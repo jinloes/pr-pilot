@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/jinloes/workspaces/intellij-claude-reviews && ./gradlew spotlessApply --quiet 2>&1 | tail -5"
+          }
+        ]
+      }
+    ]
+  }
+}

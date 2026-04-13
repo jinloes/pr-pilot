@@ -1,0 +1,38 @@
+<idea-plugin>
+    <id>com.jinloes.claudereviews</id>
+    <name>Claude PR Reviews</name>
+    <vendor>Claude Reviews</vendor>
+    <description><![CDATA[
+        Browse GitHub Pull Requests assigned to you or any accessible repository
+        and generate AI-powered code reviews using your local Claude CLI session.
+        Preview and edit the review before sharing.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Claude PR Reviews"
+                    secondary="false"
+                    anchor="right"
+                    factoryClass="com.jinloes.claudereviews.ui.PRToolWindowFactory"/>
+
+        <applicationService
+            serviceImplementation="com.jinloes.claudereviews.settings.PluginSettings"/>
+
+        <applicationService
+            serviceImplementation="com.jinloes.claudereviews.services.PRNotificationService"/>
+
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.jinloes.claudereviews.settings.PluginSettingsConfigurable"
+            id="com.jinloes.claudereviews.settings.PluginSettingsConfigurable"
+            displayName="Claude PR Reviews"/>
+
+        <notificationGroup id="Claude PR Reviews"
+                           displayType="BALLOON"
+                           isLogByDefault="true"/>
+
+        <postStartupActivity
+            implementation="com.jinloes.claudereviews.services.PRNotificationStartup"/>
+    </extensions>
+</idea-plugin>
