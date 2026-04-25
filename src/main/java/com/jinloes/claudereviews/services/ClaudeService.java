@@ -7,6 +7,8 @@ import com.jinloes.claudereviews.model.PRReviewRequest;
 import com.jinloes.claudereviews.model.ReviewResult;
 import com.jinloes.claudereviews.services.stream.ContentBlock;
 import com.jinloes.claudereviews.services.stream.StreamEvent;
+import com.jinloes.claudereviews.settings.PluginSettings;
+import com.jinloes.claudereviews.util.ProcessUtil;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -41,6 +43,71 @@ public class ClaudeService {
     private static final String CLAUDE_DIR_UNIX = "/.claude/";
     private static final String CLAUDE_DIR_WIN = "\\.claude\\";
 
+    private static final String REVIEW_INSTRUCTIONS =
+            """
+            You are a staff engineer with a security specialization conducting a formal \
+            pre-merge code review. Your mandate: find bugs that will reach production, \
+            security vulnerabilities that are real and exploitable (not theoretical), and \
+            design decisions that will hurt the team in 6 months. \
+            You are not a linter — do not flag style issues already enforced by tooling. \
+            The diff is provided below — do NOT re-fetch it. \
+            Respond ONLY with a JSON object — no markdown fences, no prose before or after.
+
+            Schema (emit exactly this structure — no extra fields, no comments, no trailing text):
+            {
+              "summary": "Markdown with sections:\\n## Overview\\n<2-3 sentences: what this PR does and why>\\n## Key Changes\\n- `path/to/file`: <what changed and why>\\n## Risk Areas\\n- <bullet per area needing extra scrutiny: complex logic, missing tests, security-sensitive code, breaking API changes; omit section if none>",
+              "lineComments": [
+                {
+                  "file": "path/to/file.ext",
+                  "line": 42,
+                  "type": "issue",
+                  "body": "single-line string: problem, why it matters, and how to fix"
+                }
+              ],
+              "verdict": "APPROVE"
+            }
+
+            Line numbering: take the number after '+' in each @@ header \
+            (e.g. @@ -3,7 +3,8 @@ → new file starts at 3), then count forward +1 for \
+            each context or added ('+') line; skip deleted ('-') lines entirely.
+
+            Only comment on changed lines ('+' lines in the diff). \
+            Do not flag pre-existing issues in unchanged context lines.
+
+            Leave lineComments as [] when you have no specific, actionable points.
+
+            "type" values:
+            - "issue" — must fix before merging (bug, security flaw, missing required test)
+            - "suggestion" — worth improving but not blocking
+            - "note" — informational; no action required
+
+            Each "body" must be a single-line JSON string (no literal newlines). \
+            Include: what the problem is, why it matters, and a concrete fix.
+
+            Review checklist (in priority order — stop at the first blocking issue per area):
+            1. Correctness: logic bugs, unhandled edge cases, off-by-one errors, \
+            null/empty dereferences
+            2. Security: injection risks (SQL, command, XSS), missing input validation, \
+            exposed secrets or credentials, insecure defaults, broken auth/authz
+            3. Test coverage: flag as "issue" any non-trivial new or changed branch or \
+            method with no corresponding test; name the specific untested branch; \
+            aim for 100% branch coverage on non-trivial changes
+            4. Performance: unnecessary allocations in hot paths, N+1 queries, \
+            blocking calls on the wrong thread
+            5. Design: missing error handling at system boundaries, API surface leaking \
+            implementation details, violated encapsulation
+
+            Verdict criteria:
+            - APPROVE: no issues found, or only suggestions/notes
+            - REQUEST_CHANGES: one or more "issue" type comments that must be resolved
+            - COMMENT: questions about intent or approach without a blocking concern
+            """;
+
+    private static final String CHAT_PERSONA =
+            "You are a staff engineer with a security specialization. "
+                    + "Answer questions about code and pull request reviews concisely and"
+                    + " precisely.\n\n";
+
     /**
      * Shells out to the {@code claude} CLI using {@code --output-format stream-json}. Tool-use
      * events are surfaced via {@code onStatus}; the final {@code result} event is parsed into a
@@ -55,24 +122,28 @@ public class ClaudeService {
     public void reviewPR(
             PRReviewRequest request,
             Consumer<String> onStatus,
-            Consumer<Integer> onProgress,
             Consumer<ReviewResult> onComplete,
             Consumer<String> onError) {
 
         String prompt = buildPrompt(request);
         ApplicationManager.getApplication()
-                .executeOnPooledThread(
-                        () -> runReview(prompt, onStatus, onProgress, onComplete, onError));
+                .executeOnPooledThread(() -> runReview(prompt, onStatus, onComplete, onError));
     }
 
     private void runReview(
             String prompt,
             Consumer<String> onStatus,
-            Consumer<Integer> onProgress,
             Consumer<ReviewResult> onComplete,
             Consumer<String> onError) {
         try {
-            Process process = buildProcess("--verbose", "--output-format", "stream-json");
+            List<String> args =
+                    new ArrayList<>(List.of("--verbose", "--output-format", "stream-json"));
+            String model = PluginSettings.getInstance().getReviewModel();
+            if (!model.isBlank()) {
+                args.add("--model");
+                args.add(model);
+            }
+            Process process = buildProcess(args.toArray(new String[0]));
             writeStdin(process, prompt);
 
             StringBuilder resultBuffer = new StringBuilder();
@@ -83,7 +154,7 @@ public class ClaudeService {
                     if (line.isBlank()) continue;
                     try {
                         StreamEvent event = MAPPER.readValue(line, StreamEvent.class);
-                        handleStreamEvent(event, onStatus, onProgress, resultBuffer);
+                        handleStreamEvent(event, onStatus, resultBuffer);
                     } catch (Exception ignored) {
                         // Claude's stream-json output occasionally includes non-JSON
                         // lines (e.g. progress markers). Skip them rather than aborting.
@@ -107,10 +178,7 @@ public class ClaudeService {
     }
 
     private void handleStreamEvent(
-            StreamEvent event,
-            Consumer<String> onStatus,
-            Consumer<Integer> onProgress,
-            StringBuilder resultBuffer) {
+            StreamEvent event, Consumer<String> onStatus, StringBuilder resultBuffer) {
         switch (StringUtils.defaultString(event.type())) {
             case "assistant" ->
                     event.message()
@@ -127,12 +195,7 @@ public class ClaudeService {
                             .ifPresent(
                                     result -> {
                                         resultBuffer.append(result);
-                                        int chars = resultBuffer.length();
-                                        onEdt(
-                                                () -> {
-                                                    onStatus.accept(STATUS_PARSING);
-                                                    onProgress.accept(chars);
-                                                });
+                                        onEdt(() -> onStatus.accept(STATUS_PARSING));
                                     });
         }
     }
@@ -242,8 +305,7 @@ public class ClaudeService {
     private static String buildChatPrompt(
             String prContext, List<ChatMessage> history, String userMessage) {
         StringBuilder sb = new StringBuilder();
-        sb.append(
-                "You are a helpful code review assistant. Answer questions about the pull request concisely.\n\n");
+        sb.append(CHAT_PERSONA);
         if (StringUtils.isNotBlank(prContext)) {
             sb.append(prContext).append("\n\n---\n\n");
         }
@@ -311,15 +373,14 @@ public class ClaudeService {
      */
     private static String findClaudeBinary() {
         String home = System.getProperty("user.home", "");
-        List<String> candidates =
+        return ProcessUtil.findBinary(
+                "claude",
                 List.of(
                         home + "/.local/bin/claude", // Claude Code default install
                         home + "/.npm-global/bin/claude", // npm global without sudo
                         "/usr/local/bin/claude", // manual install
                         "/opt/homebrew/bin/claude", // Homebrew
-                        "/usr/bin/claude" // system package managers
-                        );
-        return candidates.stream().filter(p -> new File(p).isFile()).findFirst().orElse("claude");
+                        "/usr/bin/claude")); // system package managers
     }
 
     /**
@@ -348,106 +409,29 @@ public class ClaudeService {
         return MAPPER.readValue(json, ReviewResult.class);
     }
 
-    /**
-     * Asks Claude to verify whether the pattern described in {@code comment} already exists
-     * elsewhere in the given repository, using available MCP tools.
-     *
-     * @param onChunk called on the EDT with each streamed text chunk
-     * @param onDone called on the EDT with the complete response
-     * @param onError called on the EDT with a human-readable error message
-     */
-    public void verifyComment(
-            String owner,
-            String repo,
-            String file,
-            int line,
-            String commentBody,
-            Consumer<String> onChunk,
-            Consumer<String> onDone,
-            Consumer<String> onError) {
-
-        String prompt =
-                """
-                Search the %s/%s repository and determine whether the following code \
-                review comment describes a pattern that already exists elsewhere in the \
-                codebase, or whether it is genuinely novel/problematic.
-
-                File: %s (line %d)
-                Comment: %s
-
-                Respond with a concise answer (2-4 sentences): does this pattern exist \
-                elsewhere? Give one example if yes. State whether the comment should \
-                stand or be dismissed.\
-                """
-                        .formatted(owner, repo, file, line, commentBody);
-
-        chat("", List.of(), prompt, onChunk, onDone, onError);
-    }
-
-    private static String buildPrompt(PRReviewRequest request) {
+    static String buildPrompt(PRReviewRequest request) {
         var pr = request.pr();
-        String schema =
-                """
-                You are a senior software engineer conducting a rigorous pre-merge code review. \
-                Your primary goals are to catch bugs, security vulnerabilities, and design \
-                problems — not style issues already enforced by a linter. \
-                The diff is provided below — do NOT re-fetch it. \
-                Respond ONLY with a JSON object — no markdown fences, no prose before or after.
+        StringBuilder prompt =
+                new StringBuilder(REVIEW_INSTRUCTIONS)
+                        .append(
+                                "\n## PR #%d — %s/%s: %s\n"
+                                        .formatted(
+                                                pr.getNumber(),
+                                                pr.getOwner(),
+                                                pr.getRepo(),
+                                                pr.getTitle()));
+        if (StringUtils.isNotBlank(request.projectConventions())) {
+            prompt.append("\n### Project Conventions\n")
+                    .append(
+                            """
+                            The following conventions are in effect for this project. \
+                            Use them to judge whether the changes follow established patterns \
+                            and flag deviations that would violate them:
 
-                Schema (emit exactly this structure — no extra fields, no comments, no trailing text):
-                {
-                  "summary": "Markdown with sections:\\n## Overview\\n<2-3 sentences: what this PR does and why>\\n## Key Changes\\n- `path/to/file`: <what changed and why>\\n## Risk Areas\\n- <bullet per area needing extra scrutiny: complex logic, missing tests, security-sensitive code, breaking API changes; omit section if none>",
-                  "lineComments": [
-                    {
-                      "file": "path/to/file.ext",
-                      "line": 42,
-                      "type": "issue",
-                      "body": "single-line string: problem, why it matters, and how to fix"
-                    }
-                  ],
-                  "verdict": "APPROVE"
-                }
-
-                Line numbering: take the number after '+' in each @@ header \
-                (e.g. @@ -3,7 +3,8 @@ → new file starts at 3), then count forward +1 for \
-                each context or added ('+') line; skip deleted ('-') lines entirely.
-
-                Only comment on changed lines ('+' lines in the diff). \
-                Do not flag pre-existing issues in unchanged context lines.
-
-                Leave lineComments as [] when you have no specific, actionable points.
-
-                "type" values:
-                - "issue" — must fix before merging (bug, security flaw, missing required test)
-                - "suggestion" — worth improving but not blocking
-                - "note" — informational; no action required
-
-                Each "body" must be a single-line JSON string (no literal newlines). \
-                Include: what the problem is, why it matters, and a concrete fix.
-
-                Review checklist (in priority order — stop at the first blocking issue per area):
-                1. Correctness: logic bugs, unhandled edge cases, off-by-one errors, \
-                null/empty dereferences
-                2. Security: injection risks (SQL, command, XSS), missing input validation, \
-                exposed secrets or credentials, insecure defaults, broken auth/authz
-                3. Test coverage: flag as "issue" any non-trivial new or changed branch or \
-                method with no corresponding test; name the specific untested branch; \
-                aim for 100%% branch coverage on non-trivial changes
-                4. Performance: unnecessary allocations in hot paths, N+1 queries, \
-                blocking calls on the wrong thread
-                5. Design: missing error handling at system boundaries, API surface leaking \
-                implementation details, violated encapsulation
-
-                Verdict criteria:
-                - APPROVE: no issues found, or only suggestions/notes
-                - REQUEST_CHANGES: one or more "issue" type comments that must be resolved
-                - COMMENT: questions about intent or approach without a blocking concern
-
-                ## PR #%d — %s/%s: %s
-                """
-                        .formatted(pr.getNumber(), pr.getOwner(), pr.getRepo(), pr.getTitle());
-
-        StringBuilder prompt = new StringBuilder(schema);
+                            """)
+                    .append(request.projectConventions().strip())
+                    .append("\n");
+        }
         if (StringUtils.isNotBlank(request.knownPatterns())) {
             prompt.append("\n### Previously Verified Patterns\n")
                     .append(

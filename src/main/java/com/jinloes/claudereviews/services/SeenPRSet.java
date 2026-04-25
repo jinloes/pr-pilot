@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Persists the set of PR IDs that have already triggered a notification, so we don't spam the user
@@ -17,6 +18,7 @@ import java.util.Set;
  * <p>Stored as a JSON array of {@code "owner/repo#number"} strings at {@code
  * ~/.claude-reviews/seen-prs.json}.
  */
+@Slf4j
 public class SeenPRSet {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -79,7 +81,8 @@ public class SeenPRSet {
         try {
             Files.createDirectories(file.getParent());
             Files.writeString(file, MAPPER.writeValueAsString(seen), StandardCharsets.UTF_8);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            log.warn("Failed to save seen PR set", e);
         }
     }
 }

@@ -209,6 +209,22 @@ class TreeSitterHighlighter {
                 if (start < inQuote.length && inQuote[start]) {
                     continue;
                 }
+                // Suppress @string captures whose text does not start with a quote character.
+                // The proto grammar emits (string) nodes for both "..." literals and the bare
+                // 'string' scalar-type keyword; without this guard the keyword turns string-blue.
+                if (color == COLOR_STRING
+                        && "string".equals(captureName)
+                        && !isQuoteChar(source.charAt(start))) {
+                    continue;
+                }
+                // Suppress keyword captures that are substrings of a larger identifier. Tree-sitter
+                // error recovery can match e.g. "rpc" inside "grpc" in an unquoted package path
+                // like proto.com.linkedin.gagarin.grpc.api.crm.Foo.
+                if (color == COLOR_KEYWORD
+                        && ((start > 0 && isWordChar(source.charAt(start - 1)))
+                                || (end < sourceLen && isWordChar(source.charAt(end))))) {
+                    continue;
+                }
                 captureRanges.add(new CaptureRange(start, end, patternIndex, color));
             }
         }
@@ -496,6 +512,18 @@ class TreeSitterHighlighter {
                 // Return null so these are skipped and underlying FG_COLOR shows through.
             default -> null;
         };
+    }
+
+    // -----------------------------------------------------------------------
+    // Token boundary helpers
+    // -----------------------------------------------------------------------
+
+    static boolean isQuoteChar(char c) {
+        return c == '"' || c == '\'' || c == '`';
+    }
+
+    static boolean isWordChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_';
     }
 
     // -----------------------------------------------------------------------

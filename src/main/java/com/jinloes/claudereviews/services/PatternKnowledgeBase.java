@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.LocalDate;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Persists verified pattern findings per repository so future reviews can benefit from prior
@@ -14,6 +15,7 @@ import java.time.LocalDate;
  * <p>Each entry records the comment that was verified and Claude's conclusion. The full file is
  * injected into the review prompt so future reviews know which patterns are established.
  */
+@Slf4j
 public class PatternKnowledgeBase {
 
     private final File baseDir;
@@ -37,8 +39,8 @@ public class PatternKnowledgeBase {
         String entry = formatEntry(questionContext, response);
         try (FileWriter fw = new FileWriter(file, StandardCharsets.UTF_8, true)) {
             fw.write(entry);
-        } catch (IOException ignored) {
-            // Best-effort — not critical if the write fails
+        } catch (IOException e) {
+            log.warn("Failed to write pattern knowledge for {}/{}", owner, repo, e);
         }
     }
 
@@ -52,6 +54,7 @@ public class PatternKnowledgeBase {
         try {
             return Files.readString(file.toPath(), StandardCharsets.UTF_8);
         } catch (IOException e) {
+            log.warn("Failed to read pattern knowledge for {}/{}", owner, repo, e);
             return "";
         }
     }

@@ -162,6 +162,110 @@ class GitHubServiceRoundTripTest {
     }
 
     @Nested
+    class BuildCommentArray {
+
+        @Test
+        void validComment_included() {
+            ReviewResult r =
+                    review(
+                            "s",
+                            "APPROVE",
+                            List.of(new LineComment("src/Foo.java", 5, "issue", "body")));
+            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(1);
+        }
+
+        @Test
+        void blankFile_skipped() {
+            ReviewResult r =
+                    review("s", "APPROVE", List.of(new LineComment("", 5, "issue", "body")));
+            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(0);
+        }
+
+        @Test
+        void zeroLine_skipped() {
+            ReviewResult r =
+                    review(
+                            "s",
+                            "APPROVE",
+                            List.of(new LineComment("src/Foo.java", 0, "issue", "body")));
+            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(0);
+        }
+
+        @Test
+        void negativeLine_skipped() {
+            ReviewResult r =
+                    review(
+                            "s",
+                            "APPROVE",
+                            List.of(new LineComment("src/Foo.java", -1, "issue", "body")));
+            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(0);
+        }
+
+        @Test
+        void blankBody_skipped() {
+            ReviewResult r =
+                    review(
+                            "s",
+                            "APPROVE",
+                            List.of(new LineComment("src/Foo.java", 5, "issue", "")));
+            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(0);
+        }
+
+        @Test
+        void aSlashPrefix_stripped() {
+            ReviewResult r =
+                    review(
+                            "s",
+                            "APPROVE",
+                            List.of(new LineComment("a/src/Foo.java", 5, "issue", "body")));
+            assertThat(GitHubService.buildCommentArray(r).get(0).get("path").asText())
+                    .isEqualTo("src/Foo.java");
+        }
+
+        @Test
+        void bSlashPrefix_stripped() {
+            ReviewResult r =
+                    review(
+                            "s",
+                            "APPROVE",
+                            List.of(new LineComment("b/src/Foo.java", 5, "issue", "body")));
+            assertThat(GitHubService.buildCommentArray(r).get(0).get("path").asText())
+                    .isEqualTo("src/Foo.java");
+        }
+
+        @Test
+        void exactDuplicate_deduplicated() {
+            List<LineComment> comments =
+                    List.of(
+                            new LineComment("src/Foo.java", 5, "issue", "body"),
+                            new LineComment("src/Foo.java", 5, "issue", "body"));
+            ReviewResult r = review("s", "APPROVE", comments);
+            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(1);
+        }
+
+        @Test
+        void distinctCommentsOnSameLine_bothIncluded() {
+            List<LineComment> comments =
+                    List.of(
+                            new LineComment("src/Foo.java", 5, "issue", "first"),
+                            new LineComment("src/Foo.java", 5, "note", "second"));
+            ReviewResult r = review("s", "APPROVE", comments);
+            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(2);
+        }
+
+        @Test
+        void commentNode_hasSideRight() {
+            ReviewResult r =
+                    review(
+                            "s",
+                            "APPROVE",
+                            List.of(new LineComment("src/Foo.java", 5, "issue", "body")));
+            assertThat(GitHubService.buildCommentArray(r).get(0).get("side").asText())
+                    .isEqualTo("RIGHT");
+        }
+    }
+
+    @Nested
     class RoundTrip {
 
         @Test

@@ -19,12 +19,16 @@ import com.jinloes.claudereviews.services.PendingReviewIndex;
 import com.jinloes.claudereviews.settings.PluginSettings;
 import com.jinloes.claudereviews.settings.PluginSettingsConfigurable;
 import java.awt.*;
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import javax.swing.*;
 import javax.swing.Icon;
 import javax.swing.border.EmptyBorder;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.text.StringEscapeUtils;
 
 public class PRToolWindow {
@@ -50,7 +54,6 @@ public class PRToolWindow {
     private final JLabel prHeaderLabel = new JLabel(" ");
     private final JButton generateButton = new JButton("Generate Review");
     private final ReviewPanel reviewPanel = new ReviewPanel();
-    private final GenerationProgressBar generationProgress = new GenerationProgressBar();
     private final JLabel statusLabel = new JBLabel(" ");
 
     // Summary panel (right-side sidebar, always visible when a review is loaded)
@@ -81,6 +84,8 @@ public class PRToolWindow {
     private ReviewResult lastResult;
     private PullRequest lastPR;
     private String lastDiff;
+    private volatile String prefetchedDiff = null;
+    private volatile PullRequest prefetchedPR = null;
 
     private final GitHubService githubService = new GitHubService();
     private final ClaudeService claudeService = new ClaudeService();
@@ -189,7 +194,6 @@ public class PRToolWindow {
         JPanel northPanel = new JPanel(new BorderLayout());
         northPanel.add(prHeaderLabel, BorderLayout.CENTER);
         northPanel.add(navPanel, BorderLayout.EAST);
-        northPanel.add(generationProgress, BorderLayout.SOUTH);
 
         JBScrollPane reviewScroll = new JBScrollPane(reviewPanel);
         reviewScroll.setBackground(ReviewPanel.BG);
@@ -387,6 +391,8 @@ public class PRToolWindow {
 
     private void onPRSelected(PullRequest pr) {
         if (pr == null) return;
+        prefetchedDiff = null;
+        prefetchedPR = null;
         prHeaderLabel.setText(prHeaderHtml(pr));
         lastResult = null;
         lastPR = pr;
@@ -434,27 +440,35 @@ public class PRToolWindow {
         runInBackground(
                 () -> {
                     try {
-                        String diff =
-                                githubService.getPRDiff(
-                                        token, pr.getOwner(), pr.getRepo(), pr.getNumber());
+                        String cachedDiff = prefetchedDiff;
+                        PullRequest cachedPR = prefetchedPR;
+                        String diff;
+                        if (cachedPR == pr && cachedDiff != null) {
+                            diff = cachedDiff;
+                            prefetchedDiff = null;
+                            prefetchedPR = null;
+                        } else {
+                            diff =
+                                    githubService.getPRDiff(
+                                            token, pr.getOwner(), pr.getRepo(), pr.getNumber());
+                        }
                         String knownPatterns = patternKb.load(pr.getOwner(), pr.getRepo());
+                        String projectConventions = readProjectConventions();
                         runOnEdt(
                                 () -> {
-                                    generationProgress.start();
                                     setStatus("Generating review with Claude\u2026");
                                     reviewPanel.showStatusLog(
                                             "Generating review with Claude\u2026");
                                     claudeService.reviewPR(
-                                            new PRReviewRequest(pr, diff, knownPatterns),
+                                            new PRReviewRequest(
+                                                    pr, diff, knownPatterns, projectConventions),
                                             statusMsg -> {
                                                 setStatus(statusMsg);
                                                 reviewPanel.updateStatus(statusMsg);
                                             },
-                                            chars -> generationProgress.updateChars(chars),
                                             result -> {
                                                 lastResult = result;
                                                 lastPR = pr;
-                                                generationProgress.stop();
                                                 reviewPanel.showReview(result, diff);
                                                 showSummary(result.getSummary());
                                                 int count = reviewPanel.getCommentCount();
@@ -463,6 +477,7 @@ public class PRToolWindow {
                                                 nextCommentButton.setEnabled(hasComments);
                                                 commentCountLabel.setText(
                                                         hasComments ? "0/" + count : "");
+                                                chatPanel.setProjectConventions(projectConventions);
                                                 chatPanel.setContext(pr, result);
                                                 saveDraftButton.setEnabled(true);
                                                 pendingReviewId =
@@ -473,7 +488,6 @@ public class PRToolWindow {
                                                 generateButton.setEnabled(true);
                                             },
                                             err -> {
-                                                generationProgress.stop();
                                                 reviewPanel.showError(err);
                                                 setStatus("Error: " + err);
                                                 generateButton.setEnabled(true);
@@ -482,7 +496,6 @@ public class PRToolWindow {
                     } catch (Exception ex) {
                         runOnEdt(
                                 () -> {
-                                    generationProgress.stop();
                                     reviewPanel.showError(ex.getMessage());
                                     setStatus("Failed to fetch diff: " + ex.getMessage());
                                     generateButton.setEnabled(true);
@@ -566,21 +579,38 @@ public class PRToolWindow {
                             return;
                         }
 
-                        if (finalPending != null) {
-                            String diff =
+                        // Always prefetch diff \u2014 used immediately if a draft is found, or
+                        // stored
+                        // so generateReview() can skip the network round-trip when the user clicks.
+                        String diff = null;
+                        try {
+                            diff =
                                     githubService.getPRDiff(
                                             token, pr.getOwner(), pr.getRepo(), pr.getNumber());
+                        } catch (Exception ignored) {
+                            // Non-fatal: generateReview() will re-fetch if needed.
+                        }
+
+                        final String finalDiff = diff;
+
+                        if (finalPending != null) {
+                            String conventions = readProjectConventions();
                             runOnEdt(
                                     () -> {
+                                        prefetchedDiff = finalDiff;
+                                        prefetchedPR = pr;
                                         pendingReviewId = finalPending.id();
                                         lastResult = finalPending.result();
                                         lastPR = pr;
-                                        reviewPanel.showReview(finalPending.result(), diff);
+                                        reviewPanel.showReview(
+                                                finalPending.result(),
+                                                finalDiff != null ? finalDiff : "");
                                         showSummary(finalPending.result().getSummary());
                                         int count = reviewPanel.getCommentCount();
                                         prevCommentButton.setEnabled(count > 0);
                                         nextCommentButton.setEnabled(count > 0);
                                         commentCountLabel.setText(count > 0 ? "0/" + count : "");
+                                        chatPanel.setProjectConventions(conventions);
                                         chatPanel.setContext(pr, finalPending.result());
                                         saveDraftButton.setEnabled(true);
                                         submitButton.setEnabled(true);
@@ -591,6 +621,8 @@ public class PRToolWindow {
                         } else {
                             runOnEdt(
                                     () -> {
+                                        prefetchedDiff = finalDiff;
+                                        prefetchedPR = pr;
                                         generateButton.setEnabled(true);
                                         reviewPanel.showPlaceholder(
                                                 "No pending draft found. Click \u201cGenerate Review\u201d to analyse this PR.");
@@ -739,17 +771,22 @@ public class PRToolWindow {
         runInBackground(
                 () -> {
                     try {
-                        String id =
+                        GitHubService.SaveDraftResult saved =
                                 githubService.saveDraftReview(
                                         token, pr.getOwner(), pr.getRepo(), pr.getNumber(), result);
                         pendingIndex.add(
                                 pr.getOwner(), pr.getRepo(), pr.getNumber(), pr.getTitle());
                         runOnEdt(
                                 () -> {
-                                    pendingReviewId = id;
+                                    pendingReviewId = saved.reviewId();
                                     saveDraftButton.setEnabled(true);
                                     submitButton.setEnabled(true);
-                                    setStatus("Draft saved to GitHub.");
+                                    setStatus(
+                                            saved.commentsDropped()
+                                                    ? "Draft saved — some inline comments"
+                                                            + " had invalid line numbers and were"
+                                                            + " not attached."
+                                                    : "Draft saved to GitHub.");
                                 });
                     } catch (Exception ex) {
                         runOnEdt(
@@ -772,7 +809,7 @@ public class PRToolWindow {
                     default -> 2;
                 };
 
-        // Build a custom dialog with verdict buttons and an optional comment field
+        // Build a custom dialog with verdict buttons and an optional comment field.
         JTextArea commentArea = new JTextArea(4, 40);
         commentArea.setLineWrap(true);
         commentArea.setWrapStyleWord(true);
@@ -822,7 +859,12 @@ public class PRToolWindow {
                         runOnEdt(
                                 () -> {
                                     pendingReviewId = null;
+                                    lastResult = null;
                                     saveDraftButton.setEnabled(false);
+                                    reviewPanel.showPlaceholder(
+                                            "Review submitted \u2714 Click \u201cGenerate"
+                                                    + " Review\u201d to start a new one.");
+                                    showSummaryPlaceholder();
                                     prHeaderLabel.setText(prHeaderHtml(pr));
                                     setStatus("Review submitted to GitHub \u2714");
                                 });
@@ -830,7 +872,12 @@ public class PRToolWindow {
                         runOnEdt(
                                 () -> {
                                     submitButton.setEnabled(pendingReviewId != null);
-                                    setStatus("Submit failed: " + ex.getMessage());
+                                    JOptionPane.showMessageDialog(
+                                            mainPanel,
+                                            ex.getMessage(),
+                                            "Submit Failed",
+                                            JOptionPane.ERROR_MESSAGE);
+                                    setStatus("Submit failed.");
                                 });
                     }
                 });
@@ -907,6 +954,30 @@ public class PRToolWindow {
 
     private static String esc(String s) {
         return StringEscapeUtils.escapeHtml4(s);
+    }
+
+    /**
+     * Reads the first of CLAUDE.md / AGENTS.md / .claude/CLAUDE.md found under the open project
+     * root, returning its content or an empty string if none exists.
+     */
+    String readProjectConventions() {
+        String basePath = project.getBasePath();
+        if (basePath == null) {
+            return "";
+        }
+        List<String> candidates =
+                List.of("CLAUDE.md", "AGENTS.md", ".claude/CLAUDE.md", ".claude/AGENTS.md");
+        for (String candidate : candidates) {
+            File f = new File(basePath, candidate);
+            if (f.isFile()) {
+                try {
+                    return FileUtils.readFileToString(f, StandardCharsets.UTF_8);
+                } catch (IOException ignored) {
+                    // non-fatal: fall through to the next candidate
+                }
+            }
+        }
+        return "";
     }
 
     // ---------------------------------------------------------------

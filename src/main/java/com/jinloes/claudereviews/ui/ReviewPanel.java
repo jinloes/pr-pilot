@@ -3,12 +3,12 @@ package com.jinloes.claudereviews.ui;
 import com.jinloes.claudereviews.highlighting.DiffHighlighter;
 import com.jinloes.claudereviews.model.LineComment;
 import com.jinloes.claudereviews.model.ReviewResult;
+import com.jinloes.claudereviews.ui.DiffParser.DiffFile;
+import com.jinloes.claudereviews.ui.DiffParser.DiffLine;
 import java.awt.*;
 import java.awt.geom.Rectangle2D;
 import java.util.*;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import javax.swing.*;
 import javax.swing.Timer;
 import javax.swing.border.*;
@@ -75,6 +75,9 @@ public class ReviewPanel extends JPanel implements Scrollable {
 
     /** Non-null while the panel is in terminal log mode (set by {@link #showStatusLog}). */
     private JTextArea statusLog;
+
+    /** Last message appended to {@link #statusLog}; used to suppress consecutive duplicates. */
+    private String lastStatusMessage;
 
     /** Animated "thinking" spinner shown below the log while Claude is running. */
     private JLabel thinkingLabel;
@@ -156,6 +159,8 @@ public class ReviewPanel extends JPanel implements Scrollable {
      */
     public void updateStatus(String message) {
         if (statusLog != null) {
+            if (message.equals(lastStatusMessage)) return;
+            lastStatusMessage = message;
             statusLog.append("> " + message + "\n");
             statusLog.setCaretPosition(statusLog.getDocument().getLength());
         } else if (placeholderLabel != null) {
@@ -172,8 +177,8 @@ public class ReviewPanel extends JPanel implements Scrollable {
     }
 
     public void showReview(ReviewResult result, String rawDiff) {
-        List<DiffFile> files = parseDiff(rawDiff);
-        diffMaxCols = computeMaxColumns(files);
+        List<DiffFile> files = DiffParser.parseDiff(rawDiff);
+        diffMaxCols = DiffParser.computeMaxColumns(files);
         FontMetrics monoFm = new JLabel().getFontMetrics(MONO);
         int charPx = monoFm.charWidth('0');
         diffGutterPx = charPx * 5; // 5-char gutter: "%4d "
@@ -343,32 +348,32 @@ public class ReviewPanel extends JPanel implements Scrollable {
             for (int lineIndex = 0; lineIndex < file.lines.size(); lineIndex++) {
                 DiffLine line = file.lines.get(lineIndex);
                 Color lineBg =
-                        switch (line.type) {
+                        switch (line.type()) {
                             case '+' -> ADD_BG;
                             case '-' -> DEL_BG;
                             default -> BG;
                         };
                 Color pfxColor =
-                        switch (line.type) {
+                        switch (line.type()) {
                             case '+' -> ADD_FG;
                             case '-' -> DEL_FG;
                             default -> FG_MUTED;
                         };
 
                 int lineStart = doc.getLength();
-                if (line.newLineNum > 0) {
-                    lineInfos.add(new LineInfo(lineStart, line.newLineNum, line.content));
-                    lineStartByNum.put(line.newLineNum, lineStart);
+                if (line.newLineNum() > 0) {
+                    lineInfos.add(new LineInfo(lineStart, line.newLineNum(), line.content()));
+                    lineStartByNum.put(line.newLineNum(), lineStart);
                 }
 
                 // Gutter: 4-char line number + separator space
                 String numStr =
-                        line.newLineNum > 0 ? String.format("%4d ", line.newLineNum) : "     ";
+                        line.newLineNum() > 0 ? String.format("%4d ", line.newLineNum()) : "     ";
                 doc.insertString(doc.getLength(), numStr, styledAttr(FG_MUTED, lineBg));
 
                 // Prefix (+/-/space)
                 String pfxStr =
-                        switch (line.type) {
+                        switch (line.type()) {
                             case '+' -> "+";
                             case '-' -> "-";
                             default -> " ";
@@ -378,7 +383,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
                 // Syntax-highlighted content via tree-sitter spans.
                 List<DiffHighlighter.Span> spans = precomputedSpans.get(lineIndex);
                 for (DiffHighlighter.Span span : spans) {
-                    String tok = line.content.substring(span.start(), span.end());
+                    String tok = line.content().substring(span.start(), span.end());
                     doc.insertString(doc.getLength(), tok, styledAttr(span.color(), lineBg));
                 }
 
@@ -392,8 +397,8 @@ public class ReviewPanel extends JPanel implements Scrollable {
                 }
 
                 // Inline comment cards — embedded directly into the document flow
-                if (line.newLineNum > 0 && comments.containsKey(line.newLineNum)) {
-                    for (LineComment c : comments.get(line.newLineNum)) {
+                if (line.newLineNum() > 0 && comments.containsKey(line.newLineNum())) {
+                    for (LineComment c : comments.get(line.newLineNum())) {
                         CommentCard card =
                                 new CommentCard(
                                         c,
@@ -414,8 +419,8 @@ public class ReviewPanel extends JPanel implements Scrollable {
                 // it) keeps the position stable when subsequent lines are appended at
                 // doc.getLength(): those appends happen at offsets > this position, so the
                 // mark is never bumped.  addNewComment inserts at pos.getOffset()+1.
-                if (line.newLineNum > 0) {
-                    insertPositions.put(line.newLineNum, doc.createPosition(doc.getLength() - 1));
+                if (line.newLineNum() > 0) {
+                    insertPositions.put(line.newLineNum(), doc.createPosition(doc.getLength() - 1));
                 }
             }
         } catch (BadLocationException ignored) {
@@ -772,6 +777,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
         currentCommentIndex = -1;
         placeholderLabel = null;
         statusLog = null;
+        lastStatusMessage = null;
         thinkingLabel = null;
         builder.run();
         revalidate();
@@ -902,85 +908,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
         sp.getViewport().setViewPosition(new java.awt.Point(0, Math.max(0, pt.y - 8)));
     }
 
-    // ---------------------------------------------------------------
-    // Diff parser
-    // ---------------------------------------------------------------
-
-    private static class DiffFile {
-        String name;
-        final List<DiffLine> lines = new ArrayList<>();
-
-        DiffFile(String name) {
-            this.name = name;
-        }
-    }
-
-    private record DiffLine(int newLineNum, char type, String content, boolean hunkStart) {}
-
     private record LineInfo(int docOffset, int lineNum, String content) {}
-
-    private static final Pattern HUNK_NEW_START = Pattern.compile("\\+([0-9]+)");
-
-    /**
-     * Returns the column count matching the longest content line across all diff files, clamped to
-     * [40, 120]. Used to size inline comment text areas so they don't exceed the diff width.
-     */
-    private static int computeMaxColumns(List<DiffFile> files) {
-        int max = 40;
-        for (DiffFile f : files) {
-            for (DiffLine l : f.lines) {
-                max = Math.max(max, l.content().length());
-            }
-        }
-        return Math.min(max, 120);
-    }
-
-    private static List<DiffFile> parseDiff(String rawDiff) {
-        List<DiffFile> files = new ArrayList<>();
-        DiffFile current = null;
-        int newLineNum = 0;
-        boolean nextIsHunkStart = false;
-
-        for (String line : rawDiff.split("\n", -1)) {
-            if (line.startsWith("diff --git ")) {
-                int bIdx = line.lastIndexOf(" b/");
-                current = new DiffFile(bIdx >= 0 ? line.substring(bIdx + 3) : line);
-                files.add(current);
-                newLineNum = 0;
-                nextIsHunkStart = false;
-            } else if (line.startsWith("+++ b/") && current != null) {
-                current.name = line.substring(6);
-            } else if (line.startsWith("---")
-                    || line.startsWith("+++")
-                    || line.startsWith("index ")
-                    || line.startsWith("new file")
-                    || line.startsWith("deleted file")
-                    || line.startsWith("old mode")
-                    || line.startsWith("new mode")
-                    || line.startsWith("Binary files")
-                    || line.startsWith("similarity")
-                    || line.startsWith("rename")) {
-                // skip metadata
-            } else if (line.startsWith("@@ ")) {
-                Matcher m = HUNK_NEW_START.matcher(line);
-                if (m.find()) newLineNum = Integer.parseInt(m.group(1)) - 1;
-                nextIsHunkStart = true;
-            } else if (current != null && !line.isEmpty() && line.charAt(0) != '\\') {
-                char first = line.charAt(0);
-                String content = line.length() > 1 ? line.substring(1) : "";
-                boolean isHunkStart = nextIsHunkStart;
-                nextIsHunkStart = false;
-                if (first == '+') {
-                    current.lines.add(new DiffLine(++newLineNum, '+', content, isHunkStart));
-                } else if (first == '-') {
-                    current.lines.add(new DiffLine(-1, '-', content, isHunkStart));
-                } else {
-                    current.lines.add(new DiffLine(++newLineNum, ' ', content, isHunkStart));
-                }
-            }
-        }
-        return files;
-    }
 
     /**
      * Pre-computes per-line syntax highlight spans for all lines in a file section.

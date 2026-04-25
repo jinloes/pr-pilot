@@ -2,6 +2,8 @@ package com.jinloes.claudereviews.services;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jinloes.claudereviews.model.PRReviewRequest;
+import com.jinloes.claudereviews.model.PullRequest;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -9,6 +11,78 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class ClaudeServiceTest {
+
+    private static PullRequest pr(String body) {
+        return new PullRequest("My PR", "", "owner", "repo", 42, body, "author", "2024-01-01");
+    }
+
+    @Nested
+    class BuildPrompt {
+
+        @Test
+        void alwaysContainsPersonaAndDiff() {
+            String prompt =
+                    ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff content", "", ""));
+            assertThat(prompt).contains("staff engineer");
+            assertThat(prompt).contains("diff content");
+        }
+
+        @Test
+        void blankProjectConventions_sectionAbsent() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
+            assertThat(prompt).doesNotContain("Project Conventions");
+        }
+
+        @Test
+        void nonBlankProjectConventions_sectionInjectedBeforeDiff() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(pr(""), "diff", "", "no magic numbers"));
+            assertThat(prompt).contains("### Project Conventions");
+            assertThat(prompt).contains("no magic numbers");
+            assertThat(prompt.indexOf("Project Conventions"))
+                    .isLessThan(prompt.indexOf("### Diff"));
+        }
+
+        @Test
+        void blankKnownPatterns_sectionAbsent() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
+            assertThat(prompt).doesNotContain("Previously Verified Patterns");
+        }
+
+        @Test
+        void nonBlankKnownPatterns_sectionInjected() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(pr(""), "diff", "use Optional", ""));
+            assertThat(prompt).contains("### Previously Verified Patterns");
+            assertThat(prompt).contains("use Optional");
+        }
+
+        @Test
+        void conventionsSectionAppearsBeforeKnownPatterns() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(pr(""), "diff", "patterns", "conventions"));
+            assertThat(prompt.indexOf("Project Conventions"))
+                    .isLessThan(prompt.indexOf("Previously Verified Patterns"));
+        }
+
+        @Test
+        void blankPrBody_descriptionSectionAbsent() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
+            assertThat(prompt).doesNotContain("### Description");
+        }
+
+        @Test
+        void nonBlankPrBody_descriptionSectionInjected() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(pr("fixes the bug"), "diff", "", ""));
+            assertThat(prompt).contains("### Description");
+            assertThat(prompt).contains("fixes the bug");
+        }
+    }
 
     @Nested
     class ToolUseStatus {

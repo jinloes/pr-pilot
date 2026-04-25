@@ -29,7 +29,8 @@ public class PluginSettingsConfigurable implements Configurable {
                 || component.isNotificationsEnabled() != s.isNotificationsEnabled()
                 || component.isNotifyReviewRequested() != s.isNotifyReviewRequested()
                 || component.isNotifyStarredRepos() != s.isNotifyStarredRepos()
-                || component.getNotificationPollMinutes() != s.getNotificationPollMinutes();
+                || component.getNotificationPollMinutes() != s.getNotificationPollMinutes()
+                || !component.getReviewModel().equals(s.getReviewModel());
     }
 
     @Override
@@ -40,6 +41,7 @@ public class PluginSettingsConfigurable implements Configurable {
         s.setNotifyReviewRequested(component.isNotifyReviewRequested());
         s.setNotifyStarredRepos(component.isNotifyStarredRepos());
         s.setNotificationPollMinutes(component.getNotificationPollMinutes());
+        s.setReviewModel(component.getReviewModel());
 
         // Restart/stop polling to reflect the new settings immediately
         PRNotificationService svc = PRNotificationService.getInstance();
@@ -58,6 +60,7 @@ public class PluginSettingsConfigurable implements Configurable {
         component.setNotifyReviewRequested(s.isNotifyReviewRequested());
         component.setNotifyStarredRepos(s.isNotifyStarredRepos());
         component.setNotificationPollMinutes(s.getNotificationPollMinutes());
+        component.setReviewModel(s.getReviewModel());
     }
 
     @Override

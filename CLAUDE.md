@@ -31,6 +31,8 @@ IntelliJ plugin that lists GitHub Pull Requests and generates AI-powered code re
 - **PR summary sidebar** — the AI-generated summary is shown in a right-side panel (always visible alongside the diff); sections: Overview, Key Changes, Risk Areas
 - **Width-constrained comment cards** — comment cards cap their width to match the diff's longest line and align with the diff gutter
 - **Auto-cleanup of stale drafts** — when a merged PR is selected, the plugin automatically deletes its pending GitHub draft and removes it from the local index
+- **Diff prefetch on PR selection** — when a PR is selected, `loadDraftFromGitHub()` fetches the diff in the background so `generateReview()` can skip the network round-trip; prefetch failure is non-fatal and generateReview() re-fetches as a fallback
+- **Configurable review model** — a "Review model" combo in Settings lets the user pick between the CLI default, Haiku 4.5, Sonnet 4.6, or Opus 4.7; the selected model is passed as `--model <id>` to the `claude` CLI during reviews
 
 ---
 
@@ -43,7 +45,7 @@ src/main/java/com/jinloes/claudereviews/
     ReviewResult.java              – Holds summary, verdict, and a mutable List<LineComment>
     LineComment.java               – file, line, type ("issue"|"suggestion"|"praise"|"note"), body
     ChatMessage.java               – Role + content for chat history
-    PRReviewRequest.java           – Parameter object: PullRequest + diff + knownPatterns, passed to ClaudeService.reviewPR
+    PRReviewRequest.java           – Parameter object: PullRequest + diff + knownPatterns + projectConventions, passed to ClaudeService.reviewPR
     ReviewDraft.java               – (legacy, unused)
   services/
     GitHubAuthService.java         – Runs `gh auth token` to resolve credentials; probes known gh binary paths
@@ -62,13 +64,15 @@ src/main/java/com/jinloes/claudereviews/
     PluginSettings.java            – PersistentStateComponent; stores githubBaseUrl, username, notification prefs
     PluginSettingsComponent.java   – Settings UI: base URL, auth status, notification toggles + interval
     PluginSettingsConfigurable.java – Wires settings component into IntelliJ settings tree under Tools
+  util/
+    ProcessUtil.java               – Static utility: findBinary(name, candidates) for locating CLI binaries on disk
   ui/
     PRToolWindow.java              – Main tool window: PR list, filter/repo combos, review panel, chat panel
     PRToolWindowFactory.java       – Creates PRToolWindow on demand
     ReviewPanel.java               – Syntax-highlighted diff viewer with inline CommentCards; right-click menus
-    ChatPanel.java                 – Chat UI: streaming bubbles, selection polling, code-block rendering
+    ChatPanel.java                 – Chat UI: streaming bubbles, selection polling, commonmark-rendered responses
     CommentCard.java               – Editable inline comment card with dismiss callback
-    GenerationProgressBar.java     – Indeterminate progress bar shown during generation
+    DiffParser.java                – Pure-Java unified diff parser; DiffFile / DiffLine types; extracted from ReviewPanel
   highlighting/
     DiffHighlighter.java           – Syntax highlighting facade delegating to TreeSitterHighlighter; Apache Commons Text htmlEscape
     TreeSitterHighlighter.java     – Tree-sitter-based highlighter using io.github.bonede:tree-sitter-ng; lazy-init with graceful fallback; highlight queries bundled as resources
@@ -97,18 +101,19 @@ The plugin never stores a GitHub token. `GitHubAuthService.resolveToken()` runs 
 **Why:** IntelliJ launched from the macOS Dock doesn't inherit the user's shell `PATH`. Wrapping in `zsh --login -c` was tried first but doesn't source `~/.zshrc`, so tools added to `PATH` only there (asdf, mise, etc.) were still not found. `HOME` is also set explicitly on the `ProcessBuilder` so `gh` can find its config.
 
 ### Finding the `claude` binary
-`ClaudeService.buildProcess()` augments the inherited `PATH` with `/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin` rather than probing. The `claude` CLI is invoked directly (not through a login shell).
+`ClaudeService.buildProcess()` augments the inherited `PATH` with `/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin` rather than probing. The `claude` CLI is invoked directly (not through a login shell). When a review model is configured in Settings, `--model <id>` is appended to the CLI arguments in `runReview()`.
 
 ### Claude invocation
 `claude --print` enables non-interactive mode. The full prompt is written to `stdin` (not passed as a CLI arg) to avoid OS argument-length limits. Output is streamed in 512-char chunks and appended to the review text area on the EDT.
 
 ### Review prompt structure (`ClaudeService.buildPrompt`)
-The review prompt instructs Claude as a "senior software engineer" focused on bugs, security, and design (not linter-enforceable style). It defines a strict JSON schema and includes:
+The review prompt instructs Claude as a "staff engineer with a security specialization" whose mandate is bugs that will reach production, real/exploitable security vulnerabilities, and design decisions that will hurt the team in 6 months — not linter-enforceable style. It defines a strict JSON schema and includes:
 - **Line numbering rule**: take the `+start` number from each `@@ -old +new @@` header, count forward +1 for context and added lines, skip deleted lines.
 - **Comment body template**: every body must state the problem, why it matters, and a concrete fix.
 - **Priority-ordered checklist**: correctness → security → test coverage (100% branch on non-trivial changes) → performance → design.
 - **Typed severities**: `issue` = must fix (triggers REQUEST_CHANGES verdict); `suggestion` = non-blocking; `note` = informational.
 - **Verdict criteria**: APPROVE if no issues; REQUEST_CHANGES if any issue; COMMENT for questions without a blocking concern.
+- **Project conventions**: `PRToolWindow.readProjectConventions()` probes the open project root for `CLAUDE.md`, `AGENTS.md`, `.claude/CLAUDE.md`, `.claude/AGENTS.md` (in that order) and injects the first file found as a `### Project Conventions` section so Claude can flag deviations from established patterns.
 
 ### Diff truncation
 `GitHubService.getPRDiff()` truncates diffs to 80 KB (`MAX_DIFF_BYTES = 80_000`) to stay within reasonable context limits.
@@ -122,7 +127,15 @@ The review prompt instructs Claude as a "senior software engineer" focused on bu
 nvim-treesitter query files use `#lua-match?`, `#eq?`, `#any-of?`, and `#match?` predicates to narrow general captures (e.g. `(identifier) @type` only for uppercase identifiers). `TreeSitterHighlighter.parsePredicates` reads `TSQueryPredicateStep[]` arrays from `TSQuery.getPredicateForPattern` and parses them into `QueryPredicate` records. During match iteration, predicates are evaluated via `evaluatePredicates`; matches that fail a predicate are skipped entirely. Lua character-class escapes (`%d`, `%u`, `%l`, `%a`, etc.) are converted to Java regex via `luaPatternToJava` and matched with `Matcher.find()` (partial matching, consistent with Lua `string.match` semantics).
 
 ### Syntax highlighting — in-quote suppression
-`buildSpans` calls `buildInQuoteMap(source)` to precompute a boolean array marking char positions that fall strictly inside `"..."` pairs. Any capture whose char start is in a quoted region is skipped before being added to `captureRanges`. This fixes a class of grammar bugs where tree-sitter error recovery re-tokenizes string content and emits spurious keyword captures (e.g. the proto grammar treating `rpc` in `/grpc/` as the `rpc` keyword when parsing an import path as a fragment without a `syntax = "proto3"` header). The check is language-agnostic and has negligible cost.
+`buildSpans` applies two layers of capture suppression to prevent grammar error-recovery from mis-coloring tokens:
+
+1. **In-quote map** — `buildInQuoteMap(source)` precomputes a boolean array where `true` marks char positions strictly inside `"..."` pairs. Captures whose start is inside a quoted region are dropped. This handles `rpc` inside a quoted proto import path like `"proto/.../grpc/..."`.
+
+2. **Quote-char guard** — For `@string` captures specifically, `isQuoteChar(source.charAt(start))` verifies the captured text starts with a quote character (`"`, `'`, `` ` ``). This prevents the proto grammar's `(string)` named node from coloring the bare `string` scalar-type keyword blue when it appears in field declarations like `optional string nameSubstring`.
+
+3. **Word-boundary guard** — For keyword-colored captures, `isWordChar` checks verify the character before the start and after the end of the capture are not word characters (`[a-zA-Z0-9_]`). If they are, the token is a substring of a larger identifier and is suppressed. This handles `rpc` inside `grpc` in unquoted package-style type references like `proto.com.linkedin.gagarin.grpc.api.crm.Foo`.
+
+All three checks are language-agnostic and run in `buildSpans` after `captureColor` returns a non-null color.
 
 ### Syntax highlighting — capture-name to colour mapping
 `TreeSitterHighlighter.captureColor` maps tree-sitter capture names to hardcoded GitHub dark-mode colours from `@primer/primitives` (dark scale). Unknown capture names (e.g. `@variable`, `@operator`, `@spell`) return `null` and are skipped — this prevents `@spell` annotations on comment nodes from overwriting the `@comment` colour, and means call sites (`@function.call`) are rendered in plain `FG_COLOR` just like on GitHub (only declarations get colour). No IntelliJ `EditorColorsScheme` or `DefaultLanguageHighlighterColors` is involved in colour resolution.
@@ -149,7 +162,12 @@ GitHub's review comment API returns `line: null` for comments that become outdat
 `decodeReview()` reads from this block first (reliable). If the block is absent (old draft), it falls back to parsing the GitHub API comment list with `original_line` as a secondary fallback.
 
 ### Draft review creation
-Creating a GitHub pending (draft) review requires omitting the `event` field entirely from the POST payload. Setting `event: "PENDING"` is invalid and causes a 422. If inline comments cause a 422 (invalid path/line for that commit), the request is retried with an empty comments array so the review body is always persisted.
+Creating a GitHub pending (draft) review requires omitting the `event` field entirely from the POST payload. Setting `event: "PENDING"` is invalid and causes a 422. If inline comments cause a 422 (invalid path/line for that commit), `saveDraftReview` calls `tryCommentsIndividually` to probe each comment one at a time (creates a temp single-comment review, deletes it immediately, marks valid). Only the valid subset is included in the final review. `SaveDraftResult` carries a `commentsDropped` flag so `PRToolWindow.saveDraft()` can show a warning in the status bar when any comments were dropped.
+
+`saveDraftReview` deletes any existing PENDING review before creating the new one, but wraps the delete in a `try/catch(IOException)` — GitHub's state transition from PENDING → APPROVED is asynchronous, so `getPendingReviewId` can briefly return the just-submitted review's ID; attempting to delete it returns a 422 (not deletable). Swallowing that error and proceeding to create the new draft is correct.
+
+### Post-submit UI reset
+After `submitDraftReview()` succeeds, `PRToolWindow` clears `lastResult`, resets the review panel to a placeholder ("Review submitted — Generate a new review to start over"), and resets the summary sidebar. This prevents the submitted review's verdict from persisting on screen and ensures `saveDraft()` cannot inadvertently save stale data (its `lastResult == null` guard will short-circuit).
 
 ### Duplicate comment prevention
 Two guards prevent inline comments from appearing twice on GitHub:
@@ -162,11 +180,20 @@ Two guards prevent inline comments from appearing twice on GitHub:
 ### Comment dismissal
 `CommentCard` accepts a `Consumer<CommentCard> onDismiss` callback. When the × button is clicked, `ReviewPanel.onCardDismissed()` removes the card from `commentCards`, removes the `LineComment` from `result.getLineComments()` (always a mutable `ArrayList`), clamps `currentCommentIndex`, and fires the `onCommentRemoved` runnable so `PRToolWindow` can refresh the nav count.
 
+### Diff prefetch on PR selection
+`loadDraftFromGitHub()` fetches the diff immediately after confirming the PR is not merged, storing it in `prefetchedDiff` / `prefetchedPR` volatile fields (set on the EDT inside `runOnEdt`). When `generateReview()` runs, it reads `prefetchedDiff` into a local variable and checks `cachedPR == pr` (identity comparison, safe because `pr` is the same object from the list model) before reusing it; after consuming the cache it nulls both fields. A failed prefetch stores `null` (non-fatal), and `generateReview()` falls back to a fresh HTTP call. This eliminates the 1–3 s diff fetch latency that otherwise precedes the Claude invocation.
+
 ---
 
 ## Testing conventions
 
-**Rule: every code change must include tests for any new or modified non-UI logic. Pure-Java service and utility code must have 100% branch coverage.**
+**Rule: every code change must include tests for any new or modified non-UI logic. Pure-Java service and utility code must have 100% branch coverage. Tests must be written as part of the same task — never deferred to a follow-up.**
+
+**Checklist — before marking any coding task complete:**
+1. Identify every new or modified non-UI method (service, utility, model, static helper).
+2. Widen any `private` method that needs test access to package-private (no `public`).
+3. Write tests covering every branch: happy path, edge cases, and error paths.
+4. Run `./gradlew unitTest` and confirm all tests pass.
 
 - Run tests with `./gradlew unitTest`
 - Tests live under `src/test/java/com/jinloes/claudereviews/` mirroring the main source tree.
@@ -192,12 +219,13 @@ Two guards prevent inline comments from appearing twice on GitHub:
 - Java 17, IntelliJ platform `2024.1` (IC), Gradle IntelliJ plugin `2.13.1`
 - `sinceBuild = 253`, `untilBuild = 253.*`
 - No bundled plugin dependencies — syntax highlighting is handled entirely by tree-sitter, so the plugin works in any IntelliJ-based IDE without requiring `com.intellij.java`
-- Runtime dependencies: `com.fasterxml.jackson.core:jackson-databind:2.17.1`, `org.apache.commons:commons-lang3:3.17.0`, `org.apache.commons:commons-text:1.12.0`, `org.apache.commons:commons-collections4:4.4`, `commons-io:commons-io:2.16.1`, `io.github.bonede:tree-sitter:0.26.3`, `io.github.bonede:tree-sitter-java:0.23.5`, `io.github.bonede:tree-sitter-proto:main-a` (native libs bundled for macOS/Linux/Windows on x86_64 + aarch64)
+- Runtime dependencies: `com.fasterxml.jackson.core:jackson-databind:2.17.1`, `org.commonmark:commonmark:0.22.0`, `org.apache.commons:commons-lang3:3.17.0`, `org.apache.commons:commons-text:1.12.0`, `org.apache.commons:commons-collections4:4.4`, `commons-io:commons-io:2.16.1`, `io.github.bonede:tree-sitter:0.26.3`, `io.github.bonede:tree-sitter-java:0.23.5`, `io.github.bonede:tree-sitter-proto:main-a` (native libs bundled for macOS/Linux/Windows on x86_64 + aarch64)
 - **Apache Commons preference**: use `CollectionUtils.isEmpty` (collections4), `StringUtils.isNotBlank` / `StringUtils.defaultString` (lang3), `Strings.CS.removeStart` / `Strings.CS.removeEnd` (lang3 3.17+), and `StringEscapeUtils.escapeHtml4` (commons-text) in preference to hand-rolled null/empty/prefix checks
 - Lombok is `compileOnly` (annotation processing only, not shipped); use `@Slf4j` for logging — Lombok generates the `log` field automatically, no manual `Logger` declaration needed
 - **Code style**: Spotless + Google Java Format AOSP variant (4-space indent, 100-col limit). A `Stop` hook in `.claude/settings.json` runs `./gradlew spotlessApply` automatically at the end of every Claude response (applies to all contributors).
 - **Google Java Style Guide compliance** (https://google.github.io/styleguide/javaguide.html): no FQNs in method bodies (always add an import), descriptive local variable names (not `hl`, `attrs`), static imports before non-static, braces on all blocks.
 - **Commenting policy**: add inline comments only where the *why* is non-obvious. Good candidates: intentionally swallowed exceptions (explain what non-fatal condition is expected), non-obvious OS/platform workarounds (e.g. IntelliJ Dock launch not inheriting PATH), magic error codes or string sentinels that require domain knowledge to decode (e.g. POSIX `error=2` = ENOENT), and deliberate algorithmic choices that a reader might be tempted to "fix" (e.g. a small read buffer to enable incremental streaming). Do not comment self-evident code or restate what the method name already says.
+- **Commit conventions**: do not include a `Co-Authored-By` trailer in commit messages.
 
 ---
 
@@ -210,6 +238,7 @@ Two guards prevent inline comments from appearing twice on GitHub:
 - `notifyReviewRequested` (default `true`)
 - `notifyStarredRepos` (default `false`)
 - `notificationPollMinutes` (default `5`)
+- `reviewModel` (default `""` — uses the CLI default; non-empty values are passed as `--model <id>` to `claude`)
 
 No API keys or tokens are ever written to disk.
 

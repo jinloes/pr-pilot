@@ -1,7 +1,7 @@
 package com.jinloes.claudereviews.services;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.File;
+import com.jinloes.claudereviews.util.ProcessUtil;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -61,18 +61,13 @@ public class GitHubAuthService {
      * back to {@code "gh"} (plain name) as a last resort so the OS can try PATH resolution.
      */
     private static String findGhBinary() {
-        List<String> candidates =
+        return ProcessUtil.findBinary(
+                "gh",
                 List.of(
                         "/opt/homebrew/bin/gh", // Apple Silicon Homebrew
                         "/usr/local/bin/gh", // Intel Homebrew / manual install
                         "/usr/bin/gh", // system package managers
-                        "/home/linuxbrew/.linuxbrew/bin/gh");
-        for (String path : candidates) {
-            if (new File(path).isFile()) {
-                return path;
-            }
-        }
-        return "gh";
+                        "/home/linuxbrew/.linuxbrew/bin/gh"));
     }
 
     /** Fetches the authenticated user's login name to confirm the token works. */

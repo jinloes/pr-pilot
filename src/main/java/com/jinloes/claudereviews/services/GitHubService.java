@@ -35,6 +35,12 @@ public class GitHubService {
     /** Carries a pending review ID together with its decoded {@link ReviewResult}. */
     public record PendingReview(String id, ReviewResult result) {}
 
+    /**
+     * Result of saving a draft review. {@code commentsDropped} is {@code true} when inline comments
+     * were omitted because GitHub rejected them (422 — invalid path or line number).
+     */
+    public record SaveDraftResult(String reviewId, boolean commentsDropped) {}
+
     private final HttpClient httpClient =
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
 
@@ -123,32 +129,24 @@ public class GitHubService {
      * Saves a {@link ReviewResult} as a GitHub pending (draft) review. Any existing pending review
      * is deleted first so there is never more than one. Returns the new review ID.
      */
-    public String saveDraftReview(
+    public SaveDraftResult saveDraftReview(
             String token, String owner, String repo, int number, ReviewResult review)
             throws IOException, InterruptedException {
-        // Delete stale draft if present
+        // Delete stale draft if present. Ignore failures: the review may have just been submitted
+        // (its state transitions from PENDING to APPROVED/etc. asynchronously on GitHub's side),
+        // in which case getPendingReviewId still returns the old ID but the delete is rejected.
         String existing = getPendingReviewId(token, owner, repo, number);
-        if (existing != null) deleteDraftReview(token, owner, repo, number, existing);
+        if (existing != null) {
+            try {
+                deleteDraftReview(token, owner, repo, number, existing);
+            } catch (IOException ignored) {
+                // non-fatal: the review is already gone or in a non-deletable state
+            }
+        }
 
         String headSha = getPRHeadSha(token, owner, repo, number);
 
-        ArrayNode comments = MAPPER.createArrayNode();
-        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
-        for (LineComment c : review.getLineComments()) {
-            String file = c.getFile();
-            if (file.startsWith("a/") || file.startsWith("b/")) file = file.substring(2);
-            if (file.isBlank() || c.getLine() <= 0 || c.getBody().isBlank()) continue;
-            // Deduplicate: skip exact duplicates (same file, line, and body) — prevents
-            // Claude from posting the same comment twice, but allows multiple distinct
-            // comments on the same line (e.g. an AI comment plus a user-added note).
-            if (!seen.add(file + "\0" + c.getLine() + "\0" + c.getBody())) continue;
-            ObjectNode comment = MAPPER.createObjectNode();
-            comment.put("path", file);
-            comment.put("line", c.getLine());
-            comment.put("side", "RIGHT");
-            comment.put("body", c.getBody());
-            comments.add(comment);
-        }
+        ArrayNode comments = buildCommentArray(review);
 
         ObjectNode payload = MAPPER.createObjectNode();
         payload.put("commit_id", headSha);
@@ -159,19 +157,69 @@ public class GitHubService {
 
         String url = apiBase() + "/repos/" + owner + "/" + repo + "/pulls/" + number + "/reviews";
         String response;
+        boolean commentsDropped = false;
         try {
             response = post(token, url, payload.toString());
         } catch (IOException ex) {
-            // 422: one or more inline comments have an invalid path/line for this commit.
-            // Retry with body only so the draft is always persisted.
             if (ex.getMessage() != null && ex.getMessage().contains("422")) {
-                payload.set("comments", MAPPER.createArrayNode());
+                // One or more inline comments have an invalid path/line for this commit.
+                // Try to save each comment individually so only the bad ones are dropped.
+                ArrayNode valid = tryCommentsIndividually(token, url, payload, comments);
+                commentsDropped = valid.size() < comments.size();
+                payload.set("comments", valid);
                 response = post(token, url, payload.toString());
             } else {
                 throw ex;
             }
         }
-        return String.valueOf(MAPPER.readTree(response).path("id").asLong());
+        String reviewId = String.valueOf(MAPPER.readTree(response).path("id").asLong());
+        return new SaveDraftResult(reviewId, commentsDropped);
+    }
+
+    /** Builds the deduplicated inline-comment array from a {@link ReviewResult}. */
+    static ArrayNode buildCommentArray(ReviewResult review) {
+        ArrayNode comments = MAPPER.createArrayNode();
+        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+        for (LineComment c : review.getLineComments()) {
+            String file = c.getFile();
+            if (file.startsWith("a/") || file.startsWith("b/")) file = file.substring(2);
+            if (file.isBlank() || c.getLine() <= 0 || c.getBody().isBlank()) continue;
+            // Deduplicate: skip exact duplicates (same file, line, and body).
+            if (!seen.add(file + "\0" + c.getLine() + "\0" + c.getBody())) continue;
+            ObjectNode comment = MAPPER.createObjectNode();
+            comment.put("path", file);
+            comment.put("line", c.getLine());
+            comment.put("side", "RIGHT");
+            comment.put("body", c.getBody());
+            comments.add(comment);
+        }
+        return comments;
+    }
+
+    /**
+     * Probes each comment individually to find the valid subset. Creates and immediately deletes a
+     * temporary single-comment review per probe, keeping only comments that GitHub accepts. Used
+     * when the full batch fails with 422.
+     */
+    private ArrayNode tryCommentsIndividually(
+            String token, String url, ObjectNode basePayload, ArrayNode comments)
+            throws IOException, InterruptedException {
+        ArrayNode valid = MAPPER.createArrayNode();
+        for (int i = 0; i < comments.size(); i++) {
+            ArrayNode single = MAPPER.createArrayNode();
+            single.add(comments.get(i));
+            basePayload.set("comments", single);
+            try {
+                String resp = post(token, url, basePayload.toString());
+                // Probe succeeded — immediately delete the temp review, mark comment valid.
+                String tempId = String.valueOf(MAPPER.readTree(resp).path("id").asLong());
+                delete(token, url + "/" + tempId);
+                valid.add(comments.get(i));
+            } catch (IOException ignored) {
+                // This comment is invalid for the current commit — skip it.
+            }
+        }
+        return valid;
     }
 
     /**

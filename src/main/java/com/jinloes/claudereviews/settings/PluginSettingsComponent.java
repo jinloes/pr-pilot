@@ -6,13 +6,25 @@ import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
 import com.jinloes.claudereviews.services.GitHubAuthService;
+import java.util.List;
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
 
 public class PluginSettingsComponent {
 
+    private record ModelOption(String label, String id) {}
+
+    private static final List<ModelOption> MODELS =
+            List.of(
+                    new ModelOption("Default (Claude Code setting)", ""),
+                    new ModelOption("Haiku 4.5 — fastest", "claude-haiku-4-5-20251001"),
+                    new ModelOption("Sonnet 4.6 — balanced", "claude-sonnet-4-6"),
+                    new ModelOption("Opus 4.7 — most thorough", "claude-opus-4-7"));
+
     private final JPanel mainPanel;
     private final JBTextField baseUrlField = new JBTextField("https://github.com");
+    private final JComboBox<String> modelCombo =
+            new JComboBox<>(MODELS.stream().map(ModelOption::label).toArray(String[]::new));
 
     private final JLabel statusLabel = new JBLabel("Checking…");
     private final JButton checkButton = new JButton("Check Status");
@@ -59,6 +71,8 @@ public class PluginSettingsComponent {
                         .addComponent(note, 1)
                         .addSeparator(8)
                         .addComponent(statusPanel, 1)
+                        .addSeparator(8)
+                        .addLabeledComponent(new JBLabel("Review model:"), modelCombo, 1, false)
                         .addSeparator(8)
                         .addComponent(notificationsEnabledBox, 1)
                         .addComponent(notifyReviewRequestedBox, 1)
@@ -124,6 +138,22 @@ public class PluginSettingsComponent {
 
     public void setNotificationPollMinutes(int v) {
         pollIntervalSpinner.setValue(v);
+    }
+
+    public String getReviewModel() {
+        int idx = modelCombo.getSelectedIndex();
+        return idx >= 0 && idx < MODELS.size() ? MODELS.get(idx).id() : "";
+    }
+
+    public void setReviewModel(String modelId) {
+        String id = modelId != null ? modelId : "";
+        for (int i = 0; i < MODELS.size(); i++) {
+            if (MODELS.get(i).id().equals(id)) {
+                modelCombo.setSelectedIndex(i);
+                return;
+            }
+        }
+        modelCombo.setSelectedIndex(0);
     }
 
     private void checkStatus() {

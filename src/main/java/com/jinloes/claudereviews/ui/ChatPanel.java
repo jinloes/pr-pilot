@@ -17,6 +17,9 @@ import java.util.regex.Pattern;
 import javax.swing.*;
 import javax.swing.border.*;
 import javax.swing.text.*;
+import org.apache.commons.lang3.StringUtils;
+import org.commonmark.parser.Parser;
+import org.commonmark.renderer.html.HtmlRenderer;
 
 /**
  * Conversational chat panel backed by the local {@code claude} CLI.
@@ -42,6 +45,24 @@ public class ChatPanel extends JPanel {
     private static final Font BOLD = new Font(Font.SANS_SERIF, Font.BOLD, 12);
     private static final Font MONO = new Font(Font.MONOSPACED, Font.PLAIN, 12);
 
+    private static final Parser MARKDOWN_PARSER = Parser.builder().build();
+    private static final HtmlRenderer MARKDOWN_RENDERER = HtmlRenderer.builder().build();
+    private static final String HTML_HEADER =
+            "<html><head><style type='text/css'>"
+                    + "body{font-family:Dialog,SansSerif;font-size:11pt;color:#e6edf3;margin:0;padding:2px 0;}"
+                    + "p{margin:0 0 3px 0;padding:0;}"
+                    + "ol,ul{margin:2px 0 2px 20px;padding:0;}"
+                    + "li{margin-bottom:1px;}"
+                    + "h1{font-size:14pt;color:#58a6ff;margin:4px 0 2px;}"
+                    + "h2{font-size:13pt;color:#58a6ff;margin:3px 0 2px;}"
+                    + "h3{font-size:12pt;color:#58a6ff;margin:2px 0 2px;}"
+                    + "blockquote{color:#8b949e;margin:2px 0 2px 8px;padding-left:6px;}"
+                    + "code{font-family:Monospaced,monospace;color:#f0f6fc;background-color:#21262d;}"
+                    + "pre{font-family:Monospaced,monospace;font-size:10pt;color:#e6edf3;"
+                    + "background-color:#161b22;border:1px solid #30363d;"
+                    + "padding:8px 10px;margin:4px 0;white-space:pre;}"
+                    + "</style></head><body>";
+
     private final ClaudeService claudeService;
     private final Supplier<String> selectionSupplier;
 
@@ -57,6 +78,7 @@ public class ChatPanel extends JPanel {
 
     private final List<ChatMessage> history = new ArrayList<>();
     private String prContext = ""; // formatted PR + review, injected as background context
+    private String projectConventions = ""; // CLAUDE.md / AGENTS.md from the open project root
 
     /** Fired once with the complete response text after the next send completes. */
     private java.util.function.Consumer<String> pendingResponseCallback;
@@ -121,6 +143,11 @@ public class ChatPanel extends JPanel {
         sendButton.setEnabled(true);
         startSelectionPoller();
         if (history.isEmpty()) showPlaceholder();
+    }
+
+    /** Sets the project-level conventions (CLAUDE.md / AGENTS.md) injected into every message. */
+    public void setProjectConventions(String conventions) {
+        projectConventions = conventions == null ? "" : conventions;
     }
 
     /**
@@ -287,8 +314,16 @@ public class ChatPanel extends JPanel {
         StreamBubble sb = createClaudeBubble();
 
         List<ChatMessage> snapshot = new ArrayList<>(history);
+        String effectiveContext =
+                StringUtils.isNotBlank(projectConventions)
+                        ? "### Project Conventions\n"
+                                + projectConventions.strip()
+                                + (StringUtils.isNotBlank(prContext)
+                                        ? "\n\n---\n\n" + prContext
+                                        : "")
+                        : prContext;
         claudeService.chat(
-                prContext,
+                effectiveContext,
                 snapshot,
                 raw,
                 chunk -> {
@@ -454,204 +489,9 @@ public class ChatPanel extends JPanel {
     // ---------------------------------------------------------------
 
     static String buildHtml(String markdown) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("<html><head><style type='text/css'>")
-                .append(
-                        "body{font-family:Dialog,SansSerif;font-size:11pt;color:#e6edf3;margin:0;padding:2px 0;}")
-                .append("p{margin:0 0 3px 0;padding:0;}")
-                .append("ol,ul{margin:2px 0 2px 20px;padding:0;}")
-                .append("li{margin-bottom:1px;}")
-                .append("h1{font-size:14pt;color:#58a6ff;margin:4px 0 2px;}")
-                .append("h2{font-size:13pt;color:#58a6ff;margin:3px 0 2px;}")
-                .append("h3{font-size:12pt;color:#58a6ff;margin:2px 0 2px;}")
-                .append("blockquote{color:#8b949e;margin:2px 0 2px 8px;padding-left:6px;}")
-                .append(
-                        "code{font-family:Monospaced,monospace;color:#f0f6fc;background-color:#21262d;}")
-                .append(
-                        "pre{font-family:Monospaced,monospace;font-size:10pt;color:#e6edf3;"
-                                + "background-color:#161b22;border:1px solid #30363d;"
-                                + "padding:8px 10px;margin:4px 0;white-space:pre;}")
-                .append("</style></head><body>");
-
-        String[] lines = markdown.split("\n", -1);
-        boolean inOl = false, inUl = false, inFence = false;
-        StringBuilder fenceContent = new StringBuilder();
-
-        for (int li = 0; li < lines.length; li++) {
-            String line = lines[li];
-
-            // Fenced code block handling (``` ... ```)
-            if (line.startsWith("```")) {
-                if (inFence) {
-                    // Close the fence
-                    sb.append("<pre>")
-                            .append(
-                                    fenceContent
-                                            .toString()
-                                            .replace("&", "&amp;")
-                                            .replace("<", "&lt;")
-                                            .replace(">", "&gt;"))
-                            .append("</pre>");
-                    fenceContent.setLength(0);
-                    inFence = false;
-                } else {
-                    // Open the fence; close any open list first
-                    if (inOl) {
-                        sb.append("</ol>");
-                        inOl = false;
-                    }
-                    if (inUl) {
-                        sb.append("</ul>");
-                        inUl = false;
-                    }
-                    inFence = true;
-                }
-                continue;
-            }
-            if (inFence) {
-                fenceContent.append(line).append("\n");
-                continue;
-            }
-
-            boolean isOlItem = line.matches("^\\d+\\.\\s+.+");
-            boolean isUlItem = line.matches("^[-*+]\\s+.+");
-
-            if (isOlItem) {
-                if (inUl) {
-                    sb.append("</ul>");
-                    inUl = false;
-                }
-                if (!inOl) {
-                    sb.append("<ol>");
-                    inOl = true;
-                }
-                sb.append("<li>")
-                        .append(inlineHtml(line.replaceFirst("^\\d+\\.\\s+", "")))
-                        .append("</li>");
-            } else if (isUlItem) {
-                if (inOl) {
-                    sb.append("</ol>");
-                    inOl = false;
-                }
-                if (!inUl) {
-                    sb.append("<ul>");
-                    inUl = true;
-                }
-                sb.append("<li>")
-                        .append(inlineHtml(line.replaceFirst("^[-*+]\\s+", "")))
-                        .append("</li>");
-            } else if (line.isBlank()) {
-                // blank line inside a list: ignore (keeps items together); outside: spacing
-                if (!inOl && !inUl) sb.append("<br>");
-            } else {
-                if (inOl) {
-                    sb.append("</ol>");
-                    inOl = false;
-                }
-                if (inUl) {
-                    sb.append("</ul>");
-                    inUl = false;
-                }
-                if (line.startsWith("### ")) {
-                    sb.append("<h3>").append(inlineHtml(line.substring(4))).append("</h3>");
-                } else if (line.startsWith("## ")) {
-                    sb.append("<h2>").append(inlineHtml(line.substring(3))).append("</h2>");
-                } else if (line.startsWith("# ")) {
-                    sb.append("<h1>").append(inlineHtml(line.substring(2))).append("</h1>");
-                } else if (line.startsWith("> ")) {
-                    sb.append("<blockquote>")
-                            .append(inlineHtml(line.substring(2)))
-                            .append("</blockquote>");
-                } else {
-                    sb.append("<p>").append(inlineHtml(line)).append("</p>");
-                }
-            }
-        }
-
-        if (inOl) sb.append("</ol>");
-        if (inUl) sb.append("</ul>");
-        if (inFence && fenceContent.length() > 0) {
-            sb.append("<pre>")
-                    .append(
-                            fenceContent
-                                    .toString()
-                                    .replace("&", "&amp;")
-                                    .replace("<", "&lt;")
-                                    .replace(">", "&gt;"))
-                    .append("</pre>");
-        }
-        sb.append("</body></html>");
-        return sb.toString();
-    }
-
-    /**
-     * Converts inline markdown (bold, inline code) to HTML. Processes in priority order: backtick
-     * code → bold+italic → bold. Regular characters are HTML-escaped.
-     */
-    static String inlineHtml(String text) {
-        StringBuilder out = new StringBuilder();
-        int i = 0, len = text.length();
-        while (i < len) {
-            // Inline code: `...`
-            if (text.charAt(i) == '`') {
-                int end = text.indexOf('`', i + 1);
-                if (end > i) {
-                    out.append("<code>")
-                            .append(escHtml(text.substring(i + 1, end)))
-                            .append("</code>");
-                    i = end + 1;
-                    continue;
-                }
-            }
-            // Bold+italic: ***...***
-            if (text.startsWith("***", i)) {
-                int end = text.indexOf("***", i + 3);
-                if (end > i) {
-                    out.append("<b><em>")
-                            .append(inlineHtml(text.substring(i + 3, end)))
-                            .append("</em></b>");
-                    i = end + 3;
-                    continue;
-                }
-            }
-            // Bold: **...**
-            if (text.startsWith("**", i)) {
-                int end = text.indexOf("**", i + 2);
-                if (end > i) {
-                    out.append("<b>").append(inlineHtml(text.substring(i + 2, end))).append("</b>");
-                    i = end + 2;
-                    continue;
-                }
-            }
-            // HTML-escape regular character
-            char c = text.charAt(i);
-            switch (c) {
-                case '&':
-                    out.append("&amp;");
-                    break;
-                case '<':
-                    out.append("&lt;");
-                    break;
-                case '>':
-                    out.append("&gt;");
-                    break;
-                case '"':
-                    out.append("&quot;");
-                    break;
-                default:
-                    out.append(c);
-                    break;
-            }
-            i++;
-        }
-        return out.toString();
-    }
-
-    private static String escHtml(String s) {
-        return s.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;");
+        return HTML_HEADER
+                + MARKDOWN_RENDERER.render(MARKDOWN_PARSER.parse(markdown))
+                + "</body></html>";
     }
 
     private JPanel makeCodeBlock(String lang, String code, Color bubbleBg) {

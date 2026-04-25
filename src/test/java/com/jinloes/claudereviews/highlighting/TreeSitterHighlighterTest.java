@@ -447,6 +447,70 @@ class TreeSitterHighlighterTest {
     }
 
     @Nested
+    class IsQuoteChar {
+
+        @Test
+        void doubleQuote_isQuote() {
+            assertThat(TreeSitterHighlighter.isQuoteChar('"')).isTrue();
+        }
+
+        @Test
+        void singleQuote_isQuote() {
+            assertThat(TreeSitterHighlighter.isQuoteChar('\'')).isTrue();
+        }
+
+        @Test
+        void backtick_isQuote() {
+            assertThat(TreeSitterHighlighter.isQuoteChar('`')).isTrue();
+        }
+
+        @Test
+        void letter_isNotQuote() {
+            assertThat(TreeSitterHighlighter.isQuoteChar('s')).isFalse();
+        }
+
+        @Test
+        void digit_isNotQuote() {
+            assertThat(TreeSitterHighlighter.isQuoteChar('3')).isFalse();
+        }
+    }
+
+    @Nested
+    class IsWordChar {
+
+        @Test
+        void letter_isWordChar() {
+            assertThat(TreeSitterHighlighter.isWordChar('a')).isTrue();
+            assertThat(TreeSitterHighlighter.isWordChar('Z')).isTrue();
+        }
+
+        @Test
+        void digit_isWordChar() {
+            assertThat(TreeSitterHighlighter.isWordChar('9')).isTrue();
+        }
+
+        @Test
+        void underscore_isWordChar() {
+            assertThat(TreeSitterHighlighter.isWordChar('_')).isTrue();
+        }
+
+        @Test
+        void dot_isNotWordChar() {
+            assertThat(TreeSitterHighlighter.isWordChar('.')).isFalse();
+        }
+
+        @Test
+        void space_isNotWordChar() {
+            assertThat(TreeSitterHighlighter.isWordChar(' ')).isFalse();
+        }
+
+        @Test
+        void hyphen_isNotWordChar() {
+            assertThat(TreeSitterHighlighter.isWordChar('-')).isFalse();
+        }
+    }
+
+    @Nested
     class BuildInQuoteMap {
 
         @Test
@@ -616,6 +680,49 @@ class TreeSitterHighlighterTest {
             assertThat(msgColored)
                     .as("'message' keyword should be COLOR_KEYWORD even in a fragment hunk")
                     .isTrue();
+        }
+
+        @Test
+        void stringFieldType_isNotColoredAsString() {
+            // Regression: the proto grammar emits (string) nodes for both "..." literals and the
+            // bare 'string' scalar-type keyword. The keyword must be keyword-red, not string-blue.
+            if (!TreeSitterHighlighter.isLanguageLoaded("proto")) return;
+            var lines = List.of("  optional string nameSubstring = 3;");
+            var spans = TreeSitterHighlighter.colorHunk(lines, "proto");
+            String line = lines.get(0);
+            boolean coloredAsString =
+                    spans.get(0).stream()
+                            .anyMatch(
+                                    s ->
+                                            TreeSitterHighlighter.COLOR_STRING.equals(s.color())
+                                                    && line.substring(s.start(), s.end())
+                                                            .equals("string"));
+            assertThat(coloredAsString)
+                    .as("'string' field-type keyword must not be COLOR_STRING")
+                    .isFalse();
+        }
+
+        @Test
+        void rpcInPackageTypePath_isNotColoredAsKeyword() {
+            // Regression: tree-sitter error recovery matches "rpc" inside "grpc" in an unquoted
+            // package-style type reference and emits a spurious keyword capture.
+            if (!TreeSitterHighlighter.isLanguageLoaded("proto")) return;
+            var lines =
+                    List.of(
+                            "  repeated proto.com.linkedin.gagarin.grpc.api.crm.DecoratedCrmAccount"
+                                    + " values = 3;");
+            var spans = TreeSitterHighlighter.colorHunk(lines, "proto");
+            String line = lines.get(0);
+            boolean rpcAsKeyword =
+                    spans.get(0).stream()
+                            .anyMatch(
+                                    s ->
+                                            TreeSitterHighlighter.COLOR_KEYWORD.equals(s.color())
+                                                    && line.substring(s.start(), s.end())
+                                                            .equals("rpc"));
+            assertThat(rpcAsKeyword)
+                    .as("'rpc' substring inside 'grpc' package path must not be COLOR_KEYWORD")
+                    .isFalse();
         }
 
         @Test

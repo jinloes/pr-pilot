@@ -29,6 +29,9 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
         /** Poll interval in minutes. */
         public int notificationPollMinutes = 5;
+
+        /** Model ID passed to the claude CLI for reviews. Empty string uses the CLI default. */
+        public String reviewModel = "";
     }
 
     private State myState = new State();
@@ -104,6 +107,14 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
     public void setNotificationPollMinutes(int v) {
         myState.notificationPollMinutes = Math.max(1, v);
+    }
+
+    public String getReviewModel() {
+        return myState.reviewModel != null ? myState.reviewModel : "";
+    }
+
+    public void setReviewModel(String model) {
+        myState.reviewModel = model != null ? model : "";
     }
 
     /**

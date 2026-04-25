@@ -9,6 +9,7 @@ import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Lightweight local index recording which PRs have a pending (draft) review on GitHub. Stored as
@@ -17,6 +18,7 @@ import java.util.List;
  * <p>This is intentionally minimal — it holds only enough data to populate the "Load Draft" list.
  * The actual review content is always fetched live from GitHub.
  */
+@Slf4j
 public class PendingReviewIndex {
 
     public record Entry(String owner, String repo, int number, String title, String savedAt) {
@@ -86,7 +88,8 @@ public class PendingReviewIndex {
             Files.createDirectories(indexFile.getParent());
             Files.writeString(
                     indexFile, MAPPER.writeValueAsString(entries), StandardCharsets.UTF_8);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            log.warn("Failed to save pending review index", e);
         }
     }
 }

@@ -12,7 +12,9 @@
 ; Comments
 (comment) @comment
 
-; String literals
+; String literals — quoted "..." values.
+; The Java-level isQuoteChar guard in TreeSitterHighlighter prevents the bare 'string'
+; scalar-type keyword from being mis-colored blue if the grammar re-uses this node name.
 (string) @string
 
 ; Numeric literals
