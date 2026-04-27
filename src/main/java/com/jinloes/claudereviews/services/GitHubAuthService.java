@@ -77,6 +77,7 @@ public class GitHubAuthService {
         HttpRequest request =
                 HttpRequest.newBuilder()
                         .uri(URI.create(apiBaseUrl + "/user"))
+                        .timeout(Duration.ofSeconds(15))
                         .header("Authorization", "Bearer " + token)
                         .header("Accept", "application/vnd.github.v3+json")
                         .header("X-GitHub-Api-Version", "2022-11-28")
@@ -86,6 +87,12 @@ public class GitHubAuthService {
 
         HttpResponse<String> response =
                 httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException(
+                    "GitHub auth check failed ("
+                            + response.statusCode()
+                            + ") — run 'gh auth login' in a terminal.");
+        }
         return MAPPER.readTree(response.body()).path("login").asText();
     }
 }

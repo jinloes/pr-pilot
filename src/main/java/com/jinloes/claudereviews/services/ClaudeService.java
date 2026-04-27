@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
@@ -135,6 +136,7 @@ public class ClaudeService {
             Consumer<String> onStatus,
             Consumer<ReviewResult> onComplete,
             Consumer<String> onError) {
+        Process process = null;
         try {
             List<String> args =
                     new ArrayList<>(List.of("--verbose", "--output-format", "stream-json"));
@@ -143,7 +145,7 @@ public class ClaudeService {
                 args.add("--model");
                 args.add(model);
             }
-            Process process = buildProcess(args.toArray(new String[0]));
+            process = buildProcess(args.toArray(new String[0]));
             writeStdin(process, prompt);
 
             StringBuilder resultBuffer = new StringBuilder();
@@ -162,7 +164,17 @@ public class ClaudeService {
                 }
             }
 
-            int exitCode = process.waitFor();
+            boolean finished = process.waitFor(10, TimeUnit.MINUTES);
+            if (!finished) {
+                process.destroyForcibly();
+                onEdt(
+                        () ->
+                                onError.accept(
+                                        "Review timed out — claude did not finish within 10"
+                                                + " minutes."));
+                return;
+            }
+            int exitCode = process.exitValue();
             if (exitCode != 0) {
                 reportProcessFailure(exitCode, process, onError);
             } else {
@@ -174,6 +186,8 @@ public class ClaudeService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             onEdt(() -> onError.accept("Review interrupted."));
+        } finally {
+            if (process != null) process.destroy();
         }
     }
 
@@ -268,8 +282,9 @@ public class ClaudeService {
             Consumer<String> onChunk,
             Consumer<String> onDone,
             Consumer<String> onError) {
+        Process process = null;
         try {
-            Process process = buildProcess();
+            process = buildProcess();
             writeStdin(process, prompt);
 
             StringBuilder buffer = new StringBuilder();
@@ -288,7 +303,17 @@ public class ClaudeService {
                 }
             }
 
-            int exitCode = process.waitFor();
+            boolean finished = process.waitFor(10, TimeUnit.MINUTES);
+            if (!finished) {
+                process.destroyForcibly();
+                onEdt(
+                        () ->
+                                onError.accept(
+                                        "Chat timed out — claude did not finish within 10"
+                                                + " minutes."));
+                return;
+            }
+            int exitCode = process.exitValue();
             if (exitCode != 0) {
                 reportProcessFailure(exitCode, process, onError);
             } else {
@@ -299,6 +324,8 @@ public class ClaudeService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             onEdt(() -> onError.accept("Chat interrupted."));
+        } finally {
+            if (process != null) process.destroy();
         }
     }
 

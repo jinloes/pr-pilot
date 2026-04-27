@@ -33,6 +33,15 @@ import org.apache.commons.text.StringEscapeUtils;
 
 public class PRToolWindow {
 
+    private enum State {
+        NO_PR, // nothing selected
+        LOADING, // checking GitHub for draft
+        NO_DRAFT, // PR selected, no pending GitHub draft
+        DRAFT_PRESENT, // pending draft exists (loaded or just saved)
+        REVIEW_UNSAVED, // review generated, not yet saved to GitHub
+        SUBMITTED // review submitted successfully
+    }
+
     private static final String[] FILTERS = {
         "Open", "Assigned to me", "Review Requested", "Created by me", "Drafts"
     };
@@ -76,7 +85,6 @@ public class PRToolWindow {
     private String pendingReviewId = null;
 
     // Chat toggle
-    private final JButton chatToggleButton = new JButton("Chat \u25be"); // ▾
     private JSplitPane reviewChatSplit;
     private boolean chatVisible = true;
     private double lastChatDividerRatio = 0.65;
@@ -87,7 +95,7 @@ public class PRToolWindow {
     private volatile String prefetchedDiff = null;
     private volatile PullRequest prefetchedPR = null;
 
-    private final GitHubService githubService = new GitHubService();
+    private final GitHubService githubService = GitHubService.getInstance();
     private final ClaudeService claudeService = new ClaudeService();
     private final PendingReviewIndex pendingIndex = new PendingReviewIndex();
     private final PatternKnowledgeBase patternKb = new PatternKnowledgeBase();
@@ -123,21 +131,16 @@ public class PRToolWindow {
         toolbarLeft.add(new JSeparator(SwingConstants.VERTICAL));
         repoCombo.setEditable(true);
         repoCombo.setPrototypeDisplayValue("owner/repository-name-xx");
-        repoCombo.setToolTipText("Select a starred repo or type owner/repo, then press Enter");
+        repoCombo.setToolTipText("Select a starred repo or type owner/repo to filter");
         toolbarLeft.add(repoCombo);
         toolbarLeft.add(refreshButton);
         repoCombo.addActionListener(
                 e -> {
                     if (!loadingRepos) refreshPRs();
                 });
-        toolbarLeft.add(new JSeparator(SwingConstants.VERTICAL));
-        toolbarLeft.add(generateButton);
 
         submitButton.setToolTipText("Submit the pending draft review to GitHub");
         submitButton.setEnabled(false);
-
-        chatToggleButton.setToolTipText("Show/hide chat panel");
-        chatToggleButton.addActionListener(e -> toggleChat());
 
         JButton settingsButton = new JButton("\u2699 Settings");
         settingsButton.addActionListener(
@@ -145,7 +148,6 @@ public class PRToolWindow {
                         ShowSettingsUtil.getInstance()
                                 .showSettingsDialog(project, PluginSettingsConfigurable.class));
         JPanel toolbarRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 4));
-        toolbarRight.add(chatToggleButton);
         toolbarRight.add(submitButton);
         toolbarRight.add(settingsButton);
 
@@ -155,6 +157,7 @@ public class PRToolWindow {
 
         // ── Left: PR list ─────────────────────────────────────────────
         prList.setCellRenderer(new PRCellRenderer());
+        prList.getEmptyText().setText("No pull requests found.");
         prList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         prList.addListSelectionListener(
                 e -> {
@@ -185,6 +188,8 @@ public class PRToolWindow {
         openInBrowserButton.setEnabled(false);
         commentCountLabel.setForeground(Color.GRAY);
         JPanel navPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 2));
+        navPanel.add(generateButton);
+        navPanel.add(new JSeparator(SwingConstants.VERTICAL));
         navPanel.add(prevCommentButton);
         navPanel.add(commentCountLabel);
         navPanel.add(nextCommentButton);
@@ -257,6 +262,7 @@ public class PRToolWindow {
         refreshButton.addActionListener(e -> refreshPRs());
         filterCombo.addActionListener(e -> refreshPRs());
         generateButton.addActionListener(e -> generateReview());
+        chatPanel.setOnToggle(this::toggleChat);
         reviewPanel.setOnCommentRemoved(this::updateCommentNav);
         reviewPanel.setOnAskClaude(
                 (ctx, q) -> {
@@ -329,6 +335,7 @@ public class PRToolWindow {
             return;
         }
 
+        prList.getEmptyText().setText("Loading\u2026");
         setStatus("Loading PRs\u2026");
         refreshButton.setEnabled(false);
         String token = getToken();
@@ -352,6 +359,8 @@ public class PRToolWindow {
                                 () -> {
                                     listModel.clear();
                                     prs.forEach(listModel::addElement);
+                                    prList.getEmptyText()
+                                            .setText("No pull requests found for this filter.");
                                     setStatus(
                                             prs.isEmpty()
                                                     ? "No PRs found."
@@ -361,7 +370,9 @@ public class PRToolWindow {
                     } catch (Exception ex) {
                         runOnEdt(
                                 () -> {
-                                    setStatus("Error: " + ex.getMessage());
+                                    prList.getEmptyText()
+                                            .setText("No pull requests found for this filter.");
+                                    setStatus("Error: " + friendlyError(ex));
                                     refreshButton.setEnabled(true);
                                 });
                     }
@@ -399,18 +410,15 @@ public class PRToolWindow {
         pendingReviewId = null;
         showSummaryPlaceholder();
         reviewPanel.showPlaceholder("Checking GitHub for a pending draft review\u2026");
-        generateButton.setEnabled(false);
+        applyState(State.LOADING);
         prevCommentButton.setEnabled(false);
         nextCommentButton.setEnabled(false);
         commentCountLabel.setText("");
-        openInBrowserButton.setEnabled(true);
-        saveDraftButton.setEnabled(false);
-        submitButton.setEnabled(false);
         chatPanel.clearContext();
         reviewPanel.clearSelection();
 
         if (!hasToken()) {
-            generateButton.setEnabled(true);
+            applyState(State.NO_DRAFT);
             reviewPanel.showPlaceholder(
                     "Click \u201cGenerate Review\u201d to analyse this PR with Claude.");
             return;
@@ -471,34 +479,27 @@ public class PRToolWindow {
                                                 lastPR = pr;
                                                 reviewPanel.showReview(result, diff);
                                                 showSummary(result.getSummary());
-                                                int count = reviewPanel.getCommentCount();
-                                                boolean hasComments = count > 0;
-                                                prevCommentButton.setEnabled(hasComments);
-                                                nextCommentButton.setEnabled(hasComments);
-                                                commentCountLabel.setText(
-                                                        hasComments ? "0/" + count : "");
                                                 chatPanel.setProjectConventions(projectConventions);
                                                 chatPanel.setContext(pr, result);
-                                                saveDraftButton.setEnabled(true);
                                                 pendingReviewId =
                                                         null; // new review, not yet saved to GitHub
-                                                submitButton.setEnabled(false);
+                                                applyState(State.REVIEW_UNSAVED);
+                                                updateCommentNav();
                                                 setStatus(
                                                         "Review complete. Click \u201cSave Draft\u201d to push to GitHub.");
-                                                generateButton.setEnabled(true);
                                             },
                                             err -> {
                                                 reviewPanel.showError(err);
                                                 setStatus("Error: " + err);
-                                                generateButton.setEnabled(true);
+                                                applyState(State.NO_DRAFT);
                                             });
                                 });
                     } catch (Exception ex) {
                         runOnEdt(
                                 () -> {
-                                    reviewPanel.showError(ex.getMessage());
-                                    setStatus("Failed to fetch diff: " + ex.getMessage());
-                                    generateButton.setEnabled(true);
+                                    reviewPanel.showError(friendlyError(ex));
+                                    setStatus("Failed to fetch diff: " + friendlyError(ex));
+                                    applyState(State.NO_DRAFT);
                                 });
                     }
                 });
@@ -509,7 +510,10 @@ public class PRToolWindow {
     // ---------------------------------------------------------------
 
     private void ensureChatVisible() {
-        if (!chatVisible) toggleChat();
+        if (!chatVisible) {
+            toggleChat();
+            chatPanel.setCollapsed(false);
+        }
     }
 
     private void toggleChat() {
@@ -519,12 +523,11 @@ public class PRToolWindow {
             if (total > 0)
                 lastChatDividerRatio = (double) reviewChatSplit.getDividerLocation() / total;
             reviewChatSplit.setDividerLocation(1.0d);
-            chatToggleButton.setText("Chat \u25b8"); // ▸
         } else {
             reviewChatSplit.setDividerLocation(lastChatDividerRatio);
-            chatToggleButton.setText("Chat \u25be"); // ▾
         }
         chatVisible = !chatVisible;
+        chatPanel.setCollapsed(!chatVisible);
     }
 
     private void loadDraftFromGitHub(PullRequest pr) {
@@ -570,7 +573,7 @@ public class PRToolWindow {
                         if (merged) {
                             runOnEdt(
                                     () -> {
-                                        generateButton.setEnabled(true);
+                                        applyState(State.NO_DRAFT);
                                         reviewPanel.showPlaceholder(
                                                 "PR #%d is merged \u2014 no action needed."
                                                         .formatted(pr.getNumber()));
@@ -606,15 +609,10 @@ public class PRToolWindow {
                                                 finalPending.result(),
                                                 finalDiff != null ? finalDiff : "");
                                         showSummary(finalPending.result().getSummary());
-                                        int count = reviewPanel.getCommentCount();
-                                        prevCommentButton.setEnabled(count > 0);
-                                        nextCommentButton.setEnabled(count > 0);
-                                        commentCountLabel.setText(count > 0 ? "0/" + count : "");
                                         chatPanel.setProjectConventions(conventions);
                                         chatPanel.setContext(pr, finalPending.result());
-                                        saveDraftButton.setEnabled(true);
-                                        submitButton.setEnabled(true);
-                                        generateButton.setEnabled(true);
+                                        applyState(State.DRAFT_PRESENT);
+                                        updateCommentNav();
                                         prHeaderLabel.setText(prHeaderHtml(pr, true));
                                         setStatus("Loaded pending draft review from GitHub.");
                                     });
@@ -623,7 +621,7 @@ public class PRToolWindow {
                                     () -> {
                                         prefetchedDiff = finalDiff;
                                         prefetchedPR = pr;
-                                        generateButton.setEnabled(true);
+                                        applyState(State.NO_DRAFT);
                                         reviewPanel.showPlaceholder(
                                                 "No pending draft found. Click \u201cGenerate Review\u201d to analyse this PR.");
                                         setStatus("");
@@ -632,10 +630,10 @@ public class PRToolWindow {
                     } catch (Exception ex) {
                         runOnEdt(
                                 () -> {
-                                    generateButton.setEnabled(true);
+                                    applyState(State.NO_DRAFT);
                                     reviewPanel.showPlaceholder(
                                             "Click \u201cGenerate Review\u201d to analyse this PR with Claude.");
-                                    setStatus("Could not load draft: " + ex.getMessage());
+                                    setStatus("Could not load draft: " + friendlyError(ex));
                                 });
                     }
                 });
@@ -720,17 +718,35 @@ public class PRToolWindow {
 
     private void maybeShowDraftContextMenu(java.awt.event.MouseEvent e) {
         if (!e.isPopupTrigger()) return;
-        if (!"Drafts".equals(Objects.toString(filterCombo.getSelectedItem(), ""))) return;
         int index = prList.locationToIndex(e.getPoint());
         if (index < 0) return;
         prList.setSelectedIndex(index);
         PullRequest pr = listModel.getElementAt(index);
+
+        boolean hasDraft =
+                pendingIndex.list().stream()
+                        .anyMatch(
+                                en ->
+                                        en.owner().equals(pr.getOwner())
+                                                && en.repo().equals(pr.getRepo())
+                                                && en.number() == pr.getNumber());
+        if (!hasDraft) return;
+
         JPopupMenu menu = new JPopupMenu();
         JMenuItem deleteItem = new JMenuItem("Delete Draft");
         deleteItem.addActionListener(
                 ae -> {
+                    int confirm =
+                            JOptionPane.showConfirmDialog(
+                                    mainPanel,
+                                    "Delete the saved draft for PR #" + pr.getNumber() + "?",
+                                    "Delete Draft",
+                                    JOptionPane.YES_NO_OPTION);
+                    if (confirm != JOptionPane.YES_OPTION) return;
                     pendingIndex.remove(pr.getOwner(), pr.getRepo(), pr.getNumber());
-                    listModel.removeElement(pr);
+                    if ("Drafts".equals(Objects.toString(filterCombo.getSelectedItem(), ""))) {
+                        listModel.removeElement(pr);
+                    }
                     if (lastPR != null
                             && lastPR.getOwner().equals(pr.getOwner())
                             && lastPR.getRepo().equals(pr.getRepo())
@@ -738,6 +754,8 @@ public class PRToolWindow {
                         reviewPanel.showPlaceholder("Draft deleted.");
                         lastPR = null;
                         lastResult = null;
+                        pendingReviewId = null;
+                        applyState(State.NO_PR);
                     }
                     setStatus("Draft removed from local index.");
                 });
@@ -779,8 +797,7 @@ public class PRToolWindow {
                         runOnEdt(
                                 () -> {
                                     pendingReviewId = saved.reviewId();
-                                    saveDraftButton.setEnabled(true);
-                                    submitButton.setEnabled(true);
+                                    applyState(State.DRAFT_PRESENT);
                                     setStatus(
                                             saved.commentsDropped()
                                                     ? "Draft saved — some inline comments"
@@ -791,8 +808,8 @@ public class PRToolWindow {
                     } catch (Exception ex) {
                         runOnEdt(
                                 () -> {
-                                    saveDraftButton.setEnabled(true);
-                                    setStatus("Save failed: " + ex.getMessage());
+                                    applyState(State.REVIEW_UNSAVED);
+                                    setStatus("Save failed: " + friendlyError(ex));
                                 });
                     }
                 });
@@ -860,7 +877,7 @@ public class PRToolWindow {
                                 () -> {
                                     pendingReviewId = null;
                                     lastResult = null;
-                                    saveDraftButton.setEnabled(false);
+                                    applyState(State.SUBMITTED);
                                     reviewPanel.showPlaceholder(
                                             "Review submitted \u2714 Click \u201cGenerate"
                                                     + " Review\u201d to start a new one.");
@@ -871,10 +888,10 @@ public class PRToolWindow {
                     } catch (Exception ex) {
                         runOnEdt(
                                 () -> {
-                                    submitButton.setEnabled(pendingReviewId != null);
+                                    applyState(State.DRAFT_PRESENT);
                                     JOptionPane.showMessageDialog(
                                             mainPanel,
-                                            ex.getMessage(),
+                                            friendlyError(ex),
                                             "Submit Failed",
                                             JOptionPane.ERROR_MESSAGE);
                                     setStatus("Submit failed.");
@@ -888,7 +905,7 @@ public class PRToolWindow {
     }
 
     private static String prHeaderHtml(PullRequest pr, boolean draft) {
-        String draftBadge = draft ? " &nbsp;<font color=orange>[draft]</font>" : "";
+        String draftBadge = draft ? " &nbsp;<font color='#e3b341'>[draft]</font>" : "";
         return "<html><b>#%d %s</b> &nbsp;<font color=gray>by %s &nbsp;\u00b7&nbsp; %s/%s%s</font></html>"
                 .formatted(
                         pr.getNumber(),
@@ -899,10 +916,44 @@ public class PRToolWindow {
                         draftBadge);
     }
 
+    private void applyState(State s) {
+        generateButton.setEnabled(
+                s == State.NO_DRAFT
+                        || s == State.DRAFT_PRESENT
+                        || s == State.REVIEW_UNSAVED
+                        || s == State.SUBMITTED);
+        saveDraftButton.setEnabled(s == State.DRAFT_PRESENT || s == State.REVIEW_UNSAVED);
+        submitButton.setEnabled(s == State.DRAFT_PRESENT);
+        openInBrowserButton.setEnabled(s != State.NO_PR);
+    }
+
     private void updateCommentNav() {
         int total = reviewPanel.getCommentCount();
         int idx = reviewPanel.getCurrentCommentIndex();
-        commentCountLabel.setText(total > 0 ? (idx + 1) + "/" + total : "");
+        if (total == 0) {
+            commentCountLabel.setText("");
+        } else if (idx < 0) {
+            commentCountLabel.setText(total + " comment" + (total == 1 ? "" : "s"));
+        } else {
+            commentCountLabel.setText((idx + 1) + "/" + total);
+        }
+        prevCommentButton.setEnabled(total > 0);
+        nextCommentButton.setEnabled(total > 0);
+    }
+
+    static String friendlyError(Exception ex) {
+        String msg = ex.getMessage();
+        if (msg == null) return "Unexpected error — check IDE logs.";
+        String low = msg.toLowerCase();
+        if (low.contains("401") || low.contains("unauthorized"))
+            return "GitHub authentication failed — run `gh auth login` in a terminal.";
+        if (low.contains("connection refused")
+                || low.contains("failed to connect")
+                || low.contains("unknown host"))
+            return "Could not reach GitHub — check your connection.";
+        if (low.contains("404"))
+            return "Not found on GitHub — the PR or repo may have been deleted.";
+        return msg;
     }
 
     private boolean hasToken() {

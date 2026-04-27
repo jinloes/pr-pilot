@@ -72,6 +72,7 @@ public class PatternKnowledgeBase {
     }
 
     private File fileFor(String owner, String repo) {
-        return new File(baseDir, owner + "_" + repo + ".md");
+        // % cannot appear in GitHub owner/repo names, so it serves as an unambiguous separator
+        return new File(baseDir, owner + "%" + repo + ".md");
     }
 }

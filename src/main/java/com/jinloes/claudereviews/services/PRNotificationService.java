@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Background service that polls GitHub at a configurable interval and fires IDE balloon
@@ -29,14 +30,15 @@ import java.util.stream.Collectors;
  * <p>The first poll after startup silently seeds the seen-PR set so the user doesn't receive a
  * flood of notifications for existing PRs.
  */
+@Slf4j
 @Service
 public final class PRNotificationService implements Disposable {
 
     static final String NOTIFICATION_GROUP = "Claude PR Reviews";
 
-    private ScheduledFuture<?> scheduledTask;
+    private volatile ScheduledFuture<?> scheduledTask;
     private final SeenPRSet seenSet = new SeenPRSet();
-    private final GitHubService githubService = new GitHubService();
+    private final GitHubService githubService = GitHubService.getInstance();
 
     public static PRNotificationService getInstance() {
         return ApplicationManager.getApplication().getService(PRNotificationService.class);
@@ -86,7 +88,8 @@ public final class PRNotificationService implements Disposable {
         if (settings.isNotifyReviewRequested()) {
             try {
                 found.addAll(githubService.searchPRs(token, "is:open is:pr review-requested:@me"));
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.warn("PR notification poll failed", e);
             }
         }
 
@@ -100,7 +103,8 @@ public final class PRNotificationService implements Disposable {
                             slice.stream().map(r -> "repo:" + r).collect(Collectors.joining(" "));
                     found.addAll(githubService.searchPRs(token, "is:open is:pr " + repoQ));
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.warn("PR notification poll failed", e);
             }
         }
 

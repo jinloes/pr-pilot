@@ -17,9 +17,9 @@ public class PluginSettingsComponent {
     private static final List<ModelOption> MODELS =
             List.of(
                     new ModelOption("Default (Claude Code setting)", ""),
-                    new ModelOption("Haiku 4.5 — fastest", "claude-haiku-4-5-20251001"),
-                    new ModelOption("Sonnet 4.6 — balanced", "claude-sonnet-4-6"),
-                    new ModelOption("Opus 4.7 — most thorough", "claude-opus-4-7"));
+                    new ModelOption("Haiku — fastest", "claude-haiku-4-5-20251001"),
+                    new ModelOption("Sonnet — balanced", "claude-sonnet-4-6"),
+                    new ModelOption("Opus — most thorough", "claude-opus-4-7"));
 
     private final JPanel mainPanel;
     private final JBTextField baseUrlField = new JBTextField("https://github.com");

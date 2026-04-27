@@ -18,10 +18,12 @@ public class CommentCard extends JPanel {
     private static final Color ISSUE_LABEL = new Color(0xe3b341);
     private static final Color SUG_BORDER = new Color(0x1f6feb);
     private static final Color SUG_LABEL = new Color(0x58a6ff);
+    private static final Color PRAISE_BORDER = new Color(0x238636);
+    private static final Color PRAISE_LABEL = new Color(0x3fb950);
     private static final Color NOTE_BORDER = new Color(0x8b949e);
     private static final Color NOTE_LABEL = new Color(0x8b949e);
 
-    private static final String[] TYPES = {"issue", "suggestion", "note"};
+    private static final String[] TYPES = {"issue", "suggestion", "praise", "note"};
 
     private static final Color TEXT_COLOR = new Color(0xe6edf3);
     private static final Color CARD_BG =
@@ -62,11 +64,11 @@ public class CommentCard extends JPanel {
         applyBorder(currentBorder[0]);
 
         // ── Compact header: type label (clickable) + dismiss ──────────
-        JLabel typeLabel = new JLabel(icon(comment.getType()) + " " + comment.getType());
+        JLabel typeLabel = new JLabel(icon(comment.getType()) + " " + comment.getType() + " ▾");
         typeLabel.setFont(LABEL_FONT);
         typeLabel.setForeground(currentLabel[0]);
         typeLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        typeLabel.setToolTipText("Click to change type");
+        typeLabel.setToolTipText("Click to cycle type");
 
         JButton dismiss = new JButton("×");
         dismiss.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
@@ -160,7 +162,7 @@ public class CommentCard extends JPanel {
                         currentBorder[0] = newColors[0];
                         currentLabel[0] = newColors[1];
                         typeLabel.setForeground(currentLabel[0]);
-                        typeLabel.setText(icon(next) + " " + next);
+                        typeLabel.setText(icon(next) + " " + next + " ▾");
                         applyBorder(currentBorder[0]);
                         repaint();
                     }
@@ -191,6 +193,7 @@ public class CommentCard extends JPanel {
         return switch (type == null ? "" : type.toLowerCase()) {
             case "issue" -> new Color[] {ISSUE_BORDER, ISSUE_LABEL};
             case "suggestion" -> new Color[] {SUG_BORDER, SUG_LABEL};
+            case "praise" -> new Color[] {PRAISE_BORDER, PRAISE_LABEL};
             default -> new Color[] {NOTE_BORDER, NOTE_LABEL};
         };
     }
@@ -199,6 +202,7 @@ public class CommentCard extends JPanel {
         return switch (type == null ? "" : type.toLowerCase()) {
             case "issue" -> "⚠";
             case "suggestion" -> "💡";
+            case "praise" -> "★";
             default -> "●";
         };
     }

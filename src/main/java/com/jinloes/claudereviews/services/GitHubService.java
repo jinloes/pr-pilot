@@ -1,9 +1,12 @@
 package com.jinloes.claudereviews.services;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.components.Service;
 import com.jinloes.claudereviews.model.LineComment;
 import com.jinloes.claudereviews.model.PullRequest;
 import com.jinloes.claudereviews.model.ReviewResult;
@@ -20,6 +23,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+@Service
 public class GitHubService {
 
     private static final int MAX_DIFF_BYTES = 80_000;
@@ -44,6 +48,10 @@ public class GitHubService {
     private final HttpClient httpClient =
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
 
+    public static GitHubService getInstance() {
+        return ApplicationManager.getApplication().getService(GitHubService.class);
+    }
+
     private String apiBase() {
         return com.jinloes.claudereviews.settings.PluginSettings.getInstance().getApiBaseUrl();
     }
@@ -62,16 +70,25 @@ public class GitHubService {
     }
 
     private List<PullRequest> parseSearchResults(String json) throws IOException {
+        SearchResult result = MAPPER.readValue(json, SearchResult.class);
         List<PullRequest> prs = new ArrayList<>();
-        JsonNode root = MAPPER.readTree(json);
-        ArrayNode items = (ArrayNode) root.path("items");
-        for (JsonNode el : items) {
-            // repository_url: "https://api.github.com/repos/owner/repo"
-            String repoUrl = el.path("repository_url").asText();
+        for (PrItem el : result.items()) {
+            String repoUrl = el.repositoryUrl() != null ? el.repositoryUrl() : "";
             String[] parts = repoUrl.split("/");
-            String owner = parts[parts.length - 2];
-            String repo = parts[parts.length - 1];
-            prs.add(toPR(el, owner, repo));
+            String owner = parts.length >= 2 ? parts[parts.length - 2] : "";
+            String repo = parts.length >= 1 ? parts[parts.length - 1] : "";
+            String login = el.user() != null ? el.user().login() : "";
+            String body = el.body() != null ? el.body() : "";
+            prs.add(
+                    new PullRequest(
+                            el.title(),
+                            el.htmlUrl(),
+                            owner,
+                            repo,
+                            el.number(),
+                            body,
+                            login,
+                            el.createdAt() != null ? el.createdAt() : ""));
         }
         return prs;
     }
@@ -84,11 +101,13 @@ public class GitHubService {
         while (repos.size() < 200) {
             String url = apiBase() + "/user/starred?per_page=100&sort=updated&page=" + page;
             String body = get(token, url, "application/vnd.github.v3+json");
-            ArrayNode items = (ArrayNode) MAPPER.readTree(body);
+            List<StarredRepo> items =
+                    MAPPER.readValue(
+                            body,
+                            MAPPER.getTypeFactory()
+                                    .constructCollectionType(List.class, StarredRepo.class));
             if (items.isEmpty()) break;
-            for (JsonNode el : items) {
-                repos.add(el.path("full_name").asText());
-            }
+            items.stream().map(StarredRepo::fullName).forEach(repos::add);
             if (items.size() < 100) break;
             page++;
         }
@@ -116,11 +135,13 @@ public class GitHubService {
     public String getPendingReviewId(String token, String owner, String repo, int number)
             throws IOException, InterruptedException {
         String url = apiBase() + "/repos/" + owner + "/" + repo + "/pulls/" + number + "/reviews";
-        ArrayNode reviews =
-                (ArrayNode) MAPPER.readTree(get(token, url, "application/vnd.github.v3+json"));
-        for (JsonNode r : reviews) {
-            if ("PENDING".equals(r.path("state").asText()))
-                return String.valueOf(r.path("id").asLong());
+        List<GhReview> reviews =
+                MAPPER.readValue(
+                        get(token, url, "application/vnd.github.v3+json"),
+                        MAPPER.getTypeFactory()
+                                .constructCollectionType(List.class, GhReview.class));
+        for (GhReview r : reviews) {
+            if ("PENDING".equals(r.state())) return String.valueOf(r.id());
         }
         return null;
     }
@@ -208,9 +229,10 @@ public class GitHubService {
         for (int i = 0; i < comments.size(); i++) {
             ArrayNode single = MAPPER.createArrayNode();
             single.add(comments.get(i));
-            basePayload.set("comments", single);
+            ObjectNode probe = basePayload.deepCopy();
+            probe.set("comments", single);
             try {
-                String resp = post(token, url, basePayload.toString());
+                String resp = post(token, url, probe.toString());
                 // Probe succeeded — immediately delete the temp review, mark comment valid.
                 String tempId = String.valueOf(MAPPER.readTree(resp).path("id").asLong());
                 delete(token, url + "/" + tempId);
@@ -234,18 +256,18 @@ public class GitHubService {
 
         String reviewUrl =
                 apiBase() + "/repos/" + owner + "/" + repo + "/pulls/" + number + "/reviews/" + id;
-        JsonNode review = MAPPER.readTree(get(token, reviewUrl, "application/vnd.github.v3+json"));
-        String body = review.path("body").asText("");
+        GhReview review =
+                MAPPER.readValue(
+                        get(token, reviewUrl, "application/vnd.github.v3+json"), GhReview.class);
+        String body = review.body() != null ? review.body() : "";
 
-        ArrayNode commentsArr =
-                (ArrayNode)
-                        MAPPER.readTree(
-                                get(
-                                        token,
-                                        reviewUrl + "/comments",
-                                        "application/vnd.github.v3+json"));
+        List<GhReviewComment> ghComments =
+                MAPPER.readValue(
+                        get(token, reviewUrl + "/comments", "application/vnd.github.v3+json"),
+                        MAPPER.getTypeFactory()
+                                .constructCollectionType(List.class, GhReviewComment.class));
 
-        return new PendingReview(id, decodeReview(body, commentsArr));
+        return new PendingReview(id, decodeReview(body, ghComments));
     }
 
     /**
@@ -300,19 +322,17 @@ public class GitHubService {
     public boolean isPRMerged(String token, String owner, String repo, int number)
             throws IOException, InterruptedException {
         String url = apiBase() + "/repos/" + owner + "/" + repo + "/pulls/" + number;
-        return MAPPER.readTree(get(token, url, "application/vnd.github.v3+json"))
-                .path("merged")
-                .asBoolean(false);
+        return MAPPER.readValue(get(token, url, "application/vnd.github.v3+json"), PrDetail.class)
+                .merged();
     }
 
     /** Fetches the HEAD commit SHA for a pull request. */
     public String getPRHeadSha(String token, String owner, String repo, int number)
             throws IOException, InterruptedException {
         String url = apiBase() + "/repos/" + owner + "/" + repo + "/pulls/" + number;
-        return MAPPER.readTree(get(token, url, "application/vnd.github.v3+json"))
-                .path("head")
-                .path("sha")
-                .asText();
+        PrDetail detail =
+                MAPPER.readValue(get(token, url, "application/vnd.github.v3+json"), PrDetail.class);
+        return detail.head() != null ? detail.head().sha() : "";
     }
 
     // --- Encode / decode ReviewResult ↔ GitHub review body + comments ---
@@ -347,7 +367,7 @@ public class GitHubService {
         return sb.toString();
     }
 
-    static ReviewResult decodeReview(String body, ArrayNode commentsArr) {
+    static ReviewResult decodeReview(String body, List<GhReviewComment> commentsArr) {
         String verdict = "COMMENT";
 
         // Extract verdict
@@ -380,7 +400,7 @@ public class GitHubService {
                 String json = body.substring(embeddedIdx + COMMENTS_TAG.length(), endIdx).strip();
                 try {
                     ArrayNode arr = (ArrayNode) MAPPER.readTree(json);
-                    for (JsonNode el : arr) {
+                    for (com.fasterxml.jackson.databind.JsonNode el : arr) {
                         String file = el.path("f").asText("");
                         int line = el.path("l").asInt(0);
                         String type = el.path("t").asText("note");
@@ -416,11 +436,11 @@ public class GitHubService {
         }
 
         // Legacy: inline comments from GitHub API (line may be null for outdated positions)
-        for (JsonNode c : commentsArr) {
-            String path = c.path("path").asText("");
-            JsonNode lineNode = c.path("line");
-            int line = lineNode.isNumber() ? lineNode.asInt() : c.path("original_line").asInt(0);
-            String text = c.path("body").asText("");
+        for (GhReviewComment c : commentsArr) {
+            String path = c.path() != null ? c.path() : "";
+            int line =
+                    c.line() != null ? c.line() : (c.originalLine() != null ? c.originalLine() : 0);
+            String text = c.body() != null ? c.body() : "";
             String type = "note";
             Matcher m = TYPE_PREFIX.matcher(text);
             if (m.find()) {
@@ -435,21 +455,12 @@ public class GitHubService {
 
     // --- Helpers ---
 
-    private PullRequest toPR(JsonNode obj, String owner, String repo) {
-        String title = obj.path("title").asText();
-        String htmlUrl = obj.path("html_url").asText();
-        int number = obj.path("number").asInt();
-        String body = obj.path("body").asText("");
-        String author = obj.path("user").path("login").asText();
-        String createdAt = obj.path("created_at").asText();
-        return new PullRequest(title, htmlUrl, owner, repo, number, body, author, createdAt);
-    }
-
     private String post(String token, String url, String jsonBody)
             throws IOException, InterruptedException {
         HttpRequest request =
                 HttpRequest.newBuilder()
                         .uri(URI.create(url))
+                        .timeout(Duration.ofSeconds(30))
                         .header("Authorization", "Bearer " + token)
                         .header("Accept", "application/vnd.github.v3+json")
                         .header("Content-Type", "application/json")
@@ -472,6 +483,7 @@ public class GitHubService {
         HttpRequest request =
                 HttpRequest.newBuilder()
                         .uri(URI.create(url))
+                        .timeout(Duration.ofSeconds(30))
                         .header("Authorization", "Bearer " + token)
                         .header("Accept", "application/vnd.github.v3+json")
                         .header("X-GitHub-Api-Version", "2022-11-28")
@@ -493,6 +505,7 @@ public class GitHubService {
         HttpRequest request =
                 HttpRequest.newBuilder()
                         .uri(URI.create(url))
+                        .timeout(Duration.ofSeconds(30))
                         .header("Authorization", "Bearer " + token)
                         .header("Accept", accept)
                         .header("X-GitHub-Api-Version", "2022-11-28")
@@ -511,4 +524,45 @@ public class GitHubService {
     private static String truncate(String s, int max) {
         return s.length() > max ? s.substring(0, max) + "..." : s;
     }
+
+    // --- Jackson DTOs for GitHub API responses ---
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record SearchResult(@JsonProperty("items") java.util.List<PrItem> items) {
+        SearchResult() {
+            this(java.util.List.of());
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record PrItem(
+            String title,
+            @JsonProperty("html_url") String htmlUrl,
+            int number,
+            String body,
+            GhUser user,
+            @JsonProperty("created_at") String createdAt,
+            @JsonProperty("repository_url") String repositoryUrl) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record GhUser(String login) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record StarredRepo(@JsonProperty("full_name") String fullName) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record GhReview(long id, String state, String body) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record GhReviewComment(
+            String path,
+            Integer line,
+            @JsonProperty("original_line") Integer originalLine,
+            String body) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record PrDetail(boolean merged, HeadRef head) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record HeadRef(String sha) {}
 }

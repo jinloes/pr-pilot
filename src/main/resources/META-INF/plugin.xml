@@ -20,6 +20,9 @@
             serviceImplementation="com.jinloes.claudereviews.settings.PluginSettings"/>
 
         <applicationService
+            serviceImplementation="com.jinloes.claudereviews.services.GitHubService"/>
+
+        <applicationService
             serviceImplementation="com.jinloes.claudereviews.services.PRNotificationService"/>
 
         <applicationConfigurable

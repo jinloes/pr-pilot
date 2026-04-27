@@ -46,7 +46,6 @@ src/main/java/com/jinloes/claudereviews/
     LineComment.java               – file, line, type ("issue"|"suggestion"|"praise"|"note"), body
     ChatMessage.java               – Role + content for chat history
     PRReviewRequest.java           – Parameter object: PullRequest + diff + knownPatterns + projectConventions, passed to ClaudeService.reviewPR
-    ReviewDraft.java               – (legacy, unused)
   services/
     GitHubAuthService.java         – Runs `gh auth token` to resolve credentials; probes known gh binary paths
     GitHubService.java             – GitHub REST API: search PRs, repo PRs, diff, draft review CRUD
@@ -145,6 +144,18 @@ All token colours are hardcoded GitHub dark mode values from `@primer/primitives
 
 ### GitHub Enterprise
 If `githubBaseUrl` is not `https://github.com`, the REST API base is derived as `<base>/api/v3` and `gh auth token --hostname <host>` is used.
+
+### GitHubService — application-level singleton
+`GitHubService` is registered as an IntelliJ application-level `@Service` in `plugin.xml` and retrieved via `GitHubService.getInstance()`. This prevents duplicate instances and makes it injectable by the IntelliJ platform.
+
+### GitHub API responses — typed Jackson DTO records
+All GitHub API responses are parsed via typed Jackson DTO records declared as package-accessible inner types of `GitHubService` (`SearchResult`, `PrItem`, `GhUser`, `StarredRepo`, `GhReview`, `GhReviewComment`, `PrDetail`, `HeadRef`). Raw `JsonNode` tree-model parsing in method bodies has been eliminated, preventing `ClassCastException` bugs on error/rate-limit responses that return an object rather than an array.
+
+### HTTP request timeouts
+All `HttpRequest.newBuilder()` calls in `GitHubService` include `.timeout(Duration.ofSeconds(30))` and in `GitHubAuthService` include `.timeout(Duration.ofSeconds(15))` to prevent indefinite hangs on unresponsive GitHub API endpoints.
+
+### PatternKnowledgeBase filename separator
+`PatternKnowledgeBase.fileFor()` uses `%` as the owner/repo filename separator (e.g. `owner%repo.md`). The `%` character cannot appear in GitHub owner or repo names, making the separator unambiguous even when owner or repo names contain underscores.
 
 ### JSON serialization — Jackson with Optional accessors
 All JSON parsing and serialization uses `com.fasterxml.jackson.databind.ObjectMapper`. `JsonNode`/`ArrayNode`/`ObjectNode` replace Gson's `JsonElement`/`JsonArray`/`JsonObject`. `TypeReference<T>` replaces Gson's `TypeToken<T>` for generic deserialization. Pretty-printing uses `MAPPER.enable(SerializationFeature.INDENT_OUTPUT)`.
@@ -250,4 +261,4 @@ No API keys or tokens are ever written to disk.
 |------|---------|
 | `~/.claude-reviews/pending-prs.json` | Index of PRs with saved drafts (owner, repo, number, title, savedAt) |
 | `~/.claude-reviews/seen-prs.json` | Set of `owner/repo#number` strings already notified about |
-| `~/.claude-reviews/patterns/{owner}_{repo}.md` | Per-repo Markdown log of verified pattern findings; injected into future review prompts |
+| `~/.claude-reviews/patterns/{owner}%{repo}.md` | Per-repo Markdown log of verified pattern findings; injected into future review prompts |

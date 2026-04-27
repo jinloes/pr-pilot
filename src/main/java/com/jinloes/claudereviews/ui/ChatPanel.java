@@ -72,6 +72,8 @@ public class ChatPanel extends JPanel {
     private final JButton sendButton = new JButton("Send ▶");
     private final JLabel statusLabel = new JLabel(" ");
     private final JLabel contextBar = new JLabel(" ");
+    private JButton toggleButton;
+    private Runnable onToggle;
 
     private Timer selectionPoller;
     private String lastSelection = "";
@@ -110,6 +112,14 @@ public class ChatPanel extends JPanel {
     // ---------------------------------------------------------------
     // Public API
     // ---------------------------------------------------------------
+
+    public void setOnToggle(Runnable r) {
+        this.onToggle = r;
+    }
+
+    public void setCollapsed(boolean collapsed) {
+        toggleButton.setText(collapsed ? "▸" : "▾");
+    }
 
     /**
      * Load PR review context so every chat message is grounded in the review. Called after a review
@@ -211,7 +221,24 @@ public class ChatPanel extends JPanel {
                     messagesPanel.revalidate();
                     messagesPanel.repaint();
                 });
-        header.add(clearButton, BorderLayout.EAST);
+
+        toggleButton = new JButton("▾");
+        toggleButton.setFont(UI);
+        toggleButton.setForeground(FG_MUTED);
+        toggleButton.setBorderPainted(false);
+        toggleButton.setContentAreaFilled(false);
+        toggleButton.setFocusPainted(false);
+        toggleButton.setToolTipText("Collapse/expand chat");
+        toggleButton.addActionListener(
+                e -> {
+                    if (onToggle != null) onToggle.run();
+                });
+
+        JPanel eastPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        eastPanel.setOpaque(false);
+        eastPanel.add(clearButton);
+        eastPanel.add(toggleButton);
+        header.add(eastPanel, BorderLayout.EAST);
         return header;
     }
 
@@ -360,7 +387,7 @@ public class ChatPanel extends JPanel {
                             if (sel == null) sel = "";
                             lastSelection = sel;
                             if (sel.isBlank()) {
-                                contextBar.setText(" ");
+                                contextBar.setText("Enter to send · Shift+Enter for newline");
                             } else {
                                 String preview = sel.strip().replace("\n", " ↵ ");
                                 if (preview.length() > 80) preview = preview.substring(0, 77) + "…";

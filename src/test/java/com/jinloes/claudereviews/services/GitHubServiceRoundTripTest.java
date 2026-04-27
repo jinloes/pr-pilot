@@ -2,9 +2,6 @@ package com.jinloes.claudereviews.services;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jinloes.claudereviews.model.LineComment;
 import com.jinloes.claudereviews.model.ReviewResult;
 import java.util.List;
@@ -12,8 +9,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class GitHubServiceRoundTripTest {
-
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static ReviewResult review(String summary, String verdict, List<LineComment> comments) {
         return new ReviewResult(summary, verdict, comments);
@@ -70,7 +65,7 @@ class GitHubServiceRoundTripTest {
             // GitHub comments (to avoid a 422 from the GitHub API).
             LineComment blank = new LineComment("src/Foo.java", 7, "note", "");
             String body = GitHubService.encodeBody(review("s", "COMMENT", List.of(blank)));
-            ReviewResult decoded = GitHubService.decodeReview(body, MAPPER.createArrayNode());
+            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
             assertThat(decoded.getLineComments()).hasSize(1);
             assertThat(decoded.getLineComments().get(0).getFile()).isEqualTo("src/Foo.java");
             assertThat(decoded.getLineComments().get(0).getLine()).isEqualTo(7);
@@ -85,14 +80,14 @@ class GitHubServiceRoundTripTest {
         void parsesSummary() {
             String body =
                     GitHubService.encodeBody(review("The summary text", "COMMENT", List.of()));
-            ReviewResult decoded = GitHubService.decodeReview(body, MAPPER.createArrayNode());
+            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
             assertThat(decoded.getSummary()).isEqualTo("The summary text");
         }
 
         @Test
         void parsesVerdict() {
             String body = GitHubService.encodeBody(review("s", "REQUEST_CHANGES", List.of()));
-            ReviewResult decoded = GitHubService.decodeReview(body, MAPPER.createArrayNode());
+            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
             assertThat(decoded.getVerdict()).isEqualTo("REQUEST_CHANGES");
         }
 
@@ -100,7 +95,7 @@ class GitHubServiceRoundTripTest {
         void parsesInlineCommentFromEmbeddedJson() {
             LineComment c = new LineComment("src/Bar.java", 10, "suggestion", "extract method");
             String body = GitHubService.encodeBody(review("s", "COMMENT", List.of(c)));
-            ReviewResult decoded = GitHubService.decodeReview(body, MAPPER.createArrayNode());
+            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
             assertThat(decoded.getLineComments()).hasSize(1);
             LineComment got = decoded.getLineComments().get(0);
             assertThat(got.getFile()).isEqualTo("src/Bar.java");
@@ -114,13 +109,11 @@ class GitHubServiceRoundTripTest {
             LineComment embedded = new LineComment("src/A.java", 5, "issue", "from embedded");
             String body = GitHubService.encodeBody(review("s", "COMMENT", List.of(embedded)));
 
-            // API comment that would conflict
-            ArrayNode apiComments = MAPPER.createArrayNode();
-            ObjectNode apiComment = MAPPER.createObjectNode();
-            apiComment.put("path", "src/B.java");
-            apiComment.put("line", 99);
-            apiComment.put("body", "[NOTE] from api");
-            apiComments.add(apiComment);
+            // API comment that would conflict — embedded JSON wins so this is ignored
+            List<GitHubService.GhReviewComment> apiComments =
+                    List.of(
+                            new GitHubService.GhReviewComment(
+                                    "src/B.java", 99, null, "[NOTE] from api"));
 
             ReviewResult decoded = GitHubService.decodeReview(body, apiComments);
             assertThat(decoded.getLineComments()).hasSize(1);
@@ -131,12 +124,10 @@ class GitHubServiceRoundTripTest {
         void fallsBackToApiComments_whenNoEmbeddedJson() {
             // Body without embedded JSON block (legacy format)
             String body = "Summary text\n\n<!-- claude-verdict: APPROVE -->";
-            ArrayNode apiComments = MAPPER.createArrayNode();
-            ObjectNode apiComment = MAPPER.createObjectNode();
-            apiComment.put("path", "src/Foo.java");
-            apiComment.put("line", 7);
-            apiComment.put("body", "[ISSUE] legacy comment");
-            apiComments.add(apiComment);
+            List<GitHubService.GhReviewComment> apiComments =
+                    List.of(
+                            new GitHubService.GhReviewComment(
+                                    "src/Foo.java", 7, null, "[ISSUE] legacy comment"));
 
             ReviewResult decoded = GitHubService.decodeReview(body, apiComments);
             assertThat(decoded.getLineComments()).hasSize(1);
@@ -148,13 +139,10 @@ class GitHubServiceRoundTripTest {
         @Test
         void nullLineInApiComment_usesOriginalLine() {
             String body = "Summary\n\n<!-- claude-verdict: COMMENT -->";
-            ArrayNode apiComments = MAPPER.createArrayNode();
-            ObjectNode apiComment = MAPPER.createObjectNode();
-            apiComment.put("path", "src/Foo.java");
-            apiComment.putNull("line");
-            apiComment.put("original_line", 15);
-            apiComment.put("body", "[NOTE] note text");
-            apiComments.add(apiComment);
+            List<GitHubService.GhReviewComment> apiComments =
+                    List.of(
+                            new GitHubService.GhReviewComment(
+                                    "src/Foo.java", null, 15, "[NOTE] note text"));
 
             ReviewResult decoded = GitHubService.decodeReview(body, apiComments);
             assertThat(decoded.getLineComments().get(0).getLine()).isEqualTo(15);
@@ -277,7 +265,7 @@ class GitHubServiceRoundTripTest {
                             new LineComment("", 0, "note", "general note"));
             ReviewResult original = review("Full summary", "REQUEST_CHANGES", comments);
             String body = GitHubService.encodeBody(original);
-            ReviewResult decoded = GitHubService.decodeReview(body, MAPPER.createArrayNode());
+            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
 
             assertThat(decoded.getSummary()).isEqualTo("Full summary");
             assertThat(decoded.getVerdict()).isEqualTo("REQUEST_CHANGES");
@@ -310,7 +298,7 @@ class GitHubServiceRoundTripTest {
         void emptyComments_preservedAsEmpty() {
             ReviewResult original = review("Summary only", "APPROVE", List.of());
             String body = GitHubService.encodeBody(original);
-            ReviewResult decoded = GitHubService.decodeReview(body, MAPPER.createArrayNode());
+            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
             assertThat(decoded.getLineComments()).isEmpty();
             assertThat(decoded.getSummary()).isEqualTo("Summary only");
             assertThat(decoded.getVerdict()).isEqualTo("APPROVE");
