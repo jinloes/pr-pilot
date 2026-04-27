@@ -16,7 +16,7 @@ public class PluginSettingsComponent {
 
     private static final List<ModelOption> MODELS =
             List.of(
-                    new ModelOption("Default (Claude Code setting)", ""),
+                    new ModelOption("CLI default (unset)", ""),
                     new ModelOption("Haiku — fastest", "claude-haiku-4-5-20251001"),
                     new ModelOption("Sonnet — balanced", "claude-sonnet-4-6"),
                     new ModelOption("Opus — most thorough", "claude-opus-4-7"));

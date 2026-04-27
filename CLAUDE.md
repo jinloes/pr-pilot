@@ -33,6 +33,8 @@ IntelliJ plugin that lists GitHub Pull Requests and generates AI-powered code re
 - **Auto-cleanup of stale drafts** — when a merged PR is selected, the plugin automatically deletes its pending GitHub draft and removes it from the local index
 - **Diff prefetch on PR selection** — when a PR is selected, `loadDraftFromGitHub()` fetches the diff in the background so `generateReview()` can skip the network round-trip; prefetch failure is non-fatal and generateReview() re-fetches as a fallback
 - **Configurable review model** — a "Review model" combo in Settings lets the user pick between the CLI default, Haiku 4.5, Sonnet 4.6, or Opus 4.7; the selected model is passed as `--model <id>` to the `claude` CLI during reviews
+- **Theme-aware color palette** — `ThemeColors` detects the IDE light/dark theme via Panel.background luminance and provides the matching GitHub-inspired palette to all UI classes (ReviewPanel, ChatPanel, CommentCard)
+- **Workflow action strip** — Generate Review, Save Draft, and Submit ▶ are grouped together at the bottom of the review pane in task order; "Saved Drafts" is a dedicated toolbar button separate from the filter combo
 
 ---
 
@@ -72,6 +74,7 @@ src/main/java/com/jinloes/claudereviews/
     ChatPanel.java                 – Chat UI: streaming bubbles, selection polling, commonmark-rendered responses
     CommentCard.java               – Editable inline comment card with dismiss callback
     DiffParser.java                – Pure-Java unified diff parser; DiffFile / DiffLine types; extracted from ReviewPanel
+    ThemeColors.java               – Centralized theme-aware color palette; light/dark detection via Panel.background luminance
   highlighting/
     DiffHighlighter.java           – Syntax highlighting facade delegating to TreeSitterHighlighter; Apache Commons Text htmlEscape
     TreeSitterHighlighter.java     – Tree-sitter-based highlighter using io.github.bonede:tree-sitter-ng; lazy-init with graceful fallback; highlight queries bundled as resources
@@ -85,6 +88,12 @@ build.gradle
 ---
 
 ## Key design decisions
+
+### ThemeColors — centralized theme-aware palette
+`ThemeColors` is a package-private class in `com.jinloes.claudereviews.ui` that initializes all color constants in a static block at class-load time. It detects the IDE light/dark theme by reading `UIManager.getColor("Panel.background")` and computing the luminance (`0.299R + 0.587G + 0.114B`): luminance < 0.5 → dark (GitHub dark-mode palette), ≥ 0.5 → light (GitHub light-mode palette). All three consumer classes (`ReviewPanel`, `ChatPanel`, `CommentCard`) reference `ThemeColors.*` instead of declaring their own color constants. Semantic accent colors (`ACCENT_BLUE`, `ACCENT_GREEN`, `ERROR_FG`) are identical in both themes.
+
+### Workflow strip — Generate / Save / Submit in task order
+The three primary review workflow actions (`generateButton`, `saveDraftButton`, `submitButton`) are grouped left-to-right in the `reviewControls` bottom bar using a `BorderLayout` wrapper: a `FlowLayout` panel (`WEST`) holds the buttons, and `statusLabel` fills `CENTER`. The "Saved Drafts" view is accessed via a dedicated toolbar button rather than a filter-combo entry; the boolean field `showingDrafts` tracks whether the PR list is showing drafts (used to decide whether to remove a PR from the list after local-draft deletion).
 
 ### GitHub authentication — no stored token
 The plugin never stores a GitHub token. `GitHubAuthService.resolveToken()` runs `gh auth token` each time a token is needed. Token lives only in the `gh` CLI keychain/config.

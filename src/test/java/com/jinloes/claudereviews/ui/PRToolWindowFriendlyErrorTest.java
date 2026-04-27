@@ -64,5 +64,23 @@ class PRToolWindowFriendlyErrorTest {
             Exception ex = new RuntimeException("Something unexpected happened");
             assertThat(PRToolWindow.friendlyError(ex)).isEqualTo("Something unexpected happened");
         }
+
+        @Test
+        void longMessageTruncated() {
+            // 130-char message should be truncated to 117 chars + "…"
+            String longMsg = "A".repeat(130);
+            Exception ex = new RuntimeException(longMsg);
+            String result = PRToolWindow.friendlyError(ex);
+            assertThat(result).hasSize(118); // 117 + 1 for "…"
+            assertThat(result).endsWith("…");
+        }
+
+        @Test
+        void messageLengthAtBoundaryNotTruncated() {
+            // Exactly 120 chars should not be truncated
+            String msg = "B".repeat(120);
+            Exception ex = new RuntimeException(msg);
+            assertThat(PRToolWindow.friendlyError(ex)).isEqualTo(msg);
+        }
     }
 }

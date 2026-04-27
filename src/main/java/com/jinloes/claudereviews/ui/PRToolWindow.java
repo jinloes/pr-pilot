@@ -43,7 +43,7 @@ public class PRToolWindow {
     }
 
     private static final String[] FILTERS = {
-        "Open", "Assigned to me", "Review Requested", "Created by me", "Drafts"
+        "Open", "Assigned to me", "Review Requested", "Created by me"
     };
 
     private final Project project;
@@ -58,6 +58,7 @@ public class PRToolWindow {
     // Browse-repo bar
     private final JComboBox<String> repoCombo = new JComboBox<>();
     private boolean loadingRepos = false;
+    private boolean showingDrafts = false;
 
     // Right panel – review
     private final JLabel prHeaderLabel = new JLabel(" ");
@@ -72,9 +73,8 @@ public class PRToolWindow {
 
     // Comment navigation
     private final JButton prevCommentButton =
-            iconButton(AllIcons.Actions.PreviousOccurence, "Previous comment");
-    private final JButton nextCommentButton =
-            iconButton(AllIcons.Actions.NextOccurence, "Next comment");
+            iconButton(AllIcons.Actions.MoveUp, "Previous comment");
+    private final JButton nextCommentButton = iconButton(AllIcons.Actions.MoveDown, "Next comment");
     private final JLabel commentCountLabel = new JBLabel("");
     private final JButton openInBrowserButton =
             iconButton(AllIcons.Ide.External_link_arrow, "Open PR in browser");
@@ -134,13 +134,14 @@ public class PRToolWindow {
         repoCombo.setToolTipText("Select a starred repo or type owner/repo to filter");
         toolbarLeft.add(repoCombo);
         toolbarLeft.add(refreshButton);
+        toolbarLeft.add(new JSeparator(SwingConstants.VERTICAL));
+        JButton draftsButton = new JButton("Saved Drafts");
+        draftsButton.addActionListener(e -> loadDraftPRs());
+        toolbarLeft.add(draftsButton);
         repoCombo.addActionListener(
                 e -> {
                     if (!loadingRepos) refreshPRs();
                 });
-
-        submitButton.setToolTipText("Submit the pending draft review to GitHub");
-        submitButton.setEnabled(false);
 
         JButton settingsButton = new JButton("\u2699 Settings");
         settingsButton.addActionListener(
@@ -148,7 +149,6 @@ public class PRToolWindow {
                         ShowSettingsUtil.getInstance()
                                 .showSettingsDialog(project, PluginSettingsConfigurable.class));
         JPanel toolbarRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 4));
-        toolbarRight.add(submitButton);
         toolbarRight.add(settingsButton);
 
         JPanel toolbar = new JPanel(new BorderLayout());
@@ -188,8 +188,6 @@ public class PRToolWindow {
         openInBrowserButton.setEnabled(false);
         commentCountLabel.setForeground(Color.GRAY);
         JPanel navPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 2));
-        navPanel.add(generateButton);
-        navPanel.add(new JSeparator(SwingConstants.VERTICAL));
         navPanel.add(prevCommentButton);
         navPanel.add(commentCountLabel);
         navPanel.add(nextCommentButton);
@@ -201,41 +199,49 @@ public class PRToolWindow {
         northPanel.add(navPanel, BorderLayout.EAST);
 
         JBScrollPane reviewScroll = new JBScrollPane(reviewPanel);
-        reviewScroll.setBackground(ReviewPanel.BG);
-        reviewScroll.getViewport().setBackground(ReviewPanel.BG);
+        reviewScroll.setBackground(ThemeColors.BG);
+        reviewScroll.getViewport().setBackground(ThemeColors.BG);
         reviewScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
 
-        JPanel reviewControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+        // Workflow strip: Generate Review | Save Draft | Submit ▶  [status fills remaining space]
+        submitButton.setToolTipText("Submit the pending draft review to GitHub");
+        submitButton.setEnabled(false);
         saveDraftButton.setEnabled(false);
-        reviewControls.add(saveDraftButton);
-        reviewControls.add(statusLabel);
+        JPanel controlButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+        controlButtons.add(generateButton);
+        controlButtons.add(saveDraftButton);
+        controlButtons.add(submitButton);
+        JPanel reviewControls = new JPanel(new BorderLayout());
+        reviewControls.add(controlButtons, BorderLayout.WEST);
+        reviewControls.add(statusLabel, BorderLayout.CENTER);
 
         JPanel reviewPane = new JPanel(new BorderLayout());
         reviewPane.add(reviewScroll, BorderLayout.CENTER);
         reviewPane.add(reviewControls, BorderLayout.SOUTH);
 
+        chatPanel.setMinimumSize(new Dimension(0, 28));
         reviewChatSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, reviewPane, chatPanel);
         reviewChatSplit.setResizeWeight(0.65);
         reviewChatSplit.setDividerSize(5);
 
         // ── Summary sidebar (right of diff) ───────────────────────────
         summaryPane.setEditable(false);
-        summaryPane.setBackground(ReviewPanel.BG_SUBTLE);
+        summaryPane.setBackground(ThemeColors.BG_SUBTLE);
         summaryPane.setBorder(new EmptyBorder(8, 12, 8, 12));
         summaryPane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
-        summaryScroll.setBackground(ReviewPanel.BG_SUBTLE);
-        summaryScroll.getViewport().setBackground(ReviewPanel.BG_SUBTLE);
+        summaryScroll.setBackground(ThemeColors.BG_SUBTLE);
+        summaryScroll.getViewport().setBackground(ThemeColors.BG_SUBTLE);
         summaryScroll.setBorder(null);
 
         JLabel summaryHeader = new JLabel("Summary");
         summaryHeader.setFont(summaryHeader.getFont().deriveFont(Font.BOLD, 11f));
-        summaryHeader.setForeground(ReviewPanel.FG_MUTED);
+        summaryHeader.setForeground(ThemeColors.FG_MUTED);
         summaryHeader.setBorder(new EmptyBorder(6, 10, 4, 10));
-        summaryHeader.setBackground(ReviewPanel.BG_SUBTLE);
+        summaryHeader.setBackground(ThemeColors.BG_SUBTLE);
         summaryHeader.setOpaque(true);
 
         JPanel summaryPanel = new JPanel(new BorderLayout());
-        summaryPanel.setBackground(ReviewPanel.BG_SUBTLE);
+        summaryPanel.setBackground(ThemeColors.BG_SUBTLE);
         summaryPanel.add(summaryHeader, BorderLayout.NORTH);
         summaryPanel.add(summaryScroll, BorderLayout.CENTER);
         summaryPanel.setPreferredSize(new Dimension(280, 0));
@@ -245,6 +251,8 @@ public class PRToolWindow {
                 new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, reviewChatSplit, summaryPanel);
         diffSummarySplit.setResizeWeight(1.0); // diff takes all extra space on resize
         diffSummarySplit.setDividerSize(5);
+        // Collapse the summary sidebar by default — it expands when a review is generated
+        SwingUtilities.invokeLater(() -> diffSummarySplit.setDividerLocation(1.0d));
 
         JPanel rightPanel = new JPanel(new BorderLayout());
         rightPanel.add(northPanel, BorderLayout.NORTH);
@@ -259,7 +267,7 @@ public class PRToolWindow {
         root.add(split, BorderLayout.CENTER);
 
         // ── Wire listeners ────────────────────────────────────────────
-        refreshButton.addActionListener(e -> refreshPRs());
+        refreshButton.addActionListener(e -> loadStarredRepos());
         filterCombo.addActionListener(e -> refreshPRs());
         generateButton.addActionListener(e -> generateReview());
         chatPanel.setOnToggle(this::toggleChat);
@@ -313,6 +321,7 @@ public class PRToolWindow {
     // ---------------------------------------------------------------
 
     private void refreshPRs() {
+        showingDrafts = false;
         if (!hasToken()) {
             promptSettings();
             return;
@@ -329,11 +338,6 @@ public class PRToolWindow {
                 repoParts.length == 2 && !repoParts[0].isBlank() && !repoParts[1].isBlank();
 
         String filter = Objects.toString(filterCombo.getSelectedItem(), "Open");
-
-        if ("Drafts".equals(filter)) {
-            loadDraftPRs();
-            return;
-        }
 
         prList.getEmptyText().setText("Loading\u2026");
         setStatus("Loading PRs\u2026");
@@ -380,6 +384,10 @@ public class PRToolWindow {
     }
 
     private void loadStarredRepos() {
+        loadingRepos = true;
+        repoCombo.removeAllItems();
+        repoCombo.addItem("Loading starred repos…");
+        repoCombo.setEnabled(false);
         String token = getToken();
         runInBackground(
                 () -> {
@@ -387,15 +395,21 @@ public class PRToolWindow {
                         List<String> starred = githubService.getStarredRepos(token);
                         runOnEdt(
                                 () -> {
-                                    loadingRepos = true;
                                     repoCombo.removeAllItems();
                                     starred.forEach(repoCombo::addItem);
+                                    repoCombo.setEnabled(true);
                                     loadingRepos = false;
                                     refreshPRs();
                                 });
                     } catch (Exception ex) {
                         // Non-fatal: leave combo empty, but still load PRs
-                        runOnEdt(this::refreshPRs);
+                        runOnEdt(
+                                () -> {
+                                    repoCombo.removeAllItems();
+                                    repoCombo.setEnabled(true);
+                                    loadingRepos = false;
+                                    refreshPRs();
+                                });
                     }
                 });
     }
@@ -405,6 +419,7 @@ public class PRToolWindow {
         prefetchedDiff = null;
         prefetchedPR = null;
         prHeaderLabel.setText(prHeaderHtml(pr));
+        prHeaderLabel.setToolTipText(pr.getTitle());
         lastResult = null;
         lastPR = pr;
         pendingReviewId = null;
@@ -464,7 +479,6 @@ public class PRToolWindow {
                         String projectConventions = readProjectConventions();
                         runOnEdt(
                                 () -> {
-                                    setStatus("Generating review with Claude\u2026");
                                     reviewPanel.showStatusLog(
                                             "Generating review with Claude\u2026");
                                     claudeService.reviewPR(
@@ -522,7 +536,8 @@ public class PRToolWindow {
             int total = reviewChatSplit.getHeight() - reviewChatSplit.getDividerSize();
             if (total > 0)
                 lastChatDividerRatio = (double) reviewChatSplit.getDividerLocation() / total;
-            reviewChatSplit.setDividerLocation(1.0d);
+            int collapsed = reviewChatSplit.getHeight() - 28 - reviewChatSplit.getDividerSize();
+            reviewChatSplit.setDividerLocation(Math.max(0, collapsed));
         } else {
             reviewChatSplit.setDividerLocation(lastChatDividerRatio);
         }
@@ -531,7 +546,6 @@ public class PRToolWindow {
     }
 
     private void loadDraftFromGitHub(PullRequest pr) {
-        setStatus("Checking GitHub for a pending draft review\u2026");
         generateButton.setEnabled(false);
         String token = getToken();
         runInBackground(
@@ -640,6 +654,7 @@ public class PRToolWindow {
     }
 
     private void loadDraftPRs() {
+        showingDrafts = true;
         setStatus("Loading saved drafts\u2026");
         refreshButton.setEnabled(false);
         List<PendingReviewIndex.Entry> entries = pendingIndex.list();
@@ -744,7 +759,7 @@ public class PRToolWindow {
                                     JOptionPane.YES_NO_OPTION);
                     if (confirm != JOptionPane.YES_OPTION) return;
                     pendingIndex.remove(pr.getOwner(), pr.getRepo(), pr.getNumber());
-                    if ("Drafts".equals(Objects.toString(filterCombo.getSelectedItem(), ""))) {
+                    if (showingDrafts) {
                         listModel.removeElement(pr);
                     }
                     if (lastPR != null
@@ -830,6 +845,18 @@ public class PRToolWindow {
         JTextArea commentArea = new JTextArea(4, 40);
         commentArea.setLineWrap(true);
         commentArea.setWrapStyleWord(true);
+        commentArea.setForeground(Color.GRAY);
+        commentArea.setText("Add an optional comment to the review…");
+        commentArea.addFocusListener(
+                new java.awt.event.FocusAdapter() {
+                    @Override
+                    public void focusGained(java.awt.event.FocusEvent e) {
+                        if (commentArea.getForeground().equals(Color.GRAY)) {
+                            commentArea.setText("");
+                            commentArea.setForeground(UIManager.getColor("TextArea.foreground"));
+                        }
+                    }
+                });
         JScrollPane commentScroll = new JScrollPane(commentArea);
         commentScroll.setBorder(BorderFactory.createTitledBorder("Comment (optional)"));
 
@@ -854,7 +881,8 @@ public class PRToolWindow {
         if (choice < 0) return;
 
         String event = events[choice];
-        String commentBody = commentArea.getText().strip();
+        String commentBody =
+                commentArea.getForeground().equals(Color.GRAY) ? "" : commentArea.getText().strip();
         String reviewId = pendingReviewId;
         submitButton.setEnabled(false);
         saveDraftButton.setEnabled(false); // prevent re-save while submit is in flight
@@ -900,16 +928,18 @@ public class PRToolWindow {
                 });
     }
 
-    private static String prHeaderHtml(PullRequest pr) {
+    static String prHeaderHtml(PullRequest pr) {
         return prHeaderHtml(pr, false);
     }
 
-    private static String prHeaderHtml(PullRequest pr, boolean draft) {
+    static String prHeaderHtml(PullRequest pr, boolean draft) {
+        String title = pr.getTitle();
+        String displayTitle = title.length() > 80 ? title.substring(0, 77) + "\u2026" : title;
         String draftBadge = draft ? " &nbsp;<font color='#e3b341'>[draft]</font>" : "";
         return "<html><b>#%d %s</b> &nbsp;<font color=gray>by %s &nbsp;\u00b7&nbsp; %s/%s%s</font></html>"
                 .formatted(
                         pr.getNumber(),
-                        esc(pr.getTitle()),
+                        esc(displayTitle),
                         pr.getAuthor(),
                         pr.getOwner(),
                         pr.getRepo(),
@@ -932,10 +962,9 @@ public class PRToolWindow {
         int idx = reviewPanel.getCurrentCommentIndex();
         if (total == 0) {
             commentCountLabel.setText("");
-        } else if (idx < 0) {
-            commentCountLabel.setText(total + " comment" + (total == 1 ? "" : "s"));
         } else {
-            commentCountLabel.setText((idx + 1) + "/" + total);
+            // Always show position/total; if no navigation yet (idx < 0), show 1/N
+            commentCountLabel.setText((Math.max(idx, 0) + 1) + "/" + total);
         }
         prevCommentButton.setEnabled(total > 0);
         nextCommentButton.setEnabled(total > 0);
@@ -953,7 +982,8 @@ public class PRToolWindow {
             return "Could not reach GitHub — check your connection.";
         if (low.contains("404"))
             return "Not found on GitHub — the PR or repo may have been deleted.";
-        return msg;
+        String trimmed = msg.length() > 120 ? msg.substring(0, 117) + "…" : msg;
+        return trimmed;
     }
 
     private boolean hasToken() {
@@ -982,11 +1012,19 @@ public class PRToolWindow {
     }
 
     private void showSummary(String markdown) {
+        // Restore sidebar to ~280px if currently collapsed
+        if (diffSummarySplit != null
+                && diffSummarySplit.getDividerLocation() >= diffSummarySplit.getWidth() - 10) {
+            diffSummarySplit.setDividerLocation(Math.max(0, diffSummarySplit.getWidth() - 280));
+        }
         summaryPane.setText(ChatPanel.buildHtml(markdown));
         summaryPane.setCaretPosition(0);
     }
 
     private void showSummaryPlaceholder() {
+        if (diffSummarySplit != null) {
+            SwingUtilities.invokeLater(() -> diffSummarySplit.setDividerLocation(1.0d));
+        }
         summaryPane.setText(ChatPanel.buildHtml("*Generate a review to see the summary here.*"));
         summaryPane.setCaretPosition(0);
     }

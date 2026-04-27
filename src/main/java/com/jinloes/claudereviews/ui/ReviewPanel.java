@@ -24,20 +24,8 @@ import javax.swing.text.*;
  */
 public class ReviewPanel extends JPanel implements Scrollable {
 
-    // ---- GitHub dark-mode colour palette --------------------------------
-    static final Color BG = new Color(0x0d1117);
-    static final Color BG_SUBTLE = new Color(0x161b22);
-    static final Color BORDER_COL = new Color(0x30363d);
-    static final Color FG = new Color(0xe6edf3);
-    static final Color FG_MUTED = new Color(0x8b949e);
-
-    static final Color ADD_BG = new Color(0x0f3d2e);
-    static final Color DEL_BG = new Color(0x3d1f24);
-    static final Color ADD_FG = new Color(0x3fb950);
-    static final Color DEL_FG = new Color(0xf85149);
-
     static final Font MONO = new Font(Font.MONOSPACED, Font.PLAIN, 12);
-    static final Font UI = new Font(Font.SANS_SERIF, Font.PLAIN, 13);
+    static final Font UI = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
 
     // ---------------------------------------------------------------------
 
@@ -89,7 +77,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
 
     public ReviewPanel() {
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-        setBackground(BG);
+        setBackground(ThemeColors.BG);
         showPlaceholder("Select a PR, then click \u201cGenerate Review\u201d.");
     }
 
@@ -117,7 +105,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
                     statusLog = new JTextArea("> " + initialMessage + "\n");
                     statusLog.setFont(MONO);
                     statusLog.setForeground(new Color(0x3fb950));
-                    statusLog.setBackground(BG);
+                    statusLog.setBackground(ThemeColors.BG);
                     statusLog.setEditable(false);
                     statusLog.setLineWrap(true);
                     statusLog.setWrapStyleWord(true);
@@ -130,7 +118,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
                     thinkingStartMs = System.currentTimeMillis();
                     thinkingLabel = new JLabel(SPINNER[0] + " Claude is thinking… (0s)");
                     thinkingLabel.setFont(MONO);
-                    thinkingLabel.setForeground(FG_MUTED);
+                    thinkingLabel.setForeground(ThemeColors.FG_MUTED);
                     thinkingLabel.setBorder(new EmptyBorder(0, 16, 10, 16));
                     thinkingLabel.setAlignmentX(LEFT_ALIGNMENT);
                     add(thinkingLabel);
@@ -255,18 +243,18 @@ public class ReviewPanel extends JPanel implements Scrollable {
             int indentPx) {
         JPanel section = new JPanel();
         section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
-        section.setBackground(BG);
-        section.setBorder(new LineBorder(BORDER_COL));
+        section.setBackground(ThemeColors.BG);
+        section.setBorder(new LineBorder(ThemeColors.BORDER_COL));
         section.setAlignmentX(LEFT_ALIGNMENT);
         section.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
 
         // File header
-        JPanel header = filled(BG_SUBTLE);
+        JPanel header = filled(ThemeColors.BG_SUBTLE);
         header.setLayout(new BorderLayout());
         header.setBorder(new EmptyBorder(5, 10, 5, 10));
         JLabel name = new JLabel(file.name);
         name.setFont(MONO.deriveFont(Font.BOLD));
-        name.setForeground(FG);
+        name.setForeground(ThemeColors.FG);
         header.add(name, BorderLayout.WEST);
         section.add(header);
         section.add(hline());
@@ -284,58 +272,75 @@ public class ReviewPanel extends JPanel implements Scrollable {
         final Map<Integer, Position> insertPositions = new HashMap<>();
 
         // Single JTextPane for all diff lines — enables cross-line text selection.
-        // Overrides paintComponent to draw the "+" add-comment button on hover.
+        // Overrides paintComponent to draw the "+" add-comment button on hover (filled)
+        // and a faint outline "+" for all hoverable lines.
         JTextPane pane =
                 new JTextPane() {
                     @Override
                     protected void paintComponent(Graphics g) {
                         super.paintComponent(g);
-                        if (hoverLineNum[0] <= 0) {
-                            return;
-                        }
-                        Integer startOffset = lineStartByNum.get(hoverLineNum[0]);
-                        if (startOffset == null) {
-                            return;
-                        }
-                        try {
-                            Rectangle2D rect = modelToView2D(startOffset);
-                            if (rect == null) {
-                                return;
+                        Graphics2D g2 = (Graphics2D) g.create();
+                        g2.setRenderingHint(
+                                RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                        FontMetrics fm = getFontMetrics(getFont());
+                        int lineH = fm.getHeight();
+                        int gutterPx = fm.charWidth('0') * 5;
+                        int btnSize = 14;
+
+                        for (Map.Entry<Integer, Integer> entry : lineStartByNum.entrySet()) {
+                            int lineNum = entry.getKey();
+                            int startOffset = entry.getValue();
+                            try {
+                                Rectangle2D rect = modelToView2D(startOffset);
+                                if (rect == null) continue;
+                                int btnX = gutterPx + 1;
+                                int btnY = (int) rect.getY() + (lineH - btnSize) / 2;
+                                boolean hovered = lineNum == hoverLineNum[0];
+                                if (hovered) {
+                                    g2.setColor(new Color(0x238636));
+                                    g2.fillRoundRect(btnX, btnY, btnSize, btnSize, 4, 4);
+                                    g2.setColor(Color.WHITE);
+                                } else {
+                                    // Faint indicator: subtle outline "+" in muted color
+                                    g2.setColor(
+                                            new Color(
+                                                    ThemeColors.FG_MUTED.getRed(),
+                                                    ThemeColors.FG_MUTED.getGreen(),
+                                                    ThemeColors.FG_MUTED.getBlue(),
+                                                    60));
+                                    g2.drawRoundRect(btnX, btnY, btnSize, btnSize, 4, 4);
+                                    g2.setColor(
+                                            new Color(
+                                                    ThemeColors.FG_MUTED.getRed(),
+                                                    ThemeColors.FG_MUTED.getGreen(),
+                                                    ThemeColors.FG_MUTED.getBlue(),
+                                                    80));
+                                }
+                                g2.setFont(getFont().deriveFont(Font.BOLD, 11f));
+                                FontMetrics btnFm = g2.getFontMetrics();
+                                int plusX = btnX + (btnSize - btnFm.stringWidth("+")) / 2;
+                                int plusY =
+                                        btnY
+                                                + (btnSize + btnFm.getAscent() - btnFm.getDescent())
+                                                        / 2;
+                                g2.drawString("+", plusX, plusY);
+                            } catch (BadLocationException ignored) {
                             }
-                            FontMetrics fm = getFontMetrics(getFont());
-                            int lineH = fm.getHeight();
-                            int gutterPx = fm.charWidth('0') * 5;
-                            int btnSize = 14;
-                            int btnX = gutterPx + 1;
-                            int btnY = (int) rect.getY() + (lineH - btnSize) / 2;
-                            Graphics2D g2 = (Graphics2D) g.create();
-                            g2.setRenderingHint(
-                                    RenderingHints.KEY_ANTIALIASING,
-                                    RenderingHints.VALUE_ANTIALIAS_ON);
-                            g2.setColor(new Color(0x238636));
-                            g2.fillRoundRect(btnX, btnY, btnSize, btnSize, 4, 4);
-                            g2.setColor(Color.WHITE);
-                            g2.setFont(getFont().deriveFont(Font.BOLD, 11f));
-                            FontMetrics btnFm = g2.getFontMetrics();
-                            int plusX = btnX + (btnSize - btnFm.stringWidth("+")) / 2;
-                            int plusY =
-                                    btnY + (btnSize + btnFm.getAscent() - btnFm.getDescent()) / 2;
-                            g2.drawString("+", plusX, plusY);
-                            g2.dispose();
-                        } catch (BadLocationException ignored) {
                         }
+                        g2.dispose();
                     }
                 };
         pane.setEditable(false);
-        pane.setBackground(BG);
+        pane.setBackground(ThemeColors.BG);
         pane.setFont(MONO);
-        pane.setForeground(FG);
+        pane.setForeground(ThemeColors.FG);
         pane.setBorder(new EmptyBorder(0, 0, 0, 0));
         pane.setAlignmentX(LEFT_ALIGNMENT);
         pane.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
         // Disable the default caret colour flash on focus — not needed for a read-only pane
-        pane.setCaretColor(BG);
+        pane.setCaretColor(ThemeColors.BG);
         pane.putClientProperty("diffFileName", file.name);
+        pane.setToolTipText("Click + in gutter to add an inline comment");
 
         StyledDocument doc = pane.getStyledDocument();
 
@@ -349,15 +354,15 @@ public class ReviewPanel extends JPanel implements Scrollable {
                 DiffLine line = file.lines.get(lineIndex);
                 Color lineBg =
                         switch (line.type()) {
-                            case '+' -> ADD_BG;
-                            case '-' -> DEL_BG;
-                            default -> BG;
+                            case '+' -> ThemeColors.ADD_BG;
+                            case '-' -> ThemeColors.DEL_BG;
+                            default -> ThemeColors.BG;
                         };
                 Color pfxColor =
                         switch (line.type()) {
-                            case '+' -> ADD_FG;
-                            case '-' -> DEL_FG;
-                            default -> FG_MUTED;
+                            case '+' -> ThemeColors.ADD_FG;
+                            case '-' -> ThemeColors.DEL_FG;
+                            default -> ThemeColors.FG_MUTED;
                         };
 
                 int lineStart = doc.getLength();
@@ -369,7 +374,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
                 // Gutter: 4-char line number + separator space
                 String numStr =
                         line.newLineNum() > 0 ? String.format("%4d ", line.newLineNum()) : "     ";
-                doc.insertString(doc.getLength(), numStr, styledAttr(FG_MUTED, lineBg));
+                doc.insertString(doc.getLength(), numStr, styledAttr(ThemeColors.FG_MUTED, lineBg));
 
                 // Prefix (+/-/space)
                 String pfxStr =
@@ -392,7 +397,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
                 // Newline (must carry the line background so the painter covers the full row)
                 doc.insertString(doc.getLength(), "\n", styledAttr(lineBg, lineBg));
 
-                if (lineBg != BG) {
+                if (lineBg != ThemeColors.BG) {
                     bgRanges.add(new BgRange(lineStart, lineEnd, lineBg));
                 }
 
@@ -668,13 +673,14 @@ public class ReviewPanel extends JPanel implements Scrollable {
     }
 
     private JPanel sectionHeader(String title) {
-        JPanel header = filled(BG_SUBTLE);
+        JPanel header = filled(ThemeColors.BG_SUBTLE);
         header.setLayout(new BorderLayout());
         header.setBorder(
-                new CompoundBorder(new LineBorder(BORDER_COL), new EmptyBorder(5, 10, 5, 10)));
+                new CompoundBorder(
+                        new LineBorder(ThemeColors.BORDER_COL), new EmptyBorder(5, 10, 5, 10)));
         JLabel label = new JLabel(title);
         label.setFont(MONO.deriveFont(Font.BOLD));
-        label.setForeground(FG);
+        label.setForeground(ThemeColors.FG);
         header.add(label, BorderLayout.WEST);
         return header;
     }
@@ -700,7 +706,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
 
     private JLabel muted(String text) {
         JLabel label = new JLabel(text);
-        label.setForeground(FG_MUTED);
+        label.setForeground(ThemeColors.FG_MUTED);
         label.setFont(UI);
         label.setAlignmentX(LEFT_ALIGNMENT);
         label.setBorder(new EmptyBorder(20, 20, 20, 20));
@@ -758,7 +764,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
 
     private JSeparator hline() {
         JSeparator s = new JSeparator(SwingConstants.HORIZONTAL);
-        s.setForeground(BORDER_COL);
+        s.setForeground(ThemeColors.BORDER_COL);
         s.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
         return s;
     }

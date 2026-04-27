@@ -30,17 +30,6 @@ import org.commonmark.renderer.html.HtmlRenderer;
  */
 public class ChatPanel extends JPanel {
 
-    // Colours (GitHub dark-mode palette)
-    private static final Color BG = new Color(0x0d1117);
-    private static final Color BG_SUBTLE = new Color(0x161b22);
-    private static final Color BG_USER = new Color(0x1c2128);
-    private static final Color BORDER_COL = new Color(0x30363d);
-    private static final Color FG = new Color(0xe6edf3);
-    private static final Color FG_MUTED = new Color(0x8b949e);
-    private static final Color ACCENT_BLUE = new Color(0x1f6feb);
-    private static final Color ACCENT_GREEN = new Color(0x238636);
-    private static final Color ERROR_FG = new Color(0xf85149);
-
     private static final Font UI = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
     private static final Font BOLD = new Font(Font.SANS_SERIF, Font.BOLD, 12);
     private static final Font MONO = new Font(Font.MONOSPACED, Font.PLAIN, 12);
@@ -92,15 +81,15 @@ public class ChatPanel extends JPanel {
         this.selectionSupplier = selectionSupplier;
 
         setLayout(new BorderLayout());
-        setBackground(BG);
+        setBackground(ThemeColors.BG);
 
         messagesPanel.setLayout(new BoxLayout(messagesPanel, BoxLayout.Y_AXIS));
-        messagesPanel.setBackground(BG);
+        messagesPanel.setBackground(ThemeColors.BG);
 
         messagesScroll = new JBScrollPane(messagesPanel);
-        messagesScroll.setBackground(BG);
-        messagesScroll.getViewport().setBackground(BG);
-        messagesScroll.setBorder(new MatteBorder(1, 0, 0, 0, BORDER_COL));
+        messagesScroll.setBackground(ThemeColors.BG);
+        messagesScroll.getViewport().setBackground(ThemeColors.BG);
+        messagesScroll.setBorder(new MatteBorder(1, 0, 0, 0, ThemeColors.BORDER_COL));
 
         add(buildHeader(), BorderLayout.NORTH);
         add(messagesScroll, BorderLayout.CENTER);
@@ -202,19 +191,27 @@ public class ChatPanel extends JPanel {
 
     private JPanel buildHeader() {
         JPanel header = new JPanel(new BorderLayout());
-        header.setBackground(BG_SUBTLE);
+        header.setBackground(ThemeColors.BG_SUBTLE);
         header.setBorder(
                 new CompoundBorder(
-                        new MatteBorder(0, 0, 1, 0, BORDER_COL), new EmptyBorder(4, 8, 4, 8)));
+                        new MatteBorder(0, 0, 1, 0, ThemeColors.BORDER_COL),
+                        new EmptyBorder(4, 8, 4, 8)));
         JLabel title = new JLabel("Claude Chat");
         title.setFont(BOLD);
-        title.setForeground(FG);
+        title.setForeground(ThemeColors.FG);
         header.add(title, BorderLayout.WEST);
 
         JButton clearButton = new JButton("Clear");
         clearButton.setFont(UI);
         clearButton.addActionListener(
                 e -> {
+                    int choice =
+                            JOptionPane.showConfirmDialog(
+                                    this,
+                                    "Clear all chat history?",
+                                    "Clear Chat",
+                                    JOptionPane.YES_NO_OPTION);
+                    if (choice != JOptionPane.YES_OPTION) return;
                     history.clear();
                     messagesPanel.removeAll();
                     showPlaceholder();
@@ -224,7 +221,7 @@ public class ChatPanel extends JPanel {
 
         toggleButton = new JButton("▾");
         toggleButton.setFont(UI);
-        toggleButton.setForeground(FG_MUTED);
+        toggleButton.setForeground(ThemeColors.FG_MUTED);
         toggleButton.setBorderPainted(false);
         toggleButton.setContentAreaFilled(false);
         toggleButton.setFocusPainted(false);
@@ -244,9 +241,9 @@ public class ChatPanel extends JPanel {
 
     private JPanel buildInput() {
         inputArea.setFont(UI);
-        inputArea.setForeground(FG);
+        inputArea.setForeground(ThemeColors.FG);
         inputArea.setBackground(new Color(0x161b22));
-        inputArea.setCaretColor(FG);
+        inputArea.setCaretColor(ThemeColors.FG);
         inputArea.setLineWrap(true);
         inputArea.setWrapStyleWord(true);
         inputArea.setBorder(new EmptyBorder(6, 8, 6, 8));
@@ -292,7 +289,7 @@ public class ChatPanel extends JPanel {
                 });
 
         JBScrollPane inputScroll = new JBScrollPane(inputArea);
-        inputScroll.setBorder(new LineBorder(BORDER_COL));
+        inputScroll.setBorder(new LineBorder(ThemeColors.BORDER_COL));
         inputScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
 
         sendButton.setFont(BOLD);
@@ -300,21 +297,21 @@ public class ChatPanel extends JPanel {
         sendButton.addActionListener(e -> sendMessage());
 
         statusLabel.setFont(UI);
-        statusLabel.setForeground(FG_MUTED);
+        statusLabel.setForeground(ThemeColors.FG_MUTED);
 
         contextBar.setFont(new Font(Font.SANS_SERIF, Font.ITALIC, 11));
         contextBar.setForeground(new Color(0x58a6ff));
         contextBar.setBorder(new EmptyBorder(2, 8, 2, 8));
 
         JPanel inputRow = new JPanel(new BorderLayout(4, 0));
-        inputRow.setBackground(BG);
+        inputRow.setBackground(ThemeColors.BG);
         inputRow.setBorder(new EmptyBorder(6, 6, 6, 6));
         inputRow.add(inputScroll, BorderLayout.CENTER);
         inputRow.add(sendButton, BorderLayout.EAST);
 
         JPanel inputPanel = new JPanel(new BorderLayout());
-        inputPanel.setBackground(BG);
-        inputPanel.setBorder(new MatteBorder(1, 0, 0, 0, BORDER_COL));
+        inputPanel.setBackground(ThemeColors.BG);
+        inputPanel.setBorder(new MatteBorder(1, 0, 0, 0, ThemeColors.BORDER_COL));
         inputPanel.add(contextBar, BorderLayout.NORTH);
         inputPanel.add(inputRow, BorderLayout.CENTER);
         inputPanel.add(statusLabel, BorderLayout.SOUTH);
@@ -370,7 +367,7 @@ public class ChatPanel extends JPanel {
                     if (cb != null) cb.accept(response);
                 },
                 err -> {
-                    sb.streamArea().setForeground(ERROR_FG);
+                    sb.streamArea().setForeground(ThemeColors.ERROR_FG);
                     sb.streamArea().setText("Error: " + err);
                     sendButton.setEnabled(true);
                     statusLabel.setText(" ");
@@ -381,7 +378,7 @@ public class ChatPanel extends JPanel {
         if (selectionPoller != null && selectionPoller.isRunning()) return;
         selectionPoller =
                 new Timer(
-                        300,
+                        500,
                         e -> {
                             String sel = selectionSupplier.get();
                             if (sel == null) sel = "";
@@ -435,20 +432,20 @@ public class ChatPanel extends JPanel {
 
     private void addUserBubble(String text) {
         removePlaceholder();
-        JPanel bubble = makeBubbleShell("You", BG_USER, ACCENT_BLUE);
-        addFormattedContent(bubble, BG_USER, text);
+        JPanel bubble = makeBubbleShell("You", ThemeColors.BG_USER, ThemeColors.ACCENT_BLUE);
+        addFormattedContent(bubble, ThemeColors.BG_USER, text);
         addBubbleToPanel(bubble);
         scrollToBottom();
     }
 
     private StreamBubble createClaudeBubble() {
         removePlaceholder();
-        JPanel bubble = makeBubbleShell("Claude", BG_SUBTLE, ACCENT_GREEN);
+        JPanel bubble = makeBubbleShell("Claude", ThemeColors.BG_SUBTLE, ThemeColors.ACCENT_GREEN);
 
         JTextArea streamArea = new JTextArea("\u2026");
         streamArea.setFont(MONO);
-        streamArea.setForeground(FG);
-        streamArea.setBackground(BG_SUBTLE);
+        streamArea.setForeground(ThemeColors.FG);
+        streamArea.setBackground(ThemeColors.BG_SUBTLE);
         streamArea.setEditable(false);
         streamArea.setLineWrap(true);
         streamArea.setWrapStyleWord(true);
@@ -462,7 +459,7 @@ public class ChatPanel extends JPanel {
     /** Called when streaming is done — replaces the raw stream area with formatted segments. */
     private void reformatClaudeBubble(JPanel bubble, JTextArea streamArea, String fullText) {
         bubble.remove(streamArea);
-        addFormattedContent(bubble, BG_SUBTLE, fullText);
+        addFormattedContent(bubble, ThemeColors.BG_SUBTLE, fullText);
         bubble.revalidate();
         bubble.repaint();
         scrollToBottom();
@@ -500,7 +497,7 @@ public class ChatPanel extends JPanel {
         pane.setEditable(false);
         pane.setOpaque(true);
         pane.setBackground(bg);
-        pane.setForeground(FG);
+        pane.setForeground(ThemeColors.FG);
         pane.setFont(UI);
         pane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
         pane.setBorder(new EmptyBorder(2, 0, 2, 0));
@@ -528,12 +525,13 @@ public class ChatPanel extends JPanel {
         wrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
         wrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
         wrapper.setBorder(
-                new CompoundBorder(new LineBorder(BORDER_COL), new EmptyBorder(6, 8, 6, 8)));
+                new CompoundBorder(
+                        new LineBorder(ThemeColors.BORDER_COL), new EmptyBorder(6, 8, 6, 8)));
 
         if (!lang.isBlank()) {
             JLabel langLabel = new JLabel(lang);
             langLabel.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 10));
-            langLabel.setForeground(FG_MUTED);
+            langLabel.setForeground(ThemeColors.FG_MUTED);
             wrapper.add(langLabel, BorderLayout.NORTH);
         }
 
@@ -602,7 +600,7 @@ public class ChatPanel extends JPanel {
 
     private void addBubbleToPanel(JPanel bubble) {
         JSeparator sep = new JSeparator();
-        sep.setForeground(BORDER_COL);
+        sep.setForeground(ThemeColors.BORDER_COL);
         sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
         messagesPanel.add(bubble);
         messagesPanel.add(sep);
@@ -623,7 +621,7 @@ public class ChatPanel extends JPanel {
                         prContext.isBlank()
                                 ? "Generate a review first, then ask questions here."
                                 : "Ask Claude anything about this PR…");
-        hint.setForeground(FG_MUTED);
+        hint.setForeground(ThemeColors.FG_MUTED);
         hint.setFont(UI);
         hint.setBorder(new EmptyBorder(16, 12, 16, 12));
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);

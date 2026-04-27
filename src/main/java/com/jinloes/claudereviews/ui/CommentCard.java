@@ -25,10 +25,6 @@ public class CommentCard extends JPanel {
 
     private static final String[] TYPES = {"issue", "suggestion", "praise", "note"};
 
-    private static final Color TEXT_COLOR = new Color(0xe6edf3);
-    private static final Color CARD_BG =
-            new Color(0x161b22); // elevated surface, distinct from diff BG
-    private static final Color CARD_BORDER = new Color(0x30363d); // matches ReviewPanel.BORDER_COL
     private static final Font UI_FONT = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
     private static final Font LABEL_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 11);
 
@@ -59,7 +55,7 @@ public class CommentCard extends JPanel {
         final Color[] currentLabel = {colors[1]};
 
         setLayout(new BorderLayout(0, 2));
-        setBackground(CARD_BG);
+        setBackground(ThemeColors.BG_SUBTLE);
         setAlignmentX(LEFT_ALIGNMENT);
         applyBorder(currentBorder[0]);
 
@@ -68,7 +64,22 @@ public class CommentCard extends JPanel {
         typeLabel.setFont(LABEL_FONT);
         typeLabel.setForeground(currentLabel[0]);
         typeLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        typeLabel.setToolTipText("Click to cycle type");
+        typeLabel.setToolTipText("Click to change type");
+
+        JButton verifyButton = new JButton("⋯");
+        verifyButton.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
+        verifyButton.setForeground(ThemeColors.FG_MUTED);
+        verifyButton.setBorderPainted(false);
+        verifyButton.setContentAreaFilled(false);
+        verifyButton.setFocusPainted(false);
+        verifyButton.setMargin(new Insets(0, 4, 0, 4));
+        verifyButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        verifyButton.setToolTipText("Verify pattern in repo");
+        if (onVerify != null) {
+            verifyButton.addActionListener(ev -> onVerify.accept(this));
+        } else {
+            verifyButton.setVisible(false);
+        }
 
         JButton dismiss = new JButton("×");
         dismiss.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
@@ -95,18 +106,23 @@ public class CommentCard extends JPanel {
                     onDismiss.accept(this);
                 });
 
+        JPanel eastButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        eastButtons.setOpaque(false);
+        eastButtons.add(verifyButton);
+        eastButtons.add(dismiss);
+
         JPanel header = new JPanel(new BorderLayout());
         header.setOpaque(false);
         header.add(typeLabel, BorderLayout.WEST);
-        header.add(dismiss, BorderLayout.EAST);
+        header.add(eastButtons, BorderLayout.EAST);
         add(header, BorderLayout.NORTH);
 
         // ── Body: plain monospace text area ───────────────────────────
         body = new JTextArea(comment.getBody());
         body.setFont(UI_FONT);
-        body.setForeground(TEXT_COLOR);
-        body.setBackground(CARD_BG);
-        body.setCaretColor(TEXT_COLOR);
+        body.setForeground(ThemeColors.FG);
+        body.setBackground(ThemeColors.BG_SUBTLE);
+        body.setCaretColor(ThemeColors.FG);
         body.setLineWrap(true);
         body.setWrapStyleWord(true);
         body.setEditable(true);
@@ -135,36 +151,30 @@ public class CommentCard extends JPanel {
                         });
         add(body, BorderLayout.CENTER);
 
-        // ── Right-click: verify ───────────────────────────────────────
-        if (onVerify != null) {
-            JPopupMenu popup = new JPopupMenu();
-            JMenuItem verifyItem = new JMenuItem("Verify pattern in repo");
-            verifyItem.addActionListener(e -> onVerify.accept(this));
-            popup.add(verifyItem);
-            body.setComponentPopupMenu(popup);
-        }
-
-        // ── Type cycling on label click ───────────────────────────────
+        // ── Type popup on label click ─────────────────────────────────
         typeLabel.addMouseListener(
                 new java.awt.event.MouseAdapter() {
                     @Override
                     public void mouseClicked(java.awt.event.MouseEvent e) {
-                        int idx = 0;
-                        for (int i = 0; i < TYPES.length; i++) {
-                            if (TYPES[i].equals(comment.getType())) {
-                                idx = i;
-                                break;
-                            }
+                        JPopupMenu popup = new JPopupMenu();
+                        for (String t : TYPES) {
+                            Color[] tc = palette(t);
+                            JMenuItem item = new JMenuItem(icon(t) + " " + t);
+                            item.setForeground(tc[1]);
+                            item.addActionListener(
+                                    ae -> {
+                                        comment.setType(t);
+                                        Color[] nc = palette(t);
+                                        currentBorder[0] = nc[0];
+                                        currentLabel[0] = nc[1];
+                                        typeLabel.setForeground(nc[1]);
+                                        typeLabel.setText(icon(t) + " " + t + " ▾");
+                                        applyBorder(nc[0]);
+                                        repaint();
+                                    });
+                            popup.add(item);
                         }
-                        String next = TYPES[(idx + 1) % TYPES.length];
-                        comment.setType(next);
-                        Color[] newColors = palette(next);
-                        currentBorder[0] = newColors[0];
-                        currentLabel[0] = newColors[1];
-                        typeLabel.setForeground(currentLabel[0]);
-                        typeLabel.setText(icon(next) + " " + next + " ▾");
-                        applyBorder(currentBorder[0]);
-                        repaint();
+                        popup.show(typeLabel, 0, typeLabel.getHeight());
                     }
                 });
     }
@@ -183,7 +193,7 @@ public class CommentCard extends JPanel {
         // Outer box: 1px subtle border on all sides; inner: 2px coloured accent bar + padding
         setBorder(
                 new CompoundBorder(
-                        new MatteBorder(1, 1, 1, 1, CARD_BORDER),
+                        new MatteBorder(1, 1, 1, 1, ThemeColors.BORDER_COL),
                         new CompoundBorder(
                                 new MatteBorder(0, 2, 0, 0, accentColor),
                                 new EmptyBorder(4, 8, 4, 8))));
