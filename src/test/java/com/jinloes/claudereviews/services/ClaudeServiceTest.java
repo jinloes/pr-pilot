@@ -23,39 +23,51 @@ class ClaudeServiceTest {
         void alwaysContainsPersonaAndDiff() {
             String prompt =
                     ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff content", "", ""));
-            assertThat(prompt).contains("staff engineer");
+            assertThat(prompt).contains("senior security engineer");
             assertThat(prompt).contains("diff content");
+        }
+
+        @Test
+        void diffWrappedInXmlTags() {
+            String prompt =
+                    ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff content", "", ""));
+            assertThat(prompt).contains("<diff>\ndiff content\n</diff>");
         }
 
         @Test
         void blankProjectConventions_sectionAbsent() {
             String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
-            assertThat(prompt).doesNotContain("Project Conventions");
+            // When blank, <project_conventions> must NOT appear as a block wrapper (with newline);
+            // the instruction text references these tags inline (without a trailing newline).
+            assertThat(prompt).doesNotContain("<project_conventions>\n");
         }
 
         @Test
-        void nonBlankProjectConventions_sectionInjectedBeforeDiff() {
+        void nonBlankProjectConventions_wrappedInXmlTagsBeforeDiff() {
             String prompt =
                     ClaudeService.buildPrompt(
                             new PRReviewRequest(pr(""), "diff", "", "no magic numbers"));
-            assertThat(prompt).contains("### Project Conventions");
-            assertThat(prompt).contains("no magic numbers");
-            assertThat(prompt.indexOf("Project Conventions"))
-                    .isLessThan(prompt.indexOf("### Diff"));
+            assertThat(prompt)
+                    .contains("<project_conventions>\nno magic numbers\n</project_conventions>");
+            // Use the content-carrying form to locate the injected block, not the inline mention
+            assertThat(prompt.indexOf("<project_conventions>\nno magic numbers"))
+                    .isLessThan(prompt.indexOf("<diff>\ndiff\n</diff>"));
         }
 
         @Test
         void blankKnownPatterns_sectionAbsent() {
             String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
-            assertThat(prompt).doesNotContain("Previously Verified Patterns");
+            // When blank, <known_patterns> must NOT appear as a block wrapper (with newline)
+            assertThat(prompt).doesNotContain("<known_patterns>\n");
         }
 
         @Test
-        void nonBlankKnownPatterns_sectionInjected() {
+        void nonBlankKnownPatterns_wrappedInXmlTags() {
             String prompt =
                     ClaudeService.buildPrompt(
                             new PRReviewRequest(pr(""), "diff", "use Optional", ""));
-            assertThat(prompt).contains("### Previously Verified Patterns");
+            assertThat(prompt).contains("<known_patterns>\n");
+            assertThat(prompt).contains("</known_patterns>");
             assertThat(prompt).contains("use Optional");
         }
 
@@ -64,23 +76,24 @@ class ClaudeServiceTest {
             String prompt =
                     ClaudeService.buildPrompt(
                             new PRReviewRequest(pr(""), "diff", "patterns", "conventions"));
-            assertThat(prompt.indexOf("Project Conventions"))
-                    .isLessThan(prompt.indexOf("Previously Verified Patterns"));
+            // Use the content-carrying form to locate the injected blocks
+            assertThat(prompt.indexOf("<project_conventions>\nconventions"))
+                    .isLessThan(prompt.indexOf("<known_patterns>\n"));
         }
 
         @Test
         void blankPrBody_descriptionSectionAbsent() {
             String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
-            assertThat(prompt).doesNotContain("### Description");
+            // When blank, <pr_description> must NOT appear as a block wrapper (with newline)
+            assertThat(prompt).doesNotContain("<pr_description>\n");
         }
 
         @Test
-        void nonBlankPrBody_descriptionSectionInjected() {
+        void nonBlankPrBody_wrappedInXmlTags() {
             String prompt =
                     ClaudeService.buildPrompt(
                             new PRReviewRequest(pr("fixes the bug"), "diff", "", ""));
-            assertThat(prompt).contains("### Description");
-            assertThat(prompt).contains("fixes the bug");
+            assertThat(prompt).contains("<pr_description>\nfixes the bug\n</pr_description>");
         }
     }
 

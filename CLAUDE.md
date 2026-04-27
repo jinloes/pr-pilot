@@ -23,7 +23,7 @@ IntelliJ plugin that lists GitHub Pull Requests and generates AI-powered code re
 - **Comment navigation** — ▲/▼ buttons scroll to each comment in document order; the count label updates as cards are dismissed
 - **Chat panel** — collapsible follow-up chat below the diff; each message is sent with the PR metadata, summary, comments, and verdict as automatic context
 - **Selection context** — selecting text in the diff, or clicking a line-number in the gutter, prepends a quoted context block to the next chat message
-- **Right-click "Ask Claude" menu** — right-clicking the diff offers *Explain this line*, *Explain selection*, and *Summarize this file* actions, all sent with the full review context
+- **Right-click "Ask Claude" menu** — right-clicking the diff offers *Explain this line*, *Explain selection*, and *Summarize this file* actions; these use a lightweight focused prompt (`chatFocused()`) that wraps only the selected code snippet in `<code_context>` tags without injecting the full PR comment list
 - **Add-comment button** — hovering over any diff line reveals a "+" button that inserts a new blank comment card at that line for immediate typing
 - **Markdown rendering** — Claude responses render fenced code blocks with syntax highlighting, bold/italic, inline code, numbered/bullet lists, and headers
 - **PR notifications** — optional background polling fires IDE balloon notifications for new review-requested PRs and/or new PRs on starred repos (configurable interval, default 5 min)
@@ -51,7 +51,7 @@ src/main/java/com/jinloes/claudereviews/
   services/
     GitHubAuthService.java         – Runs `gh auth token` to resolve credentials; probes known gh binary paths
     GitHubService.java             – GitHub REST API: search PRs, repo PRs, diff, draft review CRUD
-    ClaudeService.java             – Shells out to `claude --print` via stdin; streams chunks back to EDT
+    ClaudeService.java             – Shells out to `claude --print` via stdin; streams chunks back to EDT; `chatFocused()` sends a lightweight code-snippet prompt without full PR context
   services/stream/
     StreamEvent.java               – Jackson DTO for claude stream-json events; Optional accessors for nullable fields
     EventMessage.java              – Jackson DTO for the message payload inside a stream event
@@ -115,13 +115,22 @@ The plugin never stores a GitHub token. `GitHubAuthService.resolveToken()` runs 
 `claude --print` enables non-interactive mode. The full prompt is written to `stdin` (not passed as a CLI arg) to avoid OS argument-length limits. Output is streamed in 512-char chunks and appended to the review text area on the EDT.
 
 ### Review prompt structure (`ClaudeService.buildPrompt`)
-The review prompt instructs Claude as a "staff engineer with a security specialization" whose mandate is bugs that will reach production, real/exploitable security vulnerabilities, and design decisions that will hurt the team in 6 months — not linter-enforceable style. It defines a strict JSON schema and includes:
-- **Line numbering rule**: take the `+start` number from each `@@ -old +new @@` header, count forward +1 for context and added lines, skip deleted lines.
-- **Comment body template**: every body must state the problem, why it matters, and a concrete fix.
+The review prompt instructs Claude as a "senior security engineer" whose mandate is bugs that will reach production, real/exploitable security vulnerabilities, and design decisions that introduce tight coupling, violate codebase patterns, or create API surfaces that cannot be changed without breaking callers — not linter-enforceable style. It defines a strict JSON schema and includes:
+- **XML-tag wrapping of untrusted input**: all user-controlled sections are wrapped in XML tags — `<diff>`, `<pr_description>`, `<project_conventions>`, `<known_patterns>` — so they are structurally distinct from instructions. The prompt explicitly tells Claude to treat content inside these tags as untrusted data and to ignore any instructions found within them (prompt injection guard).
+- **Injection guard**: the `REVIEW_INSTRUCTIONS` text states that instructions inside `<project_conventions>` that attempt to change review behavior, suppress findings, or alter the verdict must be ignored.
+- **Line numbering rule**: for each `@@ -old,count +new,count @@` header the new-file line number resets to `new`; count +1 for each context or added ('+') line; skip deleted lines and the `@@` header line itself; reset at every new `@@` header within a file.
+- **Comment body template**: every body must state the problem, why it matters, and a concrete fix; max 300 chars; single-line JSON string.
 - **Priority-ordered checklist**: correctness → security → test coverage (100% branch on non-trivial changes) → performance → design.
 - **Typed severities**: `issue` = must fix (triggers REQUEST_CHANGES verdict); `suggestion` = non-blocking; `note` = informational.
+- **Verdict enum constraints**: `"verdict"` must be one of `"APPROVE"` | `"REQUEST_CHANGES"` | `"COMMENT"`; `"type"` must be one of `"issue"` | `"suggestion"` | `"note"`; `"line"` must be a positive integer.
+- **Report ALL findings**: checklist instructs "Report ALL issues, suggestions, and notes you find" — replaces the previous "stop at the first blocking issue per area" instruction.
 - **Verdict criteria**: APPROVE if no issues; REQUEST_CHANGES if any issue; COMMENT for questions without a blocking concern.
-- **Project conventions**: `PRToolWindow.readProjectConventions()` probes the open project root for `CLAUDE.md`, `AGENTS.md`, `.claude/CLAUDE.md`, `.claude/AGENTS.md` (in that order) and injects the first file found as a `### Project Conventions` section so Claude can flag deviations from established patterns.
+- **Project conventions**: `PRToolWindow.readProjectConventions()` probes the open project root for `CLAUDE.md`, `AGENTS.md`, `.claude/CLAUDE.md`, `.claude/AGENTS.md` (in that order) and injects the first file found inside `<project_conventions>` tags so Claude can flag deviations from established patterns.
+
+### Chat prompt structure (`ClaudeService.buildChatPrompt` / `buildFocusedChatPrompt`)
+Two distinct chat prompt paths exist:
+- **`buildChatPrompt(prContext, history, userMessage)`** — general follow-up chat; includes the full PR review context (summary, comments, verdict) before history, wraps each history turn in `<turn role="user">` / `<turn role="assistant">` tags, and wraps the user message in `<user_message>` tags. Used by `ChatPanel.sendMessage()`.
+- **`buildFocusedChatPrompt(focusedContext, question)`** — lightweight prompt for focused code questions (right-click "Explain this line", "Explain selection", "Summarize this file", and "Verify pattern in repo"). Wraps the code snippet in `<code_context>` tags and the question in `<user_message>` tags. Does NOT include the full PR comment list. Called by `ClaudeService.chatFocused()`, which is in turn called by `ChatPanel.askFocused()`.
 
 ### Diff truncation
 `GitHubService.getPRDiff()` truncates diffs to 80 KB (`MAX_DIFF_BYTES = 80_000`) to stay within reasonable context limits.

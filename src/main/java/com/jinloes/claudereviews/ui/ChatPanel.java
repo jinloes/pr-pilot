@@ -171,6 +171,55 @@ public class ChatPanel extends JPanel {
         sendMessage();
     }
 
+    /**
+     * Ask a focused question about a specific code snippet. Uses a lightweight prompt that omits
+     * the full PR review context and comment list. Still shows the exchange in the chat panel and
+     * adds it to history.
+     */
+    public void askFocused(
+            String context,
+            String question,
+            java.util.function.Consumer<String> onResponseComplete) {
+        pendingResponseCallback = onResponseComplete;
+        removePlaceholder();
+
+        String displayMessage =
+                context.isBlank()
+                        ? question
+                        : "> " + context.strip().replace("\n", "\n> ") + "\n\n" + question;
+        addUserBubble(displayMessage);
+        StreamBubble sb = createClaudeBubble();
+
+        sendButton.setEnabled(false);
+        statusLabel.setText("Claude is thinking…");
+
+        claudeService.chatFocused(
+                context,
+                question,
+                chunk -> {
+                    if ("…".equals(sb.streamArea().getText())) sb.streamArea().setText("");
+                    sb.streamArea().append(chunk);
+                    messagesPanel.revalidate();
+                    scrollToBottom();
+                },
+                response -> {
+                    reformatClaudeBubble(sb.panel(), sb.streamArea(), response);
+                    history.add(new ChatMessage(Role.USER, displayMessage));
+                    history.add(new ChatMessage(Role.ASSISTANT, response));
+                    sendButton.setEnabled(!prContext.isBlank());
+                    statusLabel.setText(" ");
+                    java.util.function.Consumer<String> cb = pendingResponseCallback;
+                    pendingResponseCallback = null;
+                    if (cb != null) cb.accept(response);
+                },
+                err -> {
+                    sb.streamArea().setForeground(ThemeColors.ERROR_FG);
+                    sb.streamArea().setText("Error: " + err);
+                    sendButton.setEnabled(!prContext.isBlank());
+                    statusLabel.setText(" ");
+                });
+    }
+
     /** Clear context and history when a new PR is selected. */
     public void clearContext() {
         prContext = "";

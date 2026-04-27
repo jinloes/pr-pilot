@@ -275,7 +275,7 @@ public class PRToolWindow {
         reviewPanel.setOnAskClaude(
                 (ctx, q) -> {
                     ensureChatVisible();
-                    chatPanel.askAbout(ctx, q);
+                    chatPanel.askFocused(ctx, q, null);
                 });
         reviewPanel.setOnVerifyComment(
                 card -> {
@@ -292,7 +292,7 @@ public class PRToolWindow {
                                             + "example file and line if the pattern is established.")
                                     .formatted(pr.getOwner(), pr.getRepo());
                     ensureChatVisible();
-                    chatPanel.askAbout(
+                    chatPanel.askFocused(
                             ctx,
                             question,
                             response ->
