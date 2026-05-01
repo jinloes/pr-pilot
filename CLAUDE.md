@@ -23,7 +23,8 @@ IntelliJ plugin that lists GitHub Pull Requests and generates AI-powered code re
 - **Comment navigation** — ▲/▼ buttons scroll to each comment in document order; the count label updates as cards are dismissed
 - **Chat panel** — collapsible follow-up chat below the diff; each message is sent with the PR metadata, summary, comments, and verdict as automatic context
 - **Selection context** — selecting text in the diff, or clicking a line-number in the gutter, prepends a quoted context block to the next chat message
-- **Right-click "Ask Claude" menu** — right-clicking the diff offers *Explain this line*, *Explain selection*, and *Summarize this file* actions; these use a lightweight focused prompt (`chatFocused()`) that wraps only the selected code snippet in `<code_context>` tags without injecting the full PR comment list
+- **Right-click "Ask Claude" menu** — right-clicking the diff offers *Explain this line*, *Explain selection*, and *Summarize this file* actions; these use a lightweight focused prompt (`chatFocused()`) that wraps only the selected code snippet in `<code_context>` tags without injecting the full PR comment list; a disabled italic header "Quick answers (no PR context):" makes the scope of these actions discoverable
+- **File navigation strip** — when a diff spans more than one file, a compact strip at the top of the review lists each filename as a clickable button that scrolls the viewport directly to that file's section
 - **Add-comment button** — hovering over any diff line reveals a "+" button that inserts a new blank comment card at that line for immediate typing
 - **Markdown rendering** — Claude responses render fenced code blocks with syntax highlighting, bold/italic, inline code, numbered/bullet lists, and headers
 - **PR notifications** — optional background polling fires IDE balloon notifications for new review-requested PRs and/or new PRs on starred repos (configurable interval, default 5 min)
@@ -35,6 +36,13 @@ IntelliJ plugin that lists GitHub Pull Requests and generates AI-powered code re
 - **Configurable review model** — a "Review model" combo in Settings lets the user pick between the CLI default, Haiku 4.5, Sonnet 4.6, or Opus 4.7; the selected model is passed as `--model <id>` to the `claude` CLI during reviews
 - **Theme-aware color palette** — `ThemeColors` detects the IDE light/dark theme via Panel.background luminance and provides the matching GitHub-inspired palette to all UI classes (ReviewPanel, ChatPanel, CommentCard)
 - **Workflow action strip** — Generate Review, Save Draft, and Submit ▶ are grouped together at the bottom of the review pane in task order; "Saved Drafts" is a dedicated toolbar button separate from the filter combo
+- **Cancel review** — a Cancel button appears only while a review is generating; clicking it forcibly terminates the `claude` CLI process via `ClaudeService.cancelCurrentRequest()` and resets the UI to the idle state
+- **Regenerate with context** — after a review is generated, the Generate button changes to "Regenerate ↺"; clicking it passes the prior review (verdict, summary, comments) as `<prior_review>` context in the next prompt so Claude can refine rather than repeat findings
+- **PR search** — a live search field in the toolbar filters the loaded PR list by title, author, or owner/repo on every keystroke; the full unfiltered list is kept in `allPRs` and rebuilt on each refresh
+- **Diff truncation warning** — when the diff was cut at 80 KB, the status bar shows "⚠ Diff truncated to 80 KB" so the user knows some files may not be reviewed
+- **Non-blocking startup auth check** — the initial `gh auth token` call runs off the EDT in `executeOnPooledThread()` so the IDE does not freeze while checking GitHub credentials at startup; combos are locked in drafts mode via `filterCombo.setEnabled(false)` and `repoCombo.setEnabled(false)` to prevent accidental filter switches while viewing saved drafts
+- **Existing reviews as context** — before generating a review, `generateReview()` calls `GitHubService.getExistingReviewsSummary()` to fetch all submitted (non-pending) reviews and their inline comments; the result is injected into the prompt inside `<existing_reviews>` tags so Claude avoids repeating findings already flagged by other reviewers; the status bar shows "N existing review(s) loaded as context…" when reviews are found; fetch failure is non-fatal
+- **Notification poll status** — `PRNotificationService` tracks `lastPollEpochMs` and `lastPollError` as volatile fields updated on every poll; `getLastPollStatus()` formats these as a human-readable string ("Last polled: 3 min ago" or "Last poll: 45s ago — Error: …"); `PluginSettingsComponent` reads and displays this below the poll-interval spinner in red on error, gray on success
 
 ---
 
@@ -47,7 +55,7 @@ src/main/java/com/jinloes/claudereviews/
     ReviewResult.java              – Holds summary, verdict, and a mutable List<LineComment>
     LineComment.java               – file, line, type ("issue"|"suggestion"|"praise"|"note"), body
     ChatMessage.java               – Role + content for chat history
-    PRReviewRequest.java           – Parameter object: PullRequest + diff + knownPatterns + projectConventions, passed to ClaudeService.reviewPR
+    PRReviewRequest.java           – Parameter object: PullRequest + diff + knownPatterns + projectConventions + priorReview (optional) + existingReviews (optional), passed to ClaudeService.reviewPR
   services/
     GitHubAuthService.java         – Runs `gh auth token` to resolve credentials; probes known gh binary paths
     GitHubService.java             – GitHub REST API: search PRs, repo PRs, diff, draft review CRUD
@@ -113,6 +121,27 @@ The plugin never stores a GitHub token. `GitHubAuthService.resolveToken()` runs 
 
 ### Claude invocation
 `claude --print` enables non-interactive mode. The full prompt is written to `stdin` (not passed as a CLI arg) to avoid OS argument-length limits. Output is streamed in 512-char chunks and appended to the review text area on the EDT.
+
+### Cancel support — `ClaudeService.cancelCurrentRequest()`
+`ClaudeService` holds a `private volatile Process activeProcess` field set to the live subprocess at the start of each review or chat, and cleared to `null` in the `finally` block. `cancelCurrentRequest()` reads the field once into a local variable and calls `destroyForcibly()` if non-null. The method is a no-op when idle. `PRToolWindow.cancelReview()` calls this and then resets the UI via `applyState(State.NO_DRAFT)`.
+
+### Regenerate with prior review context
+`PRReviewRequest` has a 5th component, `priorReview`, with a 4-arg convenience constructor for first-time generation. Before clearing `lastResult` in `generateReview()`, the prior result is captured into `priorResult` and formatted via `formatPriorReview(ReviewResult)` (verdict + summary + comment list). This string is passed as `priorReview` to `PRReviewRequest` and injected into `buildPrompt()` inside `<prior_review>` tags — after `<known_patterns>` and before `<pr_description>`. Claude is instructed to refine rather than repeat findings. The Generate button text updates to `"Regenerate ↺"` (with tooltip) when `lastResult != null`.
+
+### PR search — `allPRs` as source of truth
+`allPRs` is an `ArrayList<PullRequest>` populated by `refreshPRs()`. On every keystroke, `applySearch()` rebuilds `listModel` by filtering `allPRs` against the search field text (case-insensitive match on title, author, or `owner/repo`). An empty query restores all PRs. `listModel` is always a filtered view; `allPRs` is never mutated by search.
+
+### `--dangerously-skip-permissions` removed
+`ClaudeService.buildProcess()` no longer passes `--dangerously-skip-permissions`. Reviews and chat work without it because the prompt is sent via stdin and Claude writes back JSON — no tool calls are needed. The flag was applied to all invocations unnecessarily. If a future feature requires autonomous tool use (e.g. codebase search), it should be handled with an explicit opt-in per-invocation rather than globally.
+
+### Notification poll status — `PRNotificationService`
+`PRNotificationService` exposes two volatile fields: `lastPollEpochMs` (set at the start of each poll run) and `lastPollError` (set to the first exception message encountered, cleared to `null` on a fully successful run). `getLastPollStatus()` reads both and returns a formatted string or `null` if no poll has run yet. `PluginSettingsComponent` calls this in `refreshPollStatus()` (invoked from the constructor) and renders the result in `pollStatusLabel` — red HTML for errors, gray HTML for success.
+
+### Existing reviews as generation context
+`GitHubService.getExistingReviewsSummary(token, owner, repo, number)` calls `GET /repos/{owner}/{repo}/pulls/{number}/reviews`, filters out `PENDING` entries, and for each submitted review fetches its inline comments via `GET /repos/{owner}/{repo}/pulls/{number}/reviews/{id}/comments`. The result is a plain-text block (reviewer, verdict, date, overall comment, inline comments with file:line). Inline comment fetches are best-effort; failures are swallowed. `PRToolWindow.generateReview()` calls this in the background before invoking Claude, stores the result in `PRReviewRequest.existingReviews`, and `ClaudeService.buildPrompt()` injects it inside `<existing_reviews>` tags. The status bar shows the count when at least one review is found.
+
+### Drafts mode — combo locking
+`loadDraftPRs()` sets `showingDrafts = true` and explicitly disables `filterCombo` and `repoCombo`. `applyState()` checks `showingDrafts` when deciding combo enabled state. `refreshPRs()` sets `showingDrafts = false` and re-enables both combos on entry.
 
 ### Review prompt structure (`ClaudeService.buildPrompt`)
 The review prompt instructs Claude as a "senior security engineer" whose mandate is bugs that will reach production, real/exploitable security vulnerabilities, and design decisions that introduce tight coupling, violate codebase patterns, or create API surfaces that cannot be changed without breaking callers — not linter-enforceable style. It defines a strict JSON schema and includes:

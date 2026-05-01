@@ -2,11 +2,81 @@ package com.jinloes.claudereviews.ui;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jinloes.claudereviews.model.LineComment;
 import com.jinloes.claudereviews.model.PullRequest;
+import com.jinloes.claudereviews.model.ReviewResult;
+import java.util.List;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class PRToolWindowTest {
+
+    @Nested
+    class FormatPriorReview {
+
+        @Test
+        void includesVerdict() {
+            ReviewResult result = new ReviewResult("", "APPROVE", List.of());
+            String formatted = PRToolWindow.formatPriorReview(result);
+            assertThat(formatted).contains("Verdict: APPROVE");
+        }
+
+        @Test
+        void includesSummaryWhenPresent() {
+            ReviewResult result = new ReviewResult("Summary text here", "COMMENT", List.of());
+            String formatted = PRToolWindow.formatPriorReview(result);
+            assertThat(formatted).contains("Summary:");
+            assertThat(formatted).contains("Summary text here");
+        }
+
+        @Test
+        void omitsSummaryWhenBlank() {
+            ReviewResult result = new ReviewResult("", "APPROVE", List.of());
+            String formatted = PRToolWindow.formatPriorReview(result);
+            assertThat(formatted).doesNotContain("Summary:");
+        }
+
+        @Test
+        void includesCommentsWhenPresent() {
+            LineComment comment = new LineComment("Foo.java", 10, "issue", "Null check missing");
+            ReviewResult result = new ReviewResult("", "REQUEST_CHANGES", List.of(comment));
+            String formatted = PRToolWindow.formatPriorReview(result);
+            assertThat(formatted).contains("Comments:");
+            assertThat(formatted).contains("[ISSUE]");
+            assertThat(formatted).contains("Foo.java:10");
+            assertThat(formatted).contains("Null check missing");
+        }
+
+        @Test
+        void omitsCommentsWhenEmpty() {
+            ReviewResult result = new ReviewResult("", "APPROVE", List.of());
+            String formatted = PRToolWindow.formatPriorReview(result);
+            assertThat(formatted).doesNotContain("Comments:");
+        }
+
+        @Test
+        void commentWithBlankFile_omitsFilePrefix() {
+            LineComment comment = new LineComment("", 0, "note", "General note");
+            ReviewResult result = new ReviewResult("", "COMMENT", List.of(comment));
+            String formatted = PRToolWindow.formatPriorReview(result);
+            assertThat(formatted).contains("[NOTE]");
+            assertThat(formatted).contains("General note");
+            // No "file:line —" prefix when file is blank
+            assertThat(formatted).doesNotContain(":0 —");
+        }
+
+        @Test
+        void multipleCommentsAllIncluded() {
+            List<LineComment> comments =
+                    List.of(
+                            new LineComment("A.java", 1, "issue", "Bug"),
+                            new LineComment("B.java", 2, "suggestion", "Improve this"));
+            ReviewResult result = new ReviewResult("", "REQUEST_CHANGES", comments);
+            String formatted = PRToolWindow.formatPriorReview(result);
+            assertThat(formatted).contains("A.java:1");
+            assertThat(formatted).contains("B.java:2");
+        }
+    }
 
     @Nested
     class PrHeaderHtml {

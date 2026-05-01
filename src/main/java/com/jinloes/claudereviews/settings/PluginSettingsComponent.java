@@ -6,6 +6,7 @@ import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
 import com.jinloes.claudereviews.services.GitHubAuthService;
+import com.jinloes.claudereviews.services.PRNotificationService;
 import java.util.List;
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
@@ -37,6 +38,7 @@ public class PluginSettingsComponent {
     private final JCheckBox notifyStarredReposBox =
             new JCheckBox("Notify when a new PR is opened on a starred repo");
     private final JSpinner pollIntervalSpinner = new JSpinner(new SpinnerNumberModel(5, 1, 60, 1));
+    private final JLabel pollStatusLabel = new JBLabel(" ");
 
     private final GitHubAuthService authService = new GitHubAuthService();
 
@@ -78,9 +80,11 @@ public class PluginSettingsComponent {
                         .addComponent(notifyReviewRequestedBox, 1)
                         .addComponent(notifyStarredReposBox, 1)
                         .addComponent(pollPanel, 1)
+                        .addComponent(pollStatusLabel, 1)
                         .addComponentFillVertically(new JPanel(), 0)
                         .getPanel();
 
+        refreshPollStatus();
         refreshAuthStatus();
     }
 
@@ -188,6 +192,19 @@ public class PluginSettingsComponent {
                                         });
                             }
                         });
+    }
+
+    private void refreshPollStatus() {
+        PRNotificationService svc = PRNotificationService.getInstance();
+        String status = svc.getLastPollStatus();
+        if (status == null) {
+            pollStatusLabel.setText(" ");
+            return;
+        }
+        boolean isError = status.contains("Error:");
+        String color = isError ? "red" : "gray";
+        pollStatusLabel.setText(
+                "<html><font color='" + color + "'><small>" + status + "</small></font></html>");
     }
 
     private void refreshAuthStatus() {

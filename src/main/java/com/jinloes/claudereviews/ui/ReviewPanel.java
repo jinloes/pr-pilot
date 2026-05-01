@@ -183,10 +183,19 @@ public class ReviewPanel extends JPanel implements Scrollable {
                 () -> {
                     add(vgap(6));
 
+                    List<JPanel> fileSections = new ArrayList<>();
                     for (DiffFile file : files) {
                         Map<Integer, List<LineComment>> fc =
                                 commentMap.getOrDefault(file.name, Map.of());
-                        add(fileSection(file, fc, result, diffCardMaxPx, diffIndentPx));
+                        JPanel section = fileSection(file, fc, result, diffCardMaxPx, diffIndentPx);
+                        fileSections.add(section);
+                    }
+                    if (files.size() > 1) {
+                        add(buildFileNavStrip(files, fileSections));
+                        add(vgap(4));
+                    }
+                    for (JPanel section : fileSections) {
+                        add(section);
                         add(vgap(8));
                     }
 
@@ -513,8 +522,15 @@ public class ReviewPanel extends JPanel implements Scrollable {
 
                         JPopupMenu menu = new JPopupMenu();
 
+                        // Disabled header label explaining these use a lightweight prompt
+                        JMenuItem quickLabel = new JMenuItem("Quick answers (no PR context):");
+                        quickLabel.setEnabled(false);
+                        quickLabel.setFont(quickLabel.getFont().deriveFont(Font.ITALIC, 10f));
+                        menu.add(quickLabel);
+                        menu.addSeparator();
+
                         // "Explain this line" — uses the line under the cursor
-                        JMenuItem explainLine = new JMenuItem("Ask Claude: explain this line");
+                        JMenuItem explainLine = new JMenuItem("Explain this line");
                         explainLine.setEnabled(hit != null && onAskClaude != null);
                         if (hit != null) {
                             final LineInfo li = hit;
@@ -534,7 +550,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
 
                         // "Explain selection" — uses whatever text is selected in the pane
                         String sel = pane.getSelectedText();
-                        JMenuItem explainSel = new JMenuItem("Ask Claude: explain selection");
+                        JMenuItem explainSel = new JMenuItem("Explain selection");
                         explainSel.setEnabled(sel != null && !sel.isBlank() && onAskClaude != null);
                         if (sel != null && !sel.isBlank()) {
                             final String selectedText = sel;
@@ -547,7 +563,7 @@ public class ReviewPanel extends JPanel implements Scrollable {
                         menu.add(explainSel);
 
                         // "Summarize file" — reconstructs the new version of the file from the diff
-                        JMenuItem summarizeFile = new JMenuItem("Ask Claude: summarize this file");
+                        JMenuItem summarizeFile = new JMenuItem("Summarize this file");
                         summarizeFile.setEnabled(onAskClaude != null);
                         summarizeFile.addActionListener(
                                 ev -> {
@@ -971,5 +987,54 @@ public class ReviewPanel extends JPanel implements Scrollable {
     private static String fileExtension(String filename) {
         int dot = filename.lastIndexOf('.');
         return (dot >= 0 && dot < filename.length() - 1) ? filename.substring(dot + 1) : "";
+    }
+
+    private JPanel buildFileNavStrip(List<DiffFile> files, List<JPanel> sections) {
+        JPanel nav = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 3));
+        nav.setBackground(ThemeColors.BG_SUBTLE);
+        nav.setBorder(new javax.swing.border.MatteBorder(0, 0, 1, 0, ThemeColors.BORDER_COL));
+        nav.setAlignmentX(LEFT_ALIGNMENT);
+        nav.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+        JLabel filesLabel = new JLabel("Files:");
+        filesLabel.setFont(MONO.deriveFont(Font.BOLD, 10f));
+        filesLabel.setForeground(ThemeColors.FG_MUTED);
+        nav.add(filesLabel);
+        for (int i = 0; i < files.size() && i < sections.size(); i++) {
+            final JPanel section = sections.get(i);
+            // Show only the filename, not full path, to save space
+            String name = files.get(i).name;
+            int slash = name.lastIndexOf('/');
+            String displayName = slash >= 0 ? name.substring(slash + 1) : name;
+            JButton btn = new JButton(displayName);
+            btn.setFont(MONO.deriveFont(10f));
+            btn.setForeground(ThemeColors.ACCENT_BLUE);
+            btn.setBorderPainted(false);
+            btn.setContentAreaFilled(false);
+            btn.setFocusPainted(false);
+            btn.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+            btn.setToolTipText(files.get(i).name);
+            btn.addActionListener(e -> scrollToSection(section));
+            nav.add(btn);
+            if (i < files.size() - 1) {
+                JLabel sep = new JLabel("·");
+                sep.setForeground(ThemeColors.FG_MUTED);
+                sep.setFont(MONO.deriveFont(10f));
+                nav.add(sep);
+            }
+        }
+        return nav;
+    }
+
+    private void scrollToSection(JPanel section) {
+        JScrollPane sp =
+                (JScrollPane)
+                        javax.swing.SwingUtilities.getAncestorOfClass(JScrollPane.class, this);
+        if (sp == null) {
+            section.scrollRectToVisible(new Rectangle(0, 0, section.getWidth(), 1));
+            return;
+        }
+        java.awt.Point pt =
+                javax.swing.SwingUtilities.convertPoint(section, new java.awt.Point(0, 0), this);
+        sp.getViewport().setViewPosition(new java.awt.Point(0, Math.max(0, pt.y - 8)));
     }
 }

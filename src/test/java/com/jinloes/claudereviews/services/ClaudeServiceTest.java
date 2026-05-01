@@ -95,6 +95,108 @@ class ClaudeServiceTest {
                             new PRReviewRequest(pr("fixes the bug"), "diff", "", ""));
             assertThat(prompt).contains("<pr_description>\nfixes the bug\n</pr_description>");
         }
+
+        @Test
+        void noPriorReview_sectionAbsent() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
+            assertThat(prompt).doesNotContain("<prior_review>\n");
+        }
+
+        @Test
+        void blankPriorReview_sectionAbsent() {
+            String prompt =
+                    ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", "", "   "));
+            assertThat(prompt).doesNotContain("<prior_review>\n");
+        }
+
+        @Test
+        void nonBlankPriorReview_wrappedInXmlTags() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(pr(""), "diff", "", "", "Verdict: APPROVE"));
+            assertThat(prompt).contains("<prior_review>\n");
+            assertThat(prompt).contains("</prior_review>");
+            assertThat(prompt).contains("Verdict: APPROVE");
+        }
+
+        @Test
+        void priorReviewAppearsAfterKnownPatternsBeforePrDescription() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(
+                                    pr("body"), "diff", "patterns", "conventions", "prior"));
+            // Use content-carrying forms to avoid matching inline tag mentions in
+            // REVIEW_INSTRUCTIONS
+            int knownEnd = prompt.indexOf("</known_patterns>");
+            int priorStart = prompt.indexOf("<prior_review>\n");
+            int descStart = prompt.indexOf("<pr_description>\nbody");
+            assertThat(knownEnd).isLessThan(priorStart);
+            assertThat(priorStart).isLessThan(descStart);
+        }
+
+        @Test
+        void priorReviewStripped() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(pr(""), "diff", "", "", "  spaced  "));
+            assertThat(prompt).contains("<prior_review>\n");
+            // The content should be stripped of surrounding whitespace
+            assertThat(prompt).contains("spaced");
+            assertThat(prompt).doesNotContain("  spaced  ");
+        }
+
+        @Test
+        void noExistingReviews_sectionAbsent() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
+            assertThat(prompt).doesNotContain("<existing_reviews>\n");
+        }
+
+        @Test
+        void blankExistingReviews_sectionAbsent() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(pr(""), "diff", "", "", null, "   "));
+            assertThat(prompt).doesNotContain("<existing_reviews>\n");
+        }
+
+        @Test
+        void nonBlankExistingReviews_wrappedInXmlTags() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(pr(""), "diff", "", "", null, "Review by @alice"));
+            assertThat(prompt).contains("<existing_reviews>\n");
+            assertThat(prompt).contains("</existing_reviews>");
+            assertThat(prompt).contains("Review by @alice");
+        }
+
+        @Test
+        void existingReviewsAppearsAfterKnownPatternsBeforePriorReview() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(
+                                    pr("body"),
+                                    "diff",
+                                    "patterns",
+                                    "conventions",
+                                    "prior",
+                                    "existing"));
+            int knownEnd = prompt.indexOf("</known_patterns>");
+            int existingStart = prompt.indexOf("<existing_reviews>\n");
+            int priorStart = prompt.indexOf("<prior_review>\n");
+            assertThat(knownEnd).isLessThan(existingStart);
+            assertThat(existingStart).isLessThan(priorStart);
+        }
+    }
+
+    @Nested
+    class CancelCurrentRequest {
+
+        @Test
+        void noActiveProcess_doesNotThrow() {
+            ClaudeService service = new ClaudeService();
+            // Should be a no-op when idle (activeProcess is null)
+            service.cancelCurrentRequest();
+        }
     }
 
     @Nested

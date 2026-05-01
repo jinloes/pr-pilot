@@ -318,6 +318,73 @@ public class GitHubService {
         delete(token, url);
     }
 
+    /**
+     * Returns a formatted plain-text summary of all submitted (non-pending) reviews for a PR,
+     * including each reviewer's verdict, overall comment, and inline comments. Returns an empty
+     * string if there are no submitted reviews. Non-fatal: inline comment fetches are best-effort.
+     */
+    public String getExistingReviewsSummary(String token, String owner, String repo, int number)
+            throws IOException, InterruptedException {
+        String url = apiBase() + "/repos/" + owner + "/" + repo + "/pulls/" + number + "/reviews";
+        List<GhSubmittedReview> reviews =
+                MAPPER.readValue(
+                        get(token, url, "application/vnd.github.v3+json"),
+                        MAPPER.getTypeFactory()
+                                .constructCollectionType(List.class, GhSubmittedReview.class));
+        List<GhSubmittedReview> submitted =
+                reviews.stream().filter(r -> !"PENDING".equals(r.state())).toList();
+        if (submitted.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        for (GhSubmittedReview r : submitted) {
+            String reviewer = r.user() != null ? "@" + r.user().login() : "unknown";
+            String state = r.state() != null ? r.state() : "COMMENTED";
+            String date =
+                    r.submittedAt() != null && r.submittedAt().length() >= 10
+                            ? r.submittedAt().substring(0, 10)
+                            : "";
+            sb.append("Review by ")
+                    .append(reviewer)
+                    .append(" (")
+                    .append(state)
+                    .append(date.isBlank() ? "" : ", " + date)
+                    .append("):\n");
+            String body = r.body() != null ? r.body().strip() : "";
+            if (!body.isBlank()) {
+                String oneLine = body.replace("\n", " ");
+                sb.append("  Overall: \"").append(truncate(oneLine, 300)).append("\"\n");
+            }
+            // Fetch inline comments for this review (best-effort)
+            try {
+                List<GhReviewComment> comments =
+                        MAPPER.readValue(
+                                get(
+                                        token,
+                                        url + "/" + r.id() + "/comments",
+                                        "application/vnd.github.v3+json"),
+                                MAPPER.getTypeFactory()
+                                        .constructCollectionType(
+                                                List.class, GhReviewComment.class));
+                for (GhReviewComment c : comments) {
+                    String path = c.path() != null ? c.path() : "";
+                    int line =
+                            c.line() != null
+                                    ? c.line()
+                                    : (c.originalLine() != null ? c.originalLine() : 0);
+                    String text = c.body() != null ? c.body().strip().replace("\n", " ") : "";
+                    if (text.isBlank()) continue;
+                    sb.append("  - ").append(path);
+                    if (line > 0) sb.append(":").append(line);
+                    sb.append(": \"").append(truncate(text, 200)).append("\"\n");
+                }
+            } catch (Exception ignored) {
+                // Non-fatal: inline comments are optional context
+            }
+            sb.append("\n");
+        }
+        return sb.toString().strip();
+    }
+
     /** Returns {@code true} if the pull request has been merged. */
     public boolean isPRMerged(String token, String owner, String repo, int number)
             throws IOException, InterruptedException {
@@ -552,6 +619,14 @@ public class GitHubService {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record GhReview(long id, String state, String body) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record GhSubmittedReview(
+            long id,
+            GhUser user,
+            String state,
+            String body,
+            @JsonProperty("submitted_at") String submittedAt) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record GhReviewComment(

@@ -665,11 +665,13 @@ public class ChatPanel extends JPanel {
 
     private void showPlaceholder() {
         messagesPanel.removeAll();
-        JLabel hint =
-                new JLabel(
-                        prContext.isBlank()
-                                ? "Generate a review first, then ask questions here."
-                                : "Ask Claude anything about this PR…");
+        String hintText =
+                prContext.isBlank()
+                        ? "Generate a review first, then ask questions here."
+                        : "<html>Ask Claude anything about this PR…<br>"
+                                + "<small style='color:gray'>Tip: click or select any diff line"
+                                + " to include it as context.</small></html>";
+        JLabel hint = new JLabel(hintText);
         hint.setForeground(ThemeColors.FG_MUTED);
         hint.setFont(UI);
         hint.setBorder(new EmptyBorder(16, 12, 16, 12));

@@ -37,6 +37,8 @@ public final class PRNotificationService implements Disposable {
     static final String NOTIFICATION_GROUP = "Claude PR Reviews";
 
     private volatile ScheduledFuture<?> scheduledTask;
+    private volatile long lastPollEpochMs = 0;
+    private volatile String lastPollError = null;
     private final SeenPRSet seenSet = new SeenPRSet();
     private final GitHubService githubService = GitHubService.getInstance();
 
@@ -67,6 +69,20 @@ public final class PRNotificationService implements Disposable {
         return scheduledTask != null && !scheduledTask.isCancelled();
     }
 
+    /**
+     * Returns a human-readable description of the last poll attempt — e.g. "Last polled: 3 min ago"
+     * or "Last poll: 45s ago — Error: connection refused". Returns {@code null} if no poll has run
+     * yet.
+     */
+    public String getLastPollStatus() {
+        long ts = lastPollEpochMs;
+        if (ts == 0) return null;
+        long agoSec = (System.currentTimeMillis() - ts) / 1000;
+        String when = agoSec < 60 ? agoSec + "s ago" : (agoSec / 60) + " min ago";
+        String err = lastPollError;
+        return err != null ? "Last poll: " + when + " — Error: " + err : "Last polled: " + when;
+    }
+
     @Override
     public void dispose() {
         stopPolling();
@@ -83,6 +99,8 @@ public final class PRNotificationService implements Disposable {
         String token = settings.getGithubToken();
         if (token == null || token.isBlank()) return;
 
+        lastPollEpochMs = System.currentTimeMillis();
+        String pollError = null;
         List<PullRequest> found = new ArrayList<>();
 
         if (settings.isNotifyReviewRequested()) {
@@ -90,6 +108,7 @@ public final class PRNotificationService implements Disposable {
                 found.addAll(githubService.searchPRs(token, "is:open is:pr review-requested:@me"));
             } catch (Exception e) {
                 log.warn("PR notification poll failed", e);
+                pollError = e.getMessage();
             }
         }
 
@@ -105,8 +124,11 @@ public final class PRNotificationService implements Disposable {
                 }
             } catch (Exception e) {
                 log.warn("PR notification poll failed", e);
+                if (pollError == null) pollError = e.getMessage();
             }
         }
+
+        lastPollError = pollError;
 
         if (!seenSet.isSeeded()) {
             // First run: populate the seen set without showing any notifications
