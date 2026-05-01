@@ -76,6 +76,24 @@ class PRToolWindowTest {
             assertThat(formatted).contains("A.java:1");
             assertThat(formatted).contains("B.java:2");
         }
+
+        @Test
+        void commentWithASlashPrefix_prefixStripped() {
+            LineComment comment = new LineComment("a/src/Foo.java", 5, "issue", "body");
+            ReviewResult result = new ReviewResult("", "REQUEST_CHANGES", List.of(comment));
+            String formatted = PRToolWindow.formatPriorReview(result);
+            assertThat(formatted).contains("src/Foo.java:5");
+            assertThat(formatted).doesNotContain("a/src/Foo.java");
+        }
+
+        @Test
+        void commentWithBSlashPrefix_prefixStripped() {
+            LineComment comment = new LineComment("b/src/Bar.java", 12, "suggestion", "body");
+            ReviewResult result = new ReviewResult("", "COMMENT", List.of(comment));
+            String formatted = PRToolWindow.formatPriorReview(result);
+            assertThat(formatted).contains("src/Bar.java:12");
+            assertThat(formatted).doesNotContain("b/src/Bar.java");
+        }
     }
 
     @Nested

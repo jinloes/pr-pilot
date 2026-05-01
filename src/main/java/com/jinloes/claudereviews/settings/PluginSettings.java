@@ -56,8 +56,13 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
     }
 
     public void setGithubBaseUrl(String url) {
-        myState.githubBaseUrl =
+        String normalized =
                 url != null ? url.stripTrailing().replaceAll("/$", "") : "https://github.com";
+        // Reject non-HTTPS to prevent SSRF to local services or plain-HTTP interception
+        if (!normalized.startsWith("https://")) {
+            normalized = "https://github.com";
+        }
+        myState.githubBaseUrl = normalized;
     }
 
     /**

@@ -63,7 +63,7 @@ public class PRToolWindow {
 
     // Browse-repo bar
     private final JComboBox<String> repoCombo = new JComboBox<>();
-    private boolean loadingRepos = false;
+    private volatile boolean loadingRepos = false;
     private boolean showingDrafts = false;
 
     // Right panel – review
@@ -1079,7 +1079,9 @@ public class PRToolWindow {
             for (var c : result.getLineComments()) {
                 sb.append("- [").append(c.getType().toUpperCase()).append("] ");
                 if (!c.getFile().isBlank()) {
-                    sb.append(c.getFile()).append(":").append(c.getLine()).append(" — ");
+                    String file = c.getFile();
+                    if (file.startsWith("a/") || file.startsWith("b/")) file = file.substring(2);
+                    sb.append(file).append(":").append(c.getLine()).append(" — ");
                 }
                 sb.append(c.getBody()).append("\n");
             }

@@ -93,6 +93,38 @@ class DiffParserTest {
         void emptyDiff_returnsEmptyList() {
             assertThat(DiffParser.parseDiff("")).isEmpty();
         }
+
+        @Test
+        void carriageReturnNewline_parsedSameAsLf() {
+            String crlfDiff =
+                    "diff --git a/src/Foo.java b/src/Foo.java\r\n"
+                            + "--- a/src/Foo.java\r\n"
+                            + "+++ b/src/Foo.java\r\n"
+                            + "@@ -1 +1 @@\r\n"
+                            + "+added line\r\n";
+            List<DiffFile> files = DiffParser.parseDiff(crlfDiff);
+            assertThat(files).hasSize(1);
+            // \r must not bleed into the filename
+            assertThat(files.get(0).name).isEqualTo("src/Foo.java");
+            assertThat(files.get(0).lines.get(0).content()).isEqualTo("added line");
+        }
+
+        @Test
+        void deletionOnlyHunk_startLineNotNegative() {
+            // @@ -5,3 +5,0 @@ — deletion-only hunk; +5 must yield newLineNum = 4 (then no lines)
+            String diff =
+                    "diff --git a/src/Foo.java b/src/Foo.java\n"
+                            + "--- a/src/Foo.java\n"
+                            + "+++ b/src/Foo.java\n"
+                            + "@@ -5,3 +5,0 @@\n"
+                            + "-deleted one\n"
+                            + "-deleted two\n"
+                            + "-deleted three\n";
+            List<DiffFile> files = DiffParser.parseDiff(diff);
+            assertThat(files).hasSize(1);
+            // Deleted lines get newLineNum == -1; startLine was correctly parsed as 5 (not 0)
+            files.get(0).lines.forEach(l -> assertThat(l.newLineNum()).isEqualTo(-1));
+        }
     }
 
     @Nested

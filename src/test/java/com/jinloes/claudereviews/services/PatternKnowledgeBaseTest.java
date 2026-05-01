@@ -38,6 +38,25 @@ class PatternKnowledgeBaseTest {
     }
 
     @Nested
+    class FileFor {
+
+        @Test
+        void pathTraversal_throwsSecurityException(@TempDir File dir) {
+            PatternKnowledgeBase kb = new PatternKnowledgeBase(dir);
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> kb.append("../evil", "repo", "ctx", "response"))
+                    .isInstanceOf(SecurityException.class);
+        }
+
+        @Test
+        void normalOwnerRepo_doesNotThrow(@TempDir File dir) {
+            PatternKnowledgeBase kb = new PatternKnowledgeBase(dir);
+            // Should not throw for well-formed owner/repo names
+            kb.append("owner", "repo", "ctx", "response");
+        }
+    }
+
+    @Nested
     class Append {
 
         @Test

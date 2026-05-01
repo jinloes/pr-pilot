@@ -59,6 +59,29 @@ class GitHubServiceRoundTripTest {
         }
 
         @Test
+        void summaryContainingCommentTerminator_escapedSoTagDoesNotBreak() {
+            ReviewResult r = review("See: <!-- end --> tag", "APPROVE", List.of());
+            String body = GitHubService.encodeBody(r);
+            // The raw "-->" in the summary must be escaped so the HTML comment is well-formed
+            assertThat(body).doesNotContain("<!-- claude-summary: See: <!-- end --> tag -->");
+            // Round-trip still recovers a readable summary (with "-- >" substitution)
+            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
+            assertThat(decoded.getSummary()).contains("See:");
+        }
+
+        @Test
+        void commentBodyContainingCommentTerminator_roundTrips() {
+            LineComment c = new LineComment("src/Foo.java", 5, "issue", "closes --> stream");
+            String body = GitHubService.encodeBody(review("s", "COMMENT", List.of(c)));
+            // The embedded JSON must not contain a raw "-->" that would break the HTML comment
+            int commentsStart = body.indexOf("<!-- claude-comments:");
+            int commentsEnd =
+                    body.indexOf(" -->", commentsStart + "<!-- claude-comments:".length());
+            String jsonBlob = body.substring(commentsStart, commentsEnd);
+            assertThat(jsonBlob).doesNotContain("-->");
+        }
+
+        @Test
         void blankBodyComment_preservedInEmbeddedJson() {
             // Manually added comments start with blank body. encodeBody must include them so they
             // round-trip through the JSON blob even though saveDraftReview skips them as inline

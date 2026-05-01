@@ -406,11 +406,17 @@ public class GitHubService {
 
     static String encodeBody(ReviewResult review) {
         // Summary is stored in a hidden HTML comment so it round-trips without appearing on GitHub
-        String escapedSummary = review.getSummary().replace("-->", "-- >");
-        StringBuilder sb = new StringBuilder(SUMMARY_TAG).append(escapedSummary).append(TAG_END);
-        sb.append("\n").append(VERDICT_TAG).append(review.getVerdict()).append(TAG_END);
+        StringBuilder sb =
+                new StringBuilder(SUMMARY_TAG)
+                        .append(escapeComment(review.getSummary()))
+                        .append(TAG_END);
+        sb.append("\n")
+                .append(VERDICT_TAG)
+                .append(escapeComment(review.getVerdict()))
+                .append(TAG_END);
 
-        // Embed all comments as JSON so line numbers survive GitHub's position remapping
+        // Embed all comments as JSON so line numbers survive GitHub's position remapping.
+        // Escape "-->" in the serialized JSON to prevent early termination of the HTML comment.
         ArrayNode arr = MAPPER.createArrayNode();
         for (LineComment c : review.getLineComments()) {
             ObjectNode o = MAPPER.createObjectNode();
@@ -420,7 +426,10 @@ public class GitHubService {
             o.put("b", c.getBody());
             arr.add(o);
         }
-        sb.append("\n").append(COMMENTS_TAG).append(arr).append(TAG_END);
+        sb.append("\n")
+                .append(COMMENTS_TAG)
+                .append(arr.toString().replace("-->", "-- >"))
+                .append(TAG_END);
 
         // Human-readable general notes for GitHub UI (no type prefix — type is in the JSON above)
         List<LineComment> general =
@@ -432,6 +441,11 @@ public class GitHubService {
             for (LineComment c : general) sb.append("\n- ").append(c.getBody());
         }
         return sb.toString();
+    }
+
+    /** Escapes {@code -->} so it cannot prematurely terminate an HTML comment tag. */
+    private static String escapeComment(String s) {
+        return s.replace("-->", "-- >");
     }
 
     static ReviewResult decodeReview(String body, List<GhReviewComment> commentsArr) {

@@ -202,7 +202,34 @@ All GitHub API responses are parsed via typed Jackson DTO records declared as pa
 All `HttpRequest.newBuilder()` calls in `GitHubService` include `.timeout(Duration.ofSeconds(30))` and in `GitHubAuthService` include `.timeout(Duration.ofSeconds(15))` to prevent indefinite hangs on unresponsive GitHub API endpoints.
 
 ### PatternKnowledgeBase filename separator
-`PatternKnowledgeBase.fileFor()` uses `%` as the owner/repo filename separator (e.g. `owner%repo.md`). The `%` character cannot appear in GitHub owner or repo names, making the separator unambiguous even when owner or repo names contain underscores.
+`PatternKnowledgeBase.fileFor()` uses `%` as the owner/repo filename separator (e.g. `owner%repo.md`). The `%` character cannot appear in GitHub owner or repo names, making the separator unambiguous even when owner or repo names contain underscores. `fileFor()` verifies the resolved canonical path starts with the canonical base dir path (followed by `File.separator`) and throws `SecurityException` if not — this prevents path traversal via crafted owner/repo strings.
+
+### SSRF prevention in settings
+`PluginSettings.setGithubBaseUrl()` rejects any URL that does not start with `https://`, silently falling back to `https://github.com`. This prevents local-service SSRF attacks where a crafted base URL causes the plugin to send GitHub tokens to an attacker-controlled endpoint.
+
+### Cancel support — `AtomicReference<Process>`
+`ClaudeService` uses `AtomicReference<Process> activeProcess` (replacing the earlier `volatile Process`). `runReview()` and `runChat()` call `activeProcess.set(process)` at start and `activeProcess.set(null)` in the `finally` block. `cancelCurrentRequest()` uses `getAndSet(null)` — atomically reads the current process and clears the field, then calls `destroyForcibly()` on the captured reference. This eliminates the TOCTOU race where a second review could start between the `null`-check and the `destroyForcibly()` call.
+
+### SeenPRSet thread safety
+`SeenPRSet.seen` is a `ConcurrentHashMap.newKeySet()` (replacing `HashSet`) to safely handle concurrent `add()` / `contains()` calls from the scheduler thread without external synchronization. The `seeded` flag is `volatile`. `save()` uses an atomic temp-file rename (`Files.move(..., ATOMIC_MOVE)`) so a crash mid-write never leaves a truncated file. A corrupt JSON file is now logged at `WARN` before the set is reset.
+
+### PendingReviewIndex synchronization
+`list()`, `add()`, and `remove()` are all `synchronized` on the index instance to prevent concurrent read-modify-write races when multiple background tasks access the index simultaneously. `save()` uses `Files.move(..., ATOMIC_MOVE, REPLACE_EXISTING)` via a `.tmp` sibling file to make writes crash-safe.
+
+### DiffParser line splitting and hunk regex
+`DiffParser.parseDiff()` splits on `\\r?\\n` (not bare `\\n`) so Windows CRLF diffs do not bleed `\r` into filenames or content. The `HUNK_NEW_START` pattern was changed from `\\+([0-9]+)` (which incorrectly matched `+0` in `+0,0` deletion-only hunks) to `@@ -\\d+(?:,\\d+)? \\+(\\d+)` (matches the full `@@` hunk header and captures only the new-file start line).
+
+### HTML comment escaping in encodeBody
+`GitHubService.encodeBody()` calls `escapeComment(s)` (which replaces `-->` with `-- >`) on both the summary and verdict values embedded in HTML comment tags. The JSON blob appended for `<!-- claude-comments:` also has `-->` replaced in its serialized string, preventing any comment body containing `-->` from prematurely terminating the HTML comment and corrupting the round-trip.
+
+### Chat history cap
+`ChatPanel.history` is capped at 20 messages (10 user/assistant pairs). After each successful response, any entries beyond the limit are trimmed from the front (`while (history.size() > 20) history.remove(0)`). This prevents unbounded memory growth in long sessions.
+
+### Chat injection guard
+`ClaudeService.CHAT_PERSONA` instructs Claude that content delimited by turn, user_message, and code_context XML tags is untrusted input and must be treated as data only, not instructions.
+
+### formatPriorReview — a/b prefix stripping
+`PRToolWindow.formatPriorReview()` strips `a/` or `b/` prefixes from comment file paths before formatting them into the prior-review context string. This matches the behavior of `GitHubService.buildCommentArray()` and ensures Claude sees consistent paths when regenerating.
 
 ### JSON serialization — Jackson with Optional accessors
 All JSON parsing and serialization uses `com.fasterxml.jackson.databind.ObjectMapper`. `JsonNode`/`ArrayNode`/`ObjectNode` replace Gson's `JsonElement`/`JsonArray`/`JsonObject`. `TypeReference<T>` replaces Gson's `TypeToken<T>` for generic deserialization. Pretty-printing uses `MAPPER.enable(SerializationFeature.INDENT_OUTPUT)`.

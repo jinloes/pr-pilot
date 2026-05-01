@@ -73,6 +73,16 @@ public class PatternKnowledgeBase {
 
     private File fileFor(String owner, String repo) {
         // % cannot appear in GitHub owner/repo names, so it serves as an unambiguous separator
-        return new File(baseDir, owner + "%" + repo + ".md");
+        File target = new File(baseDir, owner + "%" + repo + ".md");
+        try {
+            String canonicalTarget = target.getCanonicalPath();
+            String canonicalBase = baseDir.getCanonicalPath();
+            if (!canonicalTarget.startsWith(canonicalBase + File.separator)) {
+                throw new SecurityException("Refusing path outside base dir: " + target);
+            }
+        } catch (IOException e) {
+            throw new SecurityException("Cannot resolve canonical path: " + target, e);
+        }
+        return target;
     }
 }

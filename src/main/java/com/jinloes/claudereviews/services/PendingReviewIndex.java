@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,18 +52,18 @@ public class PendingReviewIndex {
         this.indexFile = indexFile;
     }
 
-    public List<Entry> list() {
+    public synchronized List<Entry> list() {
         if (!Files.exists(indexFile)) return new ArrayList<>();
         try {
             String json = Files.readString(indexFile, StandardCharsets.UTF_8);
             List<Entry> entries = MAPPER.readValue(json, LIST_TYPE);
-            return entries != null ? entries : new ArrayList<>();
+            return entries != null ? new ArrayList<>(entries) : new ArrayList<>();
         } catch (Exception e) {
             return new ArrayList<>();
         }
     }
 
-    public void add(String owner, String repo, int number, String title) {
+    public synchronized void add(String owner, String repo, int number, String title) {
         List<Entry> entries = list();
         entries.removeIf(
                 e -> e.owner().equals(owner) && e.repo().equals(repo) && e.number() == number);
@@ -76,7 +78,7 @@ public class PendingReviewIndex {
         save(entries);
     }
 
-    public void remove(String owner, String repo, int number) {
+    public synchronized void remove(String owner, String repo, int number) {
         List<Entry> entries = list();
         entries.removeIf(
                 e -> e.owner().equals(owner) && e.repo().equals(repo) && e.number() == number);
@@ -86,8 +88,13 @@ public class PendingReviewIndex {
     private void save(List<Entry> entries) {
         try {
             Files.createDirectories(indexFile.getParent());
-            Files.writeString(
-                    indexFile, MAPPER.writeValueAsString(entries), StandardCharsets.UTF_8);
+            Path tmp = indexFile.resolveSibling(indexFile.getFileName() + ".tmp");
+            Files.writeString(tmp, MAPPER.writeValueAsString(entries), StandardCharsets.UTF_8);
+            Files.move(
+                    tmp,
+                    indexFile,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             log.warn("Failed to save pending review index", e);
         }

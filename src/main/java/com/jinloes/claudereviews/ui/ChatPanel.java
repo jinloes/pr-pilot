@@ -206,6 +206,7 @@ public class ChatPanel extends JPanel {
                     reformatClaudeBubble(sb.panel(), sb.streamArea(), response);
                     history.add(new ChatMessage(Role.USER, displayMessage));
                     history.add(new ChatMessage(Role.ASSISTANT, response));
+                    while (history.size() > 20) history.remove(0);
                     sendButton.setEnabled(!prContext.isBlank());
                     statusLabel.setText(" ");
                     java.util.function.Consumer<String> cb = pendingResponseCallback;
@@ -409,6 +410,7 @@ public class ChatPanel extends JPanel {
                     reformatClaudeBubble(sb.panel(), sb.streamArea(), response);
                     history.add(new ChatMessage(Role.USER, raw));
                     history.add(new ChatMessage(Role.ASSISTANT, response));
+                    while (history.size() > 20) history.remove(0);
                     sendButton.setEnabled(true);
                     statusLabel.setText(" ");
                     java.util.function.Consumer<String> cb = pendingResponseCallback;

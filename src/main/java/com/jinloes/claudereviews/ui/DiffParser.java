@@ -21,7 +21,7 @@ final class DiffParser {
 
     record DiffLine(int newLineNum, char type, String content, boolean hunkStart) {}
 
-    private static final Pattern HUNK_NEW_START = Pattern.compile("\\+([0-9]+)");
+    private static final Pattern HUNK_NEW_START = Pattern.compile("@@ -\\d+(?:,\\d+)? \\+(\\d+)");
 
     static List<DiffFile> parseDiff(String rawDiff) {
         List<DiffFile> files = new ArrayList<>();
@@ -29,7 +29,7 @@ final class DiffParser {
         int newLineNum = 0;
         boolean nextIsHunkStart = false;
 
-        for (String line : rawDiff.split("\n", -1)) {
+        for (String line : rawDiff.split("\\r?\\n", -1)) {
             if (line.startsWith("diff --git ")) {
                 int bIdx = line.lastIndexOf(" b/");
                 current = new DiffFile(bIdx >= 0 ? line.substring(bIdx + 3) : line);

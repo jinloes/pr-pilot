@@ -7,8 +7,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashSet;
+import java.nio.file.StandardCopyOption;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -25,10 +26,10 @@ public class SeenPRSet {
     private static final TypeReference<Set<String>> SET_TYPE = new TypeReference<>() {};
 
     private final Path file;
-    private Set<String> seen;
+    private volatile Set<String> seen;
 
     /** True once the initial seed poll has been persisted (first run should not notify). */
-    private boolean seeded;
+    private volatile boolean seeded;
 
     public SeenPRSet() {
         file = Path.of(System.getProperty("user.home"), ".claude-reviews", "seen-prs.json");
@@ -45,14 +46,17 @@ public class SeenPRSet {
             try {
                 String json = Files.readString(file, StandardCharsets.UTF_8);
                 Set<String> loaded = MAPPER.readValue(json, SET_TYPE);
-                seen = loaded != null ? loaded : new HashSet<>();
+                Set<String> concurrent = ConcurrentHashMap.newKeySet();
+                if (loaded != null) concurrent.addAll(loaded);
+                seen = concurrent;
                 seeded = true; // file existed → already seeded in a previous session
             } catch (Exception e) {
-                seen = new HashSet<>();
+                log.warn("Corrupt seen-PR JSON; resetting", e);
+                seen = ConcurrentHashMap.newKeySet();
                 seeded = false;
             }
         } else {
-            seen = new HashSet<>();
+            seen = ConcurrentHashMap.newKeySet();
             seeded = false;
         }
     }
@@ -80,7 +84,10 @@ public class SeenPRSet {
     public void save() {
         try {
             Files.createDirectories(file.getParent());
-            Files.writeString(file, MAPPER.writeValueAsString(seen), StandardCharsets.UTF_8);
+            Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+            Files.writeString(tmp, MAPPER.writeValueAsString(seen), StandardCharsets.UTF_8);
+            Files.move(
+                    tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             log.warn("Failed to save seen PR set", e);
         }
