@@ -21,6 +21,7 @@ import com.jinloes.claudereviews.settings.PluginSettingsConfigurable;
 import java.awt.*;
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -63,6 +64,7 @@ public class PRToolWindow {
 
     // Browse-repo bar
     private final JComboBox<String> repoCombo = new JComboBox<>();
+    private final JButton draftsButton = new JButton("Saved Drafts");
     private volatile boolean loadingRepos = false;
     private boolean showingDrafts = false;
 
@@ -152,8 +154,10 @@ public class PRToolWindow {
         toolbarLeft.add(repoCombo);
         toolbarLeft.add(refreshButton);
         toolbarLeft.add(new JSeparator(SwingConstants.VERTICAL));
-        JButton draftsButton = new JButton("Saved Drafts");
-        draftsButton.addActionListener(e -> loadDraftPRs());
+        draftsButton.addActionListener(e -> {
+            if (showingDrafts) loadStarredRepos();
+            else loadDraftPRs();
+        });
         toolbarLeft.add(draftsButton);
         searchField.putClientProperty("JTextField.placeholderText", "Search PRs…");
         searchField.setToolTipText("Filter the PR list by title, author, or repo");
@@ -327,14 +331,14 @@ public class PRToolWindow {
                     if (pr == null) return;
                     LineComment c = card.getComment();
                     String ctx =
-                            "**Verifying comment** on `%s` line %d:\n> %s"
+                            "**Assessing comment** on `%s` line %d:\n> %s"
                                     .formatted(c.getFile(), c.getLine(), c.getBody());
                     String question =
-                            ("Search the %s/%s repository to verify whether the pattern described "
-                                            + "in this comment already exists elsewhere in the codebase. "
-                                            + "Should the comment stand or be dismissed? Give a concrete "
-                                            + "example file and line if the pattern is established.")
-                                    .formatted(pr.getOwner(), pr.getRepo());
+                            "Based on the code visible in this diff, does the pattern or issue "
+                                    + "described in this comment appear consistent with the surrounding "
+                                    + "code style? Look at the changed and context lines for similar "
+                                    + "patterns. Should this comment stand or be dismissed based on "
+                                    + "what you can see in the diff?";
                     ensureChatVisible();
                     chatPanel.askFocused(
                             ctx,
@@ -367,6 +371,7 @@ public class PRToolWindow {
 
     private void refreshPRs() {
         showingDrafts = false;
+        draftsButton.setText("Saved Drafts");
         filterCombo.setEnabled(true);
         repoCombo.setEnabled(!loadingRepos);
         if (!hasToken()) {
@@ -437,28 +442,33 @@ public class PRToolWindow {
         repoCombo.addItem("Loading starred repos…");
         repoCombo.setEnabled(false);
         String token = getToken();
+        String basePath = project.getBasePath();
         runInBackground(
                 () -> {
+                    String detectedRepo = detectCurrentRepo(basePath);
+                    List<String> starred;
                     try {
-                        List<String> starred = githubService.getStarredRepos(token);
-                        runOnEdt(
-                                () -> {
-                                    repoCombo.removeAllItems();
-                                    starred.forEach(repoCombo::addItem);
-                                    repoCombo.setEnabled(true);
-                                    loadingRepos = false;
-                                    refreshPRs();
-                                });
-                    } catch (Exception ex) {
-                        // Non-fatal: leave combo empty, but still load PRs
-                        runOnEdt(
-                                () -> {
-                                    repoCombo.removeAllItems();
-                                    repoCombo.setEnabled(true);
-                                    loadingRepos = false;
-                                    refreshPRs();
-                                });
+                        starred = githubService.getStarredRepos(token);
+                    } catch (Exception ignored) {
+                        // Non-fatal: fall back to detected repo only
+                        starred = List.of();
                     }
+                    final List<String> finalStarred = starred;
+                    runOnEdt(
+                            () -> {
+                                repoCombo.removeAllItems();
+                                // Prepend detected repo so the current project is always available
+                                if (detectedRepo != null && !finalStarred.contains(detectedRepo)) {
+                                    repoCombo.addItem(detectedRepo);
+                                }
+                                finalStarred.forEach(repoCombo::addItem);
+                                if (detectedRepo != null) {
+                                    repoCombo.setSelectedItem(detectedRepo);
+                                }
+                                repoCombo.setEnabled(true);
+                                loadingRepos = false;
+                                refreshPRs();
+                            });
                 });
     }
 
@@ -740,6 +750,7 @@ public class PRToolWindow {
 
     private void loadDraftPRs() {
         showingDrafts = true;
+        draftsButton.setText("← Back to PRs");
         filterCombo.setEnabled(false);
         repoCombo.setEnabled(false);
         setStatus("Loading saved drafts\u2026");
@@ -859,7 +870,32 @@ public class PRToolWindow {
                         pendingReviewId = null;
                         applyState(State.NO_PR);
                     }
-                    setStatus("Draft removed from local index.");
+                    setStatus("Deleting draft from GitHub…");
+                    String token = getToken();
+                    runInBackground(
+                            () -> {
+                                try {
+                                    String reviewId =
+                                            githubService.getPendingReviewId(
+                                                    token,
+                                                    pr.getOwner(),
+                                                    pr.getRepo(),
+                                                    pr.getNumber());
+                                    if (reviewId != null) {
+                                        githubService.deleteDraftReview(
+                                                token,
+                                                pr.getOwner(),
+                                                pr.getRepo(),
+                                                pr.getNumber(),
+                                                reviewId);
+                                    }
+                                    runOnEdt(() -> setStatus("Draft deleted."));
+                                } catch (Exception ignored) {
+                                    // Non-fatal: local index is already cleaned up
+                                    runOnEdt(
+                                            () -> setStatus("Draft removed from local index."));
+                                }
+                            });
                 });
         menu.add(deleteItem);
         menu.show(prList, e.getX(), e.getY());
@@ -1217,6 +1253,69 @@ public class PRToolWindow {
             }
         }
         return "";
+    }
+
+    // ---------------------------------------------------------------
+    // Repo detection
+    // ---------------------------------------------------------------
+
+    /**
+     * Reads {@code .git/config} under {@code basePath} and extracts the {@code owner/repo} for the
+     * {@code origin} remote, or returns {@code null} if not found. Supports both HTTPS and SSH
+     * remote URL formats. No process is spawned — reads the file directly.
+     */
+    static String detectCurrentRepo(String basePath) {
+        if (basePath == null) return null;
+        File gitConfig = new File(basePath, ".git/config");
+        if (!gitConfig.isFile()) return null;
+        try {
+            List<String> lines = FileUtils.readLines(gitConfig, StandardCharsets.UTF_8);
+            boolean inOriginSection = false;
+            for (String line : lines) {
+                String trimmed = line.trim();
+                if (trimmed.equals("[remote \"origin\"]")) {
+                    inOriginSection = true;
+                } else if (inOriginSection && trimmed.startsWith("[")) {
+                    break; // left the origin section without finding a url
+                } else if (inOriginSection && trimmed.startsWith("url")) {
+                    int eq = trimmed.indexOf('=');
+                    if (eq >= 0) return parseOwnerRepo(trimmed.substring(eq + 1).trim());
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        return null;
+    }
+
+    /**
+     * Parses an owner/repo pair from a git remote URL. Handles both SSH ({@code
+     * git@github.com:owner/repo.git}) and HTTPS ({@code https://github.com/owner/repo.git})
+     * formats.
+     */
+    static String parseOwnerRepo(String remoteUrl) {
+        if (remoteUrl == null || remoteUrl.isBlank()) return null;
+        String url = remoteUrl.strip();
+        if (url.endsWith(".git")) url = url.substring(0, url.length() - 4);
+        // SSH format: git@github.com:owner/repo
+        if (url.contains("@") && url.contains(":") && !url.startsWith("http")) {
+            return ownerRepoFromPath(url.substring(url.lastIndexOf(':') + 1));
+        }
+        // HTTPS/HTTP format: https://github.com/owner/repo
+        try {
+            String path = new URI(url).getPath();
+            if (path != null && path.startsWith("/")) path = path.substring(1);
+            return ownerRepoFromPath(path);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String ownerRepoFromPath(String path) {
+        if (path == null || path.isBlank()) return null;
+        String[] parts = path.split("/");
+        return parts.length >= 2 && !parts[0].isBlank() && !parts[1].isBlank()
+                ? parts[0] + "/" + parts[1]
+                : null;
     }
 
     // ---------------------------------------------------------------

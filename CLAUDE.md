@@ -66,6 +66,9 @@ Only decisions that encode an active constraint future code must respect and tha
 ### GitHub authentication — no stored token
 `GitHubAuthService.resolveToken()` runs `gh auth token` each time a token is needed. The plugin never writes a token to disk.
 
+### Repo auto-detection
+`PRToolWindow.detectCurrentRepo(basePath)` reads `.git/config` directly (no process) and parses the `origin` remote URL via `parseOwnerRepo()`. The detected repo is prepended to `repoCombo` and selected so the current IntelliJ project is always available without requiring the user to have starred it.
+
 ### Finding the `gh` binary
 `GitHubAuthService.findGhBinary()` probes hard-coded paths before falling back to bare `"gh"`:
 ```

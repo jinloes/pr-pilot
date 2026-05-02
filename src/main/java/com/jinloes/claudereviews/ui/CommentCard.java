@@ -74,7 +74,7 @@ public class CommentCard extends JPanel {
         verifyButton.setFocusPainted(false);
         verifyButton.setMargin(new Insets(0, 4, 0, 4));
         verifyButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        verifyButton.setToolTipText("Verify pattern in repo");
+        verifyButton.setToolTipText("Assess pattern in diff");
         if (onVerify != null) {
             verifyButton.addActionListener(ev -> onVerify.accept(this));
         } else {
