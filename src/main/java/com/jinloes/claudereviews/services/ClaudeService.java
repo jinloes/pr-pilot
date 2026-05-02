@@ -168,7 +168,7 @@ public class ClaudeService {
                 args.add("--model");
                 args.add(model);
             }
-            process = buildProcess(args.toArray(new String[0]));
+            process = buildProcess(args.toArray(String[]::new));
             activeProcess.set(process);
             writeStdin(process, prompt);
 

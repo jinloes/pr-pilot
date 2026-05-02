@@ -1,5 +1,6 @@
 package com.jinloes.claudereviews.services;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -9,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +25,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class PendingReviewIndex {
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record Entry(
             String owner, String repo, int number, String title, String savedAt, String headSha) {
 
@@ -48,6 +51,8 @@ public class PendingReviewIndex {
 
     private static final ObjectMapper MAPPER =
             new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+    private static final DateTimeFormatter SAVED_AT_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final TypeReference<List<Entry>> LIST_TYPE = new TypeReference<>() {};
 
     private final Path indexFile;
@@ -83,7 +88,7 @@ public class PendingReviewIndex {
                         repo,
                         number,
                         title,
-                        LocalDateTime.now().toString().substring(0, 16),
+                        LocalDateTime.now().format(SAVED_AT_FMT),
                         headSha != null ? headSha : ""));
         save(entries);
     }

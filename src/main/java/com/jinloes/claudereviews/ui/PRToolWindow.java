@@ -24,8 +24,13 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.*;
 import javax.swing.Icon;
 import javax.swing.border.EmptyBorder;
@@ -65,7 +70,7 @@ public class PRToolWindow {
     // Browse-repo bar
     private final JComboBox<String> repoCombo = new JComboBox<>();
     private final JButton draftsButton = new JButton("Saved Drafts");
-    private volatile boolean loadingRepos = false;
+    private boolean loadingRepos = false;
     private boolean showingDrafts = false;
 
     // Right panel – review
@@ -109,6 +114,7 @@ public class PRToolWindow {
     private final GitHubService githubService = GitHubService.getInstance();
     private final ClaudeService claudeService = new ClaudeService();
     private final PendingReviewIndex pendingIndex = new PendingReviewIndex();
+    private Set<String> draftKeys = new HashSet<>();
     private final ChatPanel chatPanel = new ChatPanel(claudeService, reviewPanel::getSelectedText);
 
     public PRToolWindow(Project project) {
@@ -652,12 +658,18 @@ public class PRToolWindow {
         if (lastResult == null || lastPR == null || pendingReviewId == null) return;
         String token = getToken();
         PullRequest pr = lastPR;
-        ReviewResult result = lastResult;
+        // Snapshot before handing to background thread — the EDT may dismiss more comments
+        // concurrently, which would mutate lastResult.getLineComments() while it's being iterated.
+        ReviewResult snapshot =
+                new ReviewResult(
+                        lastResult.getSummary(),
+                        lastResult.getVerdict(),
+                        lastResult.getLineComments());
         runInBackground(
                 () -> {
                     try {
                         githubService.saveDraftReview(
-                                token, pr.getOwner(), pr.getRepo(), pr.getNumber(), result);
+                                token, pr.getOwner(), pr.getRepo(), pr.getNumber(), snapshot);
                     } catch (Exception ignored) {
                         // silent auto-save — user can manually save if needed
                     }
@@ -733,6 +745,7 @@ public class PRToolWindow {
                                                 "PR #%d is merged \u2014 no action needed."
                                                         .formatted(pr.getNumber()));
                                         setStatus(mergedStatus);
+                                        refreshDraftKeys();
                                     });
                             return;
                         }
@@ -839,37 +852,72 @@ public class PRToolWindow {
             return;
         }
         String token = getToken();
+        Executor pooled = r -> ApplicationManager.getApplication().executeOnPooledThread(r);
         runInBackground(
                 () -> {
-                    int removed = 0;
-                    for (PendingReviewIndex.Entry e : entries) {
-                        try {
-                            boolean merged =
-                                    githubService.isPRMerged(
-                                            token, e.owner(), e.repo(), e.number());
-                            if (merged) {
-                                try {
-                                    GitHubService.PendingReview pending =
-                                            githubService.loadDraftReview(
-                                                    token, e.owner(), e.repo(), e.number());
-                                    if (pending != null) {
-                                        githubService.deleteDraftReview(
-                                                token,
-                                                e.owner(),
-                                                e.repo(),
-                                                e.number(),
-                                                pending.id());
-                                    }
-                                } catch (Exception ignored) {
-                                }
-                                pendingIndex.remove(e.owner(), e.repo(), e.number());
-                                removed++;
-                            }
-                        } catch (Exception ignored) {
-                            // Cannot check merged status — keep the entry
-                        }
-                    }
-                    final int removedCount = removed;
+                    AtomicInteger removed = new AtomicInteger(0);
+                    // Check all entries in parallel — each isPRMerged is a separate network call.
+                    List<CompletableFuture<Void>> futures =
+                            entries.stream()
+                                    .map(
+                                            e ->
+                                                    CompletableFuture.runAsync(
+                                                            () -> {
+                                                                try {
+                                                                    boolean merged =
+                                                                            githubService
+                                                                                    .isPRMerged(
+                                                                                            token,
+                                                                                            e
+                                                                                                    .owner(),
+                                                                                            e
+                                                                                                    .repo(),
+                                                                                            e
+                                                                                                    .number());
+                                                                    if (merged) {
+                                                                        try {
+                                                                            GitHubService
+                                                                                            .PendingReview
+                                                                                    pending =
+                                                                                            githubService
+                                                                                                    .loadDraftReview(
+                                                                                                            token,
+                                                                                                            e
+                                                                                                                    .owner(),
+                                                                                                            e
+                                                                                                                    .repo(),
+                                                                                                            e
+                                                                                                                    .number());
+                                                                            if (pending != null) {
+                                                                                githubService
+                                                                                        .deleteDraftReview(
+                                                                                                token,
+                                                                                                e
+                                                                                                        .owner(),
+                                                                                                e
+                                                                                                        .repo(),
+                                                                                                e
+                                                                                                        .number(),
+                                                                                                pending
+                                                                                                        .id());
+                                                                            }
+                                                                        } catch (
+                                                                                Exception ignored) {
+                                                                        }
+                                                                        pendingIndex.remove(
+                                                                                e.owner(),
+                                                                                e.repo(),
+                                                                                e.number());
+                                                                        removed.incrementAndGet();
+                                                                    }
+                                                                } catch (Exception ignored) {
+                                                                    // Cannot check merged — keep
+                                                                    // entry
+                                                                }
+                                                            },
+                                                            pooled))
+                                    .toList();
+                    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
                     List<PullRequest> prs =
                             pendingIndex.list().stream()
                                     .map(
@@ -884,6 +932,7 @@ public class PRToolWindow {
                                                             "",
                                                             e.savedAt()))
                                     .toList();
+                    int removedCount = removed.get();
                     runOnEdt(
                             () -> {
                                 listModel.clear();
@@ -901,6 +950,7 @@ public class PRToolWindow {
                                                                 : "");
                                 setStatus(status);
                                 refreshButton.setEnabled(true);
+                                refreshDraftKeys();
                             });
                 });
     }
@@ -913,12 +963,7 @@ public class PRToolWindow {
         PullRequest pr = listModel.getElementAt(index);
 
         boolean hasDraft =
-                pendingIndex.list().stream()
-                        .anyMatch(
-                                en ->
-                                        en.owner().equals(pr.getOwner())
-                                                && en.repo().equals(pr.getRepo())
-                                                && en.number() == pr.getNumber());
+                draftKeys.contains(pr.getOwner() + "/" + pr.getRepo() + "#" + pr.getNumber());
         if (!hasDraft) return;
 
         JPopupMenu menu = new JPopupMenu();
@@ -933,6 +978,7 @@ public class PRToolWindow {
                                     JOptionPane.YES_NO_OPTION);
                     if (confirm != JOptionPane.YES_OPTION) return;
                     pendingIndex.remove(pr.getOwner(), pr.getRepo(), pr.getNumber());
+                    refreshDraftKeys();
                     if (showingDrafts) {
                         listModel.removeElement(pr);
                     }
@@ -998,13 +1044,21 @@ public class PRToolWindow {
         saveDraftButton.setEnabled(false);
         String token = getToken();
         PullRequest pr = lastPR;
-        ReviewResult result = lastResult;
+        ReviewResult snapshot =
+                new ReviewResult(
+                        lastResult.getSummary(),
+                        lastResult.getVerdict(),
+                        lastResult.getLineComments());
         runInBackground(
                 () -> {
                     try {
                         GitHubService.SaveDraftResult saved =
                                 githubService.saveDraftReview(
-                                        token, pr.getOwner(), pr.getRepo(), pr.getNumber(), result);
+                                        token,
+                                        pr.getOwner(),
+                                        pr.getRepo(),
+                                        pr.getNumber(),
+                                        snapshot);
                         String headSha = "";
                         try {
                             headSha =
@@ -1022,6 +1076,7 @@ public class PRToolWindow {
                                 () -> {
                                     pendingReviewId = saved.reviewId();
                                     applyState(State.DRAFT_PRESENT);
+                                    refreshDraftKeys();
                                     setStatus(
                                             saved.commentsDropped()
                                                     ? "Draft saved — some inline comments"
@@ -1051,6 +1106,7 @@ public class PRToolWindow {
                 };
 
         // Build a custom dialog with verdict buttons and an optional comment field.
+        boolean[] isPlaceholder = {true};
         JTextArea commentArea = new JTextArea(4, 40);
         commentArea.setLineWrap(true);
         commentArea.setWrapStyleWord(true);
@@ -1060,9 +1116,13 @@ public class PRToolWindow {
                 new java.awt.event.FocusAdapter() {
                     @Override
                     public void focusGained(java.awt.event.FocusEvent e) {
-                        if (commentArea.getForeground().equals(Color.GRAY)) {
+                        if (isPlaceholder[0]) {
                             commentArea.setText("");
-                            commentArea.setForeground(UIManager.getColor("TextArea.foreground"));
+                            commentArea.setForeground(
+                                    UIManager.getColor("TextArea.foreground") != null
+                                            ? UIManager.getColor("TextArea.foreground")
+                                            : Color.WHITE);
+                            isPlaceholder[0] = false;
                         }
                     }
                 });
@@ -1090,8 +1150,7 @@ public class PRToolWindow {
         if (choice < 0) return;
 
         String event = events[choice];
-        String commentBody =
-                commentArea.getForeground().equals(Color.GRAY) ? "" : commentArea.getText().strip();
+        String commentBody = isPlaceholder[0] ? "" : commentArea.getText().strip();
         String reviewId = pendingReviewId;
         submitButton.setEnabled(false);
         saveDraftButton.setEnabled(false); // prevent re-save while submit is in flight
@@ -1121,6 +1180,7 @@ public class PRToolWindow {
                                     showSummaryPlaceholder();
                                     prHeaderLabel.setText(prHeaderHtml(pr));
                                     setStatus("Review submitted to GitHub \u2714");
+                                    refreshDraftKeys();
                                 });
                     } catch (Exception ex) {
                         runOnEdt(
@@ -1365,6 +1425,13 @@ public class PRToolWindow {
         statusLabel.setText(msg);
     }
 
+    private void refreshDraftKeys() {
+        Set<String> keys = new HashSet<>();
+        pendingIndex.list().forEach(e -> keys.add(e.owner() + "/" + e.repo() + "#" + e.number()));
+        draftKeys = keys;
+        prList.repaint();
+    }
+
     private static void runInBackground(Runnable r) {
         ApplicationManager.getApplication().executeOnPooledThread(r);
     }
@@ -1486,12 +1553,8 @@ public class PRToolWindow {
             super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
             if (value instanceof PullRequest pr) {
                 boolean hasDraft =
-                        pendingIndex.list().stream()
-                                .anyMatch(
-                                        e ->
-                                                e.owner().equals(pr.getOwner())
-                                                        && e.repo().equals(pr.getRepo())
-                                                        && e.number() == pr.getNumber());
+                        draftKeys.contains(
+                                pr.getOwner() + "/" + pr.getRepo() + "#" + pr.getNumber());
                 String draftBadge = hasDraft ? " 📝" : "";
                 String subtitle =
                         pr.getAuthor().isEmpty()

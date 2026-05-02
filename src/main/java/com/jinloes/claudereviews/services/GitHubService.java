@@ -235,7 +235,11 @@ public class GitHubService {
                 String resp = post(token, url, probe.toString());
                 // Probe succeeded — immediately delete the temp review, mark comment valid.
                 String tempId = String.valueOf(MAPPER.readTree(resp).path("id").asLong());
-                delete(token, url + "/" + tempId);
+                try {
+                    delete(token, url + "/" + tempId);
+                } catch (IOException ignored) {
+                    // best-effort cleanup; orphan will be removed on next saveDraftReview call
+                }
                 valid.add(comments.get(i));
             } catch (IOException ignored) {
                 // This comment is invalid for the current commit — skip it.
