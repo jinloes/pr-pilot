@@ -8,6 +8,7 @@ import com.jinloes.claudereviews.model.PullRequest;
 import com.jinloes.claudereviews.model.ReviewResult;
 import com.jinloes.claudereviews.services.ClaudeService;
 import java.awt.*;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -269,6 +270,24 @@ public class ChatPanel extends JPanel {
                     messagesPanel.repaint();
                 });
 
+        JButton copyButton = new JButton("Copy");
+        copyButton.setFont(UI);
+        copyButton.setToolTipText("Copy last Claude response to clipboard");
+        copyButton.addActionListener(
+                e -> {
+                    String lastResponse =
+                            history.stream()
+                                    .filter(m -> m.role() == Role.ASSISTANT)
+                                    .reduce((first, second) -> second)
+                                    .map(ChatMessage::content)
+                                    .orElse("");
+                    if (!lastResponse.isBlank()) {
+                        Toolkit.getDefaultToolkit()
+                                .getSystemClipboard()
+                                .setContents(new StringSelection(lastResponse), null);
+                    }
+                });
+
         toggleButton = new JButton("▾");
         toggleButton.setFont(UI);
         toggleButton.setForeground(ThemeColors.FG_MUTED);
@@ -284,6 +303,7 @@ public class ChatPanel extends JPanel {
         JPanel eastPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         eastPanel.setOpaque(false);
         eastPanel.add(clearButton);
+        eastPanel.add(copyButton);
         eastPanel.add(toggleButton);
         header.add(eastPanel, BorderLayout.EAST);
         return header;
@@ -564,8 +584,13 @@ public class ChatPanel extends JPanel {
     // ---------------------------------------------------------------
 
     static String buildHtml(String markdown) {
+        return buildHtml(markdown, "");
+    }
+
+    static String buildHtml(String markdown, String extraHtml) {
         return HTML_HEADER
                 + MARKDOWN_RENDERER.render(MARKDOWN_PARSER.parse(markdown))
+                + extraHtml
                 + "</body></html>";
     }
 

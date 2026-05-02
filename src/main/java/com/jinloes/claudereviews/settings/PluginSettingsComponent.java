@@ -32,13 +32,14 @@ public class PluginSettingsComponent {
 
     // Notification settings
     private final JCheckBox notificationsEnabledBox =
-            new JCheckBox("Enable background PR notifications");
+            new JCheckBox("Enable background PR notifications (experimental)");
     private final JCheckBox notifyReviewRequestedBox =
             new JCheckBox("Notify when a review is requested from me");
     private final JCheckBox notifyStarredReposBox =
             new JCheckBox("Notify when a new PR is opened on a starred repo");
     private final JSpinner pollIntervalSpinner = new JSpinner(new SpinnerNumberModel(5, 1, 60, 1));
     private final JLabel pollStatusLabel = new JBLabel(" ");
+    private JPanel notifSubPanel;
 
     private final GitHubAuthService authService = new GitHubAuthService();
 
@@ -56,15 +57,22 @@ public class PluginSettingsComponent {
         statusPanel.add(checkButton);
         statusPanel.add(statusLabel);
 
-        // Enable/disable sub-options when master checkbox changes
-        notificationsEnabledBox.addChangeListener(
-                (ChangeEvent e) -> updateNotificationSubOptions());
-        updateNotificationSubOptions();
-
         JPanel pollPanel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
         pollPanel.add(new JBLabel("Poll every"));
         pollPanel.add(pollIntervalSpinner);
         pollPanel.add(new JBLabel("minutes"));
+
+        notifSubPanel = new JPanel();
+        notifSubPanel.setLayout(new BoxLayout(notifSubPanel, BoxLayout.Y_AXIS));
+        notifSubPanel.add(notifyReviewRequestedBox);
+        notifSubPanel.add(notifyStarredReposBox);
+        notifSubPanel.add(pollPanel);
+        notifSubPanel.add(pollStatusLabel);
+
+        // Show/hide sub-options when master checkbox changes
+        notificationsEnabledBox.addChangeListener(
+                (ChangeEvent e) -> updateNotificationSubOptions());
+        updateNotificationSubOptions();
 
         mainPanel =
                 FormBuilder.createFormBuilder()
@@ -77,10 +85,7 @@ public class PluginSettingsComponent {
                         .addLabeledComponent(new JBLabel("Review model:"), modelCombo, 1, false)
                         .addSeparator(8)
                         .addComponent(notificationsEnabledBox, 1)
-                        .addComponent(notifyReviewRequestedBox, 1)
-                        .addComponent(notifyStarredReposBox, 1)
-                        .addComponent(pollPanel, 1)
-                        .addComponent(pollStatusLabel, 1)
+                        .addComponent(notifSubPanel, 1)
                         .addComponentFillVertically(new JPanel(), 0)
                         .getPanel();
 
@@ -90,9 +95,7 @@ public class PluginSettingsComponent {
 
     private void updateNotificationSubOptions() {
         boolean on = notificationsEnabledBox.isSelected();
-        notifyReviewRequestedBox.setEnabled(on);
-        notifyStarredReposBox.setEnabled(on);
-        pollIntervalSpinner.setEnabled(on);
+        if (notifSubPanel != null) notifSubPanel.setVisible(on);
     }
 
     public JPanel getPanel() {

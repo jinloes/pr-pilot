@@ -14,7 +14,6 @@ import com.jinloes.claudereviews.model.PullRequest;
 import com.jinloes.claudereviews.model.ReviewResult;
 import com.jinloes.claudereviews.services.ClaudeService;
 import com.jinloes.claudereviews.services.GitHubService;
-import com.jinloes.claudereviews.services.PatternKnowledgeBase;
 import com.jinloes.claudereviews.services.PendingReviewIndex;
 import com.jinloes.claudereviews.settings.PluginSettings;
 import com.jinloes.claudereviews.settings.PluginSettingsConfigurable;
@@ -30,6 +29,7 @@ import java.util.Objects;
 import javax.swing.*;
 import javax.swing.Icon;
 import javax.swing.border.EmptyBorder;
+import javax.swing.event.HyperlinkEvent;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.text.StringEscapeUtils;
 
@@ -88,7 +88,7 @@ public class PRToolWindow {
             iconButton(AllIcons.Ide.External_link_arrow, "Open PR in browser");
 
     // Draft / submit controls
-    private final JButton saveDraftButton = new JButton("Save Draft");
+    private final JButton saveDraftButton = new JButton("Save to GitHub");
     private final JButton submitButton = new JButton("Submit \u25b6"); // ▶
     private final JButton cancelButton = new JButton("Cancel");
     private String pendingReviewId = null;
@@ -98,16 +98,17 @@ public class PRToolWindow {
     private boolean chatVisible = true;
     private double lastChatDividerRatio = 0.65;
 
+    /** Guard to prevent recursive list-selection events when restoring a prior selection. */
+    private boolean settingSelection = false;
+
     private ReviewResult lastResult;
     private PullRequest lastPR;
-    private String lastDiff;
     private volatile String prefetchedDiff = null;
     private volatile PullRequest prefetchedPR = null;
 
     private final GitHubService githubService = GitHubService.getInstance();
     private final ClaudeService claudeService = new ClaudeService();
     private final PendingReviewIndex pendingIndex = new PendingReviewIndex();
-    private final PatternKnowledgeBase patternKb = new PatternKnowledgeBase();
     private final ChatPanel chatPanel = new ChatPanel(claudeService, reviewPanel::getSelectedText);
 
     public PRToolWindow(Project project) {
@@ -154,13 +155,14 @@ public class PRToolWindow {
         toolbarLeft.add(repoCombo);
         toolbarLeft.add(refreshButton);
         toolbarLeft.add(new JSeparator(SwingConstants.VERTICAL));
-        draftsButton.addActionListener(e -> {
-            if (showingDrafts) loadStarredRepos();
-            else loadDraftPRs();
-        });
+        draftsButton.addActionListener(
+                e -> {
+                    if (showingDrafts) loadStarredRepos();
+                    else loadDraftPRs();
+                });
         toolbarLeft.add(draftsButton);
         searchField.putClientProperty("JTextField.placeholderText", "Search PRs…");
-        searchField.setToolTipText("Filter the PR list by title, author, or repo");
+        searchField.setToolTipText("Filters already-loaded PRs — not a GitHub search");
         toolbarLeft.add(new JSeparator(SwingConstants.VERTICAL));
         toolbarLeft.add(new JBLabel("Search:"));
         toolbarLeft.add(searchField);
@@ -280,6 +282,21 @@ public class PRToolWindow {
         summaryScroll.setBackground(ThemeColors.BG_SUBTLE);
         summaryScroll.getViewport().setBackground(ThemeColors.BG_SUBTLE);
         summaryScroll.setBorder(null);
+        summaryPane.addHyperlinkListener(
+                e -> {
+                    if (e.getEventType() != HyperlinkEvent.EventType.ACTIVATED) return;
+                    String href = e.getDescription();
+                    if (href != null && href.startsWith("comment:")) {
+                        try {
+                            int idx = Integer.parseInt(href.substring("comment:".length()));
+                            if (lastResult != null && idx < lastResult.getLineComments().size()) {
+                                reviewPanel.scrollToComment(lastResult.getLineComments().get(idx));
+                                updateCommentNav();
+                            }
+                        } catch (NumberFormatException ignored) {
+                        }
+                    }
+                });
 
         JLabel summaryHeader = new JLabel("Summary");
         summaryHeader.setFont(summaryHeader.getFont().deriveFont(Font.BOLD, 11f));
@@ -319,33 +336,15 @@ public class PRToolWindow {
         filterCombo.addActionListener(e -> refreshPRs());
         generateButton.addActionListener(e -> generateReview());
         chatPanel.setOnToggle(this::toggleChat);
-        reviewPanel.setOnCommentRemoved(this::updateCommentNav);
+        reviewPanel.setOnCommentRemoved(
+                () -> {
+                    updateCommentNav();
+                    autoSaveDraft();
+                });
         reviewPanel.setOnAskClaude(
                 (ctx, q) -> {
                     ensureChatVisible();
                     chatPanel.askFocused(ctx, q, null);
-                });
-        reviewPanel.setOnVerifyComment(
-                card -> {
-                    PullRequest pr = lastPR;
-                    if (pr == null) return;
-                    LineComment c = card.getComment();
-                    String ctx =
-                            "**Assessing comment** on `%s` line %d:\n> %s"
-                                    .formatted(c.getFile(), c.getLine(), c.getBody());
-                    String question =
-                            "Based on the code visible in this diff, does the pattern or issue "
-                                    + "described in this comment appear consistent with the surrounding "
-                                    + "code style? Look at the changed and context lines for similar "
-                                    + "patterns. Should this comment stand or be dismissed based on "
-                                    + "what you can see in the diff?";
-                    ensureChatVisible();
-                    chatPanel.askFocused(
-                            ctx,
-                            question,
-                            response ->
-                                    patternKb.append(
-                                            pr.getOwner(), pr.getRepo(), c.getBody(), response));
                 });
         saveDraftButton.addActionListener(e -> saveDraft());
         submitButton.addActionListener(e -> submitDraftReview());
@@ -474,6 +473,30 @@ public class PRToolWindow {
 
     private void onPRSelected(PullRequest pr) {
         if (pr == null) return;
+        if (settingSelection) return;
+
+        // Warn before discarding an unsaved (not yet pushed to GitHub) review.
+        if (lastResult != null && pendingReviewId == null && lastPR != null && lastPR != pr) {
+            int choice =
+                    JOptionPane.showConfirmDialog(
+                            mainPanel,
+                            "You have an unsaved review for PR #"
+                                    + lastPR.getNumber()
+                                    + ". Discard it?",
+                            "Unsaved Review",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.WARNING_MESSAGE);
+            if (choice != JOptionPane.YES_OPTION) {
+                settingSelection = true;
+                prList.setSelectedValue(lastPR, false);
+                settingSelection = false;
+                return;
+            }
+        }
+
+        // Collapse stale chat history when switching PRs.
+        if (chatVisible) toggleChat();
+
         prefetchedDiff = null;
         prefetchedPR = null;
         prHeaderLabel.setText(prHeaderHtml(pr));
@@ -512,6 +535,7 @@ public class PRToolWindow {
         }
 
         ReviewResult priorResult = lastResult; // capture for regenerate context
+        String priorPendingId = pendingReviewId;
         lastResult = null;
         showSummaryPlaceholder();
         applyState(State.GENERATING);
@@ -535,7 +559,7 @@ public class PRToolWindow {
                                             token, pr.getOwner(), pr.getRepo(), pr.getNumber());
                         }
                         boolean truncated = diff.contains("[... diff truncated at 80 KB ...]");
-                        String knownPatterns = patternKb.load(pr.getOwner(), pr.getRepo());
+                        final String truncationMsg = truncated ? buildTruncationStatus(diff) : null;
                         String projectConventions = readProjectConventions();
                         String priorReviewSummary =
                                 priorResult != null ? formatPriorReview(priorResult) : null;
@@ -551,10 +575,8 @@ public class PRToolWindow {
                         final String finalExistingReviews = existingReviews;
                         runOnEdt(
                                 () -> {
-                                    if (truncated) {
-                                        setStatus(
-                                                "\u26a0 Diff truncated to 80 KB \u2014 some files"
-                                                        + " may not be reviewed. Generating\u2026");
+                                    if (truncationMsg != null) {
+                                        setStatus(truncationMsg + " Generating\u2026");
                                     } else if (!finalExistingReviews.isBlank()) {
                                         long reviewCount =
                                                 finalExistingReviews
@@ -572,19 +594,19 @@ public class PRToolWindow {
                                             new PRReviewRequest(
                                                     pr,
                                                     finalDiff,
-                                                    knownPatterns,
+                                                    "",
                                                     projectConventions,
                                                     priorReviewSummary,
                                                     finalExistingReviews),
                                             statusMsg -> {
-                                                if (!truncated) setStatus(statusMsg);
+                                                if (truncationMsg == null) setStatus(statusMsg);
                                                 reviewPanel.updateStatus(statusMsg);
                                             },
                                             result -> {
                                                 lastResult = result;
                                                 lastPR = pr;
                                                 reviewPanel.showReview(result, finalDiff);
-                                                showSummary(result.getSummary());
+                                                showSummary(result);
                                                 chatPanel.setProjectConventions(projectConventions);
                                                 chatPanel.setContext(pr, result);
                                                 pendingReviewId =
@@ -593,7 +615,15 @@ public class PRToolWindow {
                                                 updateCommentNav();
                                                 updateGenerateButtonText();
                                                 setStatus(
-                                                        "Review complete. Click \u201cSave Draft\u201d to push to GitHub.");
+                                                        priorPendingId != null
+                                                                ? "Review regenerated \u2014"
+                                                                        + " click \u201cSave to"
+                                                                        + " GitHub\u201d to replace"
+                                                                        + " the existing draft."
+                                                                : "Review complete. Click"
+                                                                        + " \u201cSave to"
+                                                                        + " GitHub\u201d to push"
+                                                                        + " to GitHub.");
                                             },
                                             err -> {
                                                 reviewPanel.showError(err);
@@ -617,6 +647,22 @@ public class PRToolWindow {
     // ---------------------------------------------------------------
     // Draft helpers
     // ---------------------------------------------------------------
+
+    private void autoSaveDraft() {
+        if (lastResult == null || lastPR == null || pendingReviewId == null) return;
+        String token = getToken();
+        PullRequest pr = lastPR;
+        ReviewResult result = lastResult;
+        runInBackground(
+                () -> {
+                    try {
+                        githubService.saveDraftReview(
+                                token, pr.getOwner(), pr.getRepo(), pr.getNumber(), result);
+                    } catch (Exception ignored) {
+                        // silent auto-save — user can manually save if needed
+                    }
+                });
+    }
 
     private void ensureChatVisible() {
         if (!chatVisible) {
@@ -707,6 +753,29 @@ public class PRToolWindow {
 
                         if (finalPending != null) {
                             String conventions = readProjectConventions();
+                            // Check if the PR has new commits since the draft was saved
+                            String currentSha = "";
+                            try {
+                                currentSha =
+                                        githubService.getPRHeadSha(
+                                                token, pr.getOwner(), pr.getRepo(), pr.getNumber());
+                            } catch (Exception ignored) {
+                            }
+                            PendingReviewIndex.Entry localEntry =
+                                    pendingIndex.list().stream()
+                                            .filter(
+                                                    e ->
+                                                            e.owner().equals(pr.getOwner())
+                                                                    && e.repo().equals(pr.getRepo())
+                                                                    && e.number() == pr.getNumber())
+                                            .findFirst()
+                                            .orElse(null);
+                            boolean staleCommits =
+                                    localEntry != null
+                                            && !localEntry.headSha().isBlank()
+                                            && !currentSha.isBlank()
+                                            && !currentSha.equals(localEntry.headSha());
+                            final boolean finalStaleCommits = staleCommits;
                             runOnEdt(
                                     () -> {
                                         prefetchedDiff = finalDiff;
@@ -717,13 +786,20 @@ public class PRToolWindow {
                                         reviewPanel.showReview(
                                                 finalPending.result(),
                                                 finalDiff != null ? finalDiff : "");
-                                        showSummary(finalPending.result().getSummary());
+                                        showSummary(finalPending.result());
                                         chatPanel.setProjectConventions(conventions);
                                         chatPanel.setContext(pr, finalPending.result());
                                         applyState(State.DRAFT_PRESENT);
                                         updateCommentNav();
                                         prHeaderLabel.setText(prHeaderHtml(pr, true));
-                                        setStatus("Loaded pending draft review from GitHub.");
+                                        setStatus(
+                                                finalStaleCommits
+                                                        ? "⚠ Draft loaded — new commits"
+                                                                + " have been pushed since this"
+                                                                + " review was saved."
+                                                                + " Consider regenerating."
+                                                        : "Loaded pending draft review from"
+                                                                + " GitHub.");
                                     });
                         } else {
                             runOnEdt(
@@ -892,8 +968,7 @@ public class PRToolWindow {
                                     runOnEdt(() -> setStatus("Draft deleted."));
                                 } catch (Exception ignored) {
                                     // Non-fatal: local index is already cleaned up
-                                    runOnEdt(
-                                            () -> setStatus("Draft removed from local index."));
+                                    runOnEdt(() -> setStatus("Draft removed from local index."));
                                 }
                             });
                 });
@@ -930,8 +1005,19 @@ public class PRToolWindow {
                         GitHubService.SaveDraftResult saved =
                                 githubService.saveDraftReview(
                                         token, pr.getOwner(), pr.getRepo(), pr.getNumber(), result);
+                        String headSha = "";
+                        try {
+                            headSha =
+                                    githubService.getPRHeadSha(
+                                            token, pr.getOwner(), pr.getRepo(), pr.getNumber());
+                        } catch (Exception ignored) {
+                        }
                         pendingIndex.add(
-                                pr.getOwner(), pr.getRepo(), pr.getNumber(), pr.getTitle());
+                                pr.getOwner(),
+                                pr.getRepo(),
+                                pr.getNumber(),
+                                pr.getTitle(),
+                                headSha);
                         runOnEdt(
                                 () -> {
                                     pendingReviewId = saved.reviewId();
@@ -1154,6 +1240,8 @@ public class PRToolWindow {
         }
         prevCommentButton.setEnabled(total > 0);
         nextCommentButton.setEnabled(total > 0);
+        // Keep the comment list in the summary sidebar in sync with dismissed cards.
+        if (lastResult != null) showSummary(lastResult);
     }
 
     static String friendlyError(Exception ex) {
@@ -1197,14 +1285,72 @@ public class PRToolWindow {
                 .showSettingsDialog(project, PluginSettingsConfigurable.class);
     }
 
-    private void showSummary(String markdown) {
+    private void showSummary(ReviewResult result) {
         // Restore sidebar to ~280px if currently collapsed
         if (diffSummarySplit != null
                 && diffSummarySplit.getDividerLocation() >= diffSummarySplit.getWidth() - 10) {
             diffSummarySplit.setDividerLocation(Math.max(0, diffSummarySplit.getWidth() - 280));
         }
-        summaryPane.setText(ChatPanel.buildHtml(markdown));
+        summaryPane.setText(
+                ChatPanel.buildHtml(
+                        result.getSummary(), buildCommentListHtml(result.getLineComments())));
         summaryPane.setCaretPosition(0);
+    }
+
+    static String buildCommentListHtml(List<LineComment> comments) {
+        if (comments.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("<hr style='border:0;border-top:1px solid #30363d;margin:8px 0'>")
+                .append("<p style='margin:4px 0;color:#8b949e;font-size:10pt'><b>Comments (")
+                .append(comments.size())
+                .append(")</b></p>");
+        for (int i = 0; i < comments.size(); i++) {
+            LineComment c = comments.get(i);
+            String color = commentTypeColor(c.getType());
+            String file = c.getFile();
+            if (file.startsWith("a/") || file.startsWith("b/")) file = file.substring(2);
+            String locPart =
+                    file.isBlank()
+                            ? ""
+                            : " <font color='#8b949e'>" + esc(file) + ":" + c.getLine() + "</font>";
+            String rawBody = c.getBody();
+            String bodyText =
+                    rawBody.isBlank()
+                            ? "<i style='color:#8b949e'>(empty)</i>"
+                            : esc(rawBody.length() > 80 ? rawBody.substring(0, 77) + "…" : rawBody);
+            sb.append("<p style='margin:2px 0'>")
+                    .append("<a href='comment:")
+                    .append(i)
+                    .append("' style='color:#e6edf3;text-decoration:none'>")
+                    .append("<font color='")
+                    .append(color)
+                    .append("'>[")
+                    .append(c.getType().toUpperCase())
+                    .append("]</font>")
+                    .append(locPart)
+                    .append(" ")
+                    .append(bodyText)
+                    .append("</a></p>");
+        }
+        return sb.toString();
+    }
+
+    private static String commentTypeColor(String type) {
+        return switch (type == null ? "" : type.toLowerCase()) {
+            case "issue" -> "#e3b341";
+            case "suggestion" -> "#58a6ff";
+            case "praise" -> "#3fb950";
+            default -> "#8b949e";
+        };
+    }
+
+    static String buildTruncationStatus(String diff) {
+        List<DiffParser.DiffFile> files = DiffParser.parseDiff(diff);
+        if (files.isEmpty()) return "⚠ Diff truncated at 80 KB";
+        int n = files.size();
+        String lastName = files.get(n - 1).name;
+        return "⚠ Diff truncated at 80 KB — %d file(s) parsed; %s may be cut short"
+                .formatted(n, lastName);
     }
 
     private void showSummaryPlaceholder() {
@@ -1260,47 +1406,58 @@ public class PRToolWindow {
     // ---------------------------------------------------------------
 
     /**
-     * Reads {@code .git/config} under {@code basePath} and extracts the {@code owner/repo} for the
-     * {@code origin} remote, or returns {@code null} if not found. Supports both HTTPS and SSH
-     * remote URL formats. No process is spawned — reads the file directly.
+     * Walks up from {@code basePath} to find a {@code .git/config} file, then extracts the {@code
+     * owner/repo} for the {@code origin} remote. Returns {@code null} if not found. No process is
+     * spawned — reads the file directly. Walking up matches git's own behaviour for repos where the
+     * IntelliJ project root is a subdirectory of the git root.
      */
     static String detectCurrentRepo(String basePath) {
         if (basePath == null) return null;
-        File gitConfig = new File(basePath, ".git/config");
-        if (!gitConfig.isFile()) return null;
-        try {
-            List<String> lines = FileUtils.readLines(gitConfig, StandardCharsets.UTF_8);
-            boolean inOriginSection = false;
-            for (String line : lines) {
-                String trimmed = line.trim();
-                if (trimmed.equals("[remote \"origin\"]")) {
-                    inOriginSection = true;
-                } else if (inOriginSection && trimmed.startsWith("[")) {
-                    break; // left the origin section without finding a url
-                } else if (inOriginSection && trimmed.startsWith("url")) {
-                    int eq = trimmed.indexOf('=');
-                    if (eq >= 0) return parseOwnerRepo(trimmed.substring(eq + 1).trim());
+        File dir = new File(basePath);
+        while (dir != null) {
+            File gitConfig = new File(dir, ".git/config");
+            if (gitConfig.isFile()) {
+                try {
+                    List<String> lines = FileUtils.readLines(gitConfig, StandardCharsets.UTF_8);
+                    boolean inOriginSection = false;
+                    for (String line : lines) {
+                        String trimmed = line.trim();
+                        if (trimmed.equals("[remote \"origin\"]")) {
+                            inOriginSection = true;
+                        } else if (inOriginSection && trimmed.startsWith("[")) {
+                            break;
+                        } else if (inOriginSection && trimmed.startsWith("url")) {
+                            int eq = trimmed.indexOf('=');
+                            if (eq >= 0) return parseOwnerRepo(trimmed.substring(eq + 1).trim());
+                        }
+                    }
+                } catch (IOException ignored) {
                 }
+                return null; // found .git/config but no origin remote — stop walking
             }
-        } catch (IOException ignored) {
+            dir = dir.getParentFile();
         }
         return null;
     }
 
     /**
-     * Parses an owner/repo pair from a git remote URL. Handles both SSH ({@code
-     * git@github.com:owner/repo.git}) and HTTPS ({@code https://github.com/owner/repo.git})
-     * formats.
+     * Parses an owner/repo pair from a git remote URL. Handles scp-style SSH ({@code
+     * git@github.com:owner/repo.git}), SSH URIs ({@code ssh://git@host:port/owner/repo.git}), and
+     * HTTPS ({@code https://github.com/owner/repo.git}) formats.
      */
     static String parseOwnerRepo(String remoteUrl) {
         if (remoteUrl == null || remoteUrl.isBlank()) return null;
         String url = remoteUrl.strip();
         if (url.endsWith(".git")) url = url.substring(0, url.length() - 4);
-        // SSH format: git@github.com:owner/repo
-        if (url.contains("@") && url.contains(":") && !url.startsWith("http")) {
+        // scp-style SSH: git@github.com:owner/repo — NOT ssh:// URIs (those have a port after ':')
+        if (url.contains("@")
+                && url.contains(":")
+                && !url.startsWith("http")
+                && !url.startsWith("ssh://")) {
             return ownerRepoFromPath(url.substring(url.lastIndexOf(':') + 1));
         }
-        // HTTPS/HTTP format: https://github.com/owner/repo
+        // HTTPS/HTTP/SSH-URI format: https://github.com/owner/repo or
+        // ssh://git@host:port/owner/repo
         try {
             String path = new URI(url).getPath();
             if (path != null && path.startsWith("/")) path = path.substring(1);
@@ -1322,12 +1479,20 @@ public class PRToolWindow {
     // Cell renderer
     // ---------------------------------------------------------------
 
-    private static class PRCellRenderer extends DefaultListCellRenderer {
+    private class PRCellRenderer extends DefaultListCellRenderer {
         @Override
         public Component getListCellRendererComponent(
                 JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
             super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
             if (value instanceof PullRequest pr) {
+                boolean hasDraft =
+                        pendingIndex.list().stream()
+                                .anyMatch(
+                                        e ->
+                                                e.owner().equals(pr.getOwner())
+                                                        && e.repo().equals(pr.getRepo())
+                                                        && e.number() == pr.getNumber());
+                String draftBadge = hasDraft ? " 📝" : "";
                 String subtitle =
                         pr.getAuthor().isEmpty()
                                 ? "%s/%s".formatted(pr.getOwner(), pr.getRepo())
@@ -1335,8 +1500,9 @@ public class PRToolWindow {
                                         .formatted(
                                                 pr.getOwner(), pr.getRepo(), esc(pr.getAuthor()));
                 setText(
-                        "<html><b>#%d</b> %s<br><small style='color:gray'>%s</small></html>"
-                                .formatted(pr.getNumber(), esc(pr.getTitle()), subtitle));
+                        "<html><b>#%d</b> %s%s<br><small style='color:gray'>%s</small></html>"
+                                .formatted(
+                                        pr.getNumber(), esc(pr.getTitle()), draftBadge, subtitle));
             }
             setBorder(new EmptyBorder(4, 6, 4, 6));
             return this;

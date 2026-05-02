@@ -40,9 +40,6 @@ public class ReviewPanel extends JPanel implements Scrollable {
     /** Called when the user triggers "Ask Claude" from the right-click menu. */
     private java.util.function.BiConsumer<String, String> onAskClaude;
 
-    /** Called when the user triggers "Verify pattern in repo" on a CommentCard. */
-    private java.util.function.Consumer<CommentCard> onVerifyComment;
-
     /** Last non-empty selection made inside this panel; survives focus loss. */
     private String lastKnownSelection = "";
 
@@ -206,7 +203,6 @@ public class ReviewPanel extends JPanel implements Scrollable {
                                     new CommentCard(
                                             c,
                                             dismissed -> onCardDismissed(dismissed, c, result),
-                                            onVerifyComment,
                                             diffCardMaxPx);
                             commentCards.add(card);
                             add(card);
@@ -417,7 +413,6 @@ public class ReviewPanel extends JPanel implements Scrollable {
                                 new CommentCard(
                                         c,
                                         dismissed -> onCardDismissed(dismissed, c, result),
-                                        onVerifyComment,
                                         cardMaxPx);
                         commentCards.add(card);
                         JPanel wrapper = cardWrapper(card, indentPx);
@@ -612,7 +607,6 @@ public class ReviewPanel extends JPanel implements Scrollable {
                 new CommentCard(
                         newComment,
                         dismissed -> onCardDismissed(dismissed, newComment, result),
-                        onVerifyComment,
                         diffCardMaxPx);
         commentCards.add(card);
         try {
@@ -875,10 +869,6 @@ public class ReviewPanel extends JPanel implements Scrollable {
         this.onAskClaude = callback;
     }
 
-    public void setOnVerifyComment(java.util.function.Consumer<CommentCard> callback) {
-        this.onVerifyComment = callback;
-    }
-
     private void onCardDismissed(CommentCard card, LineComment comment, ReviewResult result) {
         commentCards.remove(card);
         result.getLineComments().remove(comment);
@@ -912,6 +902,17 @@ public class ReviewPanel extends JPanel implements Scrollable {
     /** Current comment index (0-based), or {@code -1} if no navigation has occurred. */
     public int getCurrentCommentIndex() {
         return currentCommentIndex;
+    }
+
+    /** Scrolls to the card for {@code comment} (matched by reference) and updates the index. */
+    void scrollToComment(LineComment comment) {
+        for (int i = 0; i < commentCards.size(); i++) {
+            if (commentCards.get(i).getComment() == comment) {
+                currentCommentIndex = i;
+                scrollToCard(commentCards.get(i));
+                return;
+            }
+        }
     }
 
     private void scrollToCard(CommentCard card) {

@@ -202,7 +202,17 @@ public class ClaudeService {
             if (exitCode != 0) {
                 reportProcessFailure(exitCode, process, onError);
             } else {
-                ReviewResult result = parseReview(resultBuffer.toString());
+                ReviewResult result;
+                try {
+                    result = parseReview(resultBuffer.toString());
+                } catch (IOException parseEx) {
+                    log.warn(
+                            "Failed to parse review JSON (first 500 chars): {}",
+                            resultBuffer.length() > 500
+                                    ? resultBuffer.substring(0, 500)
+                                    : resultBuffer.toString());
+                    throw parseEx;
+                }
                 onEdt(() -> onComplete.accept(result));
             }
         } catch (IOException e) {
@@ -229,13 +239,18 @@ public class ClaudeService {
                                                             block ->
                                                                     handleContentBlock(
                                                                             block, onStatus)));
-            case "result" ->
+            case "result" -> {
+                // Only use the final successful result; skip error subtypes.
+                if (!event.isError()
+                        && (event.subtype() == null || "success".equals(event.subtype()))) {
                     event.result()
                             .ifPresent(
                                     result -> {
                                         resultBuffer.append(result);
                                         onEdt(() -> onStatus.accept(STATUS_PARSING));
                                     });
+                }
+            }
         }
     }
 

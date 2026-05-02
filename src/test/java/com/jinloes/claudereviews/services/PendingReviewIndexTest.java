@@ -31,7 +31,7 @@ class PendingReviewIndexTest {
         @Test
         void createsEntry() {
             PendingReviewIndex idx = index();
-            idx.add("owner", "repo", 1, "My PR");
+            idx.add("owner", "repo", 1, "My PR", "");
             List<PendingReviewIndex.Entry> entries = idx.list();
             assertThat(entries).hasSize(1);
             assertThat(entries.get(0).owner()).isEqualTo("owner");
@@ -43,8 +43,8 @@ class PendingReviewIndexTest {
         @Test
         void deduplicates_sameOwnerRepoNumber() {
             PendingReviewIndex idx = index();
-            idx.add("owner", "repo", 1, "Old title");
-            idx.add("owner", "repo", 1, "New title");
+            idx.add("owner", "repo", 1, "Old title", "");
+            idx.add("owner", "repo", 1, "New title", "");
             List<PendingReviewIndex.Entry> entries = idx.list();
             assertThat(entries).hasSize(1);
             assertThat(entries.get(0).title()).isEqualTo("New title");
@@ -53,17 +53,31 @@ class PendingReviewIndexTest {
         @Test
         void differentPRs_bothKept() {
             PendingReviewIndex idx = index();
-            idx.add("owner", "repo", 1, "PR one");
-            idx.add("owner", "repo", 2, "PR two");
+            idx.add("owner", "repo", 1, "PR one", "");
+            idx.add("owner", "repo", 2, "PR two", "");
             assertThat(idx.list()).hasSize(2);
         }
 
         @Test
         void putsNewestFirst() {
             PendingReviewIndex idx = index();
-            idx.add("owner", "repo", 1, "first");
-            idx.add("owner", "repo", 2, "second");
+            idx.add("owner", "repo", 1, "first", "");
+            idx.add("owner", "repo", 2, "second", "");
             assertThat(idx.list().get(0).number()).isEqualTo(2);
+        }
+
+        @Test
+        void storesAndReturnsHeadSha() {
+            PendingReviewIndex idx = index();
+            idx.add("owner", "repo", 1, "My PR", "abc123");
+            assertThat(idx.list().get(0).headSha()).isEqualTo("abc123");
+        }
+
+        @Test
+        void nullHeadSha_returnedAsEmpty() {
+            PendingReviewIndex.Entry entry =
+                    new PendingReviewIndex.Entry("o", "r", 1, "t", "2024-01-01", null);
+            assertThat(entry.headSha()).isEmpty();
         }
     }
 
@@ -73,8 +87,8 @@ class PendingReviewIndexTest {
         @Test
         void removesMatchingEntry() {
             PendingReviewIndex idx = index();
-            idx.add("owner", "repo", 1, "PR one");
-            idx.add("owner", "repo", 2, "PR two");
+            idx.add("owner", "repo", 1, "PR one", "");
+            idx.add("owner", "repo", 2, "PR two", "");
             idx.remove("owner", "repo", 1);
             List<PendingReviewIndex.Entry> entries = idx.list();
             assertThat(entries).hasSize(1);
@@ -84,7 +98,7 @@ class PendingReviewIndexTest {
         @Test
         void nonExistentEntry_isNoOp() {
             PendingReviewIndex idx = index();
-            idx.add("owner", "repo", 1, "PR");
+            idx.add("owner", "repo", 1, "PR", "");
             idx.remove("owner", "repo", 99);
             assertThat(idx.list()).hasSize(1);
         }
@@ -97,7 +111,7 @@ class PendingReviewIndexTest {
         void entries_persistAcrossInstances() {
             Path file = tmp.resolve("pending-prs.json");
             PendingReviewIndex first = new PendingReviewIndex(file);
-            first.add("owner", "repo", 7, "Saved PR");
+            first.add("owner", "repo", 7, "Saved PR", "");
 
             PendingReviewIndex second = new PendingReviewIndex(file);
             assertThat(second.list()).hasSize(1);
@@ -111,7 +125,7 @@ class PendingReviewIndexTest {
         @Test
         void containsOwnerRepoAndNumber() {
             PendingReviewIndex idx = index();
-            idx.add("myorg", "myrepo", 42, "Fix bug");
+            idx.add("myorg", "myrepo", 42, "Fix bug", "");
             String label = idx.list().get(0).displayLabel();
             assertThat(label).contains("myorg/myrepo #42");
             assertThat(label).contains("Fix bug");

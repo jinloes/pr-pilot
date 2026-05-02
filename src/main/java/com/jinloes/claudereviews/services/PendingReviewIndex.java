@@ -23,7 +23,15 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class PendingReviewIndex {
 
-    public record Entry(String owner, String repo, int number, String title, String savedAt) {
+    public record Entry(
+            String owner, String repo, int number, String title, String savedAt, String headSha) {
+
+        /** Returns the head SHA, or empty string for entries saved before this field was added. */
+        @Override
+        public String headSha() {
+            return headSha != null ? headSha : "";
+        }
+
         public String displayLabel() {
             return owner
                     + "/"
@@ -63,7 +71,8 @@ public class PendingReviewIndex {
         }
     }
 
-    public synchronized void add(String owner, String repo, int number, String title) {
+    public synchronized void add(
+            String owner, String repo, int number, String title, String headSha) {
         List<Entry> entries = list();
         entries.removeIf(
                 e -> e.owner().equals(owner) && e.repo().equals(repo) && e.number() == number);
@@ -74,7 +83,8 @@ public class PendingReviewIndex {
                         repo,
                         number,
                         title,
-                        LocalDateTime.now().toString().substring(0, 16)));
+                        LocalDateTime.now().toString().substring(0, 16),
+                        headSha != null ? headSha : ""));
         save(entries);
     }
 

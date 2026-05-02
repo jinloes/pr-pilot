@@ -13,6 +13,8 @@ import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class PRToolWindowTest {
 
@@ -135,6 +137,14 @@ class PRToolWindowTest {
         }
 
         @Test
+        void sshUriWithPort_ownerAndRepoExtracted() {
+            assertThat(
+                            PRToolWindow.parseOwnerRepo(
+                                    "ssh://git@github.example.com:7999/org/project.git"))
+                    .isEqualTo("org/project");
+        }
+
+        @Test
         void nullInput_returnsNull() {
             assertThat(PRToolWindow.parseOwnerRepo(null)).isNull();
         }
@@ -156,8 +166,7 @@ class PRToolWindowTest {
         @Test
         void httpsRemote_ownerRepoReturned(@TempDir File tempDir) throws Exception {
             writeGitConfig(
-                    tempDir,
-                    "[remote \"origin\"]\n\turl = https://github.com/myorg/myrepo.git\n");
+                    tempDir, "[remote \"origin\"]\n\turl = https://github.com/myorg/myrepo.git\n");
             assertThat(PRToolWindow.detectCurrentRepo(tempDir.getAbsolutePath()))
                     .isEqualTo("myorg/myrepo");
         }
@@ -196,11 +205,134 @@ class PRToolWindowTest {
                     .isEqualTo("correct/repo");
         }
 
+        @Test
+        void subdirectoryOfGitRepo_walksUpToFindConfig(@TempDir File tempDir) throws Exception {
+            writeGitConfig(
+                    tempDir, "[remote \"origin\"]\n\turl = https://github.com/org/repo.git\n");
+            File subDir = new File(tempDir, "module/src");
+            subDir.mkdirs();
+            assertThat(PRToolWindow.detectCurrentRepo(subDir.getAbsolutePath()))
+                    .isEqualTo("org/repo");
+        }
+
+        @Test
+        void sshUriWithPort_ownerRepoReturned(@TempDir File tempDir) throws Exception {
+            writeGitConfig(
+                    tempDir,
+                    "[remote \"origin\"]\n\turl = ssh://git@ghe.example.com:7999/org/repo.git\n");
+            assertThat(PRToolWindow.detectCurrentRepo(tempDir.getAbsolutePath()))
+                    .isEqualTo("org/repo");
+        }
+
         private void writeGitConfig(File baseDir, String content) throws Exception {
             File gitDir = new File(baseDir, ".git");
             Files.createDirectory(gitDir.toPath());
             FileUtils.writeStringToFile(
                     new File(gitDir, "config"), content, StandardCharsets.UTF_8);
+        }
+    }
+
+    @Nested
+    class BuildTruncationStatus {
+
+        private static String singleFileDiff(String fileName) {
+            return "diff --git a/"
+                    + fileName
+                    + " b/"
+                    + fileName
+                    + "\n@@ -1,1 +1,1 @@\n-old\n+new\n[... diff truncated at 80 KB ...]";
+        }
+
+        @Test
+        void singleFileParsed_includesNameAndCount() {
+            String status = PRToolWindow.buildTruncationStatus(singleFileDiff("src/Foo.java"));
+            assertThat(status).contains("1 file(s) parsed");
+            assertThat(status).contains("src/Foo.java");
+            assertThat(status).contains("⚠ Diff truncated at 80 KB");
+        }
+
+        @Test
+        void multipleFilesParsed_showsLastFileAndCount() {
+            String diff =
+                    singleFileDiff("A.java")
+                            + "\ndiff --git a/B.java b/B.java\n@@ -1 +1 @@\n-x\n+y";
+            String status = PRToolWindow.buildTruncationStatus(diff);
+            assertThat(status).contains("2 file(s) parsed");
+            assertThat(status).contains("B.java");
+        }
+
+        @Test
+        void emptyDiff_returnsGenericMessage() {
+            String status = PRToolWindow.buildTruncationStatus("");
+            assertThat(status).contains("⚠ Diff truncated at 80 KB");
+        }
+    }
+
+    @Nested
+    class BuildCommentListHtml {
+
+        @Test
+        void emptyList_returnsEmptyString() {
+            assertThat(PRToolWindow.buildCommentListHtml(List.of())).isEmpty();
+        }
+
+        @Test
+        void singleIssueComment_containsBadgeAndLink() {
+            LineComment c = new LineComment("src/Foo.java", 10, "issue", "null check missing");
+            String html = PRToolWindow.buildCommentListHtml(List.of(c));
+            assertThat(html).contains("[ISSUE]");
+            assertThat(html).contains("comment:0");
+            assertThat(html).contains("src/Foo.java:10");
+            assertThat(html).contains("null check missing");
+        }
+
+        @Test
+        void blankFileComment_noLocationPrefix() {
+            LineComment c = new LineComment("", 0, "note", "general note");
+            String html = PRToolWindow.buildCommentListHtml(List.of(c));
+            assertThat(html).contains("[NOTE]");
+            assertThat(html).contains("general note");
+            // No file:line span — the </font> suffix identifies the location part
+            assertThat(html).doesNotContain(":0</font>");
+        }
+
+        @Test
+        void multipleComments_allLinksPresent() {
+            List<LineComment> comments =
+                    List.of(
+                            new LineComment("A.java", 1, "issue", "bug"),
+                            new LineComment("B.java", 2, "suggestion", "improve"));
+            String html = PRToolWindow.buildCommentListHtml(comments);
+            assertThat(html).contains("comment:0");
+            assertThat(html).contains("comment:1");
+            assertThat(html).contains("[ISSUE]");
+            assertThat(html).contains("[SUGGESTION]");
+        }
+
+        @Test
+        void aSlashPrefix_strippedFromLocation() {
+            LineComment c = new LineComment("a/src/Foo.java", 5, "note", "body");
+            String html = PRToolWindow.buildCommentListHtml(List.of(c));
+            assertThat(html).contains("src/Foo.java:5");
+            assertThat(html).doesNotContain("a/src/Foo.java");
+        }
+
+        @Test
+        void bodyOver80Chars_truncated() {
+            String longBody = "x".repeat(90);
+            LineComment c = new LineComment("src/Foo.java", 1, "note", longBody);
+            String html = PRToolWindow.buildCommentListHtml(List.of(c));
+            // Body is truncated to 77 chars + "…" (escaped to &hellip;)
+            assertThat(html).contains("x".repeat(77));
+            assertThat(html).doesNotContain("x".repeat(78));
+        }
+
+        @ParameterizedTest
+        @CsvSource({"issue,#e3b341", "suggestion,#58a6ff", "praise,#3fb950", "note,#8b949e"})
+        void typeColors(String type, String expectedColor) {
+            LineComment c = new LineComment("src/Foo.java", 1, type, "body");
+            String html = PRToolWindow.buildCommentListHtml(List.of(c));
+            assertThat(html).contains(expectedColor);
         }
     }
 

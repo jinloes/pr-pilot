@@ -29,8 +29,8 @@ src/main/java/com/jinloes/claudereviews/
     StreamEvent.java               – Jackson DTO for claude stream-json events
     EventMessage.java              – Jackson DTO for message payload inside a stream event
     ContentBlock.java              – Jackson DTO for a content block (tool_use / text)
-    PendingReviewIndex.java        – Local JSON index of saved drafts (~/.claude-reviews/pending-prs.json)
-    PatternKnowledgeBase.java      – Per-repo pattern knowledge file (~/.claude-reviews/patterns/)
+    PendingReviewIndex.java        – Local JSON index of saved drafts (~/.claude-reviews/pending-prs.json); Entry includes headSha for stale-commit detection
+    PatternKnowledgeBase.java      – Per-repo pattern knowledge file (~/.claude-reviews/patterns/) [unused in main flow; kept for future use]
     SeenPRSet.java                 – Local JSON set of notified PR IDs (~/.claude-reviews/seen-prs.json)
     PRNotificationService.java     – Background polling service; fires IDE balloon notifications
     PRNotificationStartup.java     – postStartupActivity that starts polling if enabled
@@ -45,7 +45,7 @@ src/main/java/com/jinloes/claudereviews/
     PRToolWindowFactory.java       – Creates PRToolWindow on demand
     ReviewPanel.java               – Syntax-highlighted diff viewer with inline CommentCards
     ChatPanel.java                 – Chat UI: streaming bubbles, commonmark-rendered responses
-    CommentCard.java               – Editable inline comment card with dismiss callback
+    CommentCard.java               – Editable inline comment card with dismiss callback; constructors: (comment, onDismiss) and (comment, onDismiss, maxPixelWidth)
     DiffParser.java                – Pure-Java unified diff parser; DiffFile / DiffLine types
     ThemeColors.java               – Centralized theme-aware color palette (light/dark detection)
   highlighting/
@@ -89,7 +89,10 @@ Only decisions that encode an active constraint future code must respect and tha
 `ClaudeService` uses `AtomicReference<Process> activeProcess`. `cancelCurrentRequest()` uses `getAndSet(null)` to atomically read and clear the field before calling `destroyForcibly()`. This eliminates the TOCTOU race that a `volatile` field would leave between the null-check and the destroy call.
 
 ### Review prompt structure
-The prompt instructs Claude as a senior staff engineer. All untrusted input sections are wrapped in XML tags (`<diff>`, `<pr_description>`, `<project_conventions>`, `<known_patterns>`, `<existing_reviews>`, `<prior_review>`) and marked as data-only to guard against prompt injection. Output is a strict JSON schema: `summary` (string), `verdict` (`"APPROVE"` | `"REQUEST_CHANGES"` | `"COMMENT"`), and `comments` array with `file`, `line` (positive int), `type` (`"issue"` | `"suggestion"` | `"note"`), `body` (≤300 chars). Priority checklist: correctness → security → test coverage (100% branch on non-trivial changes) → performance → design.
+The prompt instructs Claude as a senior staff engineer. All untrusted input sections are wrapped in XML tags (`<diff>`, `<pr_description>`, `<project_conventions>`, `<known_patterns>`, `<existing_reviews>`, `<prior_review>`) and marked as data-only to guard against prompt injection. Output is a strict JSON schema: `summary` (string), `verdict` (`"APPROVE"` | `"REQUEST_CHANGES"` | `"COMMENT"`), and `lineComments` array with `file`, `line` (positive int), `type` (`"issue"` | `"suggestion"` | `"note"`), `body` (≤300 chars). Priority checklist: correctness → security → test coverage (100% branch on non-trivial changes) → performance → design.
+
+### stream-json result filtering
+`ClaudeService.handleStreamEvent()` only appends to `resultBuffer` for `result` events with `subtype == "success"` and `is_error == false`. This prevents error results or tool-result events from being concatenated with the review JSON, which would produce a malformed JSON parse error surfaced to the user. `StreamEvent` maps `"is_error"` via `@JsonProperty("is_error")` since Jackson's default naming strategy does not translate snake_case to camelCase.
 
 ### Chat prompt structure
 Two paths: `buildChatPrompt` (general follow-up — includes full PR context and history wrapped in XML turn tags) and `buildFocusedChatPrompt` (right-click actions — wraps only a code snippet in `<code_context>`, no PR comment list). Both mark their XML-delimited content as untrusted data.
@@ -109,6 +112,12 @@ Creating a GitHub pending (draft) review requires omitting the `event` field ent
 
 ### `PatternKnowledgeBase` filename separator
 `fileFor()` uses `%` as the owner/repo separator (e.g. `owner%repo.md`) — `%` cannot appear in GitHub owner or repo names. `fileFor()` also verifies the resolved canonical path starts with the canonical base dir to prevent path traversal via crafted owner/repo strings.
+
+### Stale-commit detection on draft load
+`PendingReviewIndex.Entry` includes `headSha` (the PR HEAD SHA at save time). When `loadDraftFromGitHub()` finds a draft, it calls `getPRHeadSha()` and compares with the stored SHA. If they differ, a ⚠ warning is shown in the status bar but the draft is still loaded. `headSha()` returns `""` for entries serialized before this field was added (backward-compatible null guard in the accessor).
+
+### Auto-save on comment dismiss
+When a review is in `DRAFT_PRESENT` state (`pendingReviewId != null`), dismissing a comment triggers a background `autoSaveDraft()` call — a silent fire-and-forget save that does not update the status bar. This keeps the GitHub draft in sync without interrupting the user.
 
 ---
 

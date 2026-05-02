@@ -39,14 +39,10 @@ public class CommentCard extends JPanel {
     }
 
     public CommentCard(LineComment comment, Consumer<CommentCard> onDismiss) {
-        this(comment, onDismiss, null, 600);
+        this(comment, onDismiss, 600);
     }
 
-    public CommentCard(
-            LineComment comment,
-            Consumer<CommentCard> onDismiss,
-            Consumer<CommentCard> onVerify,
-            int maxPixelWidth) {
+    public CommentCard(LineComment comment, Consumer<CommentCard> onDismiss, int maxPixelWidth) {
         this.comment = comment;
         this.maxPixelWidth = maxPixelWidth;
 
@@ -65,21 +61,6 @@ public class CommentCard extends JPanel {
         typeLabel.setForeground(currentLabel[0]);
         typeLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         typeLabel.setToolTipText("Click to change type");
-
-        JButton verifyButton = new JButton("⋯");
-        verifyButton.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
-        verifyButton.setForeground(ThemeColors.FG_MUTED);
-        verifyButton.setBorderPainted(false);
-        verifyButton.setContentAreaFilled(false);
-        verifyButton.setFocusPainted(false);
-        verifyButton.setMargin(new Insets(0, 4, 0, 4));
-        verifyButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        verifyButton.setToolTipText("Assess pattern in diff");
-        if (onVerify != null) {
-            verifyButton.addActionListener(ev -> onVerify.accept(this));
-        } else {
-            verifyButton.setVisible(false);
-        }
 
         JButton dismiss = new JButton("×");
         dismiss.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
@@ -108,7 +89,6 @@ public class CommentCard extends JPanel {
 
         JPanel eastButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         eastButtons.setOpaque(false);
-        eastButtons.add(verifyButton);
         eastButtons.add(dismiss);
 
         JPanel header = new JPanel(new BorderLayout());
