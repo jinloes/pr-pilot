@@ -82,6 +82,43 @@ class PendingReviewIndexTest {
     }
 
     @Nested
+    class HasDraft {
+
+        @Test
+        void returnsFalse_whenEmpty() {
+            assertThat(index().hasDraft("owner", "repo", 1)).isFalse();
+        }
+
+        @Test
+        void returnsTrue_whenMatchingEntryExists() {
+            PendingReviewIndex idx = index();
+            idx.add("owner", "repo", 42, "My PR", "");
+            assertThat(idx.hasDraft("owner", "repo", 42)).isTrue();
+        }
+
+        @Test
+        void returnsFalse_whenNoPRMatch() {
+            PendingReviewIndex idx = index();
+            idx.add("owner", "repo", 42, "My PR", "");
+            assertThat(idx.hasDraft("owner", "repo", 99)).isFalse();
+        }
+
+        @Test
+        void returnsFalse_whenOwnerDiffers() {
+            PendingReviewIndex idx = index();
+            idx.add("owner", "repo", 1, "PR", "");
+            assertThat(idx.hasDraft("other", "repo", 1)).isFalse();
+        }
+
+        @Test
+        void returnsFalse_whenRepoDiffers() {
+            PendingReviewIndex idx = index();
+            idx.add("owner", "repo", 1, "PR", "");
+            assertThat(idx.hasDraft("owner", "other", 1)).isFalse();
+        }
+    }
+
+    @Nested
     class Remove {
 
         @Test

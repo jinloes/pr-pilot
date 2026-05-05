@@ -37,7 +37,8 @@ public class IntellijClaudeService {
                                         core.reviewPR(
                                                 request,
                                                 model,
-                                                status -> invokeLater(() -> onStatus.accept(status)));
+                                                status ->
+                                                        invokeLater(() -> onStatus.accept(status)));
                                 invokeLater(() -> onComplete.accept(result));
                             } catch (InterruptedException e) {
                                 Thread.currentThread().interrupt();

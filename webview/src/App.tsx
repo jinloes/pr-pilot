@@ -56,10 +56,14 @@ const DEV_PRS: PR[] = [
   },
 ]
 
-// In production, the Java side fires a 'prListLoaded' message via the bridge.
-// In dev (no JCEF), we seed fixture data directly after mount.
+// In production (JCEF), the Java side pushes 'prListLoaded' after page ready.
+// In dev (plain browser), we seed fixture data so the component renders.
 function seedDevData() {
-  const w = window as unknown as { __handleMessage?: (json: string) => void }
+  const w = window as unknown as {
+    cefQuery?: unknown
+    __handleMessage?: (json: string) => void
+  }
+  if (w.cefQuery) return // running inside JCEF — wait for Java to push PRs
   if (!w.__handleMessage) return
   w.__handleMessage(JSON.stringify({ type: 'prListLoaded', prs: DEV_PRS }))
 }

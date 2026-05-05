@@ -72,3 +72,65 @@ tasks.register('unitTest', Test) {
 test {
     useJUnitPlatform()
 }
+
+// ── Webview build ──────────────────────────────────────────────────────────
+
+def webviewSrcDir = "$rootDir/webview"
+
+// Resolve npm from common install locations so the task works when Gradle
+// is launched from the macOS Dock or an IDE that doesn't inherit the full PATH.
+def resolvedNpm = {
+    def candidates = [
+        "${System.getProperty('user.home')}/.volta/bin/npm",
+        '/opt/homebrew/bin/npm',
+        '/usr/local/bin/npm',
+        '/usr/bin/npm',
+    ]
+    for (def c : candidates) {
+        if (new File(c).exists()) return c
+    }
+    return 'npm'
+}()
+
+tasks.register('installWebviewDeps', Exec) {
+    workingDir webviewSrcDir
+    commandLine resolvedNpm, 'install'
+    inputs.file("$webviewSrcDir/package.json")
+    outputs.dir("$webviewSrcDir/node_modules")
+}
+
+tasks.register('buildWebview', Exec) {
+    dependsOn 'installWebviewDeps'
+    workingDir webviewSrcDir
+    commandLine resolvedNpm, 'run', 'build'
+    inputs.files(fileTree(webviewSrcDir) {
+        include 'src/**', 'index.html', 'package.json', 'vite.config.ts', 'tsconfig*.json'
+        exclude 'node_modules/**', 'dist/**'
+    })
+    outputs.dir("$webviewSrcDir/dist")
+}
+
+// Writes webview-manifest.txt listing every file in the Vite dist output.
+// WebviewPanel reads this at runtime to extract resources from the plugin JAR.
+tasks.register('generateWebviewManifest') {
+    dependsOn 'buildWebview'
+    def distDir = file("$webviewSrcDir/dist")
+    def manifestFile = file("$buildDir/generated-webview/webview-manifest.txt")
+    inputs.dir(distDir)
+    outputs.file(manifestFile)
+    doLast {
+        manifestFile.parentFile.mkdirs()
+        def lines = []
+        fileTree(distDir).each { f ->
+            lines << distDir.toPath().relativize(f.toPath()).toString().replace('\\', '/')
+        }
+        manifestFile.text = lines.join('\n')
+    }
+}
+
+// Adds the generated manifest to the classpath root and the dist files under webview/.
+sourceSets.main.resources.srcDirs += ["$buildDir/generated-webview"]
+tasks.named('processResources') {
+    dependsOn 'buildWebview', 'generateWebviewManifest'
+    from("$webviewSrcDir/dist") { into 'webview' }
+}

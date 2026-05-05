@@ -133,15 +133,14 @@ public class ClaudeService {
      * synchronously on the calling thread — callers are responsible for dispatching to a background
      * thread if needed.
      *
-     * @param request  PR metadata, diff, and known patterns
-     * @param model    model ID to pass to {@code --model}, or empty string for CLI default
+     * @param request PR metadata, diff, and known patterns
+     * @param model model ID to pass to {@code --model}, or empty string for CLI default
      * @param onStatus called on the calling thread with human-readable status updates
      * @return the parsed {@link ReviewResult}
-     * @throws IOException          if the process cannot be started or exits non-zero
+     * @throws IOException if the process cannot be started or exits non-zero
      * @throws InterruptedException if the calling thread is interrupted
      */
-    public ReviewResult reviewPR(
-            PRReviewRequest request, String model, Consumer<String> onStatus)
+    public ReviewResult reviewPR(PRReviewRequest request, String model, Consumer<String> onStatus)
             throws IOException, InterruptedException {
         String prompt = buildPrompt(request);
         return runReview(prompt, model, onStatus);
@@ -187,7 +186,9 @@ public class ClaudeService {
             if (exitCode != 0) {
                 String stderr = IOUtils.toString(process.getErrorStream(), StandardCharsets.UTF_8);
                 String msg =
-                        "claude exited " + exitCode + (stderr.isBlank() ? "" : ": " + stderr.trim());
+                        "claude exited "
+                                + exitCode
+                                + (stderr.isBlank() ? "" : ": " + stderr.trim());
                 throw new IOException(msg);
             }
             ReviewResult result;
@@ -274,12 +275,12 @@ public class ClaudeService {
     /**
      * Sends a chat message to Claude. Runs synchronously on the calling thread.
      *
-     * @param prContext  formatted PR + review background (may be empty)
-     * @param history    prior turns in this conversation
+     * @param prContext formatted PR + review background (may be empty)
+     * @param history prior turns in this conversation
      * @param userMessage the user's latest message
-     * @param onChunk    called on the calling thread with each new text chunk as it arrives
+     * @param onChunk called on the calling thread with each new text chunk as it arrives
      * @return the complete response text
-     * @throws IOException          if the process cannot be started or exits non-zero
+     * @throws IOException if the process cannot be started or exits non-zero
      * @throws InterruptedException if the calling thread is interrupted
      */
     public String chat(
@@ -296,10 +297,10 @@ public class ClaudeService {
      * Sends a focused code question to Claude. Runs synchronously on the calling thread.
      *
      * @param focusedContext the specific code snippet or line being asked about
-     * @param question       the user's question about that code
-     * @param onChunk        called on the calling thread with each new text chunk as it arrives
+     * @param question the user's question about that code
+     * @param onChunk called on the calling thread with each new text chunk as it arrives
      * @return the complete response text
-     * @throws IOException          if the process cannot be started or exits non-zero
+     * @throws IOException if the process cannot be started or exits non-zero
      * @throws InterruptedException if the calling thread is interrupted
      */
     public String chatFocused(String focusedContext, String question, Consumer<String> onChunk)
@@ -333,14 +334,15 @@ public class ClaudeService {
             boolean finished = process.waitFor(10, TimeUnit.MINUTES);
             if (!finished) {
                 process.destroyForcibly();
-                throw new IOException(
-                        "Chat timed out — claude did not finish within 10 minutes.");
+                throw new IOException("Chat timed out — claude did not finish within 10 minutes.");
             }
             int exitCode = process.exitValue();
             if (exitCode != 0) {
                 String stderr = IOUtils.toString(process.getErrorStream(), StandardCharsets.UTF_8);
                 String msg =
-                        "claude exited " + exitCode + (stderr.isBlank() ? "" : ": " + stderr.trim());
+                        "claude exited "
+                                + exitCode
+                                + (stderr.isBlank() ? "" : ": " + stderr.trim());
                 throw new IOException(msg);
             }
             return buffer.toString();

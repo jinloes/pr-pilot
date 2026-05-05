@@ -53,7 +53,8 @@ intellij-plugin/                       – IntelliJ Platform plugin; depends on 
       PluginSettingsConfigurable.java – Wires settings into IntelliJ settings tree under Tools
     ui/
       PRToolWindow.java              – Main tool window: PR list, filter/repo combos, review panel, chat
-      PRToolWindowFactory.java       – Creates PRToolWindow on demand
+      PRToolWindowFactory.java       – Creates PRToolWindow (Classic tab) + WebviewPanel (WebUI tab)
+      WebviewPanel.java              – JCEF browser wrapper; loads React webview, wires Java↔JS bridge
       ReviewPanel.java               – Syntax-highlighted diff viewer with inline CommentCards
       ChatPanel.java                 – Chat UI: streaming bubbles, commonmark-rendered responses
       CommentCard.java               – Editable inline comment card with dismiss callback
@@ -65,10 +66,11 @@ intellij-plugin/                       – IntelliJ Platform plugin; depends on 
     META-INF/plugin.xml
     highlights/  java.scm kotlin.scm python.scm go.scm javascript.scm typescript.scm rust.scm bash.scm proto.scm
 
-webview/                               – Vite + React + TypeScript webview scaffold
+webview/                               – Vite + React + TypeScript webview
   src/
     bridge/types.ts                  – IDE↔webview message types and sendToHost/onHostMessage helpers
-    App.tsx                          – Root component (placeholder)
+    components/PRList/               – React PR list component (Phosphor Terminal aesthetic)
+    App.tsx                          – Root component; seeds fixture data in dev, waits for bridge in prod
     main.tsx                         – React entry point
   package.json / vite.config.ts / tsconfig.json / index.html
 ```
@@ -134,6 +136,12 @@ Creating a GitHub pending review requires omitting `event` entirely from the POS
 
 ### Repo auto-detection
 `detectCurrentRepo()` walks up the directory tree to find `.git/config` (matches git's own behavior). `parseOwnerRepo()` treats scp-style `git@host:owner/repo` separately from `ssh://` URIs so the port number in `ssh://git@host:7999/owner/repo` is not mistaken for the path separator.
+
+### Webview resource extraction — manifest-based
+`intellij-plugin/build.gradle` runs `npm run build` in `webview/`, copies `dist/**` into the plugin JAR as `webview/**`, and writes `webview-manifest.txt` listing every file. At runtime, `WebviewPanel.extractWebviewResources()` reads the manifest and copies each file to a temp dir, then loads a `file://` URL in JCEF. This avoids JAR directory enumeration, which behaves differently for `file://` vs `jar://` classpath entries. The temp dir is cached in a `static volatile` field so it is extracted only once per JVM lifecycle.
+
+### JCEF availability guard
+`PRToolWindowFactory` checks `JBCefApp.isSupported()` before creating `WebviewPanel`. JCEF is unavailable in some IntelliJ variants (e.g., remote development thin clients). The Classic Swing tab is always shown; the WebUI tab is added only when JCEF is present.
 
 ### Webview bridge protocol
 `webview/src/bridge/types.ts` defines all IDE↔webview message types. The IntelliJ side calls `browser.executeJavaScript("window.__handleMessage('" + json + "')")` to push data in; the webview calls `window.cefQuery({request: json})` to send data out. Both paths have no-op fallbacks so the webview runs standalone in a browser during development.

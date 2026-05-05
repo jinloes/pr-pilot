@@ -93,6 +93,15 @@ public class PendingReviewIndex {
         save(entries);
     }
 
+    public synchronized boolean hasDraft(String owner, String repo, int number) {
+        return list().stream()
+                .anyMatch(
+                        e ->
+                                e.owner().equals(owner)
+                                        && e.repo().equals(repo)
+                                        && e.number() == number);
+    }
+
     public synchronized void remove(String owner, String repo, int number) {
         List<Entry> entries = list();
         entries.removeIf(
