@@ -1,6 +1,15 @@
 /**
  * Messages sent FROM the IntelliJ plugin TO the webview via JCEF executeJavaScript.
  */
+export interface PRListLoadedMessage {
+  type: 'prListLoaded'
+  prs: PR[]
+}
+
+export interface PRLoadingMessage {
+  type: 'prLoading'
+}
+
 export interface ReviewLoadedMessage {
   type: 'reviewLoaded'
   summary: string
@@ -18,7 +27,23 @@ export interface ChatChunkMessage {
   chunk: string
 }
 
-export type IncomingMessage = ReviewLoadedMessage | StatusUpdateMessage | ChatChunkMessage
+export type IncomingMessage =
+  | PRListLoadedMessage
+  | PRLoadingMessage
+  | ReviewLoadedMessage
+  | StatusUpdateMessage
+  | ChatChunkMessage
+
+export interface PR {
+  number: number
+  title: string
+  owner: string
+  repo: string
+  author: string
+  createdAt: string
+  htmlUrl: string
+  hasDraft: boolean
+}
 
 export interface LineComment {
   file: string
@@ -30,6 +55,17 @@ export interface LineComment {
 /**
  * Messages sent FROM the webview TO the IntelliJ plugin via window.cefQuery (JCEF).
  */
+export interface SelectPRRequest {
+  type: 'selectPR'
+  number: number
+  owner: string
+  repo: string
+}
+
+export interface RefreshPRsRequest {
+  type: 'refreshPRs'
+}
+
 export interface GenerateReviewRequest {
   type: 'generateReview'
 }
@@ -50,6 +86,8 @@ export interface SubmitReviewRequest {
 }
 
 export type OutgoingMessage =
+  | SelectPRRequest
+  | RefreshPRsRequest
   | GenerateReviewRequest
   | AskClaudeRequest
   | SaveDraftRequest
@@ -57,7 +95,7 @@ export type OutgoingMessage =
 
 /**
  * Sends a message to the IntelliJ host.
- * In development (no JCEF), logs to console so the webview can run standalone.
+ * No-op with console log when running outside JCEF (dev mode).
  */
 export function sendToHost(message: OutgoingMessage): void {
   const w = window as unknown as { cefQuery?: (opts: { request: string }) => void }
@@ -73,9 +111,7 @@ export function sendToHost(message: OutgoingMessage): void {
  * The host calls window.__handleMessage(jsonString) via executeJavaScript.
  */
 export function onHostMessage(handler: (message: IncomingMessage) => void): () => void {
-  const w = window as unknown as {
-    __handleMessage?: (json: string) => void
-  }
+  const w = window as unknown as { __handleMessage?: (json: string) => void }
   w.__handleMessage = (json: string) => {
     try {
       handler(JSON.parse(json) as IncomingMessage)
