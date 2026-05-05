@@ -1,1 +1,5 @@
 rootProject.name = 'intellij-claude-reviews'
+
+include 'core'
+include 'intellij-plugin'
+include 'webview'

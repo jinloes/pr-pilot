@@ -1,80 +1,15 @@
 plugins {
-    id 'java'
-    id 'org.jetbrains.intellij.platform' version '2.13.1'
-    id 'com.diffplug.spotless' version '6.25.0'
+    id 'com.diffplug.spotless' version '6.25.0' apply false
 }
 
-group = 'com.jinloes.claudereviews'
-version = '1.0.0'
+subprojects {
+    apply plugin: 'com.diffplug.spotless'
 
-repositories {
-    mavenCentral()
-    intellijPlatform {
-        defaultRepositories()
-    }
-}
-
-dependencies {
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
-    implementation 'org.commonmark:commonmark:0.22.0'
-    implementation 'org.apache.commons:commons-lang3:3.17.0'
-    implementation 'org.apache.commons:commons-text:1.12.0'
-    implementation 'commons-io:commons-io:2.16.1'
-    implementation 'org.apache.commons:commons-collections4:4.4'
-    implementation 'io.github.bonede:tree-sitter:0.26.3'
-    implementation 'io.github.bonede:tree-sitter-java:0.23.5'
-    implementation 'io.github.bonede:tree-sitter-python:0.23.4'
-    implementation 'io.github.bonede:tree-sitter-go:0.23.3'
-    implementation 'io.github.bonede:tree-sitter-kotlin:0.3.8.1'
-    implementation 'io.github.bonede:tree-sitter-javascript:0.23.1'
-    implementation 'io.github.bonede:tree-sitter-typescript:0.23.2'
-    implementation 'io.github.bonede:tree-sitter-rust:0.23.1'
-    implementation 'io.github.bonede:tree-sitter-bash:0.23.3'
-    implementation 'io.github.bonede:tree-sitter-proto:main-a'
-    compileOnly 'org.projectlombok:lombok:1.18.32'
-    annotationProcessor 'org.projectlombok:lombok:1.18.32'
-
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
-    testImplementation 'org.assertj:assertj-core:3.25.3'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-
-    intellijPlatform {
-        local('/Applications/IntelliJ IDEA.app')
-    }
-}
-
-intellijPlatform {
-    instrumentCode = false
-}
-
-compileJava {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
-    options.encoding = 'UTF-8'
-}
-
-// Plain JUnit 5 tests without the IntelliJ Platform sandbox (avoids requiring JUnit 4 vintage).
-tasks.register('unitTest', Test) {
-    description = 'Runs plain JUnit 5 unit tests without the IntelliJ Platform sandbox.'
-    group = 'verification'
-    useJUnitPlatform()
-    testClassesDirs = sourceSets.test.output.classesDirs
-    // Exclude testFramework.jar — it registers JUnit5TestEnvironmentInitializer which requires JUnit 4 vintage.
-    classpath = sourceSets.test.runtimeClasspath +
-        configurations.intellijPlatformTestClasspath.filter { f ->
-            !f.name.startsWith('testFramework')
+    spotless {
+        java {
+            googleJavaFormat('1.22.0').aosp()
+            trimTrailingWhitespace()
+            endWithNewline()
         }
-}
-
-test {
-    useJUnitPlatform()
-}
-
-spotless {
-    java {
-        // Google Java Format AOSP variant uses 4-space indentation (matches project style).
-        googleJavaFormat('1.22.0').aosp()
-        trimTrailingWhitespace()
-        endWithNewline()
     }
 }

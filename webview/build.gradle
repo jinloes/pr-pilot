@@ -1,0 +1,38 @@
+plugins {
+    id 'base'
+}
+
+def npmCmd = System.getProperty('os.name').toLowerCase().contains('win') ? 'npm.cmd' : 'npm'
+
+tasks.register('npmInstall', Exec) {
+    description = 'Install webview npm dependencies'
+    group = 'build'
+    workingDir projectDir
+    commandLine npmCmd, 'install'
+    inputs.file('package.json')
+    outputs.dir('node_modules')
+}
+
+tasks.register('buildWebview', Exec) {
+    description = 'Build the Vite/React webview'
+    group = 'build'
+    dependsOn 'npmInstall'
+    workingDir projectDir
+    commandLine npmCmd, 'run', 'build'
+    inputs.dir('src')
+    inputs.file('vite.config.ts')
+    inputs.file('tsconfig.json')
+    outputs.dir('dist')
+}
+
+tasks.register('copyWebview', Copy) {
+    description = 'Copy built webview into intellij-plugin resources'
+    group = 'build'
+    dependsOn 'buildWebview'
+    from 'dist'
+    into "${rootProject.projectDir}/intellij-plugin/src/main/resources/webview"
+}
+
+clean {
+    delete 'dist'
+}

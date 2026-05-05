@@ -1,0 +1,89 @@
+/**
+ * Messages sent FROM the IntelliJ plugin TO the webview via JCEF executeJavaScript.
+ */
+export interface ReviewLoadedMessage {
+  type: 'reviewLoaded'
+  summary: string
+  verdict: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
+  lineComments: LineComment[]
+}
+
+export interface StatusUpdateMessage {
+  type: 'statusUpdate'
+  text: string
+}
+
+export interface ChatChunkMessage {
+  type: 'chatChunk'
+  chunk: string
+}
+
+export type IncomingMessage = ReviewLoadedMessage | StatusUpdateMessage | ChatChunkMessage
+
+export interface LineComment {
+  file: string
+  line: number
+  type: 'issue' | 'suggestion' | 'note'
+  body: string
+}
+
+/**
+ * Messages sent FROM the webview TO the IntelliJ plugin via window.cefQuery (JCEF).
+ */
+export interface GenerateReviewRequest {
+  type: 'generateReview'
+}
+
+export interface AskClaudeRequest {
+  type: 'askClaude'
+  context: string
+  question: string
+}
+
+export interface SaveDraftRequest {
+  type: 'saveDraft'
+}
+
+export interface SubmitReviewRequest {
+  type: 'submitReview'
+  verdict: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
+}
+
+export type OutgoingMessage =
+  | GenerateReviewRequest
+  | AskClaudeRequest
+  | SaveDraftRequest
+  | SubmitReviewRequest
+
+/**
+ * Sends a message to the IntelliJ host.
+ * In development (no JCEF), logs to console so the webview can run standalone.
+ */
+export function sendToHost(message: OutgoingMessage): void {
+  const w = window as unknown as { cefQuery?: (opts: { request: string }) => void }
+  if (w.cefQuery) {
+    w.cefQuery({ request: JSON.stringify(message) })
+  } else {
+    console.debug('[bridge] sendToHost (no JCEF):', message)
+  }
+}
+
+/**
+ * Registers a handler for messages pushed from the IntelliJ host.
+ * The host calls window.__handleMessage(jsonString) via executeJavaScript.
+ */
+export function onHostMessage(handler: (message: IncomingMessage) => void): () => void {
+  const w = window as unknown as {
+    __handleMessage?: (json: string) => void
+  }
+  w.__handleMessage = (json: string) => {
+    try {
+      handler(JSON.parse(json) as IncomingMessage)
+    } catch (e) {
+      console.error('[bridge] failed to parse host message:', json, e)
+    }
+  }
+  return () => {
+    delete w.__handleMessage
+  }
+}
