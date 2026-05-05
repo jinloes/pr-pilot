@@ -110,27 +110,10 @@ tasks.register('buildWebview', Exec) {
     outputs.dir("$webviewSrcDir/dist")
 }
 
-// Writes webview-manifest.txt listing every file in the Vite dist output.
-// WebviewPanel reads this at runtime to extract resources from the plugin JAR.
-tasks.register('generateWebviewManifest') {
-    dependsOn 'buildWebview'
-    def distDir = file("$webviewSrcDir/dist")
-    def manifestFile = file("$buildDir/generated-webview/webview-manifest.txt")
-    inputs.dir(distDir)
-    outputs.file(manifestFile)
-    doLast {
-        manifestFile.parentFile.mkdirs()
-        def lines = []
-        fileTree(distDir).each { f ->
-            lines << distDir.toPath().relativize(f.toPath()).toString().replace('\\', '/')
-        }
-        manifestFile.text = lines.join('\n')
-    }
-}
-
-// Adds the generated manifest to the classpath root and the dist files under webview/.
-sourceSets.main.resources.srcDirs += ["$buildDir/generated-webview"]
+// Copies the Vite dist output under webview/ in the classpath.
+// WebviewPanel serves files directly from the classpath via an embedded HTTP server —
+// no extraction or manifest file needed.
 tasks.named('processResources') {
-    dependsOn 'buildWebview', 'generateWebviewManifest'
+    dependsOn 'buildWebview'
     from("$webviewSrcDir/dist") { into 'webview' }
 }
