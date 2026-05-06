@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jinloes.claudereviews.model.PRReviewRequest;
 import com.jinloes.claudereviews.model.PullRequest;
+import com.jinloes.claudereviews.services.stream.ContentBlock;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,7 +25,7 @@ class ClaudeServiceTest {
         void alwaysContainsPersonaAndDiff() {
             String prompt =
                     ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff content", "", ""));
-            assertThat(prompt).contains("senior security engineer");
+            assertThat(prompt).contains("experienced engineer");
             assertThat(prompt).contains("diff content");
         }
 
@@ -196,6 +198,100 @@ class ClaudeServiceTest {
             ClaudeService service = new ClaudeService();
             // Should be a no-op when idle (activeProcess is null)
             service.cancelCurrentRequest();
+        }
+    }
+
+    @Nested
+    class HandleContentBlock {
+
+        private final ClaudeService service = new ClaudeService();
+
+        @Test
+        void textBlock_withOnChunk_callsOnChunkNotOnStatus() {
+            List<String> statuses = new ArrayList<>();
+            List<String[]> chunks = new ArrayList<>();
+            ContentBlock block = textBlock("hello world");
+
+            service.handleContentBlock(
+                    block, statuses::add, (k, v) -> chunks.add(new String[] {k, v}));
+
+            assertThat(statuses).isEmpty();
+            assertThat(chunks).hasSize(1);
+            assertThat(chunks.get(0)).containsExactly("text", "hello world");
+        }
+
+        @Test
+        void textBlock_withoutOnChunk_callsOnStatusWithGenerating() {
+            List<String> statuses = new ArrayList<>();
+
+            service.handleContentBlock(textBlock("hello"), statuses::add, null);
+
+            assertThat(statuses).containsExactly("Generating review…");
+        }
+
+        @Test
+        void textBlock_blankText_withOnChunk_fallsBackToOnStatus() {
+            List<String> statuses = new ArrayList<>();
+            List<String[]> chunks = new ArrayList<>();
+
+            service.handleContentBlock(
+                    textBlock("   "), statuses::add, (k, v) -> chunks.add(new String[] {k, v}));
+
+            assertThat(chunks).isEmpty();
+            assertThat(statuses).containsExactly("Generating review…");
+        }
+
+        @Test
+        void thinkingBlock_withOnChunk_callsOnChunk() {
+            List<String[]> chunks = new ArrayList<>();
+
+            service.handleContentBlock(
+                    thinkingBlock("deep thought"),
+                    s -> {},
+                    (k, v) -> chunks.add(new String[] {k, v}));
+
+            assertThat(chunks).hasSize(1);
+            assertThat(chunks.get(0)).containsExactly("thinking", "deep thought");
+        }
+
+        @Test
+        void thinkingBlock_withoutOnChunk_callsNothing() {
+            List<String> statuses = new ArrayList<>();
+
+            service.handleContentBlock(thinkingBlock("deep thought"), statuses::add, null);
+
+            assertThat(statuses).isEmpty();
+        }
+
+        @Test
+        void toolUseBlock_callsOnStatus_regardlessOfOnChunk() {
+            List<String> statuses = new ArrayList<>();
+
+            service.handleContentBlock(toolUseBlock("my_tool"), statuses::add, (k, v) -> {});
+
+            assertThat(statuses).containsExactly("my_tool()");
+        }
+
+        private static ContentBlock textBlock(String text) {
+            ContentBlock b = new ContentBlock();
+            b.setType("text");
+            b.setText(text);
+            return b;
+        }
+
+        private static ContentBlock thinkingBlock(String thinking) {
+            ContentBlock b = new ContentBlock();
+            b.setType("thinking");
+            b.setThinking(thinking);
+            return b;
+        }
+
+        private static ContentBlock toolUseBlock(String name) {
+            ContentBlock b = new ContentBlock();
+            b.setType("tool_use");
+            b.setName(name);
+            b.setInput(Map.of());
+            return b;
         }
     }
 

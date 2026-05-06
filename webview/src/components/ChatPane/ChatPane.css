@@ -1,0 +1,286 @@
+/*
+ * ChatPane — Ask Claude section.
+ * Uses Phosphor Terminal amber theme variables from :root in PRList.css.
+ */
+
+/* ── Container ───────────────────────────────────────────────── */
+
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0;
+}
+
+/* ── Header ──────────────────────────────────────────────────── */
+
+.chat-pane__header {
+  padding: 8px 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chat-pane__title {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.chat-pane__clear-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px 3px;
+  border: 1px solid var(--border-accent);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.chat-pane__clear-btn:hover {
+  background: #1a0604;
+  border-color: #4a1410;
+  color: #f85149;
+}
+
+/* ── Message list ────────────────────────────────────────────── */
+
+.chat-pane__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.chat-pane__messages::-webkit-scrollbar {
+  width: 4px;
+}
+
+.chat-pane__messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-pane__messages::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+/* ── Bubbles ─────────────────────────────────────────────────── */
+
+.chat-pane__bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.chat-pane__bubble-label {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chat-pane__bubble--user .chat-pane__bubble-label {
+  color: var(--accent);
+}
+
+.chat-pane__bubble--assistant .chat-pane__bubble-label {
+  color: var(--text-dim);
+}
+
+.chat-pane__bubble-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+.chat-pane__bubble--user .chat-pane__bubble-body {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 2px;
+  padding: 7px 10px;
+}
+
+.chat-pane__bubble--assistant .chat-pane__bubble-body {
+  color: var(--text);
+  padding: 2px 0;
+}
+
+.chat-pane__bubble--error .chat-pane__bubble-body {
+  color: #f85149;
+  background: #1a0604;
+  border: 1px solid #4a1410;
+  border-radius: 2px;
+  padding: 7px 10px;
+}
+
+/* ── Streaming cursor & waiting dots ─────────────────────────── */
+
+.chat-pane__cursor {
+  color: var(--accent);
+  animation: cp-blink 1s step-end infinite;
+  margin-left: 1px;
+}
+
+@keyframes cp-blink {
+  50% { opacity: 0; }
+}
+
+.chat-pane__bubble-body--waiting {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.chat-pane__dot {
+  color: var(--accent);
+  font-size: 10px;
+  opacity: 0.2;
+  animation: cp-dot-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes cp-dot-pulse {
+  0%, 80%, 100% { opacity: 0.2; }
+  40% { opacity: 1; }
+}
+
+/* ── Context badge ───────────────────────────────────────────── */
+
+.chat-pane__context-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-accent);
+  border-left: 2px solid var(--accent);
+  border-radius: 2px;
+}
+
+.chat-pane__context-text {
+  flex: 1;
+  min-width: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-pane__context-dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  transition: color 0.1s;
+}
+
+.chat-pane__context-dismiss:hover {
+  color: #f85149;
+}
+
+/* ── Input row ───────────────────────────────────────────────── */
+
+.chat-pane__input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.chat-pane__input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  line-height: 1.5;
+  padding: 7px 10px;
+  resize: none;
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.chat-pane__input:focus {
+  border-color: var(--border-accent);
+}
+
+.chat-pane__input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-pane__input::placeholder {
+  color: var(--text-dim);
+}
+
+.chat-pane__send-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border-accent);
+  border-radius: 2px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 16px;
+  font-family: 'JetBrains Mono', monospace;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  line-height: 1;
+}
+
+.chat-pane__send-btn:hover:not(:disabled) {
+  background: #8a5a18;
+  border-color: var(--accent);
+  color: #fff8ec;
+}
+
+.chat-pane__send-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Context hint ────────────────────────────────────────────── */
+
+.chat-pane__hint {
+  margin: 5px 0 0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  opacity: 0.7;
+}

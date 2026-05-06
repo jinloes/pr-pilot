@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { PRList } from './components/PRList'
+import { ReviewPane } from './components/ReviewPane'
 import { type PR } from './bridge/types'
 
 // Dev-mode fixture data — replaced by real bridge messages in production
@@ -56,32 +57,111 @@ const DEV_PRS: PR[] = [
   },
 ]
 
-// In production (JCEF), the Java side pushes 'prListLoaded' after page ready.
-// In dev (plain browser), we seed fixture data so the component renders.
+const MIN_LEFT = 180
+const MAX_LEFT = 560
+const DEFAULT_LEFT = 320
+const STORAGE_KEY = 'claude-reviews:divider-width'
+
+function loadSavedWidth(): number {
+  const saved = Number(localStorage.getItem(STORAGE_KEY))
+  return saved >= MIN_LEFT && saved <= MAX_LEFT ? saved : DEFAULT_LEFT
+}
+
 function seedDevData() {
   const w = window as unknown as {
     cefQuery?: unknown
     __handleMessage?: (json: string) => void
   }
-  if (w.cefQuery) return // running inside JCEF — wait for Java to push PRs
+  if (w.cefQuery) return
   if (!w.__handleMessage) return
   w.__handleMessage(JSON.stringify({ type: 'prListLoaded', prs: DEV_PRS }))
 }
 
 export default function App() {
+  const [selectedPR, setSelectedPR] = useState<PR | null>(null)
+  const [leftWidth, setLeftWidth] = useState(loadSavedWidth)
+  const dragging = useRef(false)
+  const dragStartX = useRef(0)
+  const dragStartW = useRef(0)
+  // Tracks the latest width synchronously so handleMouseUp can persist without stale closure
+  const currentWidthRef = useRef(leftWidth)
+
   useEffect(() => {
-    // Give the bridge handler time to register, then seed dev data
     const id = setTimeout(seedDevData, 100)
     return () => clearTimeout(id)
   }, [])
 
-  function handleSelect(pr: PR) {
-    console.log('[App] selected PR', pr.number, pr.title)
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!dragging.current) return
+    const delta = e.clientX - dragStartX.current
+    const newWidth = Math.max(MIN_LEFT, Math.min(MAX_LEFT, dragStartW.current + delta))
+    currentWidthRef.current = newWidth
+    setLeftWidth(newWidth)
+  }, [])
+
+  const handleMouseUp = useCallback(() => {
+    if (!dragging.current) return
+    dragging.current = false
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    localStorage.setItem(STORAGE_KEY, String(currentWidthRef.current))
+    document.removeEventListener('mousemove', handleMouseMove)
+    document.removeEventListener('mouseup', handleMouseUp)
+  }, [handleMouseMove])
+
+  function handleDividerMouseDown(e: React.MouseEvent) {
+    dragging.current = true
+    dragStartX.current = e.clientX
+    dragStartW.current = leftWidth
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    e.preventDefault()
   }
 
   return (
-    <div style={{ height: '100%' }}>
-      <PRList onSelect={handleSelect} />
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+      {/* Left column — PR list */}
+      <div
+        style={{
+          width: leftWidth,
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        <PRList onSelect={setSelectedPR} />
+      </div>
+
+      {/* Draggable divider */}
+      <div
+        style={{
+          width: 5,
+          flexShrink: 0,
+          background: 'var(--border)',
+          cursor: 'col-resize',
+          position: 'relative',
+        }}
+        onMouseDown={handleDividerMouseDown}
+        title="Drag to resize"
+      >
+        {/* Wider invisible hit area */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: '0 -3px',
+            cursor: 'col-resize',
+          }}
+          onMouseDown={handleDividerMouseDown}
+        />
+      </div>
+
+      {/* Right column — review pane */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <ReviewPane pr={selectedPR} />
+      </div>
     </div>
   )
 }

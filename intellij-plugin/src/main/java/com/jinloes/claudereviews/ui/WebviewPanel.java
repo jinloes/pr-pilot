@@ -5,20 +5,31 @@ import static com.intellij.openapi.application.ApplicationManager.getApplication
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intellij.ide.BrowserUtil;
 import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
+import com.jinloes.claudereviews.model.ChatMessage;
+import com.jinloes.claudereviews.model.PRReviewRequest;
 import com.jinloes.claudereviews.model.PullRequest;
+import com.jinloes.claudereviews.model.ReviewResult;
+import com.jinloes.claudereviews.services.GitHubService;
+import com.jinloes.claudereviews.services.IntellijClaudeService;
+import com.jinloes.claudereviews.services.IntellijGitHubService;
 import com.jinloes.claudereviews.services.PendingReviewIndex;
+import com.jinloes.claudereviews.settings.PluginSettings;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import javax.swing.JComponent;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
 import org.cef.handler.CefLoadHandlerAdapter;
@@ -40,6 +51,8 @@ import org.cef.handler.CefLoadHandlerAdapter;
 @Slf4j
 public class WebviewPanel {
 
+    // --- Outbound DTO records (Java → JS) ---
+
     private record WebviewPr(
             int number,
             String title,
@@ -50,15 +63,68 @@ public class WebviewPanel {
             @JsonProperty("htmlUrl") String htmlUrl,
             @JsonProperty("hasDraft") boolean hasDraft) {}
 
-    private record PrListMessage(String type, List<WebviewPr> prs) {}
+    private record PrListMessage(
+            String type, List<WebviewPr> prs, @JsonProperty("defaultRepo") String defaultRepo) {}
+
+    private record DraftLoadingMsg(String type) {}
+
+    private record ReviewResultDto(
+            String summary,
+            String verdict,
+            @JsonProperty("lineComments") List<LineCommentDto> lineComments) {}
+
+    private record LineCommentDto(String file, int line, String type, String body) {}
+
+    private record DraftLoadedMsg(
+            String type,
+            String prState,
+            @JsonProperty("reviewId") String reviewId,
+            @JsonProperty("result") ReviewResultDto result,
+            String diff,
+            boolean staleCommits,
+            String status) {}
+
+    private record ReviewGeneratingMsg(String type, String message) {}
+
+    private record ReviewChunkMsg(String type, String kind, String chunk) {}
+
+    private record ReviewResultMsg(String type, ReviewResultDto result, String diff) {}
+
+    private record ErrorMsg(String type, String message) {}
+
+    private record DraftSavedMsg(String type, String reviewId, boolean commentsDropped) {}
+
+    private record SimpleMsg(String type) {}
+
+    private record ChatChunkMsg(String type, String chunk) {}
+
+    private record ChatResponseMsg(String type, String response) {}
+
+    private record PrDraftStatusMsg(
+            String type,
+            int number,
+            String owner,
+            String repo,
+            @JsonProperty("hasDraft") boolean hasDraft) {}
+
+    // --- Infrastructure ---
 
     private final HttpServer httpServer;
     private final JBCefBrowser browser;
     private final JBCefJSQuery bridgeQuery;
     private final ObjectMapper mapper = new ObjectMapper();
     private final PendingReviewIndex pendingIndex = new PendingReviewIndex();
+    private final IntellijClaudeService claudeService = new IntellijClaudeService();
+    private final IntellijGitHubService ghSvc = IntellijGitHubService.getInstance();
 
     private volatile List<PullRequest> cachedPRs = List.of();
+    private volatile PullRequest activePR = null;
+    private volatile ReviewResult lastResult = null;
+    private volatile String pendingReviewId = null;
+    private volatile String prefetchedDiff = null;
+    private volatile String prefetchedExistingReviews = null;
+    private volatile List<ChatMessage> chatHistory = List.of();
+
     private Consumer<PullRequest> onPRSelected = pr -> {};
     private Runnable onPageReady = () -> {};
 
@@ -90,7 +156,7 @@ public class WebviewPanel {
 
         if (httpServer != null) {
             String url = "http://127.0.0.1:" + httpServer.getAddress().getPort() + "/";
-            log.debug("Loading webview from {}", url);
+            log.info("Loading webview from {}", url);
             browser.loadURL(url);
         } else {
             browser.loadHTML(
@@ -157,28 +223,570 @@ public class WebviewPanel {
         try {
             var node = mapper.readTree(json);
             String type = node.path("type").asText();
-            if ("selectPR".equals(type)) {
-                int number = node.path("number").asInt();
-                String owner = node.path("owner").asText();
-                String repo = node.path("repo").asText();
-                cachedPRs.stream()
-                        .filter(
-                                pr ->
-                                        pr.getNumber() == number
-                                                && pr.getOwner().equals(owner)
-                                                && pr.getRepo().equals(repo))
-                        .findFirst()
-                        .ifPresent(onPRSelected);
-            } else if ("refreshPRs".equals(type)) {
-                getApplication().invokeLater(onPageReady);
+            int number = node.path("number").asInt();
+            String owner = node.path("owner").asText();
+            String repo = node.path("repo").asText();
+
+            switch (type) {
+                case "selectPR" -> handleSelectPR(number, owner, repo);
+                case "refreshPRs" -> getApplication().invokeLater(onPageReady);
+                case "openUrl" -> {
+                    String url = node.path("url").asText();
+                    if (StringUtils.isNotBlank(url) && url.startsWith("https://")) {
+                        getApplication().invokeLater(() -> BrowserUtil.browse(url));
+                    }
+                }
+                case "generateReview" -> handleGenerateReview(number, owner, repo);
+                case "cancelReview" -> claudeService.cancelCurrentRequest();
+                case "saveDraft" ->
+                        getApplication()
+                                .executeOnPooledThread(() -> handleSaveDraft(number, owner, repo));
+                case "submitReview" -> {
+                    String verdict = node.path("verdict").asText();
+                    String comment = node.path("comment").asText("");
+                    getApplication()
+                            .executeOnPooledThread(
+                                    () ->
+                                            handleSubmitReview(
+                                                    number, owner, repo, verdict, comment));
+                }
+                case "deleteDraft" ->
+                        getApplication()
+                                .executeOnPooledThread(
+                                        () -> handleDeleteDraft(number, owner, repo));
+                case "clearChat" -> chatHistory = List.of();
+                case "askClaude" -> {
+                    String question = node.path("question").asText();
+                    String context = node.path("context").asText("");
+                    getApplication()
+                            .executeOnPooledThread(() -> handleAskClaude(question, context));
+                }
+                default -> log.warn("Unknown bridge message type: {}", type);
             }
         } catch (Exception e) {
             log.warn("Bridge message error: {}", e.getMessage());
         }
     }
 
+    // --- selectPR ---
+
+    private void handleSelectPR(int number, String owner, String repo) {
+        PullRequest pr =
+                cachedPRs.stream()
+                        .filter(
+                                p ->
+                                        p.getNumber() == number
+                                                && p.getOwner().equals(owner)
+                                                && p.getRepo().equals(repo))
+                        .findFirst()
+                        .orElse(null);
+        if (pr == null) {
+            return;
+        }
+
+        activePR = pr;
+        lastResult = null;
+        pendingReviewId = null;
+        prefetchedDiff = null;
+        prefetchedExistingReviews = null;
+        chatHistory = List.of();
+
+        getApplication().invokeLater(() -> onPRSelected.accept(pr));
+        pushMessage(new DraftLoadingMsg("draftLoading"));
+
+        getApplication()
+                .executeOnPooledThread(
+                        () -> {
+                            String token = PluginSettings.getInstance().getGithubToken();
+                            if (StringUtils.isBlank(token)) {
+                                pushMessage(
+                                        new DraftLoadedMsg(
+                                                "draftLoaded",
+                                                "NO_DRAFT",
+                                                null,
+                                                null,
+                                                null,
+                                                false,
+                                                "No GitHub token configured."));
+                                return;
+                            }
+
+                            // All four calls are independent — run concurrently so total
+                            // latency is max(each) instead of sum(each).
+                            CompletableFuture<Boolean> mergedFuture =
+                                    CompletableFuture.supplyAsync(
+                                            () -> {
+                                                try {
+                                                    return ghSvc.isPRMerged(
+                                                            token, owner, repo, number);
+                                                } catch (Exception e) {
+                                                    log.warn(
+                                                            "isPRMerged failed: {}",
+                                                            e.getMessage());
+                                                    return false;
+                                                }
+                                            });
+
+                            CompletableFuture<GitHubService.PendingReview> pendingFuture =
+                                    CompletableFuture.supplyAsync(
+                                            () -> {
+                                                try {
+                                                    return ghSvc.loadDraftReview(
+                                                            token, owner, repo, number);
+                                                } catch (Exception e) {
+                                                    log.warn(
+                                                            "loadDraftReview failed: {}",
+                                                            e.getMessage());
+                                                    return null;
+                                                }
+                                            });
+
+                            CompletableFuture<String> diffFuture =
+                                    CompletableFuture.supplyAsync(
+                                            () -> {
+                                                try {
+                                                    return ghSvc.getPRDiff(
+                                                            token, owner, repo, number);
+                                                } catch (Exception e) {
+                                                    log.warn(
+                                                            "getPRDiff prefetch failed: {}",
+                                                            e.getMessage());
+                                                    return null;
+                                                }
+                                            });
+
+                            CompletableFuture<String> reviewsFuture =
+                                    CompletableFuture.supplyAsync(
+                                            () -> {
+                                                try {
+                                                    return ghSvc.getExistingReviewsSummary(
+                                                            token, owner, repo, number);
+                                                } catch (Exception e) {
+                                                    log.warn(
+                                                            "getExistingReviewsSummary prefetch"
+                                                                    + " failed: {}",
+                                                            e.getMessage());
+                                                    return "";
+                                                }
+                                            });
+
+                            boolean merged = mergedFuture.join();
+                            GitHubService.PendingReview pending = pendingFuture.join();
+                            prefetchedDiff = diffFuture.join();
+                            prefetchedExistingReviews = reviewsFuture.join();
+
+                            // Delete stale draft on a merged PR, best-effort.
+                            if (merged && pending != null) {
+                                try {
+                                    ghSvc.deleteDraftReview(
+                                            token, owner, repo, number, pending.id());
+                                } catch (Exception e) {
+                                    log.warn("deleteDraftReview failed: {}", e.getMessage());
+                                }
+                                pending = null;
+                            }
+
+                            if (merged) {
+                                pushMessage(
+                                        new DraftLoadedMsg(
+                                                "draftLoaded",
+                                                "MERGED",
+                                                null,
+                                                null,
+                                                null,
+                                                false,
+                                                "PR is merged."));
+                                return;
+                            }
+
+                            if (pending != null) {
+                                boolean stale = isStale(owner, repo, number);
+                                ReviewResultDto dto = toDto(pending.result());
+                                pushMessage(
+                                        new DraftLoadedMsg(
+                                                "draftLoaded",
+                                                "DRAFT_PRESENT",
+                                                pending.id(),
+                                                dto,
+                                                prefetchedDiff,
+                                                stale,
+                                                "Loaded pending draft review."));
+                                pendingReviewId = pending.id();
+                                lastResult = pending.result();
+                                return;
+                            }
+
+                            pushMessage(
+                                    new DraftLoadedMsg(
+                                            "draftLoaded",
+                                            "NO_DRAFT",
+                                            null,
+                                            null,
+                                            null,
+                                            false,
+                                            ""));
+                        });
+    }
+
+    /**
+     * Returns true when the local index has a saved entry whose headSha differs from the PR's
+     * current HEAD SHA (i.e. new commits have been pushed since the draft was saved).
+     */
+    private boolean isStale(String owner, String repo, int number) {
+        return pendingIndex.list().stream()
+                .filter(
+                        e ->
+                                e.owner().equals(owner)
+                                        && e.repo().equals(repo)
+                                        && e.number() == number)
+                .findFirst()
+                .map(
+                        e -> {
+                            if (StringUtils.isBlank(e.headSha())) {
+                                return false;
+                            }
+                            String token = PluginSettings.getInstance().getGithubToken();
+                            if (StringUtils.isBlank(token)) {
+                                return false;
+                            }
+                            try {
+                                String currentSha = ghSvc.getPRHeadSha(token, owner, repo, number);
+                                return !e.headSha().equals(currentSha);
+                            } catch (Exception ex) {
+                                log.warn("getPRHeadSha failed: {}", ex.getMessage());
+                                return false;
+                            }
+                        })
+                .orElse(false);
+    }
+
+    // --- generateReview ---
+
+    private void handleGenerateReview(int number, String owner, String repo) {
+        PullRequest pr =
+                cachedPRs.stream()
+                        .filter(
+                                p ->
+                                        p.getNumber() == number
+                                                && p.getOwner().equals(owner)
+                                                && p.getRepo().equals(repo))
+                        .findFirst()
+                        .orElse(null);
+        if (pr == null) {
+            pushMessage(new ErrorMsg("reviewError", "PR not found."));
+            return;
+        }
+
+        String token = PluginSettings.getInstance().getGithubToken();
+        if (StringUtils.isBlank(token)) {
+            pushMessage(new ErrorMsg("reviewError", "No GitHub token configured."));
+            return;
+        }
+
+        // Dispatch all blocking work to a pooled thread so the JCEF bridge returns immediately
+        // and status messages can flow during the network-fetch phase.
+        final PullRequest finalPr = pr;
+        final String finalToken = token;
+        getApplication()
+                .executeOnPooledThread(
+                        () -> {
+                            // Delete any existing draft before regenerating so GitHub doesn't
+                            // accumulate multiple pending drafts on the same PR.
+                            String existingReviewId = pendingReviewId;
+                            if (StringUtils.isNotBlank(existingReviewId)) {
+                                try {
+                                    ghSvc.deleteDraftReview(
+                                            finalToken, owner, repo, number, existingReviewId);
+                                    pendingIndex.remove(owner, repo, number);
+                                    pendingReviewId = null;
+                                } catch (Exception e) {
+                                    log.warn(
+                                            "pre-regen deleteDraftReview failed: {}",
+                                            e.getMessage());
+                                }
+                            }
+
+                            // Reuse prefetched diff; fall back to live fetch only if stale.
+                            String diff;
+                            if (activePR == finalPr && StringUtils.isNotBlank(prefetchedDiff)) {
+                                diff = prefetchedDiff;
+                            } else {
+                                pushMessage(
+                                        new ReviewGeneratingMsg(
+                                                "reviewGenerating", "Fetching diff…"));
+                                try {
+                                    diff = ghSvc.getPRDiff(finalToken, owner, repo, number);
+                                } catch (Exception e) {
+                                    pushMessage(
+                                            new ErrorMsg(
+                                                    "reviewError",
+                                                    "Failed to fetch diff: " + e.getMessage()));
+                                    return;
+                                }
+                            }
+
+                            // Reuse prefetched existing reviews; fall back to live fetch only if
+                            // stale.
+                            String existingReviews;
+                            if (activePR == finalPr && prefetchedExistingReviews != null) {
+                                existingReviews = prefetchedExistingReviews;
+                            } else {
+                                try {
+                                    existingReviews =
+                                            ghSvc.getExistingReviewsSummary(
+                                                    finalToken, owner, repo, number);
+                                } catch (Exception e) {
+                                    log.warn(
+                                            "getExistingReviewsSummary failed: {}", e.getMessage());
+                                    existingReviews = "";
+                                }
+                            }
+
+                            // Start Claude — callbacks fired on EDT
+                            pushMessage(
+                                    new ReviewGeneratingMsg(
+                                            "reviewGenerating", "Sending to Claude…"));
+                            final String finalDiff = diff;
+                            final String finalExisting = existingReviews;
+                            claudeService.reviewPR(
+                                    new PRReviewRequest(
+                                            finalPr, finalDiff, "", "", "", finalExisting),
+                                    statusMsg ->
+                                            pushMessage(
+                                                    new ReviewGeneratingMsg(
+                                                            "reviewGenerating", statusMsg)),
+                                    (kind, chunk) ->
+                                            pushMessage(
+                                                    new ReviewChunkMsg("reviewChunk", kind, chunk)),
+                                    result -> {
+                                        lastResult = result;
+                                        pendingReviewId = null;
+                                        pushMessage(
+                                                new ReviewResultMsg(
+                                                        "reviewResult", toDto(result), finalDiff));
+                                    },
+                                    err -> pushMessage(new ErrorMsg("reviewError", err)));
+                        });
+    }
+
+    // --- saveDraft ---
+
+    private void handleSaveDraft(int number, String owner, String repo) {
+        ReviewResult result = lastResult;
+        if (result == null) {
+            pushMessage(new ErrorMsg("draftSaveError", "No review result to save."));
+            return;
+        }
+
+        String token = PluginSettings.getInstance().getGithubToken();
+        if (StringUtils.isBlank(token)) {
+            pushMessage(new ErrorMsg("draftSaveError", "No GitHub token configured."));
+            return;
+        }
+
+        GitHubService.SaveDraftResult saved;
+        try {
+            saved = ghSvc.saveDraftReview(token, owner, repo, number, result);
+        } catch (Exception e) {
+            pushMessage(new ErrorMsg("draftSaveError", "Save failed: " + e.getMessage()));
+            return;
+        }
+
+        String headSha = "";
+        try {
+            headSha = ghSvc.getPRHeadSha(token, owner, repo, number);
+        } catch (Exception e) {
+            log.warn("getPRHeadSha failed during saveDraft: {}", e.getMessage());
+        }
+
+        PullRequest pr =
+                cachedPRs.stream()
+                        .filter(
+                                p ->
+                                        p.getNumber() == number
+                                                && p.getOwner().equals(owner)
+                                                && p.getRepo().equals(repo))
+                        .findFirst()
+                        .orElse(null);
+        String title = pr != null ? pr.getTitle() : "";
+        pendingIndex.add(owner, repo, number, title, headSha);
+        pendingReviewId = saved.reviewId();
+
+        pushMessage(new DraftSavedMsg("draftSaved", saved.reviewId(), saved.commentsDropped()));
+        pushMessage(new PrDraftStatusMsg("prDraftStatusUpdated", number, owner, repo, true));
+    }
+
+    // --- submitReview ---
+
+    private void handleSubmitReview(
+            int number, String owner, String repo, String verdict, String comment) {
+        String reviewId = pendingReviewId;
+        if (StringUtils.isBlank(reviewId)) {
+            pushMessage(new ErrorMsg("reviewSubmitError", "No pending draft review to submit."));
+            return;
+        }
+
+        String token = PluginSettings.getInstance().getGithubToken();
+        if (StringUtils.isBlank(token)) {
+            pushMessage(new ErrorMsg("reviewSubmitError", "No GitHub token configured."));
+            return;
+        }
+
+        try {
+            ghSvc.submitDraftReview(token, owner, repo, number, reviewId, verdict, comment);
+        } catch (Exception e) {
+            pushMessage(new ErrorMsg("reviewSubmitError", "Submit failed: " + e.getMessage()));
+            return;
+        }
+
+        pendingIndex.remove(owner, repo, number);
+        lastResult = null;
+        pendingReviewId = null;
+
+        pushMessage(new SimpleMsg("reviewSubmitted"));
+        pushMessage(new PrDraftStatusMsg("prDraftStatusUpdated", number, owner, repo, false));
+    }
+
+    // --- deleteDraft ---
+
+    private void handleDeleteDraft(int number, String owner, String repo) {
+        String reviewId = pendingReviewId;
+        if (StringUtils.isBlank(reviewId)) {
+            pushMessage(new ErrorMsg("draftDeleteError", "No pending draft review to delete."));
+            return;
+        }
+
+        String token = PluginSettings.getInstance().getGithubToken();
+        if (StringUtils.isBlank(token)) {
+            pushMessage(new ErrorMsg("draftDeleteError", "No GitHub token configured."));
+            return;
+        }
+
+        try {
+            ghSvc.deleteDraftReview(token, owner, repo, number, reviewId);
+        } catch (Exception e) {
+            pushMessage(new ErrorMsg("draftDeleteError", "Delete failed: " + e.getMessage()));
+            return;
+        }
+
+        pendingIndex.remove(owner, repo, number);
+        lastResult = null;
+        pendingReviewId = null;
+
+        pushMessage(new SimpleMsg("draftDeleted"));
+        pushMessage(new PrDraftStatusMsg("prDraftStatusUpdated", number, owner, repo, false));
+    }
+
+    // --- askClaude ---
+
+    private void handleAskClaude(String question, String context) {
+        if (StringUtils.isBlank(question)) {
+            return;
+        }
+
+        PullRequest pr = activePR;
+        if (pr == null) {
+            pushMessage(new ErrorMsg("chatError", "No PR selected."));
+            return;
+        }
+
+        String prContext = buildPrContext(pr);
+        List<ChatMessage> history = chatHistory;
+
+        // When the user has selected a code snippet, prepend it so Claude can reference it.
+        String fullQuestion =
+                StringUtils.isBlank(context)
+                        ? question
+                        : "<selection_context>\n"
+                                + context
+                                + "\n</selection_context>\n\n"
+                                + question;
+
+        claudeService.chat(
+                prContext,
+                history,
+                fullQuestion,
+                chunk -> pushMessage(new ChatChunkMsg("chatChunk", chunk)),
+                response -> {
+                    List<ChatMessage> updated = new ArrayList<>(history);
+                    updated.add(new ChatMessage(ChatMessage.Role.USER, fullQuestion));
+                    updated.add(new ChatMessage(ChatMessage.Role.ASSISTANT, response));
+                    chatHistory = updated;
+                    pushMessage(new ChatResponseMsg("chatResponse", response));
+                },
+                err -> pushMessage(new ErrorMsg("chatError", err)));
+    }
+
+    private String buildPrContext(PullRequest pr) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("PR #").append(pr.getNumber()).append(": ").append(pr.getTitle()).append("\n");
+        sb.append("Author: @").append(pr.getAuthor()).append("\n");
+        sb.append("Repo: ").append(pr.getOwner()).append("/").append(pr.getRepo()).append("\n");
+
+        String body = pr.getBody();
+        if (StringUtils.isNotBlank(body)) {
+            sb.append("\nPR Description:\n").append(body).append("\n");
+        }
+
+        ReviewResult result = lastResult;
+        if (result != null) {
+            sb.append("\nReview verdict: ").append(result.getVerdict()).append("\n");
+            sb.append("Review summary: ").append(result.getSummary()).append("\n");
+        }
+
+        String diff = prefetchedDiff;
+        if (StringUtils.isNotBlank(diff)) {
+            sb.append("\nDiff:\n").append(diff);
+        }
+
+        return sb.toString();
+    }
+
+    // --- Helpers ---
+
+    /**
+     * Serializes {@code payload} to JSON and pushes it into the webview via {@code
+     * __handleMessage}.
+     */
+    private void pushMessage(Object payload) {
+        try {
+            String json = mapper.writeValueAsString(payload);
+            String escaped = escapeForJsString(json);
+            browser.getCefBrowser()
+                    .executeJavaScript(
+                            "if(window.__handleMessage){window.__handleMessage('"
+                                    + escaped
+                                    + "');}",
+                            browser.getCefBrowser().getURL(),
+                            0);
+        } catch (JsonProcessingException e) {
+            log.warn("pushMessage serialization failed: {}", e.getMessage());
+        }
+    }
+
+    private static ReviewResultDto toDto(ReviewResult r) {
+        if (r == null) {
+            return null;
+        }
+        List<LineCommentDto> comments =
+                r.getLineComments().stream()
+                        .map(
+                                c ->
+                                        new LineCommentDto(
+                                                c.getFile(), c.getLine(), c.getType(), c.getBody()))
+                        .toList();
+        return new ReviewResultDto(r.getSummary(), r.getVerdict(), comments);
+    }
+
+    private static String escapeForJsString(String s) {
+        return s.replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n");
+    }
+
     /** Pushes the PR list into the webview via the bridge. Call from the EDT. */
-    public void loadPRs(List<PullRequest> prs) {
+    public void loadPRs(List<PullRequest> prs, String defaultRepo) {
         cachedPRs = prs;
         List<WebviewPr> dtos =
                 prs.stream()
@@ -197,27 +805,7 @@ public class WebviewPanel {
                                                         pr.getRepo(),
                                                         pr.getNumber())))
                         .toList();
-        try {
-            String json = mapper.writeValueAsString(new PrListMessage("prListLoaded", dtos));
-            String escaped = escapeForJsString(json);
-            browser.getCefBrowser()
-                    .executeJavaScript(
-                            "if(window.__handleMessage)"
-                                    + "{window.__handleMessage('"
-                                    + escaped
-                                    + "');}",
-                            browser.getCefBrowser().getURL(),
-                            0);
-        } catch (JsonProcessingException e) {
-            log.warn("PR list serialization failed: {}", e.getMessage());
-        }
-    }
-
-    private static String escapeForJsString(String s) {
-        return s.replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace("\r", "\\r")
-                .replace("\n", "\\n");
+        pushMessage(new PrListMessage("prListLoaded", dtos, defaultRepo));
     }
 
     public void setOnPRSelected(Consumer<PullRequest> callback) {

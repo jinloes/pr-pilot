@@ -15,6 +15,8 @@ public class ContentBlock {
     private String type;
     private String name;
     private Map<String, Object> input;
+    private String text;
+    private String thinking;
 
     public String type() {
         return type;
@@ -26,5 +28,13 @@ public class ContentBlock {
 
     public Optional<Map<String, Object>> input() {
         return Optional.ofNullable(input);
+    }
+
+    public Optional<String> text() {
+        return Optional.ofNullable(text);
+    }
+
+    public Optional<String> thinking() {
+        return Optional.ofNullable(thinking);
     }
 }

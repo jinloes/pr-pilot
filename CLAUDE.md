@@ -28,6 +28,7 @@ core/                                  – Pure Java JAR, no IntelliJ dependenci
       GitHubAuthService.java         – Runs `gh auth token`; probes known gh binary paths
       GitHubService.java             – GitHub REST API: search PRs, diff, draft review CRUD (constructor-injected apiBase)
       ClaudeService.java             – Shells out to `claude --print`; synchronous/blocking API
+      AnthropicApiKeyLocator.java    – Resolves Anthropic API key: macOS Keychain ("Claude Code") → ANTHROPIC_API_KEY env var → empty
       PendingReviewIndex.java        – Local JSON index of saved drafts (~/.claude-reviews/pending-prs.json)
       PatternKnowledgeBase.java      – Per-repo pattern knowledge file (~/.claude-reviews/patterns/) [unused in main flow]
       SeenPRSet.java                 – Local JSON set of notified PR IDs (~/.claude-reviews/seen-prs.json)
@@ -70,6 +71,10 @@ webview/                               – Vite + React + TypeScript webview
   src/
     bridge/types.ts                  – IDE↔webview message types and sendToHost/onHostMessage helpers
     components/PRList/               – React PR list component (Phosphor Terminal aesthetic)
+    components/ReviewPane/           – Review pane: state machine, diff viewer, footer actions
+    components/ReviewDisplay/        – Verdict badge + markdown summary display
+    components/DiffViewer/           – Unified diff renderer with inline comment cards
+    components/ChatPane/             – Ask Claude chat section; streams replies, preserves history per PR
     App.tsx                          – Root component; seeds fixture data in dev, waits for bridge in prod
     main.tsx                         – React entry point
   package.json / vite.config.ts / tsconfig.json / index.html

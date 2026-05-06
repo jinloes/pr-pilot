@@ -6,6 +6,7 @@ import com.jinloes.claudereviews.model.PRReviewRequest;
 import com.jinloes.claudereviews.model.ReviewResult;
 import com.jinloes.claudereviews.settings.PluginSettings;
 import java.util.List;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import org.apache.commons.lang3.StringUtils;
 
@@ -28,6 +29,21 @@ public class IntellijClaudeService {
             Consumer<String> onStatus,
             Consumer<ReviewResult> onComplete,
             Consumer<String> onError) {
+        reviewPR(request, onStatus, null, onComplete, onError);
+    }
+
+    /**
+     * Like {@link #reviewPR(PRReviewRequest, Consumer, Consumer, Consumer)} but also delivers
+     * streaming text and thinking chunks via {@code onChunk}. The first argument is the kind
+     * ({@code "text"} or {@code "thinking"}); the second is the content. All callbacks are invoked
+     * on the EDT.
+     */
+    public void reviewPR(
+            PRReviewRequest request,
+            Consumer<String> onStatus,
+            BiConsumer<String, String> onChunk,
+            Consumer<ReviewResult> onComplete,
+            Consumer<String> onError) {
         String model = PluginSettings.getInstance().getReviewModel();
         ApplicationManager.getApplication()
                 .executeOnPooledThread(
@@ -38,7 +54,15 @@ public class IntellijClaudeService {
                                                 request,
                                                 model,
                                                 status ->
-                                                        invokeLater(() -> onStatus.accept(status)));
+                                                        invokeLater(() -> onStatus.accept(status)),
+                                                onChunk == null
+                                                        ? null
+                                                        : (kind, chunk) ->
+                                                                invokeLater(
+                                                                        () ->
+                                                                                onChunk.accept(
+                                                                                        kind,
+                                                                                        chunk)));
                                 invokeLater(() -> onComplete.accept(result));
                             } catch (InterruptedException e) {
                                 Thread.currentThread().interrupt();
