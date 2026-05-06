@@ -13,6 +13,9 @@ out/
 # IntelliJ Platform Gradle Plugin caches
 .intellijPlatform/
 
+# Claude Code
+.claude/worktrees/
+
 # macOS
 .DS_Store
 
