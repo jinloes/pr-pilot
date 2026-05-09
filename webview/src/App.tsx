@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Toaster } from 'sonner'
 import { PRList } from './components/PRList'
 import { ReviewPane } from './components/ReviewPane'
 import { type PR } from './bridge/types'
@@ -59,7 +60,7 @@ const DEV_PRS: PR[] = [
 
 const MIN_LEFT = 180
 const MAX_LEFT = 560
-const DEFAULT_LEFT = 320
+const DEFAULT_LEFT = 240
 const STORAGE_KEY = 'claude-reviews:divider-width'
 
 function loadSavedWidth(): number {
@@ -121,47 +122,33 @@ export default function App() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+    <>
+    <Toaster theme="system" position="bottom-right" richColors />
+    <div className="flex h-full overflow-hidden">
       {/* Left column — PR list */}
-      <div
-        style={{
-          width: leftWidth,
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
+      <div style={{ width: leftWidth }} className="shrink-0 flex flex-col overflow-hidden">
         <PRList onSelect={setSelectedPR} />
       </div>
 
       {/* Draggable divider */}
       <div
-        style={{
-          width: 5,
-          flexShrink: 0,
-          background: 'var(--border)',
-          cursor: 'col-resize',
-          position: 'relative',
-        }}
+        className="shrink-0 relative cursor-col-resize bg-border"
+        style={{ width: 5 }}
         onMouseDown={handleDividerMouseDown}
         title="Drag to resize"
       >
-        {/* Wider invisible hit area */}
         <div
-          style={{
-            position: 'absolute',
-            inset: '0 -3px',
-            cursor: 'col-resize',
-          }}
+          className="absolute cursor-col-resize"
+          style={{ inset: '0 -3px' }}
           onMouseDown={handleDividerMouseDown}
         />
       </div>
 
       {/* Right column — review pane */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="flex-1 flex flex-col overflow-hidden">
         <ReviewPane pr={selectedPR} />
       </div>
     </div>
+    </>
   )
 }

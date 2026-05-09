@@ -1,0 +1,44 @@
+{
+  "name": "claude-reviews-vscode",
+  "displayName": "Claude PR Reviews",
+  "description": "AI-powered pull request reviews using Claude",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [{ "id": "claude-reviews", "title": "Claude Reviews", "icon": "$(git-pull-request)" }]
+    },
+    "views": {
+      "claude-reviews": [{ "id": "claude-reviews.main", "name": "Claude Reviews", "type": "webview" }]
+    },
+    "configuration": {
+      "title": "Claude Reviews",
+      "properties": {
+        "claude-reviews.githubBaseUrl": {
+          "type": "string",
+          "default": "https://github.com",
+          "description": "GitHub base URL. Change for GitHub Enterprise (e.g. https://github.mycompany.com)."
+        },
+        "claude-reviews.reviewModel": {
+          "type": "string",
+          "default": "",
+          "description": "Claude model ID to use for reviews. Empty uses the CLI default."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -watch -p tsconfig.json"
+  },
+  "dependencies": {
+    "core": "file:../core/build/js/packages/core"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}

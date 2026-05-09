@@ -6,10 +6,56 @@ import {
   type ReviewResult,
   type LineComment,
 } from '../../bridge/types'
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  CloudUpload,
+  ExternalLink,
+  GitMerge,
+  Loader2,
+  MessageSquare,
+  RotateCcw,
+  Trash2,
+  X,
+  XCircle,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 import { ChatPane } from '../ChatPane'
 import { DiffViewer } from '../DiffViewer'
 import { ReviewDisplay } from '../ReviewDisplay'
-import './ReviewPane.css'
 
 const CHAT_HEIGHT_KEY = 'claude-reviews:chat-height'
 const MIN_CHAT_HEIGHT = 100
@@ -38,8 +84,8 @@ type PaneState =
   | { kind: 'merged'; status?: string }
   | { kind: 'submitted' }
   | { kind: 'error'; message: string }
-  | { kind: 'saveError'; message: string }
-  | { kind: 'submitError'; message: string }
+  | { kind: 'saveError'; message: string; result: ReviewResult | null; diff: string }
+  | { kind: 'submitError'; message: string; result: ReviewResult | null; diff: string }
 
 function sortedComments(comments: LineComment[]): LineComment[] {
   return [...comments].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
@@ -50,10 +96,31 @@ function withSortedComments(result: ReviewResult): ReviewResult {
 }
 
 function commentCountFromState(s: PaneState): number {
-  if (s.kind === 'draftPresent' || s.kind === 'reviewUnsaved') {
-    return s.result.lineComments.length
-  }
+  if (s.kind === 'draftPresent' || s.kind === 'reviewUnsaved') return s.result.lineComments.length
   return 0
+}
+
+function mutateComments(
+  prev: PaneState,
+  kinds: PaneState['kind'][],
+  fn: (comments: LineComment[]) => LineComment[],
+): PaneState {
+  if (!kinds.includes(prev.kind)) return prev
+  const s = prev as { kind: string; result: ReviewResult; diff?: string; reviewId?: string; staleCommits?: boolean }
+  const updated = { ...s.result, lineComments: fn(s.result.lineComments) }
+  return { ...prev, result: updated } as PaneState
+}
+
+const VERDICT_COLOR: Record<ReviewResult['verdict'], string> = {
+  APPROVE: 'text-status-approve',
+  REQUEST_CHANGES: 'text-status-changes',
+  COMMENT: 'text-status-comment',
+}
+
+const VERDICT_LABEL: Record<ReviewResult['verdict'], string> = {
+  APPROVE: 'Approve',
+  REQUEST_CHANGES: 'Request Changes',
+  COMMENT: 'Comment',
 }
 
 export function ReviewPane({ pr }: Props) {
@@ -64,18 +131,18 @@ export function ReviewPane({ pr }: Props) {
   const [focusedCommentIdx, setFocusedCommentIdx] = useState(0)
   const [chatVisible, setChatVisible] = useState(false)
   const [selectedContext, setSelectedContext] = useState('')
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string } | null>(null)
   const [pendingChatMessage, setPendingChatMessage] = useState<{ q: string; ctx: string; id: number } | null>(null)
   const [chatHeight, setChatHeight] = useState(loadChatHeight)
   const chatHeightRef = useRef(chatHeight)
   const chatDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
-  const latestResult = useRef<ReviewResult | null>(null)
-  const latestDiff = useRef('')
+  const pendingVerdict = useRef<Verdict | null>(null)
+  const currentPrRef = useRef(pr)
+
+  currentPrRef.current = pr
 
   useEffect(() => {
     setState({ kind: pr ? 'draftLoading' : 'idle' })
-    latestResult.current = null
-    latestDiff.current = ''
+    pendingVerdict.current = null
     setSaving(false)
     setSubmitting(false)
     setDeleting(false)
@@ -92,22 +159,13 @@ export function ReviewPane({ pr }: Props) {
           break
 
         case 'draftLoaded':
-          if (msg.diff) latestDiff.current = msg.diff
           if (msg.prState === 'MERGED') {
             setState({ kind: 'merged', status: msg.status })
           } else if (msg.prState === 'DRAFT_PRESENT' && msg.result) {
             const result = withSortedComments(msg.result)
-            latestResult.current = result
             setFocusedCommentIdx(0)
-            setState({
-              kind: 'draftPresent',
-              result,
-              reviewId: msg.reviewId ?? '',
-              staleCommits: msg.staleCommits ?? false,
-              diff: msg.diff,
-            })
+            setState({ kind: 'draftPresent', result, reviewId: msg.reviewId ?? '', staleCommits: msg.staleCommits ?? false, diff: msg.diff })
           } else {
-            // Non-empty status on a NO_DRAFT means the server reported an error (e.g. missing token)
             const status = msg.status ?? ''
             setState(status ? { kind: 'authError', message: status } : { kind: 'noDraft' })
           }
@@ -124,17 +182,12 @@ export function ReviewPane({ pr }: Props) {
         case 'reviewChunk':
           setState((prev) => {
             if (prev.kind !== 'generating') return prev
-            return {
-              ...prev,
-              chunks: [...prev.chunks, { kind: msg.kind, content: msg.chunk }],
-            }
+            return { ...prev, chunks: [...prev.chunks, { kind: msg.kind, content: msg.chunk }] }
           })
           break
 
         case 'reviewResult': {
           const result = withSortedComments(msg.result)
-          latestDiff.current = msg.diff ?? ''
-          latestResult.current = result
           setFocusedCommentIdx(0)
           setState({ kind: 'reviewUnsaved', result, diff: msg.diff ?? '' })
           break
@@ -146,22 +199,40 @@ export function ReviewPane({ pr }: Props) {
 
         case 'draftSaved': {
           setSaving(false)
-          const saved = latestResult.current
-          if (saved) {
-            setState((prev) => ({
+          if (msg.commentsDropped) {
+            toast.warning('Some comments were dropped', {
+              description: 'Outdated line references were removed when saving to GitHub.',
+            })
+          }
+          setState((prev) => {
+            if (prev.kind !== 'reviewUnsaved' && prev.kind !== 'draftPresent') return prev
+            return {
               kind: 'draftPresent',
-              result: saved,
+              result: prev.result,
               reviewId: msg.reviewId,
               staleCommits: false,
-              diff: prev.kind === 'reviewUnsaved' || prev.kind === 'draftPresent' ? prev.diff : undefined,
-            }))
+              diff: prev.diff,
+            }
+          })
+          const verdict = pendingVerdict.current
+          const activePr = currentPrRef.current
+          if (verdict && activePr) {
+            pendingVerdict.current = null
+            setSubmitting(true)
+            sendToHost({ type: 'submitReview', number: activePr.number, owner: activePr.owner, repo: activePr.repo, verdict, comment: '' })
           }
           break
         }
 
         case 'draftSaveError':
           setSaving(false)
-          setState({ kind: 'saveError', message: msg.message })
+          pendingVerdict.current = null
+          setState((prev) => ({
+            kind: 'saveError',
+            message: msg.message,
+            result: prev.kind === 'reviewUnsaved' || prev.kind === 'draftPresent' ? prev.result : null,
+            diff: prev.kind === 'reviewUnsaved' ? prev.diff : prev.kind === 'draftPresent' ? (prev.diff ?? '') : '',
+          }))
           break
 
         case 'reviewSubmitted':
@@ -171,13 +242,16 @@ export function ReviewPane({ pr }: Props) {
 
         case 'reviewSubmitError':
           setSubmitting(false)
-          setState({ kind: 'submitError', message: msg.message })
+          setState((prev) => ({
+            kind: 'submitError',
+            message: msg.message,
+            result: prev.kind === 'draftPresent' || prev.kind === 'reviewUnsaved' ? prev.result : null,
+            diff: prev.kind === 'draftPresent' ? (prev.diff ?? '') : prev.kind === 'reviewUnsaved' ? prev.diff : '',
+          }))
           break
 
         case 'draftDeleted':
           setDeleting(false)
-          latestResult.current = null
-          latestDiff.current = ''
           setState({ kind: 'noDraft' })
           break
 
@@ -193,14 +267,11 @@ export function ReviewPane({ pr }: Props) {
     return cleanup
   }, [])
 
-  // Capture text selections from the diff/review body so they can be sent as chat context.
-  // Only active when the chat panel is shown; ignores selections originating in the chat input itself.
   const showChat = state.kind === 'draftPresent' || state.kind === 'reviewUnsaved'
 
   useEffect(() => {
     if (!showChat) {
       setSelectedContext('')
-      setContextMenu(null)
       return
     }
 
@@ -210,29 +281,8 @@ export function ReviewPane({ pr }: Props) {
       if (text) setSelectedContext(text)
     }
 
-    function handleContextMenu(e: MouseEvent) {
-      if ((e.target as HTMLElement).closest?.('.chat-pane')) return
-      const text = window.getSelection()?.toString().trim() ?? ''
-      if (!text) return
-      e.preventDefault()
-      setContextMenu({ x: e.clientX, y: e.clientY, text })
-    }
-
-    // Dismiss context menu when clicking outside it.
-    function handlePointerDown(e: PointerEvent) {
-      if (!(e.target as HTMLElement).closest?.('.review-pane__context-menu')) {
-        setContextMenu(null)
-      }
-    }
-
     document.addEventListener('mouseup', handleMouseUp)
-    document.addEventListener('contextmenu', handleContextMenu)
-    document.addEventListener('pointerdown', handlePointerDown, { capture: true })
-    return () => {
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.removeEventListener('contextmenu', handleContextMenu)
-      document.removeEventListener('pointerdown', handlePointerDown, { capture: true })
-    }
+    return () => document.removeEventListener('mouseup', handleMouseUp)
   }, [showChat])
 
   const handleChatResizeMove = useCallback((e: MouseEvent) => {
@@ -254,8 +304,8 @@ export function ReviewPane({ pr }: Props) {
 
   if (!pr) {
     return (
-      <div className="review-pane review-pane--empty">
-        <span className="review-pane__placeholder">← select a pull request</span>
+      <div className="flex h-full items-center justify-center bg-background">
+        <span className="text-sm text-muted-foreground italic">← select a pull request</span>
       </div>
     )
   }
@@ -269,12 +319,14 @@ export function ReviewPane({ pr }: Props) {
 
   function handleCancel() {
     sendToHost({ type: 'cancelReview' })
-    setState({ kind: 'noDraft' })
+    setState({ kind: 'draftLoading' })
+    sendToHost({ type: 'selectPR', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo })
   }
 
   function handleSave() {
+    if (state.kind !== 'reviewUnsaved' && state.kind !== 'draftPresent') return
     setSaving(true)
-    sendToHost({ type: 'saveDraft', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo })
+    sendToHost({ type: 'saveDraft', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo, result: state.result })
   }
 
   function handleDelete() {
@@ -283,15 +335,20 @@ export function ReviewPane({ pr }: Props) {
   }
 
   function handleSubmit(verdict: Verdict) {
+    if (state.kind === 'reviewUnsaved') {
+      pendingVerdict.current = verdict
+      setSaving(true)
+      sendToHost({ type: 'saveDraft', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo, result: state.result })
+      return
+    }
     setSubmitting(true)
-    sendToHost({
-      type: 'submitReview',
-      number: currentPr.number,
-      owner: currentPr.owner,
-      repo: currentPr.repo,
-      verdict,
-      comment: '',
-    })
+    sendToHost({ type: 'submitReview', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo, verdict, comment: '' })
+  }
+
+  function handleVerifyComment(comment: LineComment) {
+    const q = `Verify this review comment on ${comment.file} line ${comment.line}:\n\n> ${comment.body}\n\nIs this ${comment.type} actually present in the diff?`
+    if (!chatVisible) setChatVisible(true)
+    setPendingChatMessage({ q, ctx: '', id: Date.now() })
   }
 
   function handleChatResizeDown(e: React.MouseEvent) {
@@ -304,290 +361,222 @@ export function ReviewPane({ pr }: Props) {
   }
 
   const commentCount = commentCountFromState(state)
+  const hasReview = state.kind === 'draftPresent' || state.kind === 'reviewUnsaved'
+
+  const editCommentHandlers = {
+    onEditComment: (idx: number, body: string) => {
+      setState((prev) =>
+        mutateComments(prev, ['draftPresent', 'reviewUnsaved'], (comments) =>
+          comments.map((c, i) => (i === idx ? { ...c, body } : c)),
+        ),
+      )
+    },
+    onDeleteComment: (idx: number) => {
+      setFocusedCommentIdx((f) => (f > 0 && f >= idx ? f - 1 : f))
+      setState((prev) =>
+        mutateComments(prev, ['draftPresent', 'reviewUnsaved'], (comments) =>
+          comments.filter((_, i) => i !== idx),
+        ),
+      )
+    },
+    onAddComment: (comment: LineComment) => {
+      let newFocusIdx = 0
+      setState((prev) => {
+        if (prev.kind !== 'draftPresent' && prev.kind !== 'reviewUnsaved') return prev
+        newFocusIdx = prev.result.lineComments.length
+        return { ...prev, result: { ...prev.result, lineComments: [...prev.result.lineComments, comment] } }
+      })
+      setFocusedCommentIdx(newFocusIdx)
+    },
+  }
 
   return (
-    <div className="review-pane">
-      <PRHeader
-        pr={pr}
-        commentCount={commentCount}
-        focusedIdx={focusedCommentIdx}
-        onNavigate={setFocusedCommentIdx}
-        showChat={showChat}
-        chatVisible={chatVisible}
-        onToggleChat={() => setChatVisible((v) => !v)}
-      />
-      <div className="review-pane__body">
-        <PaneContent
-          state={state}
-          setState={setState}
-          latestResult={latestResult}
-          latestDiff={latestDiff}
-          focusedCommentIdx={focusedCommentIdx}
-          setFocusedCommentIdx={setFocusedCommentIdx}
-          onGenerate={handleGenerate}
-        />
-      </div>
-      {showChat && chatVisible && (
-        <div className="review-pane__chat-panel" style={{ height: chatHeight }}>
+    <TooltipProvider delayDuration={400}>
+      <div className="flex flex-col h-full bg-background">
+        {/* Header */}
+        <div className="shrink-0 px-4 py-2.5 border-b border-border bg-card">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-mono text-xs text-muted-foreground shrink-0">#{pr.number}</span>
+            <span className="text-sm font-medium truncate flex-1" title={pr.title}>{pr.title}</span>
+
+            {commentCount > 0 && (
+              <div className="flex items-center gap-0.5 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0"
+                  onClick={() => setFocusedCommentIdx(Math.max(0, focusedCommentIdx - 1))}
+                  disabled={focusedCommentIdx <= 0}
+                  aria-label="Previous comment"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </Button>
+                <span className="text-xs text-muted-foreground font-mono px-0.5 tabular-nums">
+                  {focusedCommentIdx + 1}/{commentCount}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0"
+                  onClick={() => setFocusedCommentIdx(Math.min(commentCount - 1, focusedCommentIdx + 1))}
+                  disabled={focusedCommentIdx >= commentCount - 1}
+                  aria-label="Next comment"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            )}
+
+            {showChat && (
+              <Button
+                variant={chatVisible ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-6 px-2 text-xs shrink-0 gap-1.5"
+                onClick={() => setChatVisible((v) => !v)}
+                title={chatVisible ? 'Collapse chat' : 'Open Ask Claude'}
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                Ask Claude
+              </Button>
+            )}
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 shrink-0 text-muted-foreground"
+                  onClick={() => sendToHost({ type: 'openUrl', url: pr.htmlUrl })}
+                  aria-label="Open PR on GitHub"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Open on GitHub</TooltipContent>
+            </Tooltip>
+          </div>
+
+          {/* Context line: verdict+count when review exists, repo otherwise */}
+          <div className="flex items-center gap-1.5 mt-1 text-xs">
+            {hasReview && (state as { result: ReviewResult }).result ? (
+              <>
+                <span className={cn('font-mono font-semibold tracking-wide', VERDICT_COLOR[(state as { result: ReviewResult }).result.verdict])}>
+                  {VERDICT_LABEL[(state as { result: ReviewResult }).result.verdict]}
+                </span>
+                {commentCount > 0 && (
+                  <>
+                    <span className="text-muted-foreground">·</span>
+                    <span className="text-muted-foreground">{commentCount} comment{commentCount !== 1 ? 's' : ''}</span>
+                  </>
+                )}
+                {state.kind === 'reviewUnsaved' && (
+                  <span className="text-status-suggestion font-mono">· unsaved</span>
+                )}
+              </>
+            ) : (
+              <span className="font-mono text-muted-foreground/70">{pr.owner}/{pr.repo}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Body */}
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div className="flex-1 overflow-y-auto min-h-0">
+              <PaneContent
+                state={state}
+                focusedCommentIdx={focusedCommentIdx}
+                setFocusedCommentIdx={setFocusedCommentIdx}
+                onGenerate={handleGenerate}
+                onVerifyComment={showChat ? handleVerifyComment : undefined}
+                editCommentHandlers={editCommentHandlers}
+              />
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            {showChat ? (
+              selectedContext ? (
+                <>
+                  <ContextMenuLabel className="text-[10px] font-normal text-muted-foreground max-w-[220px] truncate py-1">
+                    "{selectedContext.length > 60 ? selectedContext.slice(0, 60) + '…' : selectedContext}"
+                  </ContextMenuLabel>
+                  <ContextMenuSeparator />
+                  {(['What does this do?', 'Why is this here?', 'Is this correct?'] as const).map((q) => (
+                    <ContextMenuItem
+                      key={q}
+                      onSelect={() => {
+                        if (!chatVisible) setChatVisible(true)
+                        setPendingChatMessage({ q, ctx: selectedContext, id: Date.now() })
+                      }}
+                      className="gap-2 text-xs"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      {q}
+                    </ContextMenuItem>
+                  ))}
+                </>
+              ) : (
+                <ContextMenuItem disabled className="gap-2 text-xs opacity-60">
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  Select text to ask Claude
+                </ContextMenuItem>
+              )
+            ) : (
+              <ContextMenuItem disabled className="gap-2 text-xs opacity-60">
+                <MessageSquare className="w-3.5 h-3.5" />
+                Generate a review to enable chat
+              </ContextMenuItem>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
+
+        {/* Chat panel */}
+        {showChat && (
           <div
-            className="review-pane__chat-resize-handle"
-            onMouseDown={handleChatResizeDown}
-            title="Drag to resize"
-          />
-          <ChatPane
-            pr={currentPr}
-            selectedContext={selectedContext}
-            onContextUsed={() => setSelectedContext('')}
-            pendingMessage={pendingChatMessage ?? undefined}
-            onPendingMessageSent={() => setPendingChatMessage(null)}
-          />
-        </div>
-      )}
-      {contextMenu && (
-        <div
-          className="review-pane__context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-        >
-          <button
-            className="review-pane__context-menu-item"
-            onClick={() => {
-              const { text } = contextMenu
-              setSelectedContext(text)
-              setContextMenu(null)
-              if (!chatVisible) setChatVisible(true)
-              setPendingChatMessage({ q: 'What does this do?', ctx: text, id: Date.now() })
-            }}
+            className="shrink-0 border-t border-border overflow-hidden transition-[height]"
+            style={{ height: chatVisible ? chatHeight : 0 }}
           >
-            ◈ Ask Claude: what does this do?
-          </button>
-        </div>
-      )}
-      <ReviewFooter
-        state={state}
-        saving={saving}
-        submitting={submitting}
-        deleting={deleting}
-        onSave={handleSave}
-        onSubmit={handleSubmit}
-        onCancel={handleCancel}
-        onRegenerate={handleGenerate}
-        onDelete={handleDelete}
-      />
-    </div>
-  )
-}
-
-// ── PR header ────────────────────────────────────────────────────────────────
-
-interface PRHeaderProps {
-  pr: PR
-  commentCount: number
-  focusedIdx: number
-  onNavigate: (idx: number) => void
-  showChat: boolean
-  chatVisible: boolean
-  onToggleChat: () => void
-}
-
-function PRHeader({ pr, commentCount, focusedIdx, onNavigate, showChat, chatVisible, onToggleChat }: PRHeaderProps) {
-  return (
-    <div className="review-pane__header">
-      <div className="review-pane__header-top">
-        <span className="review-pane__pr-number">#{pr.number}</span>
-        <span className="review-pane__pr-title" title={pr.title}>
-          {pr.title}
-        </span>
-        {commentCount > 0 && (
-          <div className="review-pane__header-nav">
-            <button
-              className="review-pane__nav-btn"
-              onClick={() => onNavigate(Math.max(0, focusedIdx - 1))}
-              disabled={focusedIdx <= 0}
-              title="Previous comment"
-            >
-              ↑
-            </button>
-            <span className="review-pane__nav-pos">{focusedIdx + 1} of {commentCount}</span>
-            <button
-              className="review-pane__nav-btn"
-              onClick={() => onNavigate(Math.min(commentCount - 1, focusedIdx + 1))}
-              disabled={focusedIdx >= commentCount - 1}
-              title="Next comment"
-            >
-              ↓
-            </button>
+            <ChatPane
+              pr={currentPr}
+              selectedContext={selectedContext}
+              onContextUsed={() => setSelectedContext('')}
+              pendingMessage={pendingChatMessage ?? undefined}
+              onPendingMessageSent={() => setPendingChatMessage(null)}
+              onResizeStart={handleChatResizeDown}
+            />
           </div>
         )}
-        {showChat && (
-          <button
-            className={`review-pane__chat-btn${chatVisible ? ' review-pane__chat-btn--active' : ''}`}
-            onClick={onToggleChat}
-            title={chatVisible ? 'Collapse chat' : 'Open Ask Claude'}
-          >
-            ◈ Chat {chatVisible ? '▾' : '▸'}
-          </button>
-        )}
-        <button
-          className="review-pane__open-btn"
-          onClick={() => sendToHost({ type: 'openUrl', url: pr.htmlUrl })}
-          title="Open PR on GitHub"
-        >
-          ↗
-        </button>
+
+        {/* Footer */}
+        <ReviewFooter
+          state={state}
+          saving={saving}
+          submitting={submitting}
+          deleting={deleting}
+          onSave={handleSave}
+          onSubmit={handleSubmit}
+          onCancel={handleCancel}
+          onRegenerate={handleGenerate}
+          onDelete={handleDelete}
+        />
       </div>
-      <div className="review-pane__header-meta">
-        <span className="review-pane__repo">
-          {pr.owner}/{pr.repo}
-        </span>
-        <span className="review-pane__meta-sep">·</span>
-        <span className="review-pane__author">@{pr.author}</span>
-      </div>
-    </div>
+    </TooltipProvider>
   )
 }
 
-// ── Fixed footer with action buttons ─────────────────────────────────────────
-
-interface FooterProps {
-  state: PaneState
-  saving: boolean
-  submitting: boolean
-  deleting: boolean
-  onSave: () => void
-  onSubmit: (v: Verdict) => void
-  onCancel: () => void
-  onRegenerate: () => void
-  onDelete: () => void
-}
-
-function ReviewFooter({ state, saving, submitting, deleting, onSave, onSubmit, onCancel, onRegenerate, onDelete }: FooterProps) {
-  const [deletePending, setDeletePending] = useState(false)
-  const [regenPending, setRegenPending] = useState(false)
-  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const regenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    setDeletePending(false)
-    setRegenPending(false)
-    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current)
-    if (regenTimerRef.current) clearTimeout(regenTimerRef.current)
-  }, [state.kind])
-
-  useEffect(() => {
-    return () => {
-      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current)
-      if (regenTimerRef.current) clearTimeout(regenTimerRef.current)
-    }
-  }, [])
-
-  function handleDeleteClick() {
-    if (!deletePending) {
-      setDeletePending(true)
-      deleteTimerRef.current = setTimeout(() => setDeletePending(false), 3000)
-    } else {
-      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current)
-      setDeletePending(false)
-      onDelete()
-    }
-  }
-
-  function handleRegenClick() {
-    if (state.kind !== 'draftPresent') {
-      onRegenerate()
-      return
-    }
-    if (!regenPending) {
-      setRegenPending(true)
-      regenTimerRef.current = setTimeout(() => setRegenPending(false), 3000)
-    } else {
-      if (regenTimerRef.current) clearTimeout(regenTimerRef.current)
-      setRegenPending(false)
-      onRegenerate()
-    }
-  }
-
-  if (state.kind === 'generating') {
-    return (
-      <div className="review-pane__footer">
-        <button className="review-pane__btn review-pane__btn--danger" onClick={onCancel}>
-          ✕ Cancel
-        </button>
-      </div>
-    )
-  }
-
-  if (state.kind === 'draftPresent' || state.kind === 'reviewUnsaved') {
-    const busy = saving || submitting || deleting
-    return (
-      <div className="review-pane__footer">
-        <button
-          className={`review-pane__btn ${regenPending ? 'review-pane__btn--regen-confirm' : 'review-pane__btn--regen'}`}
-          onClick={handleRegenClick}
-          disabled={busy}
-          title={state.kind === 'draftPresent' ? 'Discard draft and regenerate' : 'Regenerate review'}
-        >
-          {regenPending ? '↺ Confirm Regen?' : '↺ Regen'}
-        </button>
-        <div className="review-pane__footer-spacer" />
-        {state.kind === 'draftPresent' && (
-          <button
-            className={`review-pane__btn ${deletePending ? 'review-pane__btn--danger-confirm' : 'review-pane__btn--danger'}`}
-            onClick={handleDeleteClick}
-            disabled={deleting}
-            title="Delete this draft review from GitHub"
-          >
-            {deleting ? '⋯' : deletePending ? '✕ Confirm?' : '✕ Delete'}
-          </button>
-        )}
-        <button
-          className="review-pane__btn review-pane__btn--secondary"
-          onClick={onSave}
-          disabled={busy}
-        >
-          {saving ? '↑ Saving…' : '↑ Save'}
-        </button>
-        <div className="review-pane__footer-divider" />
-        <SubmitButtons onSubmit={onSubmit} submitting={submitting} disabled={saving || deleting} />
-      </div>
-    )
-  }
-
-  if (state.kind === 'saveError') {
-    return (
-      <div className="review-pane__footer">
-        <button
-          className="review-pane__btn review-pane__btn--secondary"
-          onClick={onSave}
-          disabled={saving || submitting}
-        >
-          {saving ? '↑ Saving…' : '↑ Retry Save'}
-        </button>
-        <SubmitButtons onSubmit={onSubmit} submitting={submitting} disabled={saving} />
-      </div>
-    )
-  }
-
-  if (state.kind === 'submitError') {
-    return (
-      <div className="review-pane__footer">
-        <SubmitButtons onSubmit={onSubmit} submitting={submitting} disabled={false} />
-      </div>
-    )
-  }
-
-  return null
-}
-
-// ── Main content switcher ────────────────────────────────────────────────────
+// ── Pane content switcher ────────────────────────────────────────────────────
 
 interface ContentProps {
   state: PaneState
-  setState: React.Dispatch<React.SetStateAction<PaneState>>
-  latestResult: React.MutableRefObject<ReviewResult | null>
-  latestDiff: React.MutableRefObject<string>
   focusedCommentIdx: number
   setFocusedCommentIdx: React.Dispatch<React.SetStateAction<number>>
   onGenerate: () => void
+  onVerifyComment?: (comment: LineComment) => void
+  editCommentHandlers: {
+    onEditComment: (idx: number, body: string) => void
+    onDeleteComment: (idx: number) => void
+    onAddComment: (comment: LineComment) => void
+  }
 }
 
 function useElapsedSeconds(active: boolean): number {
@@ -607,15 +596,100 @@ function formatElapsed(s: number): string {
   return m > 0 ? `${m}:${String(sec).padStart(2, '0')}` : `${sec}s`
 }
 
-function PaneContent({ state, setState, latestResult, latestDiff, focusedCommentIdx, setFocusedCommentIdx, onGenerate }: ContentProps) {
-  const streamLogRef = useRef<HTMLDivElement>(null)
-  const elapsed = useElapsedSeconds(state.kind === 'generating')
+function ReviewAndDiff({
+  result,
+  diff,
+  focusedCommentIdx,
+  setFocusedCommentIdx,
+  editCommentHandlers,
+  onVerifyComment,
+  staleCommits,
+}: {
+  result: ReviewResult
+  diff?: string
+  focusedCommentIdx: number
+  setFocusedCommentIdx: React.Dispatch<React.SetStateAction<number>>
+  editCommentHandlers: ContentProps['editCommentHandlers']
+  onVerifyComment?: (comment: LineComment) => void
+  staleCommits?: boolean
+}) {
+  return (
+    <>
+      {staleCommits && (
+        <Alert className="mx-4 mt-3 mb-0 border-status-suggestion/40 bg-status-suggestion/5">
+          <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
+          <AlertDescription className="text-xs text-status-suggestion/90">
+            Draft generated against an older commit — new commits may have been pushed.
+          </AlertDescription>
+        </Alert>
+      )}
+      <div className="px-4 pt-3">
+        <ReviewDisplay result={result} />
+      </div>
+      {diff && (
+        <div className="px-4 pb-4">
+          <DiffViewer
+            diff={diff}
+            comments={result.lineComments}
+            focusedCommentIdx={focusedCommentIdx}
+            onEditComment={editCommentHandlers.onEditComment}
+            onDeleteComment={(idx) => {
+              setFocusedCommentIdx((f) => (f > 0 && f >= idx ? f - 1 : f))
+              editCommentHandlers.onDeleteComment(idx)
+            }}
+            onAddComment={editCommentHandlers.onAddComment}
+            onVerifyComment={onVerifyComment}
+          />
+        </div>
+      )}
+    </>
+  )
+}
 
-  useEffect(() => {
-    if (state.kind === 'generating' && streamLogRef.current) {
-      streamLogRef.current.scrollTop = streamLogRef.current.scrollHeight
-    }
-  }, [state])
+function ErrorWithReview({
+  message,
+  result,
+  diff,
+  focusedCommentIdx,
+  setFocusedCommentIdx,
+  editCommentHandlers,
+}: {
+  message: string
+  result: ReviewResult | null
+  diff: string
+  focusedCommentIdx: number
+  setFocusedCommentIdx: React.Dispatch<React.SetStateAction<number>>
+  editCommentHandlers: ContentProps['editCommentHandlers']
+}) {
+  return (
+    <div className="flex flex-col">
+      {result && (
+        <ReviewAndDiff
+          result={result}
+          diff={diff || undefined}
+          focusedCommentIdx={focusedCommentIdx}
+          setFocusedCommentIdx={setFocusedCommentIdx}
+          editCommentHandlers={editCommentHandlers}
+        />
+      )}
+      <div className="px-4 pb-3">
+        <Alert variant="destructive">
+          <AlertDescription>{message}</AlertDescription>
+        </Alert>
+      </div>
+    </div>
+  )
+}
+
+function PaneContent({
+  state,
+  focusedCommentIdx,
+  setFocusedCommentIdx,
+  onGenerate,
+  onVerifyComment,
+  editCommentHandlers,
+}: ContentProps) {
+  const elapsed = useElapsedSeconds(state.kind === 'generating')
 
   switch (state.kind) {
     case 'idle':
@@ -623,277 +697,367 @@ function PaneContent({ state, setState, latestResult, latestDiff, focusedComment
 
     case 'draftLoading':
       return (
-        <div className="review-pane__status">
-          <span className="review-pane__cursor">█</span>
-          <span>Checking for draft…</span>
+        <div className="flex items-center gap-2.5 px-4 pt-3 text-sm text-muted-foreground">
+          <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />
+          Checking for draft…
         </div>
       )
 
     case 'noDraft':
       return (
-        <div className="review-pane__section review-pane__section--center">
-          <p className="review-pane__no-draft-text">No pending draft for this PR.</p>
-          <button className="review-pane__btn review-pane__btn--primary" onClick={onGenerate}>
-            ◈ Generate Review
-          </button>
+        <div className="flex flex-col items-center justify-center gap-4 p-8">
+          <p className="text-sm text-muted-foreground">No pending draft for this PR.</p>
+          <Button onClick={onGenerate} className="gap-2">
+            Generate Review
+          </Button>
         </div>
       )
 
     case 'authError':
       return (
-        <div className="review-pane__section review-pane__section--center">
-          <div className="review-pane__error">{state.message}</div>
-          <p className="review-pane__info-sub">Check your GitHub token in plugin settings.</p>
+        <div className="p-4 flex flex-col gap-3">
+          <Alert variant="destructive">
+            <AlertDescription>{state.message}</AlertDescription>
+          </Alert>
+          <p className="text-xs text-muted-foreground">Check your GitHub token in plugin settings.</p>
         </div>
       )
 
-    case 'generating':
+    case 'generating': {
+      const latestMessage = state.messages[state.messages.length - 1] ?? 'Starting review…'
+      const isThinking = elapsed >= 10 && state.chunks.length === 0
+      const latestChunks = state.chunks.slice(-5)
       return (
-        <div className="review-pane__section">
-          <div className="review-pane__stream-header">
-            <span className="review-pane__cursor">█</span>
-            <span className="review-pane__stream-timer">{formatElapsed(elapsed)}</span>
+        <div className="flex flex-col gap-4 p-6">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-foreground/80 truncate">{latestMessage}</p>
+              <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                {elapsed < 2 ? 'Starting…' : formatElapsed(elapsed)}
+              </p>
+            </div>
           </div>
-          <div className="review-pane__stream-log" ref={streamLogRef}>
-            {state.messages.map((msg, i) => (
-              <div key={i} className="review-pane__stream-line">
-                <span className="review-pane__stream-arrow">→</span>
-                <span className="review-pane__stream-text">{msg}</span>
-              </div>
-            ))}
-            {state.chunks.map((c, i) => (
-              <div key={`c-${i}`} className={`review-pane__stream-chunk review-pane__stream-chunk--${c.kind}`}>
-                <span className="review-pane__stream-chunk-label">{c.kind === 'thinking' ? '◌' : '❯'}</span>
-                <span className="review-pane__stream-chunk-content">{c.content}</span>
-              </div>
-            ))}
+
+          {/* Indeterminate progress bar */}
+          <div className="relative h-0.5 bg-border rounded-full overflow-hidden">
+            <div
+              className="absolute inset-y-0 w-2/5 bg-primary rounded-full"
+              style={{ animation: 'progress-slide 1.5s ease-in-out infinite' }}
+            />
           </div>
+
+          {isThinking && (
+            <p className="text-xs text-muted-foreground italic">
+              {elapsed >= 60 ? 'Large diffs may take a few minutes…' : 'Claude is thinking…'}
+            </p>
+          )}
+
+          {latestChunks.length > 0 && (
+            <p className="text-xs text-muted-foreground/60 font-mono break-words line-clamp-3 leading-relaxed">
+              {latestChunks.map((c) => c.content).join('')}
+            </p>
+          )}
         </div>
       )
-
-    case 'draftPresent': {
-      const result = state.result
-      return (
-        <>
-          {state.staleCommits && <StaleCommitWarning />}
-          <div className="review-pane__display-wrap">
-            <ReviewDisplay result={result} />
-          </div>
-          {state.diff && (
-            <DiffViewer
-              diff={state.diff}
-              comments={result.lineComments}
-              focusedCommentIdx={focusedCommentIdx}
-              onEditComment={(idx, body) => {
-                setState((prev) => {
-                  if (prev.kind !== 'draftPresent') return prev
-                  const lineComments = prev.result.lineComments.map((c, i) =>
-                    i === idx ? { ...c, body } : c,
-                  )
-                  const updated = { ...prev.result, lineComments }
-                  latestResult.current = updated
-                  return { ...prev, result: updated }
-                })
-              }}
-              onDeleteComment={(idx) => {
-                setFocusedCommentIdx((f) => (f > 0 && f >= idx ? f - 1 : f))
-                setState((prev) => {
-                  if (prev.kind !== 'draftPresent') return prev
-                  const lineComments = prev.result.lineComments.filter((_, i) => i !== idx)
-                  const updated = { ...prev.result, lineComments }
-                  latestResult.current = updated
-                  return { ...prev, result: updated }
-                })
-              }}
-              onAddComment={(comment) => {
-                const newIdx = result.lineComments.length
-                setFocusedCommentIdx(newIdx)
-                setState((prev) => {
-                  if (prev.kind !== 'draftPresent') return prev
-                  const lineComments = [...prev.result.lineComments, comment]
-                  const updated = { ...prev.result, lineComments }
-                  latestResult.current = updated
-                  return { ...prev, result: updated }
-                })
-              }}
-            />
-          )}
-        </>
-      )
     }
 
-    case 'reviewUnsaved': {
-      const result = state.result
+    case 'draftPresent':
       return (
-        <>
-          <div className="review-pane__display-wrap">
-            <ReviewDisplay result={result} />
-          </div>
-          {state.diff && (
-            <DiffViewer
-              diff={state.diff}
-              comments={result.lineComments}
-              focusedCommentIdx={focusedCommentIdx}
-              onEditComment={(idx, body) => {
-                setState((prev) => {
-                  if (prev.kind !== 'reviewUnsaved') return prev
-                  const lineComments = prev.result.lineComments.map((c, i) =>
-                    i === idx ? { ...c, body } : c,
-                  )
-                  const updated = { ...prev.result, lineComments }
-                  latestResult.current = updated
-                  return { ...prev, result: updated }
-                })
-              }}
-              onDeleteComment={(idx) => {
-                setFocusedCommentIdx((f) => (f > 0 && f >= idx ? f - 1 : f))
-                setState((prev) => {
-                  if (prev.kind !== 'reviewUnsaved') return prev
-                  const lineComments = prev.result.lineComments.filter((_, i) => i !== idx)
-                  const updated = { ...prev.result, lineComments }
-                  latestResult.current = updated
-                  return { ...prev, result: updated }
-                })
-              }}
-              onAddComment={(comment) => {
-                const newIdx = result.lineComments.length
-                setFocusedCommentIdx(newIdx)
-                setState((prev) => {
-                  if (prev.kind !== 'reviewUnsaved') return prev
-                  const lineComments = [...prev.result.lineComments, comment]
-                  const updated = { ...prev.result, lineComments }
-                  latestResult.current = updated
-                  return { ...prev, result: updated }
-                })
-              }}
-            />
-          )}
-        </>
+        <ReviewAndDiff
+          result={state.result}
+          diff={state.diff}
+          focusedCommentIdx={focusedCommentIdx}
+          setFocusedCommentIdx={setFocusedCommentIdx}
+          editCommentHandlers={editCommentHandlers}
+          onVerifyComment={onVerifyComment}
+          staleCommits={state.staleCommits}
+        />
       )
-    }
+
+    case 'reviewUnsaved':
+      return (
+        <ReviewAndDiff
+          result={state.result}
+          diff={state.diff}
+          focusedCommentIdx={focusedCommentIdx}
+          setFocusedCommentIdx={setFocusedCommentIdx}
+          editCommentHandlers={editCommentHandlers}
+          onVerifyComment={onVerifyComment}
+        />
+      )
 
     case 'merged':
       return (
-        <div className="review-pane__section review-pane__section--center">
-          <span className="review-pane__merged-icon">⌀</span>
-          <p className="review-pane__info-text">This pull request has been merged.</p>
-          {state.status && <p className="review-pane__info-sub">{state.status}</p>}
+        <div className="flex flex-col items-center justify-center gap-2 p-8">
+          <GitMerge className="w-9 h-9 text-muted-foreground/50" />
+          <p className="text-sm text-muted-foreground">This pull request has been merged.</p>
+          {state.status && <p className="text-xs text-muted-foreground">{state.status}</p>}
         </div>
       )
 
     case 'submitted':
       return (
-        <div className="review-pane__section review-pane__section--center">
-          <span className="review-pane__success-icon">✓</span>
-          <p className="review-pane__info-text">Review submitted.</p>
-          <button className="review-pane__btn review-pane__btn--primary" onClick={onGenerate}>
-            ◈ Generate New Review
-          </button>
+        <div className="flex flex-col items-center justify-center gap-3 p-8">
+          <CheckCircle2 className="w-9 h-9 text-emerald-500" />
+          <p className="text-sm text-muted-foreground">Review submitted.</p>
+          <Button variant="outline" onClick={onGenerate} className="gap-2">
+            <RotateCcw className="w-3.5 h-3.5" />
+            Generate New Review
+          </Button>
         </div>
       )
 
     case 'error':
       return (
-        <div className="review-pane__section">
-          <div className="review-pane__error">{state.message}</div>
-          <div className="review-pane__inbody-actions">
-            <button className="review-pane__btn review-pane__btn--primary" onClick={onGenerate}>
-              ↺ Retry
-            </button>
-          </div>
+        <div className="p-4 flex flex-col gap-3">
+          <Alert variant="destructive">
+            <AlertDescription>{state.message}</AlertDescription>
+          </Alert>
+          <Button variant="outline" size="sm" onClick={onGenerate} className="w-fit gap-1.5">
+            <RotateCcw className="w-3.5 h-3.5" />
+            Try Again
+          </Button>
         </div>
       )
 
-    case 'saveError': {
-      const result = latestResult.current
-      const diff = latestDiff.current
+    case 'saveError':
       return (
-        <div className="review-pane__section">
-          {result && (
-            <div className="review-pane__display-wrap">
-              <ReviewDisplay result={result} />
-            </div>
-          )}
-          {result && diff && (
-            <DiffViewer
-              diff={diff}
-              comments={result.lineComments}
-              focusedCommentIdx={focusedCommentIdx}
-            />
-          )}
-          <div className="review-pane__error">{state.message}</div>
-        </div>
+        <ErrorWithReview
+          message={state.message}
+          result={state.result}
+          diff={state.diff}
+          focusedCommentIdx={focusedCommentIdx}
+          setFocusedCommentIdx={setFocusedCommentIdx}
+          editCommentHandlers={editCommentHandlers}
+        />
       )
-    }
 
-    case 'submitError': {
-      const result = latestResult.current
-      const diff = latestDiff.current
+    case 'submitError':
       return (
-        <div className="review-pane__section">
-          {result && (
-            <div className="review-pane__display-wrap">
-              <ReviewDisplay result={result} />
-            </div>
-          )}
-          {result && diff && (
-            <DiffViewer
-              diff={diff}
-              comments={result.lineComments}
-              focusedCommentIdx={focusedCommentIdx}
-            />
-          )}
-          <div className="review-pane__error">{state.message}</div>
-        </div>
+        <ErrorWithReview
+          message={state.message}
+          result={state.result}
+          diff={state.diff}
+          focusedCommentIdx={focusedCommentIdx}
+          setFocusedCommentIdx={setFocusedCommentIdx}
+          editCommentHandlers={editCommentHandlers}
+        />
       )
-    }
   }
 }
 
-// ── Submit buttons ───────────────────────────────────────────────────────────
+// ── Footer ────────────────────────────────────────────────────────────────────
 
-function SubmitButtons({
+interface FooterProps {
+  state: PaneState
+  saving: boolean
+  submitting: boolean
+  deleting: boolean
+  onSave: () => void
+  onSubmit: (v: Verdict) => void
+  onCancel: () => void
+  onRegenerate: () => void
+  onDelete: () => void
+}
+
+function ReviewFooter({
+  state,
+  saving,
+  submitting,
+  deleting,
+  onSave,
+  onSubmit,
+  onCancel,
+  onRegenerate,
+  onDelete,
+}: FooterProps) {
+  if (state.kind === 'generating') {
+    return (
+      <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-t border-border bg-card">
+        <Button variant="destructive" size="sm" onClick={onCancel} className="gap-1.5">
+          <X className="w-3.5 h-3.5" />
+          Cancel
+        </Button>
+      </div>
+    )
+  }
+
+  if (state.kind === 'draftPresent' || state.kind === 'reviewUnsaved') {
+    const busy = saving || submitting || deleting
+    return (
+      <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-t border-border bg-card">
+        {/* Regen — confirm when saved draft exists */}
+        {state.kind === 'draftPresent' ? (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="sm" disabled={busy} className="gap-1.5 text-xs">
+                <RotateCcw className="w-3.5 h-3.5" />
+                Regen
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Regenerate review?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  The current draft will be discarded and a new review generated from scratch.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={onRegenerate}>Regenerate</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : (
+          <Button variant="ghost" size="sm" disabled={busy} className="gap-1.5 text-xs" onClick={onRegenerate}>
+            <RotateCcw className="w-3.5 h-3.5" />
+            Regen
+          </Button>
+        )}
+
+        <div className="flex-1" />
+
+        {/* Delete — always confirm */}
+        {state.kind === 'draftPresent' && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="sm" disabled={deleting} className="gap-1.5 text-xs text-destructive hover:text-destructive">
+                {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                Delete
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete draft review?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This removes the pending review from GitHub permanently.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={onDelete}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+
+        <Button variant="secondary" size="sm" onClick={onSave} disabled={busy} className="gap-1.5 text-xs">
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CloudUpload className="w-3.5 h-3.5" />}
+          {saving ? 'Saving…' : 'Save Draft'}
+        </Button>
+
+        <SubmitSplitButton verdict={state.kind === 'draftPresent' || state.kind === 'reviewUnsaved' ? state.result.verdict : 'APPROVE'} onSubmit={onSubmit} submitting={submitting} disabled={saving || deleting} />
+      </div>
+    )
+  }
+
+  if (state.kind === 'saveError') {
+    return (
+      <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-t border-border bg-card">
+        <Button variant="secondary" size="sm" onClick={onSave} disabled={saving || submitting} className="gap-1.5 text-xs">
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CloudUpload className="w-3.5 h-3.5" />}
+          {saving ? 'Saving…' : 'Retry Save'}
+        </Button>
+        <SubmitSplitButton verdict={state.kind === 'saveError' && state.result ? state.result.verdict : 'APPROVE'} onSubmit={onSubmit} submitting={submitting} disabled={saving} />
+      </div>
+    )
+  }
+
+  if (state.kind === 'submitError') {
+    return (
+      <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-t border-border bg-card">
+        <SubmitSplitButton verdict={state.kind === 'submitError' && state.result ? state.result.verdict : 'APPROVE'} onSubmit={onSubmit} submitting={submitting} disabled={false} />
+      </div>
+    )
+  }
+
+  return null
+}
+
+// ── Split submit button ───────────────────────────────────────────────────────
+
+function SubmitSplitButton({
+  verdict,
   onSubmit,
   submitting,
   disabled,
 }: {
+  verdict: Verdict
   onSubmit: (v: Verdict) => void
   submitting: boolean
   disabled: boolean
 }) {
-  return (
-    <>
-      <button
-        className="review-pane__btn review-pane__btn--approve"
-        onClick={() => onSubmit('APPROVE')}
-        disabled={submitting || disabled}
-      >
-        {submitting ? '…' : '✓ Approve'}
-      </button>
-      <button
-        className="review-pane__btn review-pane__btn--request-changes"
-        onClick={() => onSubmit('REQUEST_CHANGES')}
-        disabled={submitting || disabled}
-      >
-        {submitting ? '…' : '✗ Request Changes'}
-      </button>
-      <button
-        className="review-pane__btn review-pane__btn--comment"
-        onClick={() => onSubmit('COMMENT')}
-        disabled={submitting || disabled}
-      >
-        {submitting ? '…' : '◇ Comment'}
-      </button>
-    </>
-  )
-}
+  const ICON: Record<Verdict, React.ReactNode> = {
+    APPROVE: <Check className="w-3.5 h-3.5" />,
+    REQUEST_CHANGES: <XCircle className="w-3.5 h-3.5" />,
+    COMMENT: <MessageSquare className="w-3.5 h-3.5" />,
+  }
+  const LABEL: Record<Verdict, string> = {
+    APPROVE: 'Approve',
+    REQUEST_CHANGES: 'Request Changes',
+    COMMENT: 'Comment',
+  }
+  const VARIANT: Record<Verdict, 'default' | 'destructive' | 'secondary'> = {
+    APPROVE: 'default',
+    REQUEST_CHANGES: 'destructive',
+    COMMENT: 'secondary',
+  }
 
-// ── Stale-commit warning ─────────────────────────────────────────────────────
+  const others: Verdict[] = (['COMMENT', 'APPROVE', 'REQUEST_CHANGES'] as Verdict[]).filter((v) => v !== verdict)
 
-function StaleCommitWarning() {
   return (
-    <div className="review-pane__stale-warning">
-      ⚠ Draft generated against an older commit — new commits may have been pushed.
+    <div className="flex items-stretch rounded-md overflow-hidden">
+      <Button
+        variant={VARIANT[verdict]}
+        size="sm"
+        className="text-xs rounded-r-none gap-1.5 border-r border-white/20"
+        onClick={() => onSubmit(verdict)}
+        disabled={submitting || disabled}
+      >
+        {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : ICON[verdict]}
+        {submitting ? 'Submitting…' : LABEL[verdict]}
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant={VARIANT[verdict]}
+            size="sm"
+            className="text-xs rounded-l-none px-1.5"
+            disabled={submitting || disabled}
+            aria-label="More submit options"
+          >
+            <ChevronDown className="w-3.5 h-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          {others.filter((v) => v !== 'REQUEST_CHANGES').map((v) => (
+            <DropdownMenuItem
+              key={v}
+              onSelect={() => onSubmit(v)}
+              className="gap-2 text-xs cursor-pointer"
+            >
+              {ICON[v]}
+              {LABEL[v]}
+            </DropdownMenuItem>
+          ))}
+          {others.includes('REQUEST_CHANGES') && <DropdownMenuSeparator />}
+          {others.includes('REQUEST_CHANGES') && (
+            <DropdownMenuItem
+              onSelect={() => onSubmit('REQUEST_CHANGES')}
+              className="gap-2 text-xs cursor-pointer text-destructive focus:text-destructive"
+            >
+              {ICON.REQUEST_CHANGES}
+              {LABEL.REQUEST_CHANGES}
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }

@@ -1,0 +1,409 @@
+import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as github from './github';
+import * as claude from './claude';
+
+export function activate(context: vscode.ExtensionContext) {
+    const provider = new ClaudeReviewsViewProvider(context.extensionUri);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider('claude-reviews.main', provider, {
+            webviewOptions: { retainContextWhenHidden: true },
+        })
+    );
+}
+
+export function deactivate() {}
+
+// ── State per webview view ─────────────────────────────────────────────────────
+
+interface ActivePR {
+    number: number;
+    owner: string;
+    repo: string;
+    title: string;
+    body: string;
+}
+
+/**
+ * Provides the Claude Reviews webview view in the activity bar.
+ * Serves the pre-built webview/dist/ React app and bridges all messages.
+ */
+class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
+
+    constructor(private readonly extensionUri: vscode.Uri) {}
+
+    resolveWebviewView(
+        webviewView: vscode.WebviewView,
+        _context: vscode.WebviewViewResolveContext,
+        _token: vscode.CancellationToken,
+    ): void {
+        const distUri = vscode.Uri.joinPath(this.extensionUri, '..', 'webview', 'dist');
+
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [distUri],
+        };
+
+        webviewView.webview.html = this.getHtmlContent(webviewView.webview, distUri);
+
+        // Per-view state — each panel gets its own instance of these fields
+        const state: ViewState = {
+            webview: webviewView.webview,
+            cachedToken: null,
+            prStateFilter: 'open',
+            assignedToMe: false,
+            reviewRequested: false,
+            activePR: null,
+            activeDiff: '',
+            activeReviewResult: null,
+            pendingReviewId: null,
+            chatHistory: new Map(),
+        };
+
+        this.setupMessageBridge(state);
+    }
+
+    private getHtmlContent(webview: vscode.Webview, distUri: vscode.Uri): string {
+        const indexPath = path.join(distUri.fsPath, 'index.html');
+        if (!fs.existsSync(indexPath)) {
+            return errorHtml('webview/dist/index.html not found. Run "npm run build" inside webview/.');
+        }
+        let html = fs.readFileSync(indexPath, 'utf8');
+        html = html.replace(/(src|href)="\.\/([^"]+)"/g, (_m, attr, p) =>
+            `${attr}="${webview.asWebviewUri(vscode.Uri.joinPath(distUri, p))}"`);
+        html = html.replace(/(src|href)="\/([^"]+)"/g, (_m, attr, p) =>
+            `${attr}="${webview.asWebviewUri(vscode.Uri.joinPath(distUri, p))}"`);
+        return html;
+    }
+
+    private setupMessageBridge(state: ViewState): void {
+        state.webview.onDidReceiveMessage(async (msg: { type?: string } & Record<string, unknown>) => {
+            if (!msg || typeof msg.type !== 'string') return;
+            switch (msg.type) {
+                case 'refreshPRs':
+                    await handleRefreshPRs(state, msg);
+                    break;
+                case 'selectPR':
+                    await handleSelectPR(state, msg);
+                    break;
+                case 'generateReview':
+                    await handleGenerateReview(state, msg);
+                    break;
+                case 'cancelReview':
+                    claude.cancelCurrentRequest();
+                    break;
+                case 'saveDraft':
+                    await handleSaveDraft(state, msg);
+                    break;
+                case 'submitReview':
+                    await handleSubmitReview(state, msg);
+                    break;
+                case 'deleteDraft':
+                    await handleDeleteDraft(state, msg);
+                    break;
+                case 'askClaude':
+                    await handleAskClaude(state, msg);
+                    break;
+                case 'clearChat': {
+                    const key = prKey(state.activePR);
+                    if (key) state.chatHistory.delete(key);
+                    break;
+                }
+                case 'openUrl':
+                    if (typeof msg.url === 'string' && msg.url.startsWith('https://')) {
+                        vscode.env.openExternal(vscode.Uri.parse(msg.url));
+                    }
+                    break;
+                default:
+                    console.warn('[claude-reviews] unknown message type:', msg.type);
+            }
+        });
+    }
+}
+
+// ── Per-view state ─────────────────────────────────────────────────────────────
+
+interface ViewState {
+    webview: vscode.Webview;
+    cachedToken: string | null;
+    prStateFilter: string;
+    assignedToMe: boolean;
+    reviewRequested: boolean;
+    activePR: ActivePR | null;
+    activeDiff: string;
+    activeReviewResult: github.ReviewResult | null;
+    pendingReviewId: string | null;
+    chatHistory: Map<string, claude.ChatMessage[]>;
+}
+
+function prKey(pr: ActivePR | null): string | null {
+    return pr ? `${pr.owner}/${pr.repo}#${pr.number}` : null;
+}
+
+function push(state: ViewState, msg: object): void {
+    state.webview.postMessage(msg);
+}
+
+function config(): vscode.WorkspaceConfiguration {
+    return vscode.workspace.getConfiguration('claude-reviews');
+}
+
+function githubBaseUrl(): string {
+    return config().get<string>('githubBaseUrl', 'https://github.com');
+}
+
+function reviewModel(): string {
+    return config().get<string>('reviewModel', '');
+}
+
+function workingDir(): string {
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+}
+
+async function getToken(state: ViewState): Promise<string> {
+    if (state.cachedToken) return state.cachedToken;
+    const token = await github.resolveToken(githubBaseUrl());
+    state.cachedToken = token;
+    return token;
+}
+
+// ── Message handlers ───────────────────────────────────────────────────────────
+
+async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    try {
+        const token = await getToken(state);
+        if (typeof msg.state === 'string') state.prStateFilter = msg.state;
+        if (typeof msg.assignedToMe === 'boolean') state.assignedToMe = msg.assignedToMe;
+        if (typeof msg.reviewRequested === 'boolean') state.reviewRequested = msg.reviewRequested;
+
+        const currentRepo = github.detectCurrentRepo(workingDir() || process.cwd());
+        const prs = await github.searchPRs(
+            token,
+            githubBaseUrl(),
+            state.prStateFilter,
+            state.assignedToMe,
+            state.reviewRequested,
+            currentRepo ?? undefined,
+        );
+        prs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        push(state, { type: 'prListLoaded', prs, defaultRepo: currentRepo ?? undefined });
+    } catch (err) {
+        const message = errorMessage(err);
+        state.cachedToken = null;
+        vscode.window.showErrorMessage(`Claude Reviews: ${message}`);
+        push(state, { type: 'prListLoaded', prs: [] });
+    }
+}
+
+async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    const number = msg.number as number;
+    const owner = msg.owner as string;
+    const repo = msg.repo as string;
+    if (!number || !owner || !repo) return;
+
+    push(state, { type: 'draftLoading' });
+    try {
+        const token = await getToken(state);
+        const base = githubBaseUrl();
+
+        const [diff, detail, draft] = await Promise.all([
+            github.getPRDiff(token, base, owner, repo, number),
+            github.getPRDetail(token, base, owner, repo, number),
+            github.loadDraftReview(token, base, owner, repo, number),
+        ]);
+
+        state.activePR = { number, owner, repo, title: String(msg.title ?? ''), body: String(msg.body ?? '') };
+        state.activeDiff = diff;
+        state.activeReviewResult = draft?.result ?? null;
+        state.pendingReviewId = draft?.id ?? null;
+
+        if (detail.merged) {
+            push(state, { type: 'draftLoaded', prState: 'MERGED', diff });
+        } else if (draft) {
+            push(state, {
+                type: 'draftLoaded',
+                prState: 'DRAFT_PRESENT',
+                reviewId: draft.id,
+                result: draft.result,
+                diff,
+                staleCommits: false,
+            });
+        } else {
+            push(state, { type: 'draftLoaded', prState: 'NO_DRAFT', diff });
+        }
+    } catch (err) {
+        state.cachedToken = null;
+        push(state, { type: 'draftLoaded', prState: 'NO_DRAFT', status: errorMessage(err) });
+    }
+}
+
+async function handleGenerateReview(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    const number = msg.number as number;
+    const owner = msg.owner as string;
+    const repo = msg.repo as string;
+    if (!number || !owner || !repo) return;
+
+    push(state, { type: 'reviewGenerating', message: 'Fetching PR data…' });
+    try {
+        const token = await getToken(state);
+        const base = githubBaseUrl();
+
+        let diff = state.activeDiff;
+        if (!diff || state.activePR?.number !== number) {
+            diff = await github.getPRDiff(token, base, owner, repo, number);
+            state.activeDiff = diff;
+        }
+
+        const existingReviews = await github.getExistingReviewsSummary(token, base, owner, repo, number).catch(() => '');
+
+        const pr: claude.PR = {
+            number,
+            owner,
+            repo,
+            title: state.activePR?.title ?? '',
+            body: state.activePR?.body ?? '',
+        };
+
+        const prompt = claude.buildPrompt({ pr, existingReviews });
+
+        const result = await claude.reviewPR({
+            prompt,
+            model: reviewModel(),
+            workingDir: workingDir(),
+            onStatus: (status) => push(state, { type: 'reviewGenerating', message: status }),
+            onChunk: (kind, chunk) => push(state, { type: 'reviewChunk', kind, chunk }),
+        });
+
+        state.activeReviewResult = result;
+        push(state, { type: 'reviewResult', result, diff });
+    } catch (err) {
+        push(state, { type: 'reviewError', message: errorMessage(err) });
+    }
+}
+
+async function handleSaveDraft(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    const number = msg.number as number;
+    const owner = msg.owner as string;
+    const repo = msg.repo as string;
+    const resultFromMsg = msg.result as github.ReviewResult | undefined;
+    const review = resultFromMsg ?? state.activeReviewResult;
+    if (!number || !owner || !repo || !review) return;
+
+    try {
+        const token = await getToken(state);
+        const { reviewId, commentsDropped } = await github.saveDraftReview(
+            token, githubBaseUrl(), owner, repo, number, review,
+        );
+        state.pendingReviewId = reviewId;
+        push(state, { type: 'draftSaved', reviewId, commentsDropped });
+    } catch (err) {
+        state.cachedToken = null;
+        push(state, { type: 'draftSaveError', message: errorMessage(err) });
+    }
+}
+
+async function handleSubmitReview(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    const number = msg.number as number;
+    const owner = msg.owner as string;
+    const repo = msg.repo as string;
+    const verdict = msg.verdict as string;
+    const comment = msg.comment as string ?? '';
+    if (!number || !owner || !repo || !verdict || !state.pendingReviewId) return;
+
+    try {
+        const token = await getToken(state);
+        await github.submitReview(
+            token, githubBaseUrl(), owner, repo, number,
+            state.pendingReviewId, verdict, comment,
+        );
+        state.pendingReviewId = null;
+        push(state, { type: 'reviewSubmitted' });
+    } catch (err) {
+        state.cachedToken = null;
+        push(state, { type: 'reviewSubmitError', message: errorMessage(err) });
+    }
+}
+
+async function handleDeleteDraft(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    const number = msg.number as number;
+    const owner = msg.owner as string;
+    const repo = msg.repo as string;
+    if (!number || !owner || !repo || !state.pendingReviewId) return;
+
+    try {
+        const token = await getToken(state);
+        await github.deleteDraftReview(
+            token, githubBaseUrl(), owner, repo, number, state.pendingReviewId,
+        );
+        state.pendingReviewId = null;
+        push(state, { type: 'draftDeleted' });
+    } catch (err) {
+        state.cachedToken = null;
+        push(state, { type: 'draftDeleteError', message: errorMessage(err) });
+    }
+}
+
+async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    const context = msg.context as string ?? '';
+    const question = msg.question as string ?? '';
+    if (!question.trim()) return;
+
+    const key = prKey(state.activePR);
+    if (key && !state.chatHistory.has(key)) state.chatHistory.set(key, []);
+    const history = key ? (state.chatHistory.get(key) ?? []) : [];
+
+    // Add user turn to history before sending
+    history.push({ role: 'USER', content: question });
+
+    const prompt = context.trim()
+        ? claude.buildFocusedChatPrompt(context, question)
+        : claude.buildChatPrompt(buildPrContext(state), history.slice(0, -1), question);
+
+    try {
+        const response = await claude.chat({
+            prompt,
+            workingDir: workingDir(),
+            onChunk: (chunk) => push(state, { type: 'chatChunk', chunk }),
+        });
+        history.push({ role: 'ASSISTANT', content: response });
+        push(state, { type: 'chatResponse', response });
+    } catch (err) {
+        history.pop(); // remove the user turn we added on error
+        push(state, { type: 'chatError', message: errorMessage(err) });
+    }
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────────
+
+function buildPrContext(state: ViewState): string {
+    if (!state.activePR) return '';
+    const pr = state.activePR;
+    const lines = [
+        `PR #${pr.number}: ${pr.title}`,
+        `Repo: ${pr.owner}/${pr.repo}`,
+    ];
+    if (state.activeReviewResult) {
+        const r = state.activeReviewResult;
+        lines.push('', `Review verdict: ${r.verdict}`);
+        if (r.summary) lines.push(`Summary: ${r.summary.substring(0, 500)}`);
+    }
+    if (state.activeDiff) {
+        lines.push('', 'Diff (excerpt):', state.activeDiff.substring(0, 4000));
+    }
+    return lines.join('\n');
+}
+
+function errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+}
+
+function errorHtml(message: string): string {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Claude Reviews</title></head>
+<body style="color:#e8a030;background:#0a0805;font-family:monospace;padding:16px;">
+  <p>${message}</p>
+</body>
+</html>`;
+}

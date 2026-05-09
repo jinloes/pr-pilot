@@ -5,7 +5,9 @@ import static com.intellij.openapi.application.ApplicationManager.getApplication
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.module.kotlin.KotlinModule;
 import com.intellij.ide.BrowserUtil;
+import com.intellij.openapi.project.Project;
 import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
@@ -16,6 +18,7 @@ import com.jinloes.claudereviews.model.ReviewResult;
 import com.jinloes.claudereviews.services.GitHubService;
 import com.jinloes.claudereviews.services.IntellijClaudeService;
 import com.jinloes.claudereviews.services.IntellijGitHubService;
+import com.jinloes.claudereviews.services.PatternKnowledgeBase;
 import com.jinloes.claudereviews.services.PendingReviewIndex;
 import com.jinloes.claudereviews.settings.PluginSettings;
 import com.sun.net.httpserver.HttpExchange;
@@ -25,6 +28,7 @@ import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import javax.swing.JComponent;
@@ -112,10 +116,13 @@ public class WebviewPanel {
     private final HttpServer httpServer;
     private final JBCefBrowser browser;
     private final JBCefJSQuery bridgeQuery;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper =
+            new ObjectMapper().registerModule(new KotlinModule.Builder().build());
     private final PendingReviewIndex pendingIndex = new PendingReviewIndex();
-    private final IntellijClaudeService claudeService = new IntellijClaudeService();
+    private final PatternKnowledgeBase patternKb = new PatternKnowledgeBase();
+    private final IntellijClaudeService claudeService;
     private final IntellijGitHubService ghSvc = IntellijGitHubService.getInstance();
+    private final Project project;
 
     private volatile List<PullRequest> cachedPRs = List.of();
     private volatile PullRequest activePR = null;
@@ -125,10 +132,16 @@ public class WebviewPanel {
     private volatile String prefetchedExistingReviews = null;
     private volatile List<ChatMessage> chatHistory = List.of();
 
+    private volatile String prStateFilter = "open";
+    private volatile boolean assignedToMeFilter = false;
+    private volatile boolean reviewRequestedFilter = false;
+
     private Consumer<PullRequest> onPRSelected = pr -> {};
     private Runnable onPageReady = () -> {};
 
-    public WebviewPanel() {
+    public WebviewPanel(Project project) {
+        this.project = project;
+        this.claudeService = new IntellijClaudeService(project.getBasePath());
         httpServer = tryStartServer();
         browser = new JBCefBrowser();
         bridgeQuery = JBCefJSQuery.create((JBCefBrowserBase) browser);
@@ -194,6 +207,7 @@ public class WebviewPanel {
             }
             byte[] bytes = in.readAllBytes();
             exchange.getResponseHeaders().add("Content-Type", mimeFor(path));
+            exchange.getResponseHeaders().add("Cache-Control", "no-store");
             exchange.sendResponseHeaders(200, bytes.length);
             exchange.getResponseBody().write(bytes);
             exchange.getResponseBody().close();
@@ -229,7 +243,13 @@ public class WebviewPanel {
 
             switch (type) {
                 case "selectPR" -> handleSelectPR(number, owner, repo);
-                case "refreshPRs" -> getApplication().invokeLater(onPageReady);
+                case "refreshPRs" -> {
+                    String state = node.path("state").asText("open");
+                    prStateFilter = StringUtils.defaultIfBlank(state, "open");
+                    assignedToMeFilter = node.path("assignedToMe").asBoolean(false);
+                    reviewRequestedFilter = node.path("reviewRequested").asBoolean(false);
+                    getApplication().invokeLater(onPageReady);
+                }
                 case "openUrl" -> {
                     String url = node.path("url").asText();
                     if (StringUtils.isNotBlank(url) && url.startsWith("https://")) {
@@ -238,9 +258,23 @@ public class WebviewPanel {
                 }
                 case "generateReview" -> handleGenerateReview(number, owner, repo);
                 case "cancelReview" -> claudeService.cancelCurrentRequest();
-                case "saveDraft" ->
-                        getApplication()
-                                .executeOnPooledThread(() -> handleSaveDraft(number, owner, repo));
+                case "saveDraft" -> {
+                    ReviewResult bridgeResult = null;
+                    try {
+                        var resultNode = node.path("result");
+                        if (!resultNode.isMissingNode()) {
+                            bridgeResult = mapper.treeToValue(resultNode, ReviewResult.class);
+                        }
+                    } catch (Exception e) {
+                        log.warn(
+                                "saveDraft: failed to parse result from bridge: {}",
+                                e.getMessage());
+                    }
+                    final ReviewResult finalResult = bridgeResult;
+                    getApplication()
+                            .executeOnPooledThread(
+                                    () -> handleSaveDraft(number, owner, repo, finalResult));
+                }
                 case "submitReview" -> {
                     String verdict = node.path("verdict").asText();
                     String comment = node.path("comment").asText("");
@@ -311,8 +345,39 @@ public class WebviewPanel {
                                 return;
                             }
 
-                            // All four calls are independent — run concurrently so total
+                            // Check local index upfront (no network) so we can prefetch
+                            // the current HEAD SHA in parallel if a staleness check is
+                            // likely to be needed.
+                            PendingReviewIndex.Entry localEntry =
+                                    pendingIndex.list().stream()
+                                            .filter(
+                                                    e ->
+                                                            e.owner().equals(owner)
+                                                                    && e.repo().equals(repo)
+                                                                    && e.number() == number)
+                                            .findFirst()
+                                            .orElse(null);
+                            String savedHeadSha = localEntry != null ? localEntry.headSha() : "";
+
+                            // All calls are independent — run concurrently so total
                             // latency is max(each) instead of sum(each).
+                            CompletableFuture<String> headShaFuture =
+                                    StringUtils.isNotBlank(savedHeadSha)
+                                            ? CompletableFuture.supplyAsync(
+                                                    () -> {
+                                                        try {
+                                                            return ghSvc.getPRHeadSha(
+                                                                    token, owner, repo, number);
+                                                        } catch (Exception ex) {
+                                                            log.warn(
+                                                                    "getPRHeadSha prefetch"
+                                                                            + " failed: {}",
+                                                                    ex.getMessage());
+                                                            return "";
+                                                        }
+                                                    })
+                                            : CompletableFuture.completedFuture("");
+
                             CompletableFuture<Boolean> mergedFuture =
                                     CompletableFuture.supplyAsync(
                                             () -> {
@@ -374,12 +439,13 @@ public class WebviewPanel {
                             GitHubService.PendingReview pending = pendingFuture.join();
                             prefetchedDiff = diffFuture.join();
                             prefetchedExistingReviews = reviewsFuture.join();
+                            String currentHeadSha = headShaFuture.join();
 
                             // Delete stale draft on a merged PR, best-effort.
                             if (merged && pending != null) {
                                 try {
                                     ghSvc.deleteDraftReview(
-                                            token, owner, repo, number, pending.id());
+                                            token, owner, repo, number, pending.getId());
                                 } catch (Exception e) {
                                     log.warn("deleteDraftReview failed: {}", e.getMessage());
                                 }
@@ -400,19 +466,21 @@ public class WebviewPanel {
                             }
 
                             if (pending != null) {
-                                boolean stale = isStale(owner, repo, number);
-                                ReviewResultDto dto = toDto(pending.result());
+                                boolean stale =
+                                        StringUtils.isNotBlank(savedHeadSha)
+                                                && !savedHeadSha.equals(currentHeadSha);
+                                ReviewResultDto dto = toDto(pending.getResult());
                                 pushMessage(
                                         new DraftLoadedMsg(
                                                 "draftLoaded",
                                                 "DRAFT_PRESENT",
-                                                pending.id(),
+                                                pending.getId(),
                                                 dto,
                                                 prefetchedDiff,
                                                 stale,
                                                 "Loaded pending draft review."));
-                                pendingReviewId = pending.id();
-                                lastResult = pending.result();
+                                pendingReviewId = pending.getId();
+                                lastResult = pending.getResult();
                                 return;
                             }
 
@@ -426,38 +494,6 @@ public class WebviewPanel {
                                             false,
                                             ""));
                         });
-    }
-
-    /**
-     * Returns true when the local index has a saved entry whose headSha differs from the PR's
-     * current HEAD SHA (i.e. new commits have been pushed since the draft was saved).
-     */
-    private boolean isStale(String owner, String repo, int number) {
-        return pendingIndex.list().stream()
-                .filter(
-                        e ->
-                                e.owner().equals(owner)
-                                        && e.repo().equals(repo)
-                                        && e.number() == number)
-                .findFirst()
-                .map(
-                        e -> {
-                            if (StringUtils.isBlank(e.headSha())) {
-                                return false;
-                            }
-                            String token = PluginSettings.getInstance().getGithubToken();
-                            if (StringUtils.isBlank(token)) {
-                                return false;
-                            }
-                            try {
-                                String currentSha = ghSvc.getPRHeadSha(token, owner, repo, number);
-                                return !e.headSha().equals(currentSha);
-                            } catch (Exception ex) {
-                                log.warn("getPRHeadSha failed: {}", ex.getMessage());
-                                return false;
-                            }
-                        })
-                .orElse(false);
     }
 
     // --- generateReview ---
@@ -548,9 +584,18 @@ public class WebviewPanel {
                                             "reviewGenerating", "Sending to Claude…"));
                             final String finalDiff = diff;
                             final String finalExisting = existingReviews;
+                            String typeContext =
+                                    DiffTypeContextExtractor.extract(finalDiff, project);
+                            String knownPatterns =
+                                    patternKb.load(finalPr.getOwner(), finalPr.getRepo());
                             claudeService.reviewPR(
                                     new PRReviewRequest(
-                                            finalPr, finalDiff, "", "", "", finalExisting),
+                                            finalPr,
+                                            "",
+                                            knownPatterns,
+                                            "",
+                                            finalExisting,
+                                            typeContext),
                                     statusMsg ->
                                             pushMessage(
                                                     new ReviewGeneratingMsg(
@@ -571,12 +616,13 @@ public class WebviewPanel {
 
     // --- saveDraft ---
 
-    private void handleSaveDraft(int number, String owner, String repo) {
-        ReviewResult result = lastResult;
+    private void handleSaveDraft(int number, String owner, String repo, ReviewResult bridgeResult) {
+        ReviewResult result = bridgeResult != null ? bridgeResult : lastResult;
         if (result == null) {
             pushMessage(new ErrorMsg("draftSaveError", "No review result to save."));
             return;
         }
+        lastResult = result;
 
         String token = PluginSettings.getInstance().getGithubToken();
         if (StringUtils.isBlank(token)) {
@@ -610,9 +656,10 @@ public class WebviewPanel {
                         .orElse(null);
         String title = pr != null ? pr.getTitle() : "";
         pendingIndex.add(owner, repo, number, title, headSha);
-        pendingReviewId = saved.reviewId();
+        pendingReviewId = saved.getReviewId();
 
-        pushMessage(new DraftSavedMsg("draftSaved", saved.reviewId(), saved.commentsDropped()));
+        pushMessage(
+                new DraftSavedMsg("draftSaved", saved.getReviewId(), saved.getCommentsDropped()));
         pushMessage(new PrDraftStatusMsg("prDraftStatusUpdated", number, owner, repo, true));
     }
 
@@ -788,6 +835,10 @@ public class WebviewPanel {
     /** Pushes the PR list into the webview via the bridge. Call from the EDT. */
     public void loadPRs(List<PullRequest> prs, String defaultRepo) {
         cachedPRs = prs;
+        Set<String> draftKeys =
+                pendingIndex.list().stream()
+                        .map(e -> e.owner() + "/" + e.repo() + "#" + e.number())
+                        .collect(java.util.stream.Collectors.toSet());
         List<WebviewPr> dtos =
                 prs.stream()
                         .map(
@@ -800,10 +851,12 @@ public class WebviewPanel {
                                                 pr.getAuthor(),
                                                 pr.getCreatedAt(),
                                                 pr.getHtmlUrl(),
-                                                pendingIndex.hasDraft(
-                                                        pr.getOwner(),
-                                                        pr.getRepo(),
-                                                        pr.getNumber())))
+                                                draftKeys.contains(
+                                                        pr.getOwner()
+                                                                + "/"
+                                                                + pr.getRepo()
+                                                                + "#"
+                                                                + pr.getNumber())))
                         .toList();
         pushMessage(new PrListMessage("prListLoaded", dtos, defaultRepo));
     }
@@ -814,6 +867,22 @@ public class WebviewPanel {
 
     public void setOnPageReady(Runnable callback) {
         this.onPageReady = callback;
+    }
+
+    public String getPrStateFilter() {
+        return prStateFilter;
+    }
+
+    public boolean isAssignedToMeFilter() {
+        return assignedToMeFilter;
+    }
+
+    public boolean isReviewRequestedFilter() {
+        return reviewRequestedFilter;
+    }
+
+    public void reload() {
+        browser.getCefBrowser().reloadIgnoreCache();
     }
 
     public JComponent getComponent() {

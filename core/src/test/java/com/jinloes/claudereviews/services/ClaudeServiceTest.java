@@ -22,92 +22,87 @@ class ClaudeServiceTest {
     class BuildPrompt {
 
         @Test
-        void alwaysContainsPersonaAndDiff() {
-            String prompt =
-                    ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff content", "", ""));
+        void alwaysContainsPersonaAndFetchInstruction() {
+            PullRequest prWithMeta =
+                    new PullRequest(
+                            "Fix the bug", "", "myorg", "myrepo", 99, "", "alice", "2024-01-01");
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(prWithMeta, "", ""));
             assertThat(prompt).contains("experienced engineer");
-            assertThat(prompt).contains("diff content");
+            assertThat(prompt).contains("gh pr diff 99 --repo myorg/myrepo");
         }
 
         @Test
-        void diffWrappedInXmlTags() {
-            String prompt =
-                    ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff content", "", ""));
-            assertThat(prompt).contains("<diff>\ndiff content\n</diff>");
+        void fetchDiffWrappedInFetchDiffTag() {
+            PullRequest prWithMeta =
+                    new PullRequest(
+                            "Fix the bug", "", "myorg", "myrepo", 99, "", "alice", "2024-01-01");
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(prWithMeta, "", ""));
+            assertThat(prompt).contains("<fetch_diff>\n");
+            assertThat(prompt).contains("gh pr diff 99 --repo myorg/myrepo");
+            assertThat(prompt).contains("</fetch_diff>");
+            assertThat(prompt).doesNotContain("<diff>");
         }
 
         @Test
-        void blankProjectConventions_sectionAbsent() {
-            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
-            // When blank, <project_conventions> must NOT appear as a block wrapper (with newline);
-            // the instruction text references these tags inline (without a trailing newline).
-            assertThat(prompt).doesNotContain("<project_conventions>\n");
+        void prMetadataWrappedInXmlTags() {
+            PullRequest prWithMeta =
+                    new PullRequest(
+                            "Fix the bug", "", "myorg", "myrepo", 99, "", "alice", "2024-01-01");
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(prWithMeta, "diff", ""));
+            assertThat(prompt).contains("<pr_metadata>\n");
+            assertThat(prompt).contains("</pr_metadata>");
+            assertThat(prompt).contains("number: 99");
+            assertThat(prompt).contains("repo: myorg/myrepo");
+            assertThat(prompt).contains("title: Fix the bug");
         }
 
         @Test
-        void nonBlankProjectConventions_wrappedInXmlTagsBeforeDiff() {
-            String prompt =
-                    ClaudeService.buildPrompt(
-                            new PRReviewRequest(pr(""), "diff", "", "no magic numbers"));
-            assertThat(prompt)
-                    .contains("<project_conventions>\nno magic numbers\n</project_conventions>");
-            // Use the content-carrying form to locate the injected block, not the inline mention
-            assertThat(prompt.indexOf("<project_conventions>\nno magic numbers"))
-                    .isLessThan(prompt.indexOf("<diff>\ndiff\n</diff>"));
+        void prMetadataAppearsBeforeFetchDiff() {
+            PullRequest prWithMeta =
+                    new PullRequest("My PR", "", "org", "repo", 1, "", "alice", "2024-01-01");
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(prWithMeta, "", ""));
+            assertThat(prompt.indexOf("<pr_metadata>\nnumber:"))
+                    .isLessThan(prompt.indexOf("<fetch_diff>\nRun:"));
         }
 
         @Test
         void blankKnownPatterns_sectionAbsent() {
-            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
-            // When blank, <known_patterns> must NOT appear as a block wrapper (with newline)
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", ""));
             assertThat(prompt).doesNotContain("<known_patterns>\n");
         }
 
         @Test
         void nonBlankKnownPatterns_wrappedInXmlTags() {
             String prompt =
-                    ClaudeService.buildPrompt(
-                            new PRReviewRequest(pr(""), "diff", "use Optional", ""));
+                    ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "use Optional"));
             assertThat(prompt).contains("<known_patterns>\n");
             assertThat(prompt).contains("</known_patterns>");
             assertThat(prompt).contains("use Optional");
         }
 
         @Test
-        void conventionsSectionAppearsBeforeKnownPatterns() {
-            String prompt =
-                    ClaudeService.buildPrompt(
-                            new PRReviewRequest(pr(""), "diff", "patterns", "conventions"));
-            // Use the content-carrying form to locate the injected blocks
-            assertThat(prompt.indexOf("<project_conventions>\nconventions"))
-                    .isLessThan(prompt.indexOf("<known_patterns>\n"));
-        }
-
-        @Test
         void blankPrBody_descriptionSectionAbsent() {
-            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
-            // When blank, <pr_description> must NOT appear as a block wrapper (with newline)
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", ""));
             assertThat(prompt).doesNotContain("<pr_description>\n");
         }
 
         @Test
         void nonBlankPrBody_wrappedInXmlTags() {
             String prompt =
-                    ClaudeService.buildPrompt(
-                            new PRReviewRequest(pr("fixes the bug"), "diff", "", ""));
+                    ClaudeService.buildPrompt(new PRReviewRequest(pr("fixes the bug"), "diff", ""));
             assertThat(prompt).contains("<pr_description>\nfixes the bug\n</pr_description>");
         }
 
         @Test
         void noPriorReview_sectionAbsent() {
-            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", ""));
             assertThat(prompt).doesNotContain("<prior_review>\n");
         }
 
         @Test
         void blankPriorReview_sectionAbsent() {
             String prompt =
-                    ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", "", "   "));
+                    ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", "   "));
             assertThat(prompt).doesNotContain("<prior_review>\n");
         }
 
@@ -115,7 +110,7 @@ class ClaudeServiceTest {
         void nonBlankPriorReview_wrappedInXmlTags() {
             String prompt =
                     ClaudeService.buildPrompt(
-                            new PRReviewRequest(pr(""), "diff", "", "", "Verdict: APPROVE"));
+                            new PRReviewRequest(pr(""), "diff", "", "Verdict: APPROVE"));
             assertThat(prompt).contains("<prior_review>\n");
             assertThat(prompt).contains("</prior_review>");
             assertThat(prompt).contains("Verdict: APPROVE");
@@ -125,10 +120,7 @@ class ClaudeServiceTest {
         void priorReviewAppearsAfterKnownPatternsBeforePrDescription() {
             String prompt =
                     ClaudeService.buildPrompt(
-                            new PRReviewRequest(
-                                    pr("body"), "diff", "patterns", "conventions", "prior"));
-            // Use content-carrying forms to avoid matching inline tag mentions in
-            // REVIEW_INSTRUCTIONS
+                            new PRReviewRequest(pr("body"), "diff", "patterns", "prior"));
             int knownEnd = prompt.indexOf("</known_patterns>");
             int priorStart = prompt.indexOf("<prior_review>\n");
             int descStart = prompt.indexOf("<pr_description>\nbody");
@@ -137,27 +129,99 @@ class ClaudeServiceTest {
         }
 
         @Test
+        void blankTypeContext_sectionAbsent() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", ""));
+            assertThat(prompt).doesNotContain("<type_context>\n");
+        }
+
+        @Test
+        void nonBlankTypeContext_wrappedInXmlTags() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(pr(""), "diff", "", null, null, "Foo#bar(): int"));
+            assertThat(prompt).contains("<type_context>\nFoo#bar(): int\n</type_context>");
+        }
+
+        @Test
+        void typeContextAppearsAfterPrDescriptionBeforeFetchDiff() {
+            String prompt =
+                    ClaudeService.buildPrompt(
+                            new PRReviewRequest(
+                                    pr("body"), "", "", null, null, "Foo#bar(): int"));
+            assertThat(prompt.indexOf("<type_context>\nFoo#bar(): int"))
+                    .isGreaterThan(prompt.indexOf("<pr_description>\nbody"));
+            assertThat(prompt.indexOf("<type_context>\nFoo#bar(): int"))
+                    .isLessThan(prompt.indexOf("<fetch_diff>\nRun:"));
+        }
+
+        @Test
+        void misattributionGuardPresent() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "", ""));
+            assertThat(prompt).contains("misattributed comment is worse than no comment");
+            assertThat(prompt).contains("trace");
+        }
+
+        @Test
+        void unverifiableIssueGuardPresent() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "", ""));
+            assertThat(prompt).contains("library internals");
+            assertThat(prompt).contains("When in doubt, leave it out");
+        }
+
+        @Test
+        void issueTypeRequiresConfirmationFromDiff() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "", ""));
+            assertThat(prompt).contains("Do NOT use \"issue\" for problems that require runtime");
+        }
+
+        @Test
+        void priorReviewInUntrustedInputList() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "", ""));
+            assertThat(prompt).contains("<prior_review>");
+            int injectionGuardIndex = prompt.indexOf("untrusted input");
+            int priorReviewTagIndex = prompt.indexOf("<prior_review>", 0);
+            assertThat(priorReviewTagIndex).isLessThan(injectionGuardIndex);
+        }
+
+        @Test
+        void lineCommentsCapPresent() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "", ""));
+            assertThat(prompt).contains("at most 12 comments");
+        }
+
+        @Test
+        void testCoverageRuleIsScoped() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "", ""));
+            assertThat(prompt).contains("flag as \"issue\" only if");
+            assertThat(prompt).doesNotContain("any non-trivial new or changed branch or");
+        }
+
+        @Test
+        void lineNumberingRulesAppearBeforeSchema() {
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "", ""));
+            assertThat(prompt.indexOf("Line numbering:")).isLessThan(prompt.indexOf("Schema (emit"));
+        }
+
+        @Test
         void priorReviewStripped() {
             String prompt =
                     ClaudeService.buildPrompt(
-                            new PRReviewRequest(pr(""), "diff", "", "", "  spaced  "));
+                            new PRReviewRequest(pr(""), "diff", "", "  spaced  "));
             assertThat(prompt).contains("<prior_review>\n");
-            // The content should be stripped of surrounding whitespace
             assertThat(prompt).contains("spaced");
             assertThat(prompt).doesNotContain("  spaced  ");
         }
 
         @Test
         void noExistingReviews_sectionAbsent() {
-            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", ""));
+            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", ""));
             assertThat(prompt).doesNotContain("<existing_reviews>\n");
         }
 
         @Test
         void blankExistingReviews_sectionAbsent() {
             String prompt =
-                    ClaudeService.buildPrompt(
-                            new PRReviewRequest(pr(""), "diff", "", "", null, "   "));
+                    ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", "", null, "   "));
             assertThat(prompt).doesNotContain("<existing_reviews>\n");
         }
 
@@ -165,7 +229,7 @@ class ClaudeServiceTest {
         void nonBlankExistingReviews_wrappedInXmlTags() {
             String prompt =
                     ClaudeService.buildPrompt(
-                            new PRReviewRequest(pr(""), "diff", "", "", null, "Review by @alice"));
+                            new PRReviewRequest(pr(""), "diff", "", null, "Review by @alice"));
             assertThat(prompt).contains("<existing_reviews>\n");
             assertThat(prompt).contains("</existing_reviews>");
             assertThat(prompt).contains("Review by @alice");
@@ -176,12 +240,7 @@ class ClaudeServiceTest {
             String prompt =
                     ClaudeService.buildPrompt(
                             new PRReviewRequest(
-                                    pr("body"),
-                                    "diff",
-                                    "patterns",
-                                    "conventions",
-                                    "prior",
-                                    "existing"));
+                                    pr("body"), "diff", "patterns", "prior", "existing"));
             int knownEnd = prompt.indexOf("</known_patterns>");
             int existingStart = prompt.indexOf("<existing_reviews>\n");
             int priorStart = prompt.indexOf("<prior_review>\n");
@@ -196,7 +255,6 @@ class ClaudeServiceTest {
         @Test
         void noActiveProcess_doesNotThrow() {
             ClaudeService service = new ClaudeService();
-            // Should be a no-op when idle (activeProcess is null)
             service.cancelCurrentRequest();
         }
     }
@@ -218,6 +276,25 @@ class ClaudeServiceTest {
             assertThat(statuses).isEmpty();
             assertThat(chunks).hasSize(1);
             assertThat(chunks.get(0)).containsExactly("text", "hello world");
+        }
+
+        @Test
+        void textBlock_withTextBuffer_appendsText() {
+            StringBuilder textBuffer = new StringBuilder();
+
+            service.handleContentBlock(
+                    textBlock("json content"), s -> {}, null, textBuffer);
+
+            assertThat(textBuffer.toString()).isEqualTo("json content");
+        }
+
+        @Test
+        void textBlock_blankText_doesNotAppendToTextBuffer() {
+            StringBuilder textBuffer = new StringBuilder();
+
+            service.handleContentBlock(textBlock("  "), s -> {}, null, textBuffer);
+
+            assertThat(textBuffer.toString()).isEmpty();
         }
 
         @Test
@@ -326,7 +403,6 @@ class ClaudeServiceTest {
         void multipleArgs_joinedWithCommaSpace() {
             Map<String, Object> input = Map.of("a", "1", "b", "2");
             String result = ClaudeService.toolUseStatus("tool", input);
-            // Both entries present, separated by ", "
             assertThat(result).matches("tool\\(.*=.*,\\s.*=.*\\)");
         }
 

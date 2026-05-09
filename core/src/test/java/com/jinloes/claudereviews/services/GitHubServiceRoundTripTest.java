@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jinloes.claudereviews.model.LineComment;
 import com.jinloes.claudereviews.model.ReviewResult;
 import java.util.List;
+import kotlinx.serialization.json.JsonArray;
+import kotlinx.serialization.json.JsonObject;
+import kotlinx.serialization.json.JsonPrimitive;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -14,12 +17,19 @@ class GitHubServiceRoundTripTest {
         return new ReviewResult(summary, verdict, comments);
     }
 
+    /** Returns the string value of a field in the first element of a [JsonArray]. */
+    private static String fieldText(JsonArray arr, int index, String key) {
+        JsonObject obj = (JsonObject) arr.get(index);
+        JsonPrimitive prim = (JsonPrimitive) obj.get(key);
+        return prim.getContent();
+    }
+
     @Nested
     class EncodeBody {
 
         @Test
         void summaryStoredInHiddenTag() {
-            String body = GitHubService.encodeBody(review("My summary", "APPROVE", List.of()));
+            String body = GitHubService.Companion.encodeBody(review("My summary", "APPROVE", List.of()));
             // Summary must be in the hidden tag, NOT in visible text at the start
             assertThat(body).contains("<!-- claude-summary: My summary -->");
             assertThat(body).doesNotStartWith("My summary");
@@ -28,7 +38,7 @@ class GitHubServiceRoundTripTest {
         @Test
         void generalComment_noTypePrefix() {
             LineComment general = new LineComment("", 0, "issue", "look at this");
-            String body = GitHubService.encodeBody(review("s", "COMMENT", List.of(general)));
+            String body = GitHubService.Companion.encodeBody(review("s", "COMMENT", List.of(general)));
             // Type prefix must not appear in the human-readable general notes section
             assertThat(body).doesNotContain("[ISSUE]");
             assertThat(body).contains("look at this");
@@ -36,14 +46,14 @@ class GitHubServiceRoundTripTest {
 
         @Test
         void containsVerdictTag() {
-            String body = GitHubService.encodeBody(review("s", "REQUEST_CHANGES", List.of()));
+            String body = GitHubService.Companion.encodeBody(review("s", "REQUEST_CHANGES", List.of()));
             assertThat(body).contains("<!-- claude-verdict: REQUEST_CHANGES -->");
         }
 
         @Test
         void containsCommentsJson() {
             LineComment c = new LineComment("src/Foo.java", 42, "issue", "null check missing");
-            String body = GitHubService.encodeBody(review("s", "COMMENT", List.of(c)));
+            String body = GitHubService.Companion.encodeBody(review("s", "COMMENT", List.of(c)));
             assertThat(body).contains("<!-- claude-comments:");
             assertThat(body).contains("src/Foo.java");
             assertThat(body).contains("42");
@@ -54,25 +64,25 @@ class GitHubServiceRoundTripTest {
         @Test
         void generalComment_includedInCommentsJson() {
             LineComment general = new LineComment("", 0, "note", "overall looks good");
-            String body = GitHubService.encodeBody(review("s", "APPROVE", List.of(general)));
+            String body = GitHubService.Companion.encodeBody(review("s", "APPROVE", List.of(general)));
             assertThat(body).contains("overall looks good");
         }
 
         @Test
         void summaryContainingCommentTerminator_escapedSoTagDoesNotBreak() {
             ReviewResult r = review("See: <!-- end --> tag", "APPROVE", List.of());
-            String body = GitHubService.encodeBody(r);
+            String body = GitHubService.Companion.encodeBody(r);
             // The raw "-->" in the summary must be escaped so the HTML comment is well-formed
             assertThat(body).doesNotContain("<!-- claude-summary: See: <!-- end --> tag -->");
             // Round-trip still recovers a readable summary (with "-- >" substitution)
-            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
+            ReviewResult decoded = GitHubService.Companion.decodeReview(body, List.of());
             assertThat(decoded.getSummary()).contains("See:");
         }
 
         @Test
         void commentBodyContainingCommentTerminator_roundTrips() {
             LineComment c = new LineComment("src/Foo.java", 5, "issue", "closes --> stream");
-            String body = GitHubService.encodeBody(review("s", "COMMENT", List.of(c)));
+            String body = GitHubService.Companion.encodeBody(review("s", "COMMENT", List.of(c)));
             // The embedded JSON must not contain a raw "-->" that would break the HTML comment
             int commentsStart = body.indexOf("<!-- claude-comments:");
             int commentsEnd =
@@ -87,8 +97,8 @@ class GitHubServiceRoundTripTest {
             // round-trip through the JSON blob even though saveDraftReview skips them as inline
             // GitHub comments (to avoid a 422 from the GitHub API).
             LineComment blank = new LineComment("src/Foo.java", 7, "note", "");
-            String body = GitHubService.encodeBody(review("s", "COMMENT", List.of(blank)));
-            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
+            String body = GitHubService.Companion.encodeBody(review("s", "COMMENT", List.of(blank)));
+            ReviewResult decoded = GitHubService.Companion.decodeReview(body, List.of());
             assertThat(decoded.getLineComments()).hasSize(1);
             assertThat(decoded.getLineComments().get(0).getFile()).isEqualTo("src/Foo.java");
             assertThat(decoded.getLineComments().get(0).getLine()).isEqualTo(7);
@@ -102,23 +112,23 @@ class GitHubServiceRoundTripTest {
         @Test
         void parsesSummary() {
             String body =
-                    GitHubService.encodeBody(review("The summary text", "COMMENT", List.of()));
-            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
+                    GitHubService.Companion.encodeBody(review("The summary text", "COMMENT", List.of()));
+            ReviewResult decoded = GitHubService.Companion.decodeReview(body, List.of());
             assertThat(decoded.getSummary()).isEqualTo("The summary text");
         }
 
         @Test
         void parsesVerdict() {
-            String body = GitHubService.encodeBody(review("s", "REQUEST_CHANGES", List.of()));
-            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
+            String body = GitHubService.Companion.encodeBody(review("s", "REQUEST_CHANGES", List.of()));
+            ReviewResult decoded = GitHubService.Companion.decodeReview(body, List.of());
             assertThat(decoded.getVerdict()).isEqualTo("REQUEST_CHANGES");
         }
 
         @Test
         void parsesInlineCommentFromEmbeddedJson() {
             LineComment c = new LineComment("src/Bar.java", 10, "suggestion", "extract method");
-            String body = GitHubService.encodeBody(review("s", "COMMENT", List.of(c)));
-            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
+            String body = GitHubService.Companion.encodeBody(review("s", "COMMENT", List.of(c)));
+            ReviewResult decoded = GitHubService.Companion.decodeReview(body, List.of());
             assertThat(decoded.getLineComments()).hasSize(1);
             LineComment got = decoded.getLineComments().get(0);
             assertThat(got.getFile()).isEqualTo("src/Bar.java");
@@ -130,7 +140,7 @@ class GitHubServiceRoundTripTest {
         @Test
         void embeddedJsonTakesPrecedenceOverApiComments() {
             LineComment embedded = new LineComment("src/A.java", 5, "issue", "from embedded");
-            String body = GitHubService.encodeBody(review("s", "COMMENT", List.of(embedded)));
+            String body = GitHubService.Companion.encodeBody(review("s", "COMMENT", List.of(embedded)));
 
             // API comment that would conflict — embedded JSON wins so this is ignored
             List<GitHubService.GhReviewComment> apiComments =
@@ -138,7 +148,7 @@ class GitHubServiceRoundTripTest {
                             new GitHubService.GhReviewComment(
                                     "src/B.java", 99, null, "[NOTE] from api"));
 
-            ReviewResult decoded = GitHubService.decodeReview(body, apiComments);
+            ReviewResult decoded = GitHubService.Companion.decodeReview(body, apiComments);
             assertThat(decoded.getLineComments()).hasSize(1);
             assertThat(decoded.getLineComments().get(0).getFile()).isEqualTo("src/A.java");
         }
@@ -152,7 +162,7 @@ class GitHubServiceRoundTripTest {
                             new GitHubService.GhReviewComment(
                                     "src/Foo.java", 7, null, "[ISSUE] legacy comment"));
 
-            ReviewResult decoded = GitHubService.decodeReview(body, apiComments);
+            ReviewResult decoded = GitHubService.Companion.decodeReview(body, apiComments);
             assertThat(decoded.getLineComments()).hasSize(1);
             assertThat(decoded.getLineComments().get(0).getFile()).isEqualTo("src/Foo.java");
             assertThat(decoded.getLineComments().get(0).getLine()).isEqualTo(7);
@@ -167,7 +177,7 @@ class GitHubServiceRoundTripTest {
                             new GitHubService.GhReviewComment(
                                     "src/Foo.java", null, 15, "[NOTE] note text"));
 
-            ReviewResult decoded = GitHubService.decodeReview(body, apiComments);
+            ReviewResult decoded = GitHubService.Companion.decodeReview(body, apiComments);
             assertThat(decoded.getLineComments().get(0).getLine()).isEqualTo(15);
         }
     }
@@ -182,14 +192,14 @@ class GitHubServiceRoundTripTest {
                             "s",
                             "APPROVE",
                             List.of(new LineComment("src/Foo.java", 5, "issue", "body")));
-            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(1);
+            assertThat(GitHubService.Companion.buildCommentArray(r).size()).isEqualTo(1);
         }
 
         @Test
         void blankFile_skipped() {
             ReviewResult r =
                     review("s", "APPROVE", List.of(new LineComment("", 5, "issue", "body")));
-            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(0);
+            assertThat(GitHubService.Companion.buildCommentArray(r).size()).isEqualTo(0);
         }
 
         @Test
@@ -199,7 +209,7 @@ class GitHubServiceRoundTripTest {
                             "s",
                             "APPROVE",
                             List.of(new LineComment("src/Foo.java", 0, "issue", "body")));
-            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(0);
+            assertThat(GitHubService.Companion.buildCommentArray(r).size()).isEqualTo(0);
         }
 
         @Test
@@ -209,7 +219,7 @@ class GitHubServiceRoundTripTest {
                             "s",
                             "APPROVE",
                             List.of(new LineComment("src/Foo.java", -1, "issue", "body")));
-            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(0);
+            assertThat(GitHubService.Companion.buildCommentArray(r).size()).isEqualTo(0);
         }
 
         @Test
@@ -219,7 +229,7 @@ class GitHubServiceRoundTripTest {
                             "s",
                             "APPROVE",
                             List.of(new LineComment("src/Foo.java", 5, "issue", "")));
-            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(0);
+            assertThat(GitHubService.Companion.buildCommentArray(r).size()).isEqualTo(0);
         }
 
         @Test
@@ -229,7 +239,7 @@ class GitHubServiceRoundTripTest {
                             "s",
                             "APPROVE",
                             List.of(new LineComment("a/src/Foo.java", 5, "issue", "body")));
-            assertThat(GitHubService.buildCommentArray(r).get(0).get("path").asText())
+            assertThat(fieldText(GitHubService.Companion.buildCommentArray(r), 0, "path"))
                     .isEqualTo("src/Foo.java");
         }
 
@@ -240,7 +250,7 @@ class GitHubServiceRoundTripTest {
                             "s",
                             "APPROVE",
                             List.of(new LineComment("b/src/Foo.java", 5, "issue", "body")));
-            assertThat(GitHubService.buildCommentArray(r).get(0).get("path").asText())
+            assertThat(fieldText(GitHubService.Companion.buildCommentArray(r), 0, "path"))
                     .isEqualTo("src/Foo.java");
         }
 
@@ -251,7 +261,7 @@ class GitHubServiceRoundTripTest {
                             new LineComment("src/Foo.java", 5, "issue", "body"),
                             new LineComment("src/Foo.java", 5, "issue", "body"));
             ReviewResult r = review("s", "APPROVE", comments);
-            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(1);
+            assertThat(GitHubService.Companion.buildCommentArray(r).size()).isEqualTo(1);
         }
 
         @Test
@@ -261,7 +271,7 @@ class GitHubServiceRoundTripTest {
                             new LineComment("src/Foo.java", 5, "issue", "first"),
                             new LineComment("src/Foo.java", 5, "note", "second"));
             ReviewResult r = review("s", "APPROVE", comments);
-            assertThat(GitHubService.buildCommentArray(r).size()).isEqualTo(2);
+            assertThat(GitHubService.Companion.buildCommentArray(r).size()).isEqualTo(2);
         }
 
         @Test
@@ -271,7 +281,7 @@ class GitHubServiceRoundTripTest {
                             "s",
                             "APPROVE",
                             List.of(new LineComment("src/Foo.java", 5, "issue", "body")));
-            assertThat(GitHubService.buildCommentArray(r).get(0).get("side").asText())
+            assertThat(fieldText(GitHubService.Companion.buildCommentArray(r), 0, "side"))
                     .isEqualTo("RIGHT");
         }
     }
@@ -287,8 +297,8 @@ class GitHubServiceRoundTripTest {
                             new LineComment("src/Bar.java", 20, "suggestion", "extract method"),
                             new LineComment("", 0, "note", "general note"));
             ReviewResult original = review("Full summary", "REQUEST_CHANGES", comments);
-            String body = GitHubService.encodeBody(original);
-            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
+            String body = GitHubService.Companion.encodeBody(original);
+            ReviewResult decoded = GitHubService.Companion.decodeReview(body, List.of());
 
             assertThat(decoded.getSummary()).isEqualTo("Full summary");
             assertThat(decoded.getVerdict()).isEqualTo("REQUEST_CHANGES");
@@ -320,8 +330,8 @@ class GitHubServiceRoundTripTest {
         @Test
         void emptyComments_preservedAsEmpty() {
             ReviewResult original = review("Summary only", "APPROVE", List.of());
-            String body = GitHubService.encodeBody(original);
-            ReviewResult decoded = GitHubService.decodeReview(body, List.of());
+            String body = GitHubService.Companion.encodeBody(original);
+            ReviewResult decoded = GitHubService.Companion.decodeReview(body, List.of());
             assertThat(decoded.getLineComments()).isEmpty();
             assertThat(decoded.getSummary()).isEqualTo("Summary only");
             assertThat(decoded.getVerdict()).isEqualTo("APPROVE");

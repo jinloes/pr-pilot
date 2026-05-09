@@ -1,8 +1,31 @@
 plugins {
+    id 'idea'
     id 'com.diffplug.spotless' version '6.25.0' apply false
+    id 'org.jetbrains.kotlin.multiplatform' version '2.1.21' apply false
+    id 'org.jetbrains.kotlin.plugin.serialization' version '2.1.21' apply false
+}
+
+idea {
+    module {
+        // Exclude generated/cache directories that IntelliJ should not index.
+        excludeDirs += [
+            file('.gradle'),
+            file('.claude'),
+            file('build'),
+            file('org'),   // stray org.treesitter.TreeSitterProto.class from prior builds
+            file('src'),   // stray root-level source dir from prior builds
+        ]
+    }
 }
 
 subprojects {
+    apply plugin: 'idea'
+    idea {
+        module {
+            excludeDirs += [file('build')]
+        }
+    }
+
     apply plugin: 'com.diffplug.spotless'
 
     plugins.withId('java') {

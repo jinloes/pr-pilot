@@ -1,33 +1,49 @@
 .diff-viewer {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   margin-top: 4px;
 }
 
-/* ── File block ─────────────────────────────────────── */
+/* ── File block ──────────────────────────────────────── */
 
 .diff-file {
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+.diff-file::-webkit-scrollbar {
+  height: 5px;
+}
+
+.diff-file::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.diff-file::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
   border-radius: 3px;
-  overflow: hidden;
 }
 
 .diff-file__header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  background: #0f0c08;
-  border-bottom: 1px solid var(--border);
+  padding: 5px 10px;
+  background: hsl(var(--card));
+  border-bottom: 1px solid hsl(var(--border));
   font-size: 11px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
 }
 
 .diff-file__path {
   flex: 1;
   min-width: 0;
-  color: var(--text-muted);
-  font-family: inherit;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -39,174 +55,169 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   padding: 1px 6px 2px;
-  border-radius: 2px;
+  border-radius: 3px;
   text-transform: uppercase;
+  border: 1px solid;
 }
 
 .diff-file__badge--add {
-  color: #3fb950;
-  background: #0a1e0c;
-  border: 1px solid #1a4a20;
+  color: #4ade80;
+  background: #052e0a;
+  border-color: #166534;
 }
 
 .diff-file__badge--delete {
-  color: #f85149;
-  background: #1a0604;
-  border: 1px solid #4a1410;
+  color: #f87171;
+  background: #2d0707;
+  border-color: #7f1d1d;
 }
 
 .diff-file__badge--rename,
 .diff-file__badge--copy {
-  color: #e8a030;
-  background: #141008;
-  border: 1px solid #3a2a10;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.1);
+  border-color: hsl(var(--primary) / 0.3);
 }
 
-/* ── Table ──────────────────────────────────────────── */
+/* ── Table ───────────────────────────────────────────── */
 
 .diff-table {
-  width: 100%;
+  min-width: 100%;
+  width: max-content;
   border-collapse: collapse;
   font-size: 12px;
   line-height: 1.5;
-  font-family:
-    'JetBrains Mono',
-    'Fira Code',
-    'Cascadia Code',
-    'SF Mono',
-    'Consolas',
-    'Monaco',
-    monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Consolas', monospace;
 }
 
-/* ── Hunk header ────────────────────────────────────── */
+/* ── Hunk header ─────────────────────────────────────── */
 
 .diff-hunk-header {
-  background: #0d0f14;
+  background: hsl(var(--background));
+  border-top: 1px solid hsl(var(--border) / 0.6);
+  border-bottom: 1px solid hsl(var(--border) / 0.6);
 }
 
 .diff-hunk-label {
   padding: 3px 10px;
-  color: #5a7090;
+  color: hsl(var(--muted-foreground) / 0.7);
   font-size: 11px;
   white-space: pre;
 }
 
-/* ── Line rows ──────────────────────────────────────── */
+/* ── Line rows ───────────────────────────────────────── */
 
 .diff-gutter {
   width: 44px;
   min-width: 44px;
   padding: 1px 6px;
   text-align: right;
-  color: #3a3228;
+  color: hsl(var(--muted-foreground) / 0.4);
   user-select: none;
   vertical-align: top;
-  border-right: 1px solid #1a1510;
+  border-right: 1px solid hsl(var(--border));
   font-size: 11px;
   line-height: 1.6;
 }
 
 .diff-gutter--clickable {
   cursor: pointer;
-  color: #5a4838;
   position: relative;
 }
 
-.diff-gutter--clickable:hover {
-  background: rgba(232, 160, 48, 0.08);
-  color: var(--accent);
-}
-
-/* "+" affordance overlay on hover — makes click-to-add-comment discoverable */
-.diff-gutter--clickable:hover::after {
+.diff-gutter--clickable::after {
   content: '+';
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(232, 160, 48, 0.12);
-  color: var(--accent, #e8a030);
-  font-size: 11px;
+  color: hsl(var(--muted-foreground) / 0.2);
+  font-size: 10px;
   font-weight: 700;
   line-height: 1;
+}
+
+.diff-gutter--clickable:hover {
+  background: hsl(var(--primary) / 0.08);
+}
+
+.diff-gutter--clickable:hover::after {
+  background: hsl(var(--primary) / 0.12);
+  color: hsl(var(--primary));
 }
 
 .diff-prefix {
   display: inline-block;
   width: 12px;
-  color: #6a5040; /* increased contrast from #3a3228 for colorblind accessibility */
+  color: hsl(var(--muted-foreground) / 0.5);
   user-select: none;
 }
 
-/* overflow-x on <td> is unreliable in Chromium/JCEF — inner div handles it */
 .diff-code {
   padding: 0;
   vertical-align: top;
-  max-width: 0; /* forces the td to not stretch the table */
-  width: 100%;
-  overflow: hidden;
 }
 
 .diff-code__scroll {
   padding: 1px 10px 1px 4px;
   white-space: pre;
-  overflow-x: auto;
-  color: #c8bfa8;
+  color: hsl(var(--foreground) / 0.85);
 }
 
-/* ── Line types ─────────────────────────────────────── */
+/* ── Line types ──────────────────────────────────────── */
 
 .diff-line--normal {
   background: transparent;
 }
 
+/* GitHub Dark-style: light tint so syntax highlighting remains legible */
 .diff-line--insert {
-  background: #0a1e0c;
+  background: hsl(142 52% 20% / 0.18);
 }
 
 .diff-line--insert .diff-gutter {
-  background: #0c200e;
-  color: #2a6a30;
+  background: hsl(142 52% 16% / 0.40);
+  color: hsl(142 50% 48%);
 }
 
 .diff-line--insert .diff-prefix {
-  color: #3fb950;
-}
-
-.diff-line--insert .diff-code {
-  color: #d4f0d8;
+  color: #4ade80;
+  font-weight: 700;
 }
 
 .diff-line--delete {
-  background: #1a0604;
+  background: hsl(0 65% 20% / 0.18);
 }
 
 .diff-line--delete .diff-gutter {
-  background: #1c0806;
-  color: #6a2020;
+  background: hsl(0 65% 16% / 0.40);
+  color: hsl(0 55% 55%);
 }
 
 .diff-line--delete .diff-prefix {
-  color: #f85149;
+  color: #f87171;
+  font-weight: 700;
 }
 
-.diff-line--delete .diff-code {
-  color: #f0c8c6;
-}
-
-/* ── Inline comment rows ────────────────────────────── */
+/* ── Inline comment rows ─────────────────────────────── */
 
 .diff-comment-row {
-  background: #0f0e0c;
+  background: hsl(var(--card));
 }
 
 .diff-comment-row--focused .diff-comment-cell {
-  background: #131210;
+  background: hsl(var(--primary) / 0.08);
+  border-left-color: hsl(var(--primary)) !important;
+  animation: comment-focus-pulse 0.4s ease-out;
+}
+
+@keyframes comment-focus-pulse {
+  0%   { background: hsl(var(--primary) / 0.25); }
+  100% { background: hsl(var(--primary) / 0.08); }
 }
 
 .diff-comment-row--new .diff-comment-cell {
-  border-left-color: var(--accent-dim) !important;
+  border-left-color: hsl(var(--primary) / 0.5) !important;
 }
 
 .diff-comment-cell {
@@ -214,18 +225,18 @@
   border-left: 3px solid transparent;
 }
 
-.diff-comment-cell--issue      { border-left-color: #f85149; }
-.diff-comment-cell--suggestion { border-left-color: #e8a030; }
-.diff-comment-cell--note       { border-left-color: #6a9ab0; }
-.diff-comment-cell--new        { border-left-color: var(--accent-dim); }
+.diff-comment-cell--issue      { border-left-color: hsl(var(--status-issue)); }
+.diff-comment-cell--suggestion { border-left-color: hsl(var(--status-suggestion)); }
+.diff-comment-cell--note       { border-left-color: hsl(var(--status-note)); }
+.diff-comment-cell--new        { border-left-color: hsl(var(--primary) / 0.5); }
 
 .diff-comment {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* Comments are prose — cap width so they wrap inside a wide-scrolling table */
+  max-width: min(700px, calc(100vw - 120px));
 }
-
-/* ── Comment header (badge + actions) ───────────────── */
 
 .diff-comment__header {
   display: flex;
@@ -234,112 +245,73 @@
   gap: 8px;
 }
 
-.diff-comment__badge {
-  display: inline-block;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding: 2px 6px 3px;
-  border-radius: 2px;
-  border: 1px solid;
-  line-height: 1;
-}
-
-.diff-comment__badge--issue {
-  color: #f85149;
-  background: #1a0604;
-  border-color: #4a1410;
-}
-
-.diff-comment__badge--suggestion {
-  color: #e8a030;
-  background: #141008;
-  border-color: #3a2a10;
-}
-
-.diff-comment__badge--note {
-  color: #6a9ab0;
-  background: #08141a;
-  border-color: #183040;
-}
-
-/* ── Action buttons ─────────────────────────────────── */
-
-.diff-comment__actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  opacity: 0.5;
-  transition: opacity 0.1s;
-}
-
-.diff-comment-row:hover .diff-comment__actions {
-  opacity: 1;
-}
-
-.diff-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
-}
-
-.diff-action-btn:hover {
-  background: #1a1510;
-  border-color: var(--border-accent);
-  color: var(--text-muted);
-}
-
-.diff-action-btn--delete:hover {
-  background: #1a0604;
-  border-color: #4a1410;
-  color: #f85149;
-}
-
 /* ── Comment body ────────────────────────────────────── */
 
 .diff-comment__body {
   margin: 0;
   font-size: 12px;
-  color: #c8bfa8;
+  color: hsl(var(--foreground) / 0.85);
   line-height: 1.6;
-  white-space: pre-wrap;
+  white-space: normal;
+  overflow-wrap: break-word;
   word-break: break-word;
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    system-ui,
-    sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
 
-/* ── Inline edit ─────────────────────────────────────── */
+.diff-comment__body p { margin: 0; }
+.diff-comment__body p + p { margin-top: 4px; }
 
-.diff-comment__edit {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.diff-comment__body code {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  font-size: 11px;
+  background: hsl(var(--muted) / 0.6);
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: 3px;
+  padding: 0 3px;
 }
+
+.diff-comment__body pre {
+  background: hsl(var(--muted) / 0.4);
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: 4px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  margin: 4px 0;
+}
+
+.diff-comment__body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+}
+
+.diff-comment__body blockquote {
+  margin: 2px 0;
+  padding-left: 8px;
+  border-left: 2px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+
+.diff-comment__body ul,
+.diff-comment__body ol {
+  margin: 2px 0;
+  padding-left: 16px;
+}
+
+.diff-comment__body li { margin: 0; }
+
+/* ── Inline edit textarea ────────────────────────────── */
 
 .diff-comment__textarea {
   width: 100%;
   min-height: 52px;
   padding: 6px 8px;
-  background: #0a0907;
-  border: 1px solid var(--border-accent);
-  border-radius: 2px;
-  color: var(--text);
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  color: hsl(var(--foreground));
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 12px;
   line-height: 1.6;
@@ -351,209 +323,159 @@
 }
 
 .diff-comment__textarea:focus {
-  border-color: var(--accent);
+  border-color: hsl(var(--ring));
 }
 
-.diff-comment__edit-actions {
+/* ── Search bar ──────────────────────────────────────── */
+
+.diff-search-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
+  align-items: center;
   gap: 6px;
+  padding: 5px 10px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  box-shadow: 0 2px 8px hsl(0 0% 0% / 0.15);
 }
 
-.diff-edit-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px 4px;
-  border-radius: 2px;
-  border: 1px solid;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  line-height: 1;
-  transition: background 0.1s, border-color 0.1s, color 0.1s;
-}
-
-.diff-edit-btn--save {
-  background: #0a1e0c;
-  border-color: #1a4a20;
-  color: #3fb950;
-}
-
-.diff-edit-btn--save:hover {
-  background: #0e2a12;
-  border-color: #3fb950;
-  color: #6fda80;
-}
-
-.diff-edit-btn--cancel {
-  background: transparent;
-  border-color: var(--border-accent);
-  color: var(--text-muted);
-}
-
-.diff-edit-btn--cancel:hover {
-  background: #1a1510;
-  border-color: var(--text-dim);
-  color: var(--text);
-}
-
-/* ── New comment form ────────────────────────────────── */
-
-.diff-new-form__header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 2px;
-}
-
-.diff-new-form__type {
-  background: #0a0907;
-  border: 1px solid var(--border-accent);
-  border-radius: 2px;
-  color: var(--text-muted);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  padding: 3px 6px;
-  cursor: pointer;
-  outline: none;
-}
-
-/* ── Diff truncation banner ─────────────────────────── */
-
-.diff-truncated {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  background: var(--surface, #110d08);
-  border-top: 1px solid var(--border, #261c10);
+.diff-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 4px);
+  color: hsl(var(--foreground));
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 12px;
-  color: var(--text-muted, #a07840);
-  font-family: 'JetBrains Mono', monospace;
+  outline: none;
+  transition: border-color 0.12s;
 }
 
-.diff-truncated__btn {
-  background: transparent;
-  border: 1px solid var(--border-accent, #4a3018);
-  border-radius: 2px;
-  color: var(--accent, #e8a030);
-  font-family: inherit;
+.diff-search-input:focus {
+  border-color: hsl(var(--ring));
+}
+
+.diff-search-count {
   font-size: 11px;
-  padding: 2px 8px 3px;
-  cursor: pointer;
-  transition: background 0.1s;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+  min-width: 64px;
+  text-align: right;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
 
-.diff-truncated__btn:hover {
-  background: var(--accent-glow, rgba(232, 160, 48, 0.08));
+/* ── Search match highlighting ───────────────────────── */
+
+.diff-line--search-match .diff-code__scroll {
+  background: hsl(47 95% 64% / 0.12);
 }
 
-/* ── Light mode overrides ───────────────────────────── */
+.diff-line--search-match--current .diff-code__scroll {
+  background: hsl(47 95% 64% / 0.30);
+}
+
+.diff-line--search-match--current {
+  outline: 1px solid hsl(47 95% 64% / 0.6);
+  outline-offset: -1px;
+}
+
+/* ── Light mode overrides ────────────────────────────── */
 
 @media (prefers-color-scheme: light) {
-  .diff-table {
-    color: var(--text, #1c1408);
-  }
-
-  .diff-code__scroll {
-    color: #2c2010;
-  }
-
   .diff-hunk-header {
-    background: #f0ede8;
-  }
-
-  .diff-hunk-label {
-    color: #7a6a58;
-  }
-
-  .diff-gutter {
-    color: #b0a090;
-    border-right-color: #d4c4a8;
-  }
-
-  .diff-prefix {
-    color: #b0a090;
+    background: hsl(210 40% 94%);
   }
 
   .diff-line--insert {
-    background: #e8f5ea;
+    background: hsl(142 52% 48% / 0.12);
   }
 
   .diff-line--insert .diff-gutter {
-    background: #d4ecd8;
-    color: #5a9060;
-  }
-
-  .diff-line--insert .diff-prefix {
-    color: #3a8048;
-  }
-
-  .diff-line--insert .diff-code__scroll {
-    color: #1a4a1e;
+    background: hsl(142 52% 40% / 0.22);
+    color: hsl(142 50% 35%);
   }
 
   .diff-line--delete {
-    background: #faeaea;
+    background: hsl(0 65% 50% / 0.10);
   }
 
   .diff-line--delete .diff-gutter {
-    background: #f0d0d0;
-    color: #a05050;
-  }
-
-  .diff-line--delete .diff-prefix {
-    color: #b03030;
-  }
-
-  .diff-line--delete .diff-code__scroll {
-    color: #4a1010;
+    background: hsl(0 65% 45% / 0.20);
+    color: hsl(0 55% 42%);
   }
 
   .diff-comment-row {
-    background: #f8f4ee;
+    background: hsl(var(--card));
   }
+}
 
-  .diff-comment-row--focused .diff-comment-cell {
-    background: #f0ebe0;
-  }
+/* ── Syntax highlighting tokens (slate/sky dark theme) ───── */
 
-  .diff-comment__body {
-    color: #2c1c08;
-  }
+.hljs-keyword,
+.hljs-operator,
+.hljs-selector-tag       { color: #7dd3fc; }          /* sky-300 */
 
-  .diff-comment__textarea {
-    background: #faf7f2;
-    color: #1c1408;
-  }
+.hljs-string,
+.hljs-attr-value,
+.hljs-template-string    { color: #86efac; }           /* green-300 */
 
-  .diff-new-form__type {
-    background: #f0ebe0;
-    color: #5a3e1c;
-  }
+.hljs-comment,
+.hljs-quote              { color: #64748b; font-style: italic; } /* slate-500 */
 
-  .diff-action-btn {
-    color: #5a4030;
-  }
+.hljs-number,
+.hljs-literal            { color: #fb923c; }           /* orange-400 */
 
-  .diff-action-btn:hover {
-    background: #e8e0d0;
-    color: #2c1c08;
-  }
+.hljs-title.function_,
+.hljs-function .hljs-title { color: #a5f3fc; }         /* cyan-200 */
 
-  .diff-file__header {
-    background: #f0ebe0;
-  }
+.hljs-type,
+.hljs-title.class_,
+.hljs-class .hljs-title  { color: #c4b5fd; }           /* violet-300 */
 
-  .diff-file__path {
-    color: #5a3e1c;
-  }
+.hljs-built_in           { color: #f9a8d4; }           /* pink-300 */
 
-  .diff-truncated {
-    background: var(--surface, #f0ebe0);
-    border-top-color: var(--border, #d4c4a8);
-    color: var(--text-muted, #5a3e1c);
-  }
+.hljs-attr,
+.hljs-attribute,
+.hljs-property           { color: #fcd34d; }           /* amber-300 */
+
+.hljs-tag                { color: #f87171; }           /* red-400 */
+
+.hljs-meta               { color: #94a3b8; }           /* slate-400 */
+
+.hljs-regexp             { color: #fb923c; }           /* orange-400 */
+
+/* Light mode overrides */
+@media (prefers-color-scheme: light) {
+  .hljs-keyword,
+  .hljs-operator,
+  .hljs-selector-tag   { color: #0369a1; }   /* sky-700 */
+
+  .hljs-string,
+  .hljs-attr-value     { color: #15803d; }   /* green-700 */
+
+  .hljs-comment        { color: #94a3b8; font-style: italic; }
+
+  .hljs-number,
+  .hljs-literal        { color: #c2410c; }   /* orange-700 */
+
+  .hljs-title.function_ { color: #0e7490; }  /* cyan-700 */
+
+  .hljs-type,
+  .hljs-title.class_   { color: #7c3aed; }   /* violet-600 */
+
+  .hljs-built_in       { color: #be185d; }   /* pink-700 */
+
+  .hljs-attr,
+  .hljs-attribute,
+  .hljs-property       { color: #b45309; }   /* amber-700 */
+
+  .hljs-tag            { color: #dc2626; }   /* red-600 */
+
+  .hljs-meta           { color: #64748b; }   /* slate-500 */
 }

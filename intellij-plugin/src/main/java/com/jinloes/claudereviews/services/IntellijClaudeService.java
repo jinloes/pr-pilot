@@ -18,7 +18,15 @@ import org.apache.commons.lang3.StringUtils;
  */
 public class IntellijClaudeService {
 
-    private final ClaudeService core = new ClaudeService();
+    private final ClaudeService core;
+
+    public IntellijClaudeService() {
+        this.core = new ClaudeService();
+    }
+
+    public IntellijClaudeService(String projectDir) {
+        this.core = new ClaudeService(projectDir);
+    }
 
     /**
      * Generates a review asynchronously. {@code onStatus}, {@code onComplete}, and {@code onError}

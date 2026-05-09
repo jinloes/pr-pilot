@@ -21,8 +21,9 @@ class ClaudeServiceBuildFocusedChatPromptTest {
         void nonBlankContext_appearsBeforeUserMessage() {
             String prompt =
                     ClaudeService.buildFocusedChatPrompt("int x = 1;", "What does this do?");
-            assertThat(prompt.indexOf("<code_context>"))
-                    .isLessThan(prompt.indexOf("<user_message>"));
+            // Use <user_message>\n to skip the persona's inline mention of <user_message>
+            assertThat(prompt.indexOf("<code_context>\n"))
+                    .isLessThan(prompt.indexOf("<user_message>\n"));
         }
     }
 
@@ -32,13 +33,15 @@ class ClaudeServiceBuildFocusedChatPromptTest {
         @Test
         void blankContext_codeContextBlockAbsent() {
             String prompt = ClaudeService.buildFocusedChatPrompt("", "Explain this");
-            assertThat(prompt).doesNotContain("<code_context>");
+            // Persona mentions <code_context> inline; actual block always has a newline after
+            // opening tag
+            assertThat(prompt).doesNotContain("<code_context>\n");
         }
 
         @Test
         void whitespaceOnlyContext_codeContextBlockAbsent() {
             String prompt = ClaudeService.buildFocusedChatPrompt("   ", "Explain this");
-            assertThat(prompt).doesNotContain("<code_context>");
+            assertThat(prompt).doesNotContain("<code_context>\n");
         }
     }
 
@@ -64,13 +67,13 @@ class ClaudeServiceBuildFocusedChatPromptTest {
         @Test
         void chatPersonaAppearsAtStart() {
             String prompt = ClaudeService.buildFocusedChatPrompt("code", "question");
-            assertThat(prompt).startsWith("You are a senior security engineer.");
+            assertThat(prompt).startsWith("You are a senior engineer familiar");
         }
 
         @Test
         void personaAppearsBeforeCodeContext() {
             String prompt = ClaudeService.buildFocusedChatPrompt("code", "question");
-            assertThat(prompt.indexOf("senior security engineer"))
+            assertThat(prompt.indexOf("senior engineer"))
                     .isLessThan(prompt.indexOf("<code_context>"));
         }
     }

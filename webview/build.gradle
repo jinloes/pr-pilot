@@ -2,6 +2,15 @@ plugins {
     id 'base'
 }
 
+idea {
+    module {
+        excludeDirs += [
+            file('node_modules'),
+            file('dist'),
+        ]
+    }
+}
+
 def npmCmd = System.getProperty('os.name').toLowerCase().contains('win') ? 'npm.cmd' : 'npm'
 
 tasks.register('npmInstall', Exec) {

@@ -35,63 +35,63 @@ class DiffParserTest {
 
         @Test
         void twoFiles_parsesCorrectCount() {
-            List<DiffFile> files = DiffParser.parseDiff(TWO_FILE_DIFF);
+            List<DiffFile> files = DiffParser.INSTANCE.parseDiff(TWO_FILE_DIFF);
             assertThat(files).hasSize(2);
         }
 
         @Test
         void twoFiles_parsesCorrectFileNames() {
-            List<DiffFile> files = DiffParser.parseDiff(TWO_FILE_DIFF);
-            assertThat(files.get(0).name).isEqualTo("src/Foo.java");
-            assertThat(files.get(1).name).isEqualTo("src/Bar.java");
+            List<DiffFile> files = DiffParser.INSTANCE.parseDiff(TWO_FILE_DIFF);
+            assertThat(files.get(0).getName()).isEqualTo("src/Foo.java");
+            assertThat(files.get(1).getName()).isEqualTo("src/Bar.java");
         }
 
         @Test
         void addedLines_getIncrementingLineNumbers() {
-            List<DiffFile> files = DiffParser.parseDiff(TWO_FILE_DIFF);
-            List<DiffLine> lines = files.get(0).lines;
-            DiffLine added = lines.stream().filter(l -> l.type() == '+').findFirst().orElseThrow();
-            assertThat(added.newLineNum()).isGreaterThan(0);
-            assertThat(added.content()).isEqualTo("added line");
+            List<DiffFile> files = DiffParser.INSTANCE.parseDiff(TWO_FILE_DIFF);
+            List<DiffLine> lines = files.get(0).getLines();
+            DiffLine added = lines.stream().filter(l -> l.getType() == '+').findFirst().orElseThrow();
+            assertThat(added.getNewLineNum()).isGreaterThan(0);
+            assertThat(added.getContent()).isEqualTo("added line");
         }
 
         @Test
         void deletedLines_getMinusOneLineNumber() {
-            List<DiffFile> files = DiffParser.parseDiff(TWO_FILE_DIFF);
-            List<DiffLine> lines = files.get(0).lines;
+            List<DiffFile> files = DiffParser.INSTANCE.parseDiff(TWO_FILE_DIFF);
+            List<DiffLine> lines = files.get(0).getLines();
             DiffLine deleted =
-                    lines.stream().filter(l -> l.type() == '-').findFirst().orElseThrow();
-            assertThat(deleted.newLineNum()).isEqualTo(-1);
-            assertThat(deleted.content()).isEqualTo("deleted line");
+                    lines.stream().filter(l -> l.getType() == '-').findFirst().orElseThrow();
+            assertThat(deleted.getNewLineNum()).isEqualTo(-1);
+            assertThat(deleted.getContent()).isEqualTo("deleted line");
         }
 
         @Test
         void contextLines_getIncrementingLineNumbers() {
-            List<DiffFile> files = DiffParser.parseDiff(TWO_FILE_DIFF);
-            List<DiffLine> lines = files.get(0).lines;
-            List<DiffLine> ctx = lines.stream().filter(l -> l.type() == ' ').toList();
+            List<DiffFile> files = DiffParser.INSTANCE.parseDiff(TWO_FILE_DIFF);
+            List<DiffLine> lines = files.get(0).getLines();
+            List<DiffLine> ctx = lines.stream().filter(l -> l.getType() == ' ').toList();
             assertThat(ctx).hasSize(2);
-            assertThat(ctx.get(0).newLineNum()).isEqualTo(1);
+            assertThat(ctx.get(0).getNewLineNum()).isEqualTo(1);
             // deleted line does not advance the new-file counter
-            assertThat(ctx.get(1).newLineNum()).isEqualTo(3);
+            assertThat(ctx.get(1).getNewLineNum()).isEqualTo(3);
         }
 
         @Test
         void firstLineAfterHunkHeader_hasHunkStartTrue() {
-            List<DiffFile> files = DiffParser.parseDiff(TWO_FILE_DIFF);
-            assertThat(files.get(0).lines.get(0).hunkStart()).isTrue();
+            List<DiffFile> files = DiffParser.INSTANCE.parseDiff(TWO_FILE_DIFF);
+            assertThat(files.get(0).getLines().get(0).getHunkStart()).isTrue();
         }
 
         @Test
         void subsequentLinesInHunk_haveHunkStartFalse() {
-            List<DiffFile> files = DiffParser.parseDiff(TWO_FILE_DIFF);
-            List<DiffLine> lines = files.get(0).lines;
-            assertThat(lines.subList(1, lines.size())).allMatch(l -> !l.hunkStart());
+            List<DiffFile> files = DiffParser.INSTANCE.parseDiff(TWO_FILE_DIFF);
+            List<DiffLine> lines = files.get(0).getLines();
+            assertThat(lines.subList(1, lines.size())).allMatch(l -> !l.getHunkStart());
         }
 
         @Test
         void emptyDiff_returnsEmptyList() {
-            assertThat(DiffParser.parseDiff("")).isEmpty();
+            assertThat(DiffParser.INSTANCE.parseDiff("")).isEmpty();
         }
 
         @Test
@@ -102,11 +102,11 @@ class DiffParserTest {
                             + "+++ b/src/Foo.java\r\n"
                             + "@@ -1 +1 @@\r\n"
                             + "+added line\r\n";
-            List<DiffFile> files = DiffParser.parseDiff(crlfDiff);
+            List<DiffFile> files = DiffParser.INSTANCE.parseDiff(crlfDiff);
             assertThat(files).hasSize(1);
             // \r must not bleed into the filename
-            assertThat(files.get(0).name).isEqualTo("src/Foo.java");
-            assertThat(files.get(0).lines.get(0).content()).isEqualTo("added line");
+            assertThat(files.get(0).getName()).isEqualTo("src/Foo.java");
+            assertThat(files.get(0).getLines().get(0).getContent()).isEqualTo("added line");
         }
 
         @Test
@@ -120,10 +120,10 @@ class DiffParserTest {
                             + "-deleted one\n"
                             + "-deleted two\n"
                             + "-deleted three\n";
-            List<DiffFile> files = DiffParser.parseDiff(diff);
+            List<DiffFile> files = DiffParser.INSTANCE.parseDiff(diff);
             assertThat(files).hasSize(1);
             // Deleted lines get newLineNum == -1; startLine was correctly parsed as 5 (not 0)
-            files.get(0).lines.forEach(l -> assertThat(l.newLineNum()).isEqualTo(-1));
+            files.get(0).getLines().forEach(l -> assertThat(l.getNewLineNum()).isEqualTo(-1));
         }
     }
 
@@ -133,28 +133,28 @@ class DiffParserTest {
         @Test
         void shortLines_returnsMinimumOf40() {
             DiffFile file = new DiffFile("f.java");
-            file.lines.add(new DiffLine(1, '+', "short", false));
-            assertThat(DiffParser.computeMaxColumns(List.of(file))).isEqualTo(40);
+            file.getLines().add(new DiffLine(1, '+', "short", false));
+            assertThat(DiffParser.INSTANCE.computeMaxColumns(List.of(file))).isEqualTo(40);
         }
 
         @Test
         void longLines_returnsActualLength() {
             DiffFile file = new DiffFile("f.java");
             String line = "x".repeat(80);
-            file.lines.add(new DiffLine(1, '+', line, false));
-            assertThat(DiffParser.computeMaxColumns(List.of(file))).isEqualTo(80);
+            file.getLines().add(new DiffLine(1, '+', line, false));
+            assertThat(DiffParser.INSTANCE.computeMaxColumns(List.of(file))).isEqualTo(80);
         }
 
         @Test
         void veryLongLines_cappedAt120() {
             DiffFile file = new DiffFile("f.java");
-            file.lines.add(new DiffLine(1, '+', "x".repeat(200), false));
-            assertThat(DiffParser.computeMaxColumns(List.of(file))).isEqualTo(120);
+            file.getLines().add(new DiffLine(1, '+', "x".repeat(200), false));
+            assertThat(DiffParser.INSTANCE.computeMaxColumns(List.of(file))).isEqualTo(120);
         }
 
         @Test
         void emptyFiles_returnsMinimumOf40() {
-            assertThat(DiffParser.computeMaxColumns(List.of())).isEqualTo(40);
+            assertThat(DiffParser.INSTANCE.computeMaxColumns(List.of())).isEqualTo(40);
         }
     }
 }

@@ -1,5 +1,6 @@
 plugins {
-    id 'java'
+    id 'org.jetbrains.kotlin.multiplatform'
+    id 'org.jetbrains.kotlin.plugin.serialization'
 }
 
 group = 'com.jinloes.claudereviews'
@@ -9,31 +10,111 @@ repositories {
     mavenCentral()
 }
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+def ktorVersion = '3.1.3'
+
+kotlin {
+    // Suppress Beta warning for expect/actual classes (stable in practice for Kotlin 2.x).
+    compilerOptions {
+        freeCompilerArgs.add("-Xexpect-actual-classes")
+    }
+
+    jvm {
+        compilations.main.compileTaskProvider.configure {
+            compilerOptions {
+                jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+            }
+        }
+        compilations.test.compileTaskProvider.configure {
+            compilerOptions {
+                jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+            }
+        }
+    }
+
+    js(IR) {
+        nodejs()
+    }
+
+    sourceSets {
+        commonMain {
+            dependencies {
+                implementation "io.ktor:ktor-client-core:$ktorVersion"
+                implementation "io.ktor:ktor-client-content-negotiation:$ktorVersion"
+                implementation "io.ktor:ktor-serialization-kotlinx-json:$ktorVersion"
+                implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1'
+                implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2'
+                implementation 'org.slf4j:slf4j-api:2.0.13'
+            }
+        }
+
+        commonTest {
+            dependencies {
+                implementation kotlin('test')
+            }
+        }
+
+        jvmMain {
+            dependencies {
+                implementation "io.ktor:ktor-client-java:$ktorVersion"
+                implementation 'org.apache.commons:commons-lang3:3.18.0'
+                implementation 'org.apache.commons:commons-text:1.12.0'
+                implementation 'commons-io:commons-io:2.15.1'
+                implementation 'org.apache.commons:commons-collections4:4.4'
+
+                compileOnly 'org.projectlombok:lombok:1.18.32'
+            }
+        }
+
+        jvmTest {
+            dependencies {
+                implementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+                implementation 'org.assertj:assertj-core:3.25.3'
+                runtimeOnly 'org.junit.platform:junit-platform-launcher'
+            }
+        }
+
+        jsMain {
+            dependencies {
+                implementation "io.ktor:ktor-client-js:$ktorVersion"
+            }
+        }
+    }
 }
 
-compileJava {
+// Wire the existing Java source tree into the KMP JVM compilation.
+// In KMP 2.x, jvmMain Kotlin sources live under src/jvmMain/kotlin.
+// The compileJvmMainJava JavaCompile task starts with no Java source dirs;
+// we add the legacy src/main/java directory directly to each compile task.
+tasks.named('compileJvmMainJava', JavaCompile) {
+    source fileTree('src/main/java')
+}
+tasks.named('compileJvmTestJava', JavaCompile) {
+    source fileTree('src/test/java')
+}
+
+// Lombok annotation processing for jvmMain/jvmTest Java sources.
+dependencies {
+    add('jvmMainCompileOnly', 'org.projectlombok:lombok:1.18.32')
+    add('jvmMainAnnotationProcessor', 'org.projectlombok:lombok:1.18.32')
+    add('jvmTestAnnotationProcessor', 'org.projectlombok:lombok:1.18.32')
+}
+
+// Ensure the jvmTest task uses JUnit Platform.
+tasks.named('jvmTest', Test) {
+    useJUnitPlatform()
+}
+
+// Keep Java compilation at Java 17.
+tasks.withType(JavaCompile).configureEach {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
     options.encoding = 'UTF-8'
 }
 
-dependencies {
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
-    implementation 'org.apache.commons:commons-lang3:3.18.0'
-    implementation 'org.apache.commons:commons-text:1.12.0'
-    implementation 'commons-io:commons-io:2.15.1'
-    implementation 'org.apache.commons:commons-collections4:4.4'
-    implementation 'org.slf4j:slf4j-api:2.0.13'
-
-    compileOnly 'org.projectlombok:lombok:1.18.32'
-    annotationProcessor 'org.projectlombok:lombok:1.18.32'
-
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
-    testImplementation 'org.assertj:assertj-core:3.25.3'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-}
-
-test {
-    useJUnitPlatform()
+// Copy the compiled KMP JS output into vscode-extension/node_modules/core so the
+// extension can import it without a published npm package.
+tasks.register('copyJsToVscodeExtension', Copy) {
+    dependsOn 'jsNodeProductionLibraryDistribution'
+    from("$buildDir/js/packages/core")
+    into("$rootDir/vscode-extension/node_modules/core")
 }

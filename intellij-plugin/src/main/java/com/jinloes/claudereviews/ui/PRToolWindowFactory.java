@@ -17,6 +17,8 @@ import com.jinloes.claudereviews.settings.PluginSettings;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import javax.swing.JLabel;
+import javax.swing.SwingConstants;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
@@ -30,21 +32,42 @@ public class PRToolWindowFactory implements ToolWindowFactory {
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
         ContentFactory factory = ContentFactory.getInstance();
 
-        if (JBCefApp.isSupported()) {
-            WebviewPanel webviewPanel = new WebviewPanel();
-            wireWebviewLoading(project, webviewPanel);
-            Content webContent =
-                    factory.createContent(webviewPanel.getComponent(), "Review", false);
-            toolWindow.getContentManager().addContent(webContent);
+        if (!JBCefApp.isSupported()) {
+            JLabel label =
+                    new JLabel(
+                            "<html><center>Claude PR Reviews requires JCEF.<br>"
+                                    + "This IDE variant does not support embedded browsers.</center></html>",
+                            SwingConstants.CENTER);
+            toolWindow
+                    .getContentManager()
+                    .addContent(factory.createContent(label, "Claude PR Reviews", false));
+            return;
         }
 
-        PRToolWindow classic = new PRToolWindow(project);
-        Content classicContent =
-                factory.createContent(classic.getContent(), "Classic (legacy)", false);
-        toolWindow.getContentManager().addContent(classicContent);
+        WebviewPanel webviewPanel = new WebviewPanel(project);
+        wireWebviewLoading(project, webviewPanel);
+        Content webContent = factory.createContent(webviewPanel.getComponent(), "Review", false);
+        toolWindow.getContentManager().addContent(webContent);
 
-        toolWindow.setTitleActions(
-                List.of(new PopOutAction(toolWindow), new SettingsAction(project)));
+        List<AnAction> titleActions = new ArrayList<>();
+        titleActions.add(new PopOutAction(toolWindow));
+        titleActions.add(new ReloadWebviewAction(webviewPanel));
+        titleActions.add(new SettingsAction(project));
+        toolWindow.setTitleActions(titleActions);
+    }
+
+    private static final class ReloadWebviewAction extends AnAction {
+        private final WebviewPanel webviewPanel;
+
+        ReloadWebviewAction(WebviewPanel webviewPanel) {
+            super("Reload WebView", "Reload the webview", AllIcons.Actions.Refresh);
+            this.webviewPanel = webviewPanel;
+        }
+
+        @Override
+        public void actionPerformed(@NotNull AnActionEvent e) {
+            webviewPanel.reload();
+        }
     }
 
     private static final class PopOutAction extends AnAction {
@@ -108,7 +131,7 @@ public class PRToolWindowFactory implements ToolWindowFactory {
             log.info("No GitHub token available — skipping webview PR load");
             return;
         }
-        String currentRepo = PRToolWindow.detectCurrentRepo(project.getBasePath());
+        String currentRepo = RepoDetector.detectCurrentRepo(project.getBasePath());
 
         List<String> starred;
         try {
@@ -118,12 +141,17 @@ public class PRToolWindowFactory implements ToolWindowFactory {
             starred = List.of();
         }
 
-        String query = buildQuery(currentRepo, starred);
+        String query =
+                buildQuery(
+                        currentRepo,
+                        starred,
+                        webviewPanel.getPrStateFilter(),
+                        webviewPanel.isAssignedToMeFilter(),
+                        webviewPanel.isReviewRequestedFilter());
         log.info("Webview PR query: {}", query);
         List<PullRequest> prs = IntellijGitHubService.getInstance().searchPRs(token, query);
         prs.sort(Comparator.comparing(PullRequest::getCreatedAt).reversed());
 
-        // Default to current project repo; fall back to first starred repo
         String defaultRepo =
                 StringUtils.isNotBlank(currentRepo)
                         ? currentRepo
@@ -133,7 +161,12 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                 .invokeLater(() -> webviewPanel.loadPRs(prs, defaultRepo));
     }
 
-    static String buildQuery(String currentRepo, List<String> starredRepos) {
+    static String buildQuery(
+            String currentRepo,
+            List<String> starredRepos,
+            String state,
+            boolean assignedToMe,
+            boolean reviewRequested) {
         List<String> repos = new ArrayList<>();
         if (StringUtils.isNotBlank(currentRepo)) {
             repos.add(currentRepo);
@@ -144,12 +177,27 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                 repos.add(r);
             }
         }
-        if (repos.isEmpty()) {
-            return "is:pr is:open draft:false author:@me";
+        StringBuilder q = new StringBuilder("is:pr");
+        if ("closed".equals(state)) {
+            q.append(" is:closed");
+        } else if (!"all".equals(state)) {
+            q.append(" is:open");
         }
-        StringBuilder q = new StringBuilder("is:pr is:open draft:false");
-        for (String r : repos) {
-            q.append(" repo:").append(r);
+        q.append(" draft:false");
+        if (repos.isEmpty()) {
+            if (!assignedToMe && !reviewRequested) {
+                q.append(" author:@me");
+            }
+        } else {
+            for (String r : repos) {
+                q.append(" repo:").append(r);
+            }
+        }
+        if (assignedToMe) {
+            q.append(" assignee:@me");
+        }
+        if (reviewRequested) {
+            q.append(" review-requested:@me");
         }
         return q.toString();
     }

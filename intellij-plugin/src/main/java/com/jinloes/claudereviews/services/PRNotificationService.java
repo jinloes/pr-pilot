@@ -36,10 +36,12 @@ public final class PRNotificationService implements Disposable {
 
     static final String NOTIFICATION_GROUP = "Claude PR Reviews";
 
+    private record PollStatus(long epochMs, String error) {}
+
     private volatile ScheduledFuture<?> scheduledTask;
-    private volatile long lastPollEpochMs = 0;
-    private volatile String lastPollError = null;
+    private volatile PollStatus lastPollStatus = new PollStatus(0, null);
     private final SeenPRSet seenSet = new SeenPRSet();
+    private final PendingReviewIndex pendingIndex = new PendingReviewIndex();
     private final IntellijGitHubService githubService = IntellijGitHubService.getInstance();
 
     public static PRNotificationService getInstance() {
@@ -66,7 +68,8 @@ public final class PRNotificationService implements Disposable {
     }
 
     public boolean isPolling() {
-        return scheduledTask != null && !scheduledTask.isCancelled();
+        ScheduledFuture<?> task = scheduledTask;
+        return task != null && !task.isCancelled();
     }
 
     /**
@@ -75,12 +78,13 @@ public final class PRNotificationService implements Disposable {
      * yet.
      */
     public String getLastPollStatus() {
-        long ts = lastPollEpochMs;
-        if (ts == 0) return null;
-        long agoSec = (System.currentTimeMillis() - ts) / 1000;
+        PollStatus status = lastPollStatus;
+        if (status.epochMs() == 0) return null;
+        long agoSec = (System.currentTimeMillis() - status.epochMs()) / 1000;
         String when = agoSec < 60 ? agoSec + "s ago" : (agoSec / 60) + " min ago";
-        String err = lastPollError;
-        return err != null ? "Last poll: " + when + " — Error: " + err : "Last polled: " + when;
+        return status.error() != null
+                ? "Last poll: " + when + " — Error: " + status.error()
+                : "Last polled: " + when;
     }
 
     @Override
@@ -99,7 +103,6 @@ public final class PRNotificationService implements Disposable {
         String token = settings.getGithubToken();
         if (token == null || token.isBlank()) return;
 
-        lastPollEpochMs = System.currentTimeMillis();
         String pollError = null;
         List<PullRequest> found = new ArrayList<>();
 
@@ -128,7 +131,7 @@ public final class PRNotificationService implements Disposable {
             }
         }
 
-        lastPollError = pollError;
+        lastPollStatus = new PollStatus(System.currentTimeMillis(), pollError);
 
         if (!seenSet.isSeeded()) {
             // First run: populate the seen set without showing any notifications
@@ -138,13 +141,19 @@ public final class PRNotificationService implements Disposable {
             return;
         }
 
-        // Notify about PRs that weren't seen before
+        // Notify about PRs that weren't seen before and have no in-progress draft
         for (PullRequest pr : found) {
             if (!seenSet.contains(pr)) {
                 seenSet.add(pr);
-                fireNotification(pr);
+                if (!pendingIndex.hasDraft(pr.getOwner(), pr.getRepo(), pr.getNumber())) {
+                    fireNotification(pr);
+                }
             }
         }
+        // Drop entries for PRs no longer in live results (closed, merged, review fulfilled),
+        // then cap size to guard against unbounded growth.
+        seenSet.retain(found);
+        seenSet.trim();
         seenSet.save();
     }
 

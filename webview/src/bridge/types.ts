@@ -144,7 +144,7 @@ export interface LineComment {
 }
 
 /**
- * Messages sent FROM the webview TO the IntelliJ plugin via window.cefQuery (JCEF).
+ * Messages sent FROM the webview TO the host (IntelliJ via JCEF or VS Code).
  */
 export interface SelectPRRequest {
   type: 'selectPR'
@@ -155,6 +155,9 @@ export interface SelectPRRequest {
 
 export interface RefreshPRsRequest {
   type: 'refreshPRs'
+  state?: string
+  assignedToMe?: boolean
+  reviewRequested?: boolean
 }
 
 export interface GenerateReviewRequest {
@@ -175,6 +178,7 @@ export interface SaveDraftRequest {
   number: number
   owner: string
   repo: string
+  result?: ReviewResult
 }
 
 export interface SubmitReviewRequest {
@@ -218,44 +222,84 @@ export type OutgoingMessage =
   | OpenUrlRequest
   | ClearChatRequest
 
+// VS Code injects acquireVsCodeApi() into the webview's global scope.
+// It can only be called once per session — store the result as a singleton.
+declare function acquireVsCodeApi(): {
+  postMessage(msg: unknown): void
+  getState(): unknown
+  setState(state: unknown): void
+}
+
+type VsCodeApi = ReturnType<typeof acquireVsCodeApi>
+
+function _getVsCodeApi(): VsCodeApi | null {
+  try {
+    return typeof acquireVsCodeApi !== 'undefined' ? acquireVsCodeApi() : null
+  } catch {
+    return null
+  }
+}
+
+const _vsCodeApi: VsCodeApi | null = _getVsCodeApi()
+
 /**
- * Sends a message to the IntelliJ host.
- * No-op with console log when running outside JCEF (dev mode).
+ * Sends a message to the host (IntelliJ via JCEF, VS Code, or dev console).
  */
 export function sendToHost(message: OutgoingMessage): void {
-  const w = window as unknown as { cefQuery?: (opts: { request: string }) => void }
-  if (w.cefQuery) {
-    w.cefQuery({ request: JSON.stringify(message) })
+  if (_vsCodeApi) {
+    _vsCodeApi.postMessage(message)
   } else {
-    console.debug('[bridge] sendToHost (no JCEF):', message)
+    const w = window as unknown as { cefQuery?: (opts: { request: string }) => void }
+    if (w.cefQuery) {
+      w.cefQuery({ request: JSON.stringify(message) })
+    } else {
+      console.debug('[bridge] sendToHost (no host):', message)
+    }
   }
 }
 
 // Module-level subscriber set so every onHostMessage caller gets every message.
 const _handlers = new Set<(message: IncomingMessage) => void>()
 
+function _dispatch(msg: IncomingMessage) {
+  _handlers.forEach((h) => h(msg))
+}
+
 function _ensureGlobalDispatcher() {
-  const w = window as unknown as { __handleMessage?: (json: string) => void }
-  if (w.__handleMessage) return
-  w.__handleMessage = (json: string) => {
-    let msg: IncomingMessage
-    try {
-      msg = JSON.parse(json) as IncomingMessage
-    } catch (e) {
-      console.error('[bridge] failed to parse host message:', json, e)
-      return
+  if (_vsCodeApi) {
+    // VS Code delivers messages via window.addEventListener('message', ...).
+    // Register once; the listener is never removed because it must outlive any
+    // individual component that calls onHostMessage.
+    window.addEventListener('message', (event: MessageEvent) => {
+      _dispatch(event.data as IncomingMessage)
+    })
+  } else {
+    // JCEF: the plugin calls window.__handleMessage(jsonString).
+    const w = window as unknown as { __handleMessage?: (json: string) => void }
+    if (w.__handleMessage) return
+    w.__handleMessage = (json: string) => {
+      let msg: IncomingMessage
+      try {
+        msg = JSON.parse(json) as IncomingMessage
+      } catch (e) {
+        console.error('[bridge] failed to parse host message:', json, e)
+        return
+      }
+      _dispatch(msg)
     }
-    _handlers.forEach((h) => h(msg))
   }
 }
 
+// Wire up the dispatcher immediately so handlers registered before the first
+// message arrives are all notified.
+_ensureGlobalDispatcher()
+
 /**
- * Registers a handler for messages pushed from the IntelliJ host.
+ * Registers a handler for messages pushed from the host.
  * Multiple callers each get every message (fan-out). Returns a cleanup function.
  */
 export function onHostMessage(handler: (message: IncomingMessage) => void): () => void {
   _handlers.add(handler)
-  _ensureGlobalDispatcher()
   return () => {
     _handlers.delete(handler)
   }

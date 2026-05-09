@@ -1,0 +1,2 @@
+// Placeholder — wired into the Gradle project graph so settings.gradle is valid.
+// The actual VS Code extension is built via npm in this directory.

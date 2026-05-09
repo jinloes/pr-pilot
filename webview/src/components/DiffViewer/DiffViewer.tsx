@@ -1,6 +1,94 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Fragment, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseDiff, isDelete, isInsert } from 'react-diff-view'
 import type { ChangeData, FileData, HunkData } from 'react-diff-view'
+import { Check, ChevronDown, ChevronUp, Pencil, Plus, Search, ShieldCheck, Trash2, X } from 'lucide-react'
+import hljs from 'highlight.js/lib/core'
+import hljsBash from 'highlight.js/lib/languages/bash'
+import hljsCss from 'highlight.js/lib/languages/css'
+import hljsGo from 'highlight.js/lib/languages/go'
+import hljsJava from 'highlight.js/lib/languages/java'
+import hljsJson from 'highlight.js/lib/languages/json'
+import hljsJs from 'highlight.js/lib/languages/javascript'
+import hljsKotlin from 'highlight.js/lib/languages/kotlin'
+import hljsProto from 'highlight.js/lib/languages/protobuf'
+import hljsPython from 'highlight.js/lib/languages/python'
+import hljsRust from 'highlight.js/lib/languages/rust'
+import hljsSql from 'highlight.js/lib/languages/sql'
+import hljsTs from 'highlight.js/lib/languages/typescript'
+import hljsXml from 'highlight.js/lib/languages/xml'
+import hljsYaml from 'highlight.js/lib/languages/yaml'
+
+hljs.registerLanguage('bash', hljsBash)
+hljs.registerLanguage('css', hljsCss)
+hljs.registerLanguage('go', hljsGo)
+hljs.registerLanguage('java', hljsJava)
+hljs.registerLanguage('json', hljsJson)
+hljs.registerLanguage('javascript', hljsJs)
+hljs.registerLanguage('kotlin', hljsKotlin)
+hljs.registerLanguage('protobuf', hljsProto)
+hljs.registerLanguage('python', hljsPython)
+hljs.registerLanguage('rust', hljsRust)
+hljs.registerLanguage('sql', hljsSql)
+hljs.registerLanguage('typescript', hljsTs)
+hljs.registerLanguage('xml', hljsXml)
+hljs.registerLanguage('yaml', hljsYaml)
+
+const EXT_LANG: Record<string, string> = {
+  bash: 'bash', sh: 'bash', zsh: 'bash',
+  css: 'css', scss: 'css', less: 'css',
+  go: 'go',
+  html: 'xml', htm: 'xml', svg: 'xml', xml: 'xml',
+  java: 'java',
+  js: 'javascript', jsx: 'javascript', mjs: 'javascript',
+  json: 'json',
+  kt: 'kotlin', kts: 'kotlin',
+  proto: 'protobuf',
+  py: 'python',
+  rs: 'rust',
+  sql: 'sql',
+  ts: 'typescript', tsx: 'typescript',
+  yaml: 'yaml', yml: 'yaml',
+}
+
+function syntaxHighlight(code: string, filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
+  const lang = EXT_LANG[ext]
+  if (!lang) return escapeHtml(code)
+  return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 import type { LineComment } from '../../bridge/types'
 import './DiffViewer.css'
 
@@ -13,9 +101,9 @@ interface Props {
   onEditComment?: (idx: number, body: string) => void
   onDeleteComment?: (idx: number) => void
   onAddComment?: (comment: LineComment) => void
+  onVerifyComment?: (comment: LineComment) => void
 }
 
-// Each comment carries its global index in the `comments` array
 type IndexedComment = { comment: LineComment; globalIdx: number }
 type LineCommentMap = Map<number, IndexedComment[]>
 type FileCommentMap = Map<string, LineCommentMap>
@@ -51,17 +139,29 @@ function findByPathSuffix(map: FileCommentMap, path: string): LineCommentMap | u
   return undefined
 }
 
-// Pending new-comment form anchored to a specific file+line in the diff
 interface PendingNew {
   file: string
   line: number
 }
 
-export function DiffViewer({ diff, comments, focusedCommentIdx, onEditComment, onDeleteComment, onAddComment }: Props) {
+export function DiffViewer({
+  diff,
+  comments,
+  focusedCommentIdx,
+  onEditComment,
+  onDeleteComment,
+  onAddComment,
+  onVerifyComment,
+}: Props) {
   const [pendingNew, setPendingNew] = useState<PendingNew | null>(null)
   const [showAll, setShowAll] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchCursor, setSearchCursor] = useState(0)
+  const [matchCount, setMatchCount] = useState(0)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
-  // Scroll to the focused comment when the index changes
   useEffect(() => {
     if (focusedCommentIdx !== undefined) {
       document
@@ -70,24 +170,65 @@ export function DiffViewer({ diff, comments, focusedCommentIdx, onEditComment, o
     }
   }, [focusedCommentIdx])
 
-  if (!diff) return null
+  const openSearch = useCallback(() => {
+    setSearchOpen(true)
+    setTimeout(() => searchInputRef.current?.focus(), 0)
+  }, [])
 
-  let files: FileData[]
-  try {
-    files = parseDiff(diff)
-  } catch {
-    return null
-  }
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchCursor(0)
+  }, [])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        openSearch()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [openSearch])
+
+  useEffect(() => { setSearchCursor(0) }, [searchQuery])
+
+  useEffect(() => {
+    if (!containerRef.current) return
+    const count = searchQuery
+      ? containerRef.current.querySelectorAll('.diff-line--search-match').length
+      : 0
+    setMatchCount(count)
+  }, [searchQuery, showAll, diff])
+
+  useEffect(() => {
+    if (!containerRef.current || !searchQuery || matchCount === 0) return
+    const matches = Array.from(
+      containerRef.current.querySelectorAll<HTMLElement>('.diff-line--search-match'),
+    )
+    const idx = Math.min(searchCursor, matches.length - 1)
+    matches.forEach((el, i) => el.classList.toggle('diff-line--search-match--current', i === idx))
+    matches[idx]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [searchCursor, searchQuery, matchCount])
+
+  const files = useMemo<FileData[]>(() => {
+    if (!diff) return []
+    try {
+      return parseDiff(diff)
+    } catch {
+      return []
+    }
+  }, [diff])
+
   if (files.length === 0) return null
 
-  // Count total changes across all files
   const totalChanges = files.reduce(
     (sum, f) => sum + f.hunks.reduce((s, h) => s + h.changes.length, 0),
     0,
   )
   const truncating = !showAll && totalChanges > MAX_CHANGES
 
-  // Build a truncated view of files if needed
   let remaining = MAX_CHANGES
   const visibleFiles: FileData[] = truncating
     ? files
@@ -109,48 +250,75 @@ export function DiffViewer({ diff, comments, focusedCommentIdx, onEditComment, o
   const byFile = groupComments(comments)
 
   return (
-    <div className="diff-viewer">
-      {visibleFiles.map((file) => {
-        const displayPath = file.newPath !== '/dev/null' ? file.newPath : file.oldPath
-        const fileComments =
-          byFile.get(file.newPath) ??
-          byFile.get(file.oldPath) ??
-          findByPathSuffix(byFile, file.newPath) ??
-          new Map<number, IndexedComment[]>()
-        return (
-          <FileView
-            key={`${file.oldRevision}-${file.newRevision}-${file.newPath}`}
-            file={file}
-            displayPath={displayPath}
-            comments={fileComments}
-            focusedCommentIdx={focusedCommentIdx}
-            pendingNew={pendingNew?.file === displayPath ? pendingNew.line : undefined}
-            onLineClick={
-              onAddComment
-                ? (line) => setPendingNew({ file: displayPath, line })
-                : undefined
-            }
-            onPendingCancel={() => setPendingNew(null)}
-            onPendingSave={(type, body) => {
-              if (pendingNew) {
-                onAddComment?.({ file: pendingNew.file, line: pendingNew.line, type, body })
-              }
-              setPendingNew(null)
-            }}
-            onEditComment={onEditComment}
-            onDeleteComment={onDeleteComment}
-          />
-        )
-      })}
-      {truncating && (
-        <div className="diff-truncated">
-          <span>Showing {MAX_CHANGES} of {totalChanges} changed lines</span>
-          <button className="diff-truncated__btn" onClick={() => setShowAll(true)}>
-            Show full diff ↓
-          </button>
-        </div>
-      )}
-    </div>
+    <TooltipProvider delayDuration={400}>
+      <div ref={containerRef} className="diff-viewer" tabIndex={-1}>
+        {searchOpen && (
+          <div className="diff-search-bar">
+            <Search className="w-3 h-3 text-muted-foreground shrink-0" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              className="diff-search-input"
+              placeholder="Find in diff…"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value)
+                setSearchCursor(0)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') { e.stopPropagation(); closeSearch() }
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (matchCount > 0) setSearchCursor((c) => e.shiftKey ? (c - 1 + matchCount) % matchCount : (c + 1) % matchCount)
+                }
+              }}
+            />
+            <span className="diff-search-count">
+              {searchQuery ? (matchCount === 0 ? 'No results' : `${Math.min(searchCursor + 1, matchCount)} / ${matchCount}`) : ''}
+            </span>
+            <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground" onClick={() => matchCount > 0 && setSearchCursor((c) => (c - 1 + matchCount) % matchCount)} disabled={matchCount === 0} aria-label="Previous match"><ChevronUp className="w-3 h-3" /></Button>
+            <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground" onClick={() => matchCount > 0 && setSearchCursor((c) => (c + 1) % matchCount)} disabled={matchCount === 0} aria-label="Next match"><ChevronDown className="w-3 h-3" /></Button>
+            <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground" onClick={closeSearch} aria-label="Close search"><X className="w-3 h-3" /></Button>
+          </div>
+        )}
+        {visibleFiles.map((file) => {
+          const displayPath = file.newPath !== '/dev/null' ? file.newPath : file.oldPath
+          const fileComments =
+            byFile.get(file.newPath) ??
+            byFile.get(file.oldPath) ??
+            findByPathSuffix(byFile, file.newPath) ??
+            new Map<number, IndexedComment[]>()
+          return (
+            <FileView
+              key={`${file.oldRevision}-${file.newRevision}-${file.newPath}`}
+              file={file}
+              displayPath={displayPath}
+              comments={fileComments}
+              focusedCommentIdx={focusedCommentIdx}
+              searchQuery={searchQuery}
+              pendingNew={pendingNew?.file === displayPath ? pendingNew.line : undefined}
+              onLineClick={onAddComment ? (line) => setPendingNew({ file: displayPath, line }) : undefined}
+              onPendingCancel={() => setPendingNew(null)}
+              onPendingSave={(type, body) => {
+                if (pendingNew) onAddComment?.({ file: pendingNew.file, line: pendingNew.line, type, body })
+                setPendingNew(null)
+              }}
+              onEditComment={onEditComment}
+              onDeleteComment={onDeleteComment}
+              onVerifyComment={onVerifyComment}
+            />
+          )
+        })}
+        {truncating && (
+          <div className="flex items-center justify-between px-4 py-2 border-t border-border bg-card text-xs text-muted-foreground font-mono">
+            <span>Showing {MAX_CHANGES} of {totalChanges} changed lines</span>
+            <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => startTransition(() => setShowAll(true))}>
+              Show full diff ↓
+            </Button>
+          </div>
+        )}
+      </div>
+    </TooltipProvider>
   )
 }
 
@@ -161,15 +329,30 @@ interface FileViewProps {
   displayPath: string
   comments: LineCommentMap
   focusedCommentIdx?: number
+  searchQuery?: string
   pendingNew?: number
   onLineClick?: (line: number) => void
   onPendingCancel: () => void
   onPendingSave: (type: LineComment['type'], body: string) => void
   onEditComment?: (idx: number, body: string) => void
   onDeleteComment?: (idx: number) => void
+  onVerifyComment?: (comment: LineComment) => void
 }
 
-function FileView({ file, displayPath, comments, focusedCommentIdx, pendingNew, onLineClick, onPendingCancel, onPendingSave, onEditComment, onDeleteComment }: FileViewProps) {
+function FileView({
+  file,
+  displayPath,
+  comments,
+  focusedCommentIdx,
+  searchQuery,
+  pendingNew,
+  onLineClick,
+  onPendingCancel,
+  onPendingSave,
+  onEditComment,
+  onDeleteComment,
+  onVerifyComment,
+}: FileViewProps) {
   return (
     <div className="diff-file">
       <div className="diff-file__header">
@@ -184,14 +367,17 @@ function FileView({ file, displayPath, comments, focusedCommentIdx, pendingNew, 
             <HunkRows
               key={hunk.content}
               hunk={hunk}
+              filePath={displayPath}
               comments={comments}
               focusedCommentIdx={focusedCommentIdx}
+              searchQuery={searchQuery}
               pendingNewLine={pendingNew}
               onLineClick={onLineClick}
               onPendingCancel={onPendingCancel}
               onPendingSave={onPendingSave}
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
+              onVerifyComment={onVerifyComment}
             />
           ))}
         </tbody>
@@ -204,17 +390,39 @@ function FileView({ file, displayPath, comments, focusedCommentIdx, pendingNew, 
 
 interface HunkRowsProps {
   hunk: HunkData
+  filePath: string
   comments: LineCommentMap
   focusedCommentIdx?: number
+  searchQuery?: string
   pendingNewLine?: number
   onLineClick?: (line: number) => void
   onPendingCancel: () => void
   onPendingSave: (type: LineComment['type'], body: string) => void
   onEditComment?: (idx: number, body: string) => void
   onDeleteComment?: (idx: number) => void
+  onVerifyComment?: (comment: LineComment) => void
 }
 
-function HunkRows({ hunk, comments, focusedCommentIdx, pendingNewLine, onLineClick, onPendingCancel, onPendingSave, onEditComment, onDeleteComment }: HunkRowsProps) {
+function HunkRows({
+  hunk,
+  filePath,
+  comments,
+  focusedCommentIdx,
+  searchQuery,
+  pendingNewLine,
+  onLineClick,
+  onPendingCancel,
+  onPendingSave,
+  onEditComment,
+  onDeleteComment,
+  onVerifyComment,
+}: HunkRowsProps) {
+  const highlighted = useMemo(
+    () => hunk.changes.map((c) => syntaxHighlight(c.content, filePath)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hunk, filePath],
+  )
+
   return (
     <Fragment>
       <tr className="diff-hunk-header">
@@ -224,25 +432,26 @@ function HunkRows({ hunk, comments, focusedCommentIdx, pendingNewLine, onLineCli
       {hunk.changes.map((change, i) => {
         const newLine = newLineOf(change)
         const oldLine = oldLineOf(change)
-        const lineComments =
-          (newLine !== undefined ? comments.get(newLine) : undefined) ??
-          (oldLine !== undefined ? comments.get(oldLine) : undefined) ??
-          []
+        const lineComments = newLine !== undefined ? (comments.get(newLine) ?? []) : []
         const clickableLine = newLine ?? oldLine
         return (
           <Fragment key={i}>
-            <tr className={`diff-line diff-line--${change.type}`}>
+            <tr className={cn(`diff-line diff-line--${change.type}`, searchQuery && change.content.toLowerCase().includes(searchQuery.toLowerCase()) && 'diff-line--search-match')}>
               <td
-                className={`diff-gutter${onLineClick && oldLine ? ' diff-gutter--clickable' : ''}`}
+                className={cn('diff-gutter', onLineClick && oldLine && 'diff-gutter--clickable')}
                 onClick={() => onLineClick && clickableLine && onLineClick(clickableLine)}
                 title={onLineClick && clickableLine ? `Add comment at line ${clickableLine}` : undefined}
+                role={onLineClick && oldLine ? 'button' : undefined}
+                aria-label={onLineClick && oldLine ? `Add comment at line ${oldLine}` : undefined}
               >
                 {oldLineOf(change) ?? ''}
               </td>
               <td
-                className={`diff-gutter${onLineClick && newLine ? ' diff-gutter--clickable' : ''}`}
+                className={cn('diff-gutter', onLineClick && newLine && 'diff-gutter--clickable')}
                 onClick={() => onLineClick && clickableLine && onLineClick(clickableLine)}
                 title={onLineClick && clickableLine ? `Add comment at line ${clickableLine}` : undefined}
+                role={onLineClick && newLine ? 'button' : undefined}
+                aria-label={onLineClick && newLine ? `Add comment at line ${newLine}` : undefined}
               >
                 {newLine ?? ''}
               </td>
@@ -251,12 +460,11 @@ function HunkRows({ hunk, comments, focusedCommentIdx, pendingNewLine, onLineCli
                   <span className="diff-prefix">
                     {change.type === 'insert' ? '+' : change.type === 'delete' ? '-' : ' '}
                   </span>
-                  {change.content}
+                  <span dangerouslySetInnerHTML={{ __html: highlighted[i] }} />
                 </div>
               </td>
             </tr>
 
-            {/* Inline comment annotations */}
             {lineComments.map(({ comment, globalIdx }) => (
               <InlineCommentRow
                 key={`c-${globalIdx}`}
@@ -265,10 +473,10 @@ function HunkRows({ hunk, comments, focusedCommentIdx, pendingNewLine, onLineCli
                 focused={globalIdx === focusedCommentIdx}
                 onEdit={onEditComment ? (body) => onEditComment(globalIdx, body) : undefined}
                 onDelete={onDeleteComment ? () => onDeleteComment(globalIdx) : undefined}
+                onVerify={onVerifyComment ? () => onVerifyComment(comment) : undefined}
               />
             ))}
 
-            {/* Click-to-add new comment form */}
             {pendingNewLine !== undefined && clickableLine === pendingNewLine && (
               <NewCommentRow onSave={onPendingSave} onCancel={onPendingCancel} />
             )}
@@ -281,15 +489,22 @@ function HunkRows({ hunk, comments, focusedCommentIdx, pendingNewLine, onLineCli
 
 // ── Inline comment row ────────────────────────────────────────────────────────
 
+const COMMENT_BADGE_CLASS: Record<LineComment['type'], string> = {
+  issue:      'text-status-issue border-status-issue/50 bg-status-issue/10',
+  suggestion: 'text-status-suggestion border-status-suggestion/50 bg-status-suggestion/10',
+  note:       'text-status-note border-status-note/50 bg-status-note/10',
+}
+
 interface InlineCommentRowProps {
   comment: LineComment
   globalIdx: number
   focused: boolean
   onEdit?: (body: string) => void
   onDelete?: () => void
+  onVerify?: () => void
 }
 
-function InlineCommentRow({ comment, globalIdx, focused, onEdit, onDelete }: InlineCommentRowProps) {
+function InlineCommentRow({ comment, globalIdx, focused, onEdit, onDelete, onVerify }: InlineCommentRowProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(comment.body)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -316,31 +531,92 @@ function InlineCommentRow({ comment, globalIdx, focused, onEdit, onDelete }: Inl
   return (
     <tr
       id={`diff-comment-${globalIdx}`}
-      className={`diff-comment-row${focused ? ' diff-comment-row--focused' : ''}`}
+      className={cn('diff-comment-row', focused && 'diff-comment-row--focused')}
     >
       <td colSpan={3} className={`diff-comment-cell diff-comment-cell--${comment.type}`}>
         <div className="diff-comment">
           <div className="diff-comment__header">
-            <span className={`diff-comment__badge diff-comment__badge--${comment.type}`}>
+            <Badge
+              variant="outline"
+              className={cn('text-[9px] font-bold tracking-widest uppercase px-1.5 py-0', COMMENT_BADGE_CLASS[comment.type])}
+            >
               {comment.type}
-            </span>
-            {(onEdit || onDelete) && !editing && (
-              <div className="diff-comment__actions">
+            </Badge>
+            {(onVerify || onEdit || onDelete) && !editing && (
+              <div className="flex items-center gap-1">
+                {onVerify && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 text-muted-foreground hover:text-amber-400"
+                        onClick={onVerify}
+                        aria-label="Verify with Claude"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Verify with Claude</TooltipContent>
+                  </Tooltip>
+                )}
                 {onEdit && (
-                  <button className="diff-action-btn" onClick={() => setEditing(true)} title="Edit">
-                    ✎
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                        onClick={() => setEditing(true)}
+                        aria-label="Edit comment"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Edit</TooltipContent>
+                  </Tooltip>
                 )}
                 {onDelete && (
-                  <button className="diff-action-btn diff-action-btn--delete" onClick={onDelete} title="Delete">
-                    ×
-                  </button>
+                  <AlertDialog>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                            aria-label="Delete comment"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </AlertDialogTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">Delete</TooltipContent>
+                    </Tooltip>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete this comment?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This comment will be removed. Save the draft to persist the change.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={onDelete}
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 )}
               </div>
             )}
           </div>
           {editing ? (
-            <div className="diff-comment__edit">
+            <div className="flex flex-col gap-1.5">
               <textarea
                 ref={textareaRef}
                 className="diff-comment__textarea"
@@ -356,13 +632,15 @@ function InlineCommentRow({ comment, globalIdx, focused, onEdit, onDelete }: Inl
                   if (e.key === 'Escape') setEditing(false)
                 }}
               />
-              <div className="diff-comment__edit-actions">
-                <button className="diff-edit-btn diff-edit-btn--save" onClick={handleSave}>✓ Save</button>
-                <button className="diff-edit-btn diff-edit-btn--cancel" onClick={() => setEditing(false)}>Cancel</button>
+              <div className="flex gap-1.5">
+                <Button size="sm" className="h-6 text-xs gap-1" onClick={handleSave}><Check className="w-3 h-3" />Save</Button>
+                <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setEditing(false)}><X className="w-3 h-3" />Cancel</Button>
               </div>
             </div>
           ) : (
-            <p className="diff-comment__body">{comment.body}</p>
+            <div className="diff-comment__body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{comment.body}</ReactMarkdown>
+          </div>
           )}
         </div>
       </td>
@@ -370,9 +648,15 @@ function InlineCommentRow({ comment, globalIdx, focused, onEdit, onDelete }: Inl
   )
 }
 
-// ── New comment form (click-to-add) ──────────────────────────────────────────
+// ── New comment form ──────────────────────────────────────────────────────────
 
-function NewCommentRow({ onSave, onCancel }: { onSave: (type: LineComment['type'], body: string) => void; onCancel: () => void }) {
+function NewCommentRow({
+  onSave,
+  onCancel,
+}: {
+  onSave: (type: LineComment['type'], body: string) => void
+  onCancel: () => void
+}) {
   const [type, setType] = useState<LineComment['type']>('note')
   const [body, setBody] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -387,17 +671,18 @@ function NewCommentRow({ onSave, onCancel }: { onSave: (type: LineComment['type'
   return (
     <tr className="diff-comment-row diff-comment-row--new">
       <td colSpan={3} className="diff-comment-cell diff-comment-cell--new">
-        <div className="diff-comment diff-new-form">
-          <div className="diff-new-form__header">
-            <select
-              className="diff-new-form__type"
-              value={type}
-              onChange={(e) => setType(e.target.value as LineComment['type'])}
-            >
-              <option value="note">note</option>
-              <option value="issue">issue</option>
-              <option value="suggestion">suggestion</option>
-            </select>
+        <div className="diff-comment">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Select value={type} onValueChange={(v) => setType(v as LineComment['type'])}>
+              <SelectTrigger className="h-6 w-28 text-xs border-border bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="note" className="text-xs">note</SelectItem>
+                <SelectItem value="issue" className="text-xs">issue</SelectItem>
+                <SelectItem value="suggestion" className="text-xs">suggestion</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <textarea
             ref={textareaRef}
@@ -415,9 +700,9 @@ function NewCommentRow({ onSave, onCancel }: { onSave: (type: LineComment['type'
               if (e.key === 'Escape') onCancel()
             }}
           />
-          <div className="diff-comment__edit-actions">
-            <button className="diff-edit-btn diff-edit-btn--save" onClick={handleSave}>+ Add</button>
-            <button className="diff-edit-btn diff-edit-btn--cancel" onClick={onCancel}>Cancel</button>
+          <div className="flex gap-1.5 mt-1.5">
+            <Button size="sm" className="h-6 text-xs gap-1" onClick={handleSave}><Plus className="w-3 h-3" />Add</Button>
+            <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={onCancel}><X className="w-3 h-3" />Cancel</Button>
           </div>
         </div>
       </td>
