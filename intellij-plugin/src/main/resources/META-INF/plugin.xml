@@ -1,42 +1,41 @@
 <idea-plugin>
-    <id>com.jinloes.claudereviews</id>
-    <name>Claude PR Reviews</name>
-    <vendor>Claude Reviews</vendor>
+    <id>com.jinloes.prpilot</id>
+    <name>PR Pilot</name>
+    <vendor>PR Pilot</vendor>
     <description><![CDATA[
         Browse GitHub Pull Requests assigned to you or any accessible repository
-        and generate AI-powered code reviews using your local Claude CLI session.
-        Preview and edit the review before sharing.
+        and generate AI-powered code reviews. Preview and edit the review before sharing.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.java</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow id="Claude PR Reviews"
+        <toolWindow id="PR Pilot"
                     secondary="false"
                     anchor="right"
-                    factoryClass="com.jinloes.claudereviews.ui.PRToolWindowFactory"/>
+                    factoryClass="com.jinloes.prpilot.ui.PRToolWindowFactory"/>
 
         <applicationService
-            serviceImplementation="com.jinloes.claudereviews.settings.PluginSettings"/>
+            serviceImplementation="com.jinloes.prpilot.settings.PluginSettings"/>
 
         <applicationService
-            serviceImplementation="com.jinloes.claudereviews.services.IntellijGitHubService"/>
+            serviceImplementation="com.jinloes.prpilot.services.IntellijGitHubService"/>
 
         <applicationService
-            serviceImplementation="com.jinloes.claudereviews.services.PRNotificationService"/>
+            serviceImplementation="com.jinloes.prpilot.services.PRNotificationService"/>
 
         <applicationConfigurable
             parentId="tools"
-            instance="com.jinloes.claudereviews.settings.PluginSettingsConfigurable"
-            id="com.jinloes.claudereviews.settings.PluginSettingsConfigurable"
-            displayName="Claude PR Reviews"/>
+            instance="com.jinloes.prpilot.settings.PluginSettingsConfigurable"
+            id="com.jinloes.prpilot.settings.PluginSettingsConfigurable"
+            displayName="PR Pilot"/>
 
-        <notificationGroup id="Claude PR Reviews"
+        <notificationGroup id="PR Pilot"
                            displayType="BALLOON"
                            isLogByDefault="true"/>
 
         <postStartupActivity
-            implementation="com.jinloes.claudereviews.services.PRNotificationStartup"/>
+            implementation="com.jinloes.prpilot.services.PRNotificationStartup"/>
     </extensions>
 </idea-plugin>

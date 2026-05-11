@@ -7,7 +7,7 @@ import * as claude from './claude';
 export function activate(context: vscode.ExtensionContext) {
     const provider = new ClaudeReviewsViewProvider(context.extensionUri);
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider('claude-reviews.main', provider, {
+        vscode.window.registerWebviewViewProvider('pr-pilot.main', provider, {
             webviewOptions: { retainContextWhenHidden: true },
         })
     );
@@ -116,7 +116,7 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
                     }
                     break;
                 default:
-                    console.warn('[claude-reviews] unknown message type:', msg.type);
+                    console.warn('[pr-pilot] unknown message type:', msg.type);
             }
         });
     }
@@ -146,7 +146,7 @@ function push(state: ViewState, msg: object): void {
 }
 
 function config(): vscode.WorkspaceConfiguration {
-    return vscode.workspace.getConfiguration('claude-reviews');
+    return vscode.workspace.getConfiguration('pr-pilot');
 }
 
 function githubBaseUrl(): string {

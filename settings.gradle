@@ -1,4 +1,4 @@
-rootProject.name = 'intellij-claude-reviews'
+rootProject.name = 'pr-pilot'
 
 include 'core'
 include 'intellij-plugin'

@@ -1,30 +1,30 @@
 {
-  "name": "claude-reviews-vscode",
-  "displayName": "Claude PR Reviews",
-  "description": "AI-powered pull request reviews using Claude",
+  "name": "pr-pilot-vscode",
+  "displayName": "PR Pilot",
+  "description": "AI-powered pull request reviews",
   "version": "0.1.0",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
-      "activitybar": [{ "id": "claude-reviews", "title": "Claude Reviews", "icon": "$(git-pull-request)" }]
+      "activitybar": [{ "id": "pr-pilot", "title": "PR Pilot", "icon": "$(git-pull-request)" }]
     },
     "views": {
-      "claude-reviews": [{ "id": "claude-reviews.main", "name": "Claude Reviews", "type": "webview" }]
+      "pr-pilot": [{ "id": "pr-pilot.main", "name": "PR Pilot", "type": "webview" }]
     },
     "configuration": {
-      "title": "Claude Reviews",
+      "title": "PR Pilot",
       "properties": {
-        "claude-reviews.githubBaseUrl": {
+        "pr-pilot.githubBaseUrl": {
           "type": "string",
           "default": "https://github.com",
           "description": "GitHub base URL. Change for GitHub Enterprise (e.g. https://github.mycompany.com)."
         },
-        "claude-reviews.reviewModel": {
+        "pr-pilot.reviewModel": {
           "type": "string",
           "default": "",
-          "description": "Claude model ID to use for reviews. Empty uses the CLI default."
+          "description": "Model ID to use for reviews. Empty uses the CLI default."
         }
       }
     }

@@ -1,6 +1,6 @@
-# Claude PR Reviews — IntelliJ Plugin
+# PR Pilot
 
-IntelliJ plugin that lists GitHub Pull Requests and generates AI-powered code reviews using the local `claude` CLI.
+IntelliJ and VS Code extension that lists GitHub Pull Requests and generates AI-powered code reviews using a local AI CLI.
 
 > **CLAUDE.md maintenance rule:** Update this file as part of every coding task.
 > - Update "Project layout" when files are added or renamed.
@@ -17,7 +17,7 @@ Multi-module Gradle project:
 
 ```
 core/                                  – KMP module (jvm + js targets); Java services compiled as jvmMain
-  src/commonMain/kotlin/com/jinloes/claudereviews/
+  src/commonMain/kotlin/com/jinloes/prpilot/
     model/
       PullRequest.kt                 – @Serializable data class (title, number, owner, repo, author, etc.)
       ReviewResult.kt                – @Serializable class; holds summary, verdict, mutable List<LineComment>
@@ -28,7 +28,7 @@ core/                                  – KMP module (jvm + js targets); Java s
       DiffParser.kt                  – Kotlin object; unified diff parser; DiffFile / DiffLine types
     util/
       ProcessUtil.kt                 – expect object; findBinary(name, candidates); jvmMain actual uses java.io.File, jsMain actual uses Node.js fs
-  src/jvmMain/kotlin/com/jinloes/claudereviews/
+  src/jvmMain/kotlin/com/jinloes/prpilot/
     services/
       GitHubAuthService.kt           – Runs `gh auth token`; probes known gh binary paths
       ClaudeService.kt               – Shells out to `claude --print`; synchronous/blocking API
@@ -37,18 +37,18 @@ core/                                  – KMP module (jvm + js targets); Java s
       EventMessage.kt                – @Serializable DTO for message payload inside a stream event
       ContentBlock.kt                – @Serializable DTO for a content block (tool_use / text); AnySerializer handles Map<String,Any> input field
       AnySerializer.kt               – internal KSerializer<Any> for tool-use input map values
-  src/commonMain/kotlin/com/jinloes/claudereviews/
+  src/commonMain/kotlin/com/jinloes/prpilot/
     services/
       GitHubService.kt               – GitHub REST API: search PRs, diff, draft review CRUD; Ktor + kotlinx.serialization; runBlocking wrappers for Java callers
       RunBlockingCompat.kt           – internal expect fun runBlockingCompat; bridges suspend to blocking for Java callers without JVM-only runBlocking in commonMain
       UrlEncode.kt (expect)          – expect fun urlEncode(value: String): String
-  src/jvmMain/kotlin/com/jinloes/claudereviews/
+  src/jvmMain/kotlin/com/jinloes/prpilot/
     services/
       GitHubAuthService.kt           – Runs `gh auth token`; probes known gh binary paths
       ClaudeService.kt               – Shells out to `claude --print`; synchronous/blocking API
-      PendingReviewIndex.kt          – Local JSON index of saved drafts (~/.claude-reviews/pending-prs.json)
-      PatternKnowledgeBase.kt        – Per-repo pattern knowledge file (~/.claude-reviews/patterns/) [unused in main flow]
-      SeenPRSet.kt                   – Local JSON set of notified PR IDs (~/.claude-reviews/seen-prs.json)
+      PendingReviewIndex.kt          – Local JSON index of saved drafts (~/.pr-pilot/pending-prs.json)
+      PatternKnowledgeBase.kt        – Per-repo pattern knowledge file (~/.pr-pilot/patterns/) [unused in main flow]
+      SeenPRSet.kt                   – Local JSON set of notified PR IDs (~/.pr-pilot/seen-prs.json)
       RunBlockingCompat.kt (actual/jvm) – actual delegates to kotlinx.coroutines.runBlocking
       UrlEncode.kt (actual/jvm)      – java.net.URLEncoder implementation
     services/stream/
@@ -58,7 +58,7 @@ core/                                  – KMP module (jvm + js targets); Java s
       AnySerializer.kt               – internal KSerializer<Any> for tool-use input map values
     util/
       ProcessUtil.kt (actual/jvm)    – actual object; java.io.File.isFile() check; @JvmStatic on findBinary
-  src/jsMain/kotlin/com/jinloes/claudereviews/
+  src/jsMain/kotlin/com/jinloes/prpilot/
     services/
       RunBlockingCompat.kt (actual/js) – actual throws UnsupportedOperationException (JS has no blocking primitive)
       UrlEncode.kt (actual/js)       – encodeURIComponent implementation
@@ -66,7 +66,7 @@ core/                                  – KMP module (jvm + js targets); Java s
       ProcessUtil.kt (actual/js)     – actual object; Node.js fs.existsSync / statSync check
 
 intellij-plugin/                       – IntelliJ Platform plugin; depends on :core
-  src/main/java/com/jinloes/claudereviews/
+  src/main/java/com/jinloes/prpilot/
     services/
       IntellijGitHubService.java     – @Service adapter: wraps core GitHubService with PluginSettings apiBase
       IntellijClaudeService.java     – Wrapper: dispatches core ClaudeService to pooled thread, callbacks to EDT
@@ -253,13 +253,13 @@ PR list filters (`prStateFilter`, `assignedToMeFilter`, `reviewRequestedFilter`)
 3. Write tests covering every branch: happy path, edge cases, and error paths.
 4. Run `./gradlew :core:jvmTest :intellij-plugin:unitTest` and confirm all tests pass.
 
-- Core tests live under `core/src/test/java/com/jinloes/claudereviews/` mirroring the main source tree.
-- IntelliJ-coupled tests live under `intellij-plugin/src/test/java/com/jinloes/claudereviews/`.
+- Core tests live under `core/src/test/java/com/jinloes/prpilot/` mirroring the main source tree.
+- IntelliJ-coupled tests live under `intellij-plugin/src/test/java/com/jinloes/prpilot/`.
 - Use **JUnit 5** (`@Test`, `@Nested`, `@TempDir`) and **AssertJ** for assertions.
 - Group related tests in `@Nested` inner classes named after the method or scenario.
 - Tests must not depend on IntelliJ platform classes — pure-Java logic only.
 - UI classes (anything extending `JPanel`, `JComponent`, etc.) are excluded from the coverage requirement.
-- File-based classes use `@TempDir` — never write to `~/.claude-reviews` in tests.
+- File-based classes use `@TempDir` — never write to `~/.pr-pilot` in tests.
 
 ---
 
@@ -317,6 +317,6 @@ No API keys or tokens are ever written to disk.
 
 | Path | Purpose |
 |------|---------|
-| `~/.claude-reviews/pending-prs.json` | Index of PRs with saved drafts (owner, repo, number, title, savedAt, headSha) |
-| `~/.claude-reviews/seen-prs.json` | Set of `owner/repo#number` strings already notified about |
-| `~/.claude-reviews/patterns/{owner}%{repo}.md` | Per-repo verified pattern log (unused in main flow) |
+| `~/.pr-pilot/pending-prs.json` | Index of PRs with saved drafts (owner, repo, number, title, savedAt, headSha) |
+| `~/.pr-pilot/seen-prs.json` | Set of `owner/repo#number` strings already notified about |
+| `~/.pr-pilot/patterns/{owner}%{repo}.md` | Per-repo verified pattern log (unused in main flow) |
