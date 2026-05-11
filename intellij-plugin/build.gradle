@@ -40,7 +40,6 @@ dependencies {
 
     intellijPlatform {
         local('/Applications/IntelliJ IDEA.app')
-        bundledPlugin('com.intellij.java')
     }
 }
 

@@ -78,9 +78,8 @@ intellij-plugin/                       – IntelliJ Platform plugin; depends on 
       PluginSettingsConfigurable.java – Wires settings into IntelliJ settings tree under Tools
     ui/
       PRToolWindowFactory.java       – Creates WebviewPanel; shows JCEF-unavailable label when JCEF not supported
-      WebviewPanel.java              – JCEF browser wrapper; loads React webview, wires Java↔JS bridge; accepts Project for PSI access
+      WebviewPanel.java              – JCEF browser wrapper; loads React webview, wires Java↔JS bridge; accepts Project for repo detection
       RepoDetector.java              – Static helpers: detectCurrentRepo (walks .git/config) and parseOwnerRepo
-      DiffTypeContextExtractor.java  – Extracts non-private method/field signatures from changed Java files via PSI; injected as <type_context> in the review prompt
   src/main/resources/
     META-INF/plugin.xml
 
@@ -198,8 +197,8 @@ The full prompt is written to `stdin` (not passed as a CLI arg) to avoid OS argu
 ### Cancel support — `AtomicReference<Process>`
 `cancelCurrentRequest()` uses `getAndSet(null)` to atomically read and clear `activeProcess` before calling `destroyForcibly()`. This eliminates the TOCTOU race a `volatile` field would leave between the null-check and the destroy call.
 
-### PSI type context injection
-`DiffTypeContextExtractor` injects non-private method/field signatures as a `<type_context>` block in the review prompt. The review instructions explicitly prohibit Claude from using file-reading tools — all type information Claude needs is already in the prompt. Requires the `com.intellij.java` bundled plugin dependency (`intellij-plugin/build.gradle`).
+### IDE tools for type context
+The review prompt instructs Claude to use IDE tools (via Claude Code's IDE MCP integration) when it needs type information — method signatures, field types, class hierarchies. No pre-baked type context is injected; Claude fetches what it needs on demand.
 
 ### Review prompt output schema
 Output must be a strict JSON object: `summary` (string, max 800 chars, markdown with `## Overview` / `## Key Changes` / `## Risk Areas` sections), `verdict` (`"APPROVE"` | `"REQUEST_CHANGES"` | `"COMMENT"`), `lineComments` array (max 12) with `file`, `line` (positive int), `type` (`"issue"` | `"suggestion"` | `"note"`), `body` (≤300 chars). All untrusted input tags (`<pr_metadata>`, `<pr_description>`, `<prior_review>`, `<known_patterns>`, `<existing_reviews>`) are marked data-only in `REVIEW_INSTRUCTIONS` to guard against prompt injection.
@@ -209,7 +208,7 @@ Both the IntelliJ plugin and VS Code extension pass `diff = ""` in `PRReviewRequ
 
 **Why:** Embedding the full diff in the prompt consumed significant context and limited the model's extended thinking budget. Letting Claude fetch the diff on demand eliminates that overhead and avoids the 80 KB size cap.
 
-The plugin still fetches the diff over the GitHub API for two reasons: (1) to render the diff viewer in the UI, and (2) to pass it to `DiffTypeContextExtractor` for PSI-based type context extraction. It just does not forward the diff text to the Claude prompt.
+The plugin still fetches the diff over the GitHub API to render the diff viewer in the UI. It does not forward the diff text to the Claude prompt.
 
 ### stream-json result filtering
 `ClaudeService.handleStreamEvent()` only appends to `resultBuffer` for `result` events with `subtype == "success"` and `is_error == false`. `StreamEvent` maps `"is_error"` via `@SerialName("is_error")` — kotlinx.serialization does not translate snake_case automatically.

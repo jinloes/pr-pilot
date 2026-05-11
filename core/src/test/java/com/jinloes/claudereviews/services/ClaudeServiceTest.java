@@ -129,32 +129,6 @@ class ClaudeServiceTest {
         }
 
         @Test
-        void blankTypeContext_sectionAbsent() {
-            String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "diff", ""));
-            assertThat(prompt).doesNotContain("<type_context>\n");
-        }
-
-        @Test
-        void nonBlankTypeContext_wrappedInXmlTags() {
-            String prompt =
-                    ClaudeService.buildPrompt(
-                            new PRReviewRequest(pr(""), "diff", "", null, null, "Foo#bar(): int"));
-            assertThat(prompt).contains("<type_context>\nFoo#bar(): int\n</type_context>");
-        }
-
-        @Test
-        void typeContextAppearsAfterPrDescriptionBeforeFetchDiff() {
-            String prompt =
-                    ClaudeService.buildPrompt(
-                            new PRReviewRequest(
-                                    pr("body"), "", "", null, null, "Foo#bar(): int"));
-            assertThat(prompt.indexOf("<type_context>\nFoo#bar(): int"))
-                    .isGreaterThan(prompt.indexOf("<pr_description>\nbody"));
-            assertThat(prompt.indexOf("<type_context>\nFoo#bar(): int"))
-                    .isLessThan(prompt.indexOf("<fetch_diff>\nRun:"));
-        }
-
-        @Test
         void misattributionGuardPresent() {
             String prompt = ClaudeService.buildPrompt(new PRReviewRequest(pr(""), "", ""));
             assertThat(prompt).contains("misattributed comment is worse than no comment");

@@ -584,18 +584,11 @@ public class WebviewPanel {
                                             "reviewGenerating", "Sending to Claude…"));
                             final String finalDiff = diff;
                             final String finalExisting = existingReviews;
-                            String typeContext =
-                                    DiffTypeContextExtractor.extract(finalDiff, project);
                             String knownPatterns =
                                     patternKb.load(finalPr.getOwner(), finalPr.getRepo());
                             claudeService.reviewPR(
                                     new PRReviewRequest(
-                                            finalPr,
-                                            "",
-                                            knownPatterns,
-                                            "",
-                                            finalExisting,
-                                            typeContext),
+                                            finalPr, "", knownPatterns, "", finalExisting),
                                     statusMsg ->
                                             pushMessage(
                                                     new ReviewGeneratingMsg(
