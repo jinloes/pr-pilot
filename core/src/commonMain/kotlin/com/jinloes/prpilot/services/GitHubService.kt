@@ -47,6 +47,7 @@ class GitHubService(
     private val apiBase: String,
     private val httpClient: HttpClient = HTTP_CLIENT,
 ) {
+    constructor(apiBase: String) : this(apiBase, HTTP_CLIENT)
 
     companion object {
         private const val MAX_DIFF_BYTES = 80_000
