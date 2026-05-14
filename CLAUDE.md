@@ -211,7 +211,10 @@ Both the IntelliJ plugin and VS Code extension pass `diff = ""` in `PRReviewRequ
 The plugin still fetches the diff over the GitHub API to render the diff viewer in the UI. It does not forward the diff text to the Claude prompt.
 
 ### stream-json result filtering
-`ClaudeService.handleStreamEvent()` only appends to `resultBuffer` for `result` events with `subtype == "success"` and `is_error == false`. `StreamEvent` maps `"is_error"` via `@SerialName("is_error")` — kotlinx.serialization does not translate snake_case automatically.
+`ClaudeService.handleStreamEvent()` only appends to `resultBuffer` for `result` events with `subtype == "success"` and `is_error == false`. `StreamEvent` maps `"is_error"` via `@SerialName("is_error")` and `"session_id"` via `@SerialName("session_id")` — kotlinx.serialization does not translate snake_case automatically.
+
+### Max-turns recovery via `--resume`
+When a review process exits non-zero with `subtype == "error_max_turns"` in the stream-json output, `ClaudeService.runReview` checks the result event for a `session_id`. If one is present it automatically calls `runResume(sessionId, ...)`, which spawns a new `claude --resume <session_id> --max-turns 3` process and sends a nudge prompt ("Output the review JSON now…") to Claude. Claude already completed its analysis — the nudge prompts it to emit the JSON it has without further tool calls. The VS Code extension mirrors this logic in `resumeReview(...)`. If no `session_id` is present (e.g., older CLI versions), the original error is surfaced.
 
 ### GitHub draft encoding scheme
 GitHub's review comment API returns `line: null` for outdated comments. `GitHubService.encodeBody()` embeds all comments as a compact JSON array inside an HTML comment in the review body:
@@ -222,6 +225,9 @@ GitHub's review comment API returns `line: null` for outdated comments. `GitHubS
 
 ### Draft review creation — omit `event` field
 Creating a GitHub pending review requires omitting `event` entirely from the POST payload. Setting `event: "PENDING"` is invalid and causes a 422.
+
+### 422 fallback — body-first, then add comments individually
+When creating a pending review with inline comments returns 422 (invalid path or line number), `saveDraftReview` falls back to: (1) create the review with an empty comments array, (2) POST each comment individually to `reviews/{id}/comments`. This keeps exactly one pending review in existence at all times. **Do not revert to the old probe-review approach** (creating a temp review per comment and deleting it) — delete failures leave orphaned pending reviews whose comments appear as duplicates in the PR diff view for the author.
 
 ### SSRF prevention
 `PluginSettings.setGithubBaseUrl()` rejects any URL not starting with `https://`, falling back to `https://github.com`. This prevents a crafted base URL from forwarding GitHub tokens to an attacker-controlled host.

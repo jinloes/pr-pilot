@@ -11,6 +11,7 @@ data class StreamEvent(
     @SerialName("is_error") @get:JvmName("getIsError") var isError: Boolean = false,
     var message: EventMessage? = null,
     var result: String? = null,
+    @SerialName("session_id") var sessionId: String? = null,
 ) {
     // Record-style component accessors for Java callers using method-call syntax.
     fun type(): String? = type
@@ -21,4 +22,5 @@ data class StreamEvent(
 
     fun message(): Optional<EventMessage> = Optional.ofNullable(message)
     fun result(): Optional<String> = Optional.ofNullable(result)
+    fun sessionId(): String? = sessionId
 }

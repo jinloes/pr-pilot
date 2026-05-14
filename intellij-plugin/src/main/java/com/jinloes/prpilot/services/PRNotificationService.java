@@ -34,7 +34,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 public final class PRNotificationService implements Disposable {
 
-    static final String NOTIFICATION_GROUP = "Claude PR Reviews";
+    static final String NOTIFICATION_GROUP = "PR Pilot";
 
     private record PollStatus(long epochMs, String error) {}
 

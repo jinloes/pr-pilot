@@ -101,73 +101,70 @@ class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
             val exitCode = process.exitValue()
             val stderr = stderrFuture.join()
             if (exitCode != 0) {
-                val msg = "claude exited $exitCode" + if (stderr.isBlank()) "" else ": ${stderr.trim()}"
+                val errorInfo = findErrorInfo(stdoutFile)
+                if (errorInfo.subtype == "error_max_turns" && errorInfo.sessionId != null) {
+                    log.info("Max turns hit — resuming session {}", errorInfo.sessionId)
+                    return runResume(errorInfo.sessionId, model, onStatus, onChunk)
+                }
+                val msg = when (errorInfo.subtype) {
+                    "error_max_turns" -> "Review hit the turn limit — the PR may be too large. Try again."
+                    else -> "claude exited $exitCode" + if (stderr.isBlank()) "" else ": ${stderr.trim()}"
+                }
                 throw IOException(msg)
             }
 
-            val stdoutBytes = stdoutFile.length()
-            log.info("claude stdout file: {} ({} bytes)", stdoutFile.absolutePath, stdoutBytes)
-
-            val resultBuffer = StringBuilder()
-            val textBuffer = StringBuilder()
-            val eventTypeSeen = mutableListOf<String>()
-            val rawLinesSample = mutableListOf<String>()
-            IOUtils.lineIterator(stdoutFile.inputStream(), StandardCharsets.UTF_8).use { it: LineIterator ->
-                while (it.hasNext()) {
-                    val line = it.next()
-                    if (line.isBlank()) continue
-                    if (rawLinesSample.size < 20) rawLinesSample.add(line.take(200))
-                    try {
-                        val event = JSON.decodeFromString<StreamEvent>(line)
-                        val eventType = StringUtils.defaultString(event.type(), "unknown")
-                        eventTypeSeen.add(eventType)
-                        handleStreamEvent(event, onStatus, onChunk, resultBuffer, textBuffer)
-                    } catch (e: Exception) {
-                        if (rawLinesSample.size == 1) {
-                            // Write the first parse failure to a file so it can be read without IDE logging.
-                            val errFile = File(System.getProperty("java.io.tmpdir"), "claude-parse-error.txt")
-                            errFile.writeText("${e.javaClass.name}: ${e.message}\n${e.stackTraceToString()}\n\nLine content (first 500):\n${line.take(500)}")
-                            log.warn("stream parse error: {} — {} (see {})", e.javaClass.name, e.message, errFile.absolutePath)
-                        }
-                    }
-                }
-            }
-
-            val raw = if (resultBuffer.isNotBlank()) resultBuffer.toString() else textBuffer.toString()
-            if (raw.isBlank()) {
-                val eventSummary = eventTypeSeen.groupingBy { it }.eachCount()
-                    .entries.joinToString(", ") { "${it.key}×${it.value}" }
-                    .ifBlank { "none" }
-                log.warn(
-                    "claude produced no output. events: [{}]. stderr: [{}]. stdout file: {}. first lines:\n{}",
-                    eventSummary,
-                    stderr.trim(),
-                    stdoutFile.absolutePath,
-                    rawLinesSample.joinToString("\n"),
-                )
-                val parseErrFile = File(System.getProperty("java.io.tmpdir"), "claude-parse-error.txt")
-                val detail = buildString {
-                    append("events: $eventSummary")
-                    if (stderr.isNotBlank()) append(", stderr: ${stderr.trim().take(300)}")
-                    append(". Stdout (${stdoutBytes}B) at ${stdoutFile.absolutePath}")
-                    if (parseErrFile.exists()) append(". Parse error at ${parseErrFile.absolutePath}")
-                }
-                throw IOException("claude produced no output ($detail)")
-            }
-            return try {
-                parseReview(raw)
-            } catch (parseEx: IOException) {
-                log.warn(
-                    "Failed to parse review JSON (first 500 chars): {}",
-                    if (raw.length > 500) raw.substring(0, 500) else raw,
-                )
-                throw parseEx
-            }
+            return parseStdoutFileToResult(stdoutFile, stderr, onStatus, onChunk)
         } finally {
             activeProcess.set(null)
             process?.destroy()
             // stdoutFile is kept on failure so the path in the error message can be inspected.
             // The OS /tmp cleaner handles eventual removal.
+        }
+    }
+
+    /**
+     * Resumes a Claude session that hit the turn limit by sending a nudge prompt instructing it to
+     * emit the JSON it already has. Uses `--resume` with a reduced turn budget.
+     */
+    private fun runResume(
+        sessionId: String,
+        model: String,
+        onStatus: Consumer<String>,
+        onChunk: BiConsumer<String, String>?,
+    ): ReviewResult {
+        var process: Process? = null
+        val stdoutFile = File(System.getProperty("java.io.tmpdir"), "claude-review-stdout-${System.currentTimeMillis()}.ndjson")
+        try {
+            onStatus.accept("Resuming review session…")
+            val args = mutableListOf("--verbose", "--output-format", "stream-json", "--resume", sessionId)
+            if (model.isNotBlank()) { args.add("--model"); args.add(model) }
+            process = buildProcess(stdoutFile, 3, *args.toTypedArray())
+            activeProcess.set(process)
+
+            val stderrFuture = drainStderr(process)
+            val stdinFuture = CompletableFuture.runAsync { writeStdin(process, RESUME_NUDGE) }
+
+            val finished = process.waitFor(10, TimeUnit.MINUTES)
+            stdinFuture.join()
+            if (!finished) {
+                process.destroyForcibly()
+                throw IOException("Review resume timed out — claude did not finish within 10 minutes.")
+            }
+            val exitCode = process.exitValue()
+            val stderr = stderrFuture.join()
+            if (exitCode != 0) {
+                val errorInfo = findErrorInfo(stdoutFile)
+                val msg = when (errorInfo.subtype) {
+                    "error_max_turns" -> "Review hit the turn limit even after resume — the PR may be too large."
+                    else -> "claude exited $exitCode during resume" + if (stderr.isBlank()) "" else ": ${stderr.trim()}"
+                }
+                throw IOException(msg)
+            }
+
+            return parseStdoutFileToResult(stdoutFile, stderr, onStatus, onChunk)
+        } finally {
+            activeProcess.set(null)
+            process?.destroy()
         }
     }
 
@@ -316,12 +313,15 @@ class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
     }
 
     private fun buildProcess(vararg extraArgs: String): Process =
-        buildProcess(null, *extraArgs)
+        buildProcess(null, DEFAULT_MAX_TURNS, *extraArgs)
 
-    private fun buildProcess(stdoutFile: File?, vararg extraArgs: String): Process {
+    private fun buildProcess(stdoutFile: File?, vararg extraArgs: String): Process =
+        buildProcess(stdoutFile, DEFAULT_MAX_TURNS, *extraArgs)
+
+    private fun buildProcess(stdoutFile: File?, maxTurns: Int, vararg extraArgs: String): Process {
         val cmd = mutableListOf(
             findClaudeBinary(), "--print", "--dangerously-skip-permissions",
-            "--max-turns", "15",
+            "--max-turns", maxTurns.toString(),
         )
         cmd.addAll(extraArgs.toList())
         val pb = ProcessBuilder(cmd)
@@ -334,6 +334,93 @@ class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
         return pb.start()
     }
 
+    /**
+     * Reads the stdout ndjson file and finds the first error event, returning its subtype and
+     * session_id. Returns nulls for both fields if no error event is found or the file is unreadable.
+     */
+    private fun findErrorInfo(stdoutFile: File): ErrorInfo {
+        return stdoutFile.runCatching {
+            var subtype: String? = null
+            var sessionId: String? = null
+            inputStream().bufferedReader().lineSequence()
+                .mapNotNull { line -> runCatching { JSON.decodeFromString<StreamEvent>(line) }.getOrNull() }
+                .firstOrNull { it.isError() }
+                ?.also { event ->
+                    subtype = event.subtype()
+                    sessionId = event.sessionId()
+                }
+            ErrorInfo(subtype, sessionId)
+        }.getOrDefault(ErrorInfo(null, null))
+    }
+
+    private fun parseStdoutFileToResult(
+        stdoutFile: File,
+        stderr: String,
+        onStatus: Consumer<String>,
+        onChunk: BiConsumer<String, String>?,
+    ): ReviewResult {
+        val stdoutBytes = stdoutFile.length()
+        log.info("claude stdout file: {} ({} bytes)", stdoutFile.absolutePath, stdoutBytes)
+
+        val resultBuffer = StringBuilder()
+        val textBuffer = StringBuilder()
+        val eventTypeSeen = mutableListOf<String>()
+        val rawLinesSample = mutableListOf<String>()
+        IOUtils.lineIterator(stdoutFile.inputStream(), StandardCharsets.UTF_8).use { it: LineIterator ->
+            while (it.hasNext()) {
+                val line = it.next()
+                if (line.isBlank()) continue
+                if (rawLinesSample.size < 20) rawLinesSample.add(line.take(200))
+                try {
+                    val event = JSON.decodeFromString<StreamEvent>(line)
+                    val eventType = StringUtils.defaultString(event.type(), "unknown")
+                    eventTypeSeen.add(eventType)
+                    handleStreamEvent(event, onStatus, onChunk, resultBuffer, textBuffer)
+                } catch (e: Exception) {
+                    if (rawLinesSample.size == 1) {
+                        // Write the first parse failure to a file so it can be read without IDE logging.
+                        val errFile = File(System.getProperty("java.io.tmpdir"), "claude-parse-error.txt")
+                        errFile.writeText("${e.javaClass.name}: ${e.message}\n${e.stackTraceToString()}\n\nLine content (first 500):\n${line.take(500)}")
+                        log.warn("stream parse error: {} — {} (see {})", e.javaClass.name, e.message, errFile.absolutePath)
+                    }
+                }
+            }
+        }
+
+        val raw = if (resultBuffer.isNotBlank()) resultBuffer.toString() else textBuffer.toString()
+        if (raw.isBlank()) {
+            val eventSummary = eventTypeSeen.groupingBy { it }.eachCount()
+                .entries.joinToString(", ") { "${it.key}×${it.value}" }
+                .ifBlank { "none" }
+            log.warn(
+                "claude produced no output. events: [{}]. stderr: [{}]. stdout file: {}. first lines:\n{}",
+                eventSummary,
+                stderr.trim(),
+                stdoutFile.absolutePath,
+                rawLinesSample.joinToString("\n"),
+            )
+            val parseErrFile = File(System.getProperty("java.io.tmpdir"), "claude-parse-error.txt")
+            val detail = buildString {
+                append("events: $eventSummary")
+                if (stderr.isNotBlank()) append(", stderr: ${stderr.trim().take(300)}")
+                append(". Stdout (${stdoutBytes}B) at ${stdoutFile.absolutePath}")
+                if (parseErrFile.exists()) append(". Parse error at ${parseErrFile.absolutePath}")
+            }
+            throw IOException("claude produced no output ($detail)")
+        }
+        return try {
+            parseReview(raw)
+        } catch (parseEx: IOException) {
+            log.warn(
+                "Failed to parse review JSON (first 500 chars): {}",
+                if (raw.length > 500) raw.substring(0, 500) else raw,
+            )
+            throw parseEx
+        }
+    }
+
+    private data class ErrorInfo(val subtype: String?, val sessionId: String?)
+
     companion object {
         private val log = LoggerFactory.getLogger(ClaudeService::class.java)
 
@@ -342,8 +429,15 @@ class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
         private const val STATUS_GENERATING = "Generating review…"
         private const val STATUS_PARSING = "Parsing review…"
 
+        private const val DEFAULT_MAX_TURNS = 15
+
         private const val CLAUDE_DIR_UNIX = "/.claude/"
         private const val CLAUDE_DIR_WIN = "\\.claude\\"
+
+        // Sent as the resuming user turn when Claude hits the turn limit mid-analysis.
+        // Claude has already gathered context — this nudges it to emit the JSON it has.
+        private const val RESUME_NUDGE =
+            "You have gathered sufficient context. Output the review JSON now following the schema exactly — no more tool calls."
 
         private const val REVIEW_INSTRUCTIONS =
             "You are an experienced engineer reviewing a colleague's pull request. " +

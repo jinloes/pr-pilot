@@ -337,4 +337,36 @@ class GitHubServiceRoundTripTest {
             assertThat(decoded.getVerdict()).isEqualTo("APPROVE");
         }
     }
+
+    @Nested
+    class EffectiveBody {
+
+        @Test
+        void approve_blankBody_defaultsToLgtm() {
+            assertThat(GitHubService.Companion.effectiveBody("APPROVE", ""))
+                    .isEqualTo("Looks good to me!");
+        }
+
+        @Test
+        void approve_whitespaceBody_defaultsToLgtm() {
+            assertThat(GitHubService.Companion.effectiveBody("APPROVE", "   "))
+                    .isEqualTo("Looks good to me!");
+        }
+
+        @Test
+        void approve_nonBlankBody_preserved() {
+            assertThat(GitHubService.Companion.effectiveBody("APPROVE", "Custom message"))
+                    .isEqualTo("Custom message");
+        }
+
+        @Test
+        void requestChanges_blankBody_notDefaulted() {
+            assertThat(GitHubService.Companion.effectiveBody("REQUEST_CHANGES", "")).isEmpty();
+        }
+
+        @Test
+        void comment_blankBody_notDefaulted() {
+            assertThat(GitHubService.Companion.effectiveBody("COMMENT", "")).isEmpty();
+        }
+    }
 }

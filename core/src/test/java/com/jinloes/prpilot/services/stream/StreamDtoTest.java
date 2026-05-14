@@ -45,6 +45,19 @@ class StreamDtoTest {
             StreamEvent event = new StreamEvent();
             assertThat(event.result()).isEmpty();
         }
+
+        @Test
+        void sessionId_returnsValueWhenSet() {
+            StreamEvent event = new StreamEvent();
+            event.setSessionId("abc-123");
+            assertThat(event.sessionId()).isEqualTo("abc-123");
+        }
+
+        @Test
+        void sessionId_returnsNullWhenNotSet() {
+            StreamEvent event = new StreamEvent();
+            assertThat(event.sessionId()).isNull();
+        }
     }
 
     @Nested

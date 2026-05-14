@@ -363,26 +363,8 @@ function buildCommentArray(review: ReviewResult): object[] {
     return result;
 }
 
-async function tryCommentsIndividually(
-    token: string,
-    url: string,
-    basePayload: Record<string, unknown>,
-    comments: object[],
-): Promise<object[]> {
-    const valid: object[] = [];
-    for (const c of comments) {
-        try {
-            const probe = JSON.stringify({ ...basePayload, comments: [c] });
-            const resp = await ghRequest(token, url, { method: 'POST', body: probe });
-            const tempId = (JSON.parse(resp) as { id?: number })?.id?.toString();
-            if (tempId) {
-                try { await ghRequest(token, `${url}/${tempId}`, { method: 'DELETE' }); } catch { /* best-effort */ }
-            }
-            valid.push(c);
-        } catch { /* skip invalid comment */ }
-    }
-    return valid;
-}
+// Removed: tryCommentsIndividually — the probe-review approach created orphaned pending reviews
+// that showed up as duplicate comments in the PR diff view. See saveDraftReview fallback instead.
 
 export async function loadDraftReview(
     token: string,
@@ -430,10 +412,18 @@ export async function saveDraftReview(
         return { reviewId: (JSON.parse(resp) as { id?: number })?.id?.toString() ?? '', commentsDropped };
     } catch (ex: unknown) {
         if (ex instanceof Error && ex.message.includes('422')) {
-            const valid = await tryCommentsIndividually(token, url, payload, comments);
-            commentsDropped = valid.length < comments.length;
-            const resp = await ghRequest(token, url, { method: 'POST', body: JSON.stringify({ ...payload, comments: valid }) });
-            return { reviewId: (JSON.parse(resp) as { id?: number })?.id?.toString() ?? '', commentsDropped };
+            // One or more inline comments reference an invalid path or line. Create the review
+            // body-only first (guaranteed to succeed), then add each comment individually so
+            // only the bad ones are dropped. This avoids creating orphaned probe reviews.
+            const bodyResp = await ghRequest(token, url, { method: 'POST', body: JSON.stringify({ ...payload, comments: [] }) });
+            const reviewId = (JSON.parse(bodyResp) as { id?: number })?.id?.toString() ?? '';
+            const commentsUrl = `${url}/${reviewId}/comments`;
+            for (const c of comments) {
+                try {
+                    await ghRequest(token, commentsUrl, { method: 'POST', body: JSON.stringify(c) });
+                } catch { commentsDropped = true; }
+            }
+            return { reviewId, commentsDropped };
         }
         throw ex;
     }

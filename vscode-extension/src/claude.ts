@@ -171,6 +171,7 @@ interface StreamEvent {
     subtype?: string;
     is_error?: boolean;
     result?: string;
+    session_id?: string;
     message?: { content?: ContentBlock[] };
 }
 
@@ -233,7 +234,7 @@ export function reviewPR(options: {
 }): Promise<ReviewResult> {
     return new Promise((resolve, reject) => {
         const { prompt, model, workingDir, onStatus, onChunk } = options;
-        const args = ['--print', '--dangerously-skip-permissions', '--verbose', '--output-format', 'stream-json'];
+        const args = ['--print', '--dangerously-skip-permissions', '--verbose', '--output-format', 'stream-json', '--max-turns', '15'];
         if (model) { args.push('--model', model); }
 
         const proc = spawn(findClaudeBinary(), args, {
@@ -244,6 +245,8 @@ export function reviewPR(options: {
 
         const resultBuffer: string[] = [];
         let stdoutBuf = '';
+        let errorSubtype: string | null = null;
+        let errorSessionId: string | null = null;
 
         proc.stdin.write(prompt, 'utf8');
         proc.stdin.end();
@@ -279,11 +282,16 @@ export function reviewPR(options: {
                                 }
                             }
                         }
-                    } else if (event.type === 'result' && !event.is_error && (event.subtype == null || event.subtype === 'success')) {
-                        if (event.result && event.result.trim()) {
-                            resultBuffer.push(event.result);
+                    } else if (event.type === 'result') {
+                        if (!event.is_error && (event.subtype == null || event.subtype === 'success')) {
+                            if (event.result && event.result.trim()) {
+                                resultBuffer.push(event.result);
+                            }
+                            onStatus('Parsing review…');
+                        } else if (event.is_error && event.subtype) {
+                            errorSubtype = event.subtype;
+                            errorSessionId = event.session_id ?? null;
                         }
-                        onStatus('Parsing review…');
                     }
                 } catch { /* skip non-JSON lines */ }
             }
@@ -295,13 +303,127 @@ export function reviewPR(options: {
         proc.on('close', (code) => {
             if (activeProcess === proc) activeProcess = null;
             if (code !== 0 && code !== null) {
-                const msg = `claude exited ${code}` + (stderrBuf.trim() ? `: ${stderrBuf.trim()}` : '');
+                if (errorSubtype === 'error_max_turns' && errorSessionId) {
+                    resumeReview({ sessionId: errorSessionId, model, workingDir, onStatus, onChunk })
+                        .then(resolve)
+                        .catch(reject);
+                    return;
+                }
+                const msg = errorSubtype === 'error_max_turns'
+                    ? 'Review hit the turn limit — the PR may be too large. Try again.'
+                    : `claude exited ${code}` + (stderrBuf.trim() ? `: ${stderrBuf.trim()}` : '');
                 reject(new Error(msg));
                 return;
             }
             const raw = resultBuffer.length > 0 ? resultBuffer.join('') : textBuffer.join('');
             if (!raw.trim()) {
                 reject(new Error('claude produced no output — the review prompt may be too long or the model may have failed silently.'));
+                return;
+            }
+            try {
+                resolve(parseReview(raw));
+            } catch (e) {
+                reject(new Error(`Failed to parse review JSON: ${e}`));
+            }
+        });
+
+        proc.on('error', (err) => {
+            if (activeProcess === proc) activeProcess = null;
+            reject(err);
+        });
+    });
+}
+
+const RESUME_NUDGE =
+    'You have gathered sufficient context. Output the review JSON now following the schema exactly — no more tool calls.';
+
+function resumeReview(options: {
+    sessionId: string;
+    model: string;
+    workingDir?: string;
+    onStatus: (status: string) => void;
+    onChunk: (kind: 'text' | 'thinking', chunk: string) => void;
+}): Promise<ReviewResult> {
+    return new Promise((resolve, reject) => {
+        const { sessionId, model, workingDir, onStatus, onChunk } = options;
+        onStatus('Resuming review session…');
+
+        const args = ['--print', '--dangerously-skip-permissions', '--verbose', '--output-format', 'stream-json', '--max-turns', '3', '--resume', sessionId];
+        if (model) { args.push('--model', model); }
+
+        const proc = spawn(findClaudeBinary(), args, {
+            cwd: workingDir || os.homedir(),
+            env: { ...process.env, HOME: process.env.HOME || os.homedir() },
+        });
+        activeProcess = proc;
+
+        const resultBuffer: string[] = [];
+        let stdoutBuf = '';
+        let errorSubtype: string | null = null;
+
+        proc.stdin.write(RESUME_NUDGE, 'utf8');
+        proc.stdin.end();
+
+        const textBuffer: string[] = [];
+
+        proc.stdout.on('data', (chunk: Buffer) => {
+            stdoutBuf += chunk.toString('utf8');
+            const lines = stdoutBuf.split('\n');
+            stdoutBuf = lines.pop() ?? '';
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const event: StreamEvent = JSON.parse(line);
+                    if (event.type === 'assistant' && event.message?.content) {
+                        for (const block of event.message.content) {
+                            switch (block.type) {
+                                case 'text':
+                                    if (block.text && block.text.trim()) {
+                                        textBuffer.push(block.text);
+                                        onChunk('text', block.text);
+                                    } else {
+                                        onStatus('Generating review…');
+                                    }
+                                    break;
+                                case 'thinking':
+                                    if (block.thinking) onChunk('thinking', block.thinking);
+                                    break;
+                                case 'tool_use': {
+                                    const status = toolUseStatus(block.name ?? '', block.input ?? {});
+                                    if (status) onStatus(status);
+                                    break;
+                                }
+                            }
+                        }
+                    } else if (event.type === 'result') {
+                        if (!event.is_error && (event.subtype == null || event.subtype === 'success')) {
+                            if (event.result && event.result.trim()) {
+                                resultBuffer.push(event.result);
+                            }
+                            onStatus('Parsing review…');
+                        } else if (event.is_error && event.subtype) {
+                            errorSubtype = event.subtype;
+                        }
+                    }
+                } catch { /* skip non-JSON lines */ }
+            }
+        });
+
+        let stderrBuf = '';
+        proc.stderr.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString('utf8'); });
+
+        proc.on('close', (code) => {
+            if (activeProcess === proc) activeProcess = null;
+            if (code !== 0 && code !== null) {
+                const msg = errorSubtype === 'error_max_turns'
+                    ? 'Review hit the turn limit even after resume — the PR may be too large.'
+                    : `claude exited ${code} during resume` + (stderrBuf.trim() ? `: ${stderrBuf.trim()}` : '');
+                reject(new Error(msg));
+                return;
+            }
+            const raw = resultBuffer.length > 0 ? resultBuffer.join('') : textBuffer.join('');
+            if (!raw.trim()) {
+                reject(new Error('claude produced no output during resume.'));
                 return;
             }
             try {
