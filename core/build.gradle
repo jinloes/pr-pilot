@@ -32,7 +32,13 @@ kotlin {
     }
 
     js(IR) {
-        nodejs()
+        nodejs {
+            testTask {
+                useMocha {
+                    timeout = '30s'
+                }
+            }
+        }
     }
 
     sourceSets {
@@ -67,9 +73,10 @@ kotlin {
 
         jvmTest {
             dependencies {
-                implementation 'org.junit.jupiter:junit-jupiter:5.10.2'
-                implementation 'org.assertj:assertj-core:3.25.3'
-                runtimeOnly 'org.junit.platform:junit-platform-launcher'
+                implementation 'io.kotest:kotest-runner-junit5:5.9.1'
+                implementation kotlin('reflect')
+                implementation 'io.mockk:mockk:1.13.12'
+                implementation "io.ktor:ktor-client-mock:$ktorVersion"
             }
         }
 
@@ -88,15 +95,10 @@ kotlin {
 tasks.named('compileJvmMainJava', JavaCompile) {
     source fileTree('src/main/java')
 }
-tasks.named('compileJvmTestJava', JavaCompile) {
-    source fileTree('src/test/java')
-}
-
-// Lombok annotation processing for jvmMain/jvmTest Java sources.
+// Lombok annotation processing for jvmMain Java sources.
 dependencies {
     add('jvmMainCompileOnly', 'org.projectlombok:lombok:1.18.32')
     add('jvmMainAnnotationProcessor', 'org.projectlombok:lombok:1.18.32')
-    add('jvmTestAnnotationProcessor', 'org.projectlombok:lombok:1.18.32')
 }
 
 // Ensure the jvmTest task uses JUnit Platform.

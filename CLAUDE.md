@@ -259,13 +259,15 @@ PR list filters (`prStateFilter`, `assignedToMeFilter`, `reviewRequestedFilter`)
 3. Write tests covering every branch: happy path, edge cases, and error paths.
 4. Run `./gradlew :core:jvmTest :intellij-plugin:unitTest` and confirm all tests pass.
 
-- Core tests live under `core/src/test/java/com/jinloes/prpilot/` mirroring the main source tree.
+- Core tests live under `core/src/jvmTest/kotlin/com/jinloes/prpilot/` mirroring the main source tree. Written in **Kotest FunSpec** (`io.kotest:kotest-runner-junit5:5.9.1` + `kotest-assertions-core:5.9.1`).
 - IntelliJ-coupled tests live under `intellij-plugin/src/test/java/com/jinloes/prpilot/`.
-- Use **JUnit 5** (`@Test`, `@Nested`, `@TempDir`) and **AssertJ** for assertions.
-- Group related tests in `@Nested` inner classes named after the method or scenario.
-- Tests must not depend on IntelliJ platform classes — pure-Java logic only.
+- Core tests use **Kotest** (`FunSpec`, `context(...)`, `test(...)`, `shouldBe`, `shouldContain`, etc.) — not JUnit 5 or AssertJ.
+- IntelliJ plugin tests use **JUnit 5** (`@Test`, `@Nested`, `@TempDir`) and **AssertJ** for assertions.
+- Group related tests in `context("MethodName") { test("...") {} }` blocks.
+- For temp directories in Kotest, use `beforeTest`/`afterTest` with `Files.createTempDirectory`.
+- Tests must not depend on IntelliJ platform classes — pure-Java/Kotlin logic only.
 - UI classes (anything extending `JPanel`, `JComponent`, etc.) are excluded from the coverage requirement.
-- File-based classes use `@TempDir` — never write to `~/.pr-pilot` in tests.
+- File-based classes use temp dirs — never write to `~/.pr-pilot` in tests.
 
 ---
 
@@ -276,7 +278,8 @@ PR list filters (`prStateFilter`, `assignedToMeFilter`, `reviewRequestedFilter`)
 ./gradlew :intellij-plugin:runIde        # launches a sandboxed IntelliJ with the plugin loaded
 ./gradlew spotlessApply                  # format all Java sources (runs automatically via Claude Code hook)
 ./gradlew spotlessCheck                  # verify formatting without modifying files
-./gradlew :core:jvmTest :intellij-plugin:unitTest   # run all tests
+./gradlew check                                      # run all tests (jvmTest + unitTest wired into check)
+./gradlew :core:jvmTest :intellij-plugin:unitTest   # run tests directly
 ./gradlew idea                           # regenerate .iml/.ipr files (run after adding new excludeDirs)
 ```
 

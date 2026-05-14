@@ -58,8 +58,14 @@ tasks.register('unitTest', Test) {
         }
 }
 
+// Wire unitTest into the standard check lifecycle so `./gradlew check` runs it.
+// The platform `test` task requires the IntelliJ sandbox and is not usable here.
+check.dependsOn unitTest
+
+// The platform `test` task requires the IntelliJ sandbox and cannot run in this project.
+// Unit tests run via `unitTest` instead.
 test {
-    useJUnitPlatform()
+    enabled = false
 }
 
 // ── Webview build ──────────────────────────────────────────────────────────

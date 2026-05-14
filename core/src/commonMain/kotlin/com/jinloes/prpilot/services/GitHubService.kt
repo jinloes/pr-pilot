@@ -43,7 +43,10 @@ private val JSON = Json {
  * [HTTP_CLIENT] is a companion singleton; a new [GitHubService] instance is cheap because it
  * only carries [apiBase].
  */
-class GitHubService(private val apiBase: String) {
+class GitHubService(
+    private val apiBase: String,
+    private val httpClient: HttpClient = HTTP_CLIENT,
+) {
 
     companion object {
         private const val MAX_DIFF_BYTES = 80_000
@@ -269,7 +272,7 @@ class GitHubService(private val apiBase: String) {
     // --- HTTP helpers ---
 
     private suspend fun get(token: String, url: String, accept: String): String {
-        val response = HTTP_CLIENT.get(url) {
+        val response = httpClient.get(url) {
             header("Authorization", "Bearer $token")
             header("Accept", accept)
             header("X-GitHub-Api-Version", "2022-11-28")
@@ -283,7 +286,7 @@ class GitHubService(private val apiBase: String) {
     }
 
     private suspend fun post(token: String, url: String, jsonBody: String): String {
-        val response = HTTP_CLIENT.post(url) {
+        val response = httpClient.post(url) {
             header("Authorization", "Bearer $token")
             header("Accept", "application/vnd.github.v3+json")
             header("X-GitHub-Api-Version", "2022-11-28")
@@ -299,7 +302,7 @@ class GitHubService(private val apiBase: String) {
     }
 
     private suspend fun httpDelete(token: String, url: String) {
-        val response = HTTP_CLIENT.delete(url) {
+        val response = httpClient.delete(url) {
             header("Authorization", "Bearer $token")
             header("Accept", "application/vnd.github.v3+json")
             header("X-GitHub-Api-Version", "2022-11-28")
