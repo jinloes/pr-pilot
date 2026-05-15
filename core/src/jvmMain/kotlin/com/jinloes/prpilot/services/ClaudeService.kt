@@ -194,7 +194,7 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
                 if (rawLinesSample.size < 20) rawLinesSample.add(line.take(200))
                 try {
                     val event = JSON.decodeFromString<StreamEvent>(line)
-                    val eventType = StringUtils.defaultString(event.type(), "unknown")
+                    val eventType = StringUtils.defaultString(event.type, "unknown")
                     eventTypeSeen.add(eventType)
                     handleStreamEvent(event, { onStatus(it) }, onChunk, resultBuffer, textBuffer)
                 } catch (e: Exception) {
@@ -254,8 +254,8 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
                     if (line.isBlank()) continue
                     try {
                         val event = JSON.decodeFromString<StreamEvent>(line)
-                        if (event.isError()) {
-                            return ErrorInfo(event.subtype(), event.sessionId())
+                        if (event.isError) {
+                            return ErrorInfo(event.subtype, event.sessionId)
                         }
                     } catch (_: Exception) {
                         // Skip corrupt lines.
@@ -275,16 +275,14 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
         resultBuffer: StringBuilder,
         textBuffer: StringBuilder,
     ) {
-        when (StringUtils.defaultString(event.type())) {
+        when (StringUtils.defaultString(event.type)) {
             "assistant" ->
-                event.message().ifPresent { message ->
-                    message.content().orElse(listOf()).forEach { block ->
-                        handleContentBlock(block, onStatus, onChunk, textBuffer)
-                    }
+                event.message?.content?.forEach { block ->
+                    handleContentBlock(block, onStatus, onChunk, textBuffer)
                 }
             "result" -> {
-                if (!event.isError() && (event.subtype() == null || event.subtype() == "success")) {
-                    event.result().ifPresent { result ->
+                if (!event.isError && (event.subtype == null || event.subtype == "success")) {
+                    event.result?.let { result ->
                         if (result.isNotBlank()) {
                             resultBuffer.append(result)
                         }
@@ -302,14 +300,14 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
         onChunk: BiConsumer<String, String>?,
         textBuffer: StringBuilder? = null,
     ) {
-        log.debug("stream content block: type={}", block.type())
-        when (StringUtils.defaultString(block.type())) {
+        log.debug("stream content block: type={}", block.type)
+        when (StringUtils.defaultString(block.type)) {
             "tool_use" -> {
-                val status = toolUseStatus(block.name().orElse(""), block.input().orElse(mapOf()))
+                val status = toolUseStatus(block.name ?: "", block.input ?: mapOf())
                 if (status != null) onStatus.accept(status)
             }
             "text" -> {
-                val text = block.text().orElse("")
+                val text = block.text ?: ""
                 if (StringUtils.isNotBlank(text)) textBuffer?.append(text)
                 if (onChunk != null && StringUtils.isNotBlank(text)) {
                     onChunk.accept("text", text)
@@ -318,7 +316,7 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
                 }
             }
             "thinking" -> {
-                val thinking = block.thinking().orElse("")
+                val thinking = block.thinking ?: ""
                 if (onChunk != null && StringUtils.isNotBlank(thinking)) {
                     onChunk.accept("thinking", thinking)
                 }

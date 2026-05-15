@@ -21,10 +21,16 @@ internal object AnySerializer : KSerializer<Any> {
     override val descriptor: SerialDescriptor = buildClassSerialDescriptor("Any")
 
     override fun serialize(encoder: Encoder, value: Any) {
-        (encoder as JsonEncoder).encodeJsonElement(toElement(value))
+        val jsonEncoder = encoder as? JsonEncoder
+            ?: error("AnySerializer requires a JSON encoder")
+        jsonEncoder.encodeJsonElement(toElement(value))
     }
 
-    override fun deserialize(decoder: Decoder): Any = fromElement((decoder as JsonDecoder).decodeJsonElement())
+    override fun deserialize(decoder: Decoder): Any {
+        val jsonDecoder = decoder as? JsonDecoder
+            ?: error("AnySerializer requires a JSON decoder")
+        return fromElement(jsonDecoder.decodeJsonElement())
+    }
 
     private fun toElement(value: Any): JsonElement = when (value) {
         is Boolean -> JsonPrimitive(value)
@@ -34,12 +40,16 @@ internal object AnySerializer : KSerializer<Any> {
 
     internal fun fromElement(element: JsonElement): Any = when (element) {
         is JsonNull -> "null"
-        is JsonPrimitive -> when {
-            element.isString -> element.content
-            element.booleanOrNull != null -> element.boolean
-            element.longOrNull != null -> element.longOrNull!!
-            element.doubleOrNull != null -> element.doubleOrNull!!
-            else -> element.content
+        is JsonPrimitive -> {
+            val long = element.longOrNull
+            val double = element.doubleOrNull
+            when {
+                element.isString -> element.content
+                element.booleanOrNull != null -> element.boolean
+                long != null -> long
+                double != null -> double
+                else -> element.content
+            }
         }
         is JsonObject -> element.entries.associate { (k, v) -> k to fromElement(v) }
         else -> element.toString()

@@ -4,8 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.nulls.shouldBeNull
-import io.kotest.matchers.optional.shouldBeEmpty
-import io.kotest.matchers.optional.shouldBePresent
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -18,59 +17,53 @@ class StreamDtoTest : FunSpec({
 
     context("StreamEvent") {
 
-        test("type() returns set value") {
-            val event = StreamEvent().also { it.type = "assistant" }
-            event.type() shouldBe "assistant"
+        test("type returns set value") {
+            StreamEvent(type = "assistant").type shouldBe "assistant"
         }
 
-        test("type() returns null when not set") {
-            StreamEvent().type().shouldBeNull()
+        test("type returns null when not set") {
+            StreamEvent().type.shouldBeNull()
         }
 
-        test("subtype() returns set value") {
-            val event = StreamEvent().also { it.subtype = "success" }
-            event.subtype() shouldBe "success"
+        test("subtype returns set value") {
+            StreamEvent(subtype = "success").subtype shouldBe "success"
         }
 
-        test("subtype() returns null when not set") {
-            StreamEvent().subtype().shouldBeNull()
+        test("subtype returns null when not set") {
+            StreamEvent().subtype.shouldBeNull()
         }
 
-        test("isError() defaults to false") {
-            StreamEvent().isError().shouldBeFalse()
+        test("isError defaults to false") {
+            StreamEvent().isError.shouldBeFalse()
         }
 
-        test("isError() returns true when set") {
-            val event = StreamEvent().also { it.isError = true }
-            event.isError().shouldBeTrue()
+        test("isError returns true when set") {
+            StreamEvent(isError = true).isError.shouldBeTrue()
         }
 
-        test("message() is present when set") {
+        test("message is non-null when set") {
             val msg = EventMessage()
-            val event = StreamEvent().also { it.message = msg }
-            event.message().shouldBePresent { it shouldBe msg }
+            StreamEvent(message = msg).message.shouldNotBeNull()
         }
 
-        test("message() is empty when null") {
-            StreamEvent().message().shouldBeEmpty()
+        test("message is null when not set") {
+            StreamEvent().message.shouldBeNull()
         }
 
-        test("result() is present when set") {
-            val event = StreamEvent().also { it.result = "the result" }
-            event.result().shouldBePresent { it shouldBe "the result" }
+        test("result is non-null when set") {
+            StreamEvent(result = "the result").result shouldBe "the result"
         }
 
-        test("result() is empty when null") {
-            StreamEvent().result().shouldBeEmpty()
+        test("result is null when not set") {
+            StreamEvent().result.shouldBeNull()
         }
 
-        test("sessionId() returns value when set") {
-            val event = StreamEvent().also { it.sessionId = "abc-123" }
-            event.sessionId() shouldBe "abc-123"
+        test("sessionId returns value when set") {
+            StreamEvent(sessionId = "abc-123").sessionId shouldBe "abc-123"
         }
 
-        test("sessionId() returns null when not set") {
-            StreamEvent().sessionId().shouldBeNull()
+        test("sessionId returns null when not set") {
+            StreamEvent().sessionId.shouldBeNull()
         }
     }
 
@@ -78,14 +71,13 @@ class StreamDtoTest : FunSpec({
 
     context("EventMessage") {
 
-        test("content() is present when set") {
+        test("content is non-null when set") {
             val block = ContentBlock()
-            val msg = EventMessage().also { it.content = listOf(block) }
-            msg.content().shouldBePresent { it shouldBe listOf(block) }
+            EventMessage(content = listOf(block)).content shouldBe listOf(block)
         }
 
-        test("content() is empty when null") {
-            EventMessage().content().shouldBeEmpty()
+        test("content is null when not set") {
+            EventMessage().content.shouldBeNull()
         }
     }
 
@@ -93,50 +85,45 @@ class StreamDtoTest : FunSpec({
 
     context("ContentBlock") {
 
-        test("type() returns set value") {
-            val block = ContentBlock().also { it.type = "tool_use" }
-            block.type() shouldBe "tool_use"
+        test("type returns set value") {
+            ContentBlock(type = "tool_use").type shouldBe "tool_use"
         }
 
-        test("type() returns null when not set") {
-            ContentBlock().type().shouldBeNull()
+        test("type returns null when not set") {
+            ContentBlock().type.shouldBeNull()
         }
 
-        test("name() is present when set") {
-            val block = ContentBlock().also { it.name = "mcp__github__get_file" }
-            block.name().shouldBePresent { it shouldBe "mcp__github__get_file" }
+        test("name is non-null when set") {
+            ContentBlock(name = "mcp__github__get_file").name shouldBe "mcp__github__get_file"
         }
 
-        test("name() is empty when null") {
-            ContentBlock().name().shouldBeEmpty()
+        test("name is null when not set") {
+            ContentBlock().name.shouldBeNull()
         }
 
-        test("input() is present when set") {
+        test("input is non-null when set") {
             val input = mapOf("owner" to "alice" as Any)
-            val block = ContentBlock().also { it.input = input }
-            block.input().shouldBePresent { it shouldBe input }
+            ContentBlock(input = input).input shouldBe input
         }
 
-        test("input() is empty when null") {
-            ContentBlock().input().shouldBeEmpty()
+        test("input is null when not set") {
+            ContentBlock().input.shouldBeNull()
         }
 
-        test("text() is present when set") {
-            val block = ContentBlock().also { it.text = "hello" }
-            block.text().shouldBePresent { it shouldBe "hello" }
+        test("text is non-null when set") {
+            ContentBlock(text = "hello").text shouldBe "hello"
         }
 
-        test("text() is empty when null") {
-            ContentBlock().text().shouldBeEmpty()
+        test("text is null when not set") {
+            ContentBlock().text.shouldBeNull()
         }
 
-        test("thinking() is present when set") {
-            val block = ContentBlock().also { it.thinking = "deep thought" }
-            block.thinking().shouldBePresent { it shouldBe "deep thought" }
+        test("thinking is non-null when set") {
+            ContentBlock(thinking = "deep thought").thinking shouldBe "deep thought"
         }
 
-        test("thinking() is empty when null") {
-            ContentBlock().thinking().shouldBeEmpty()
+        test("thinking is null when not set") {
+            ContentBlock().thinking.shouldBeNull()
         }
     }
 

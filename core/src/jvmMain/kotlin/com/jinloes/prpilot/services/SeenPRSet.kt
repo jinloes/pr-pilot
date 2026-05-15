@@ -35,11 +35,9 @@ class SeenPRSet(private val file: Path) {
     }
 
     // LinkedHashSet preserves insertion order so trim() drops the oldest entries.
-    @Volatile
     private var seen: LinkedHashSet<String>
 
     /** True once the initial seed poll has been persisted (first run should not notify). */
-    @Volatile
     private var seeded: Boolean
 
     init {
@@ -62,14 +60,18 @@ class SeenPRSet(private val file: Path) {
         return Pair(LinkedHashSet(), false)
     }
 
+    @Synchronized
     fun isSeeded(): Boolean = seeded
 
+    @Synchronized
     fun contains(pr: PullRequest): Boolean = seen.contains(key(pr))
 
+    @Synchronized
     fun add(pr: PullRequest) {
         seen.add(key(pr))
     }
 
+    @Synchronized
     fun markSeeded() {
         seeded = true
     }
@@ -78,6 +80,7 @@ class SeenPRSet(private val file: Path) {
      * Removes entries for PRs that are no longer in [livePrs]. Call after each poll to drop
      * closed/merged PRs and PRs where the review request was fulfilled.
      */
+    @Synchronized
     fun retain(livePrs: Collection<PullRequest>) {
         val liveKeys = livePrs.mapTo(HashSet()) { key(it) }
         seen.retainAll(liveKeys)
@@ -87,6 +90,7 @@ class SeenPRSet(private val file: Path) {
      * Drops the oldest entries if the set exceeds [maxSize]. The oldest entries are the ones
      * added first (LinkedHashSet insertion order).
      */
+    @Synchronized
     @JvmOverloads
     fun trim(maxSize: Int = MAX_SIZE) {
         val excess = seen.size - maxSize
@@ -95,6 +99,7 @@ class SeenPRSet(private val file: Path) {
         repeat(excess) { if (iter.hasNext()) { iter.next(); iter.remove() } }
     }
 
+    @Synchronized
     fun save() {
         try {
             Files.createDirectories(file.parent)

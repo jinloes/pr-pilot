@@ -31,8 +31,8 @@ class GitHubAuthService {
     fun resolveToken(githubBaseUrl: String?): String {
         val cmd = mutableListOf("gh", "auth", "token")
         if (githubBaseUrl != null && githubBaseUrl != "https://github.com") {
-            val hostname = URI.create(githubBaseUrl).host
-            if (!hostname.isNullOrBlank()) {
+            val hostname = URI.create(githubBaseUrl).host ?: ""
+            if (hostname.isNotBlank()) {
                 cmd.addAll(listOf("--hostname", hostname))
             }
         }

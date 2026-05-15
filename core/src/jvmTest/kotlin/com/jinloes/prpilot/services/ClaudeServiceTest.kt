@@ -19,9 +19,9 @@ import io.kotest.matchers.string.shouldStartWith
 private fun pr(body: String = "") =
     PullRequest("My PR", "", "owner", "repo", 42, body, "author", "2024-01-01")
 
-private fun textBlock(text: String) = ContentBlock().also { it.type = "text"; it.text = text }
-private fun thinkingBlock(thinking: String) = ContentBlock().also { it.type = "thinking"; it.thinking = thinking }
-private fun toolUseBlock(name: String) = ContentBlock().also { it.type = "tool_use"; it.name = name; it.input = emptyMap() }
+private fun textBlock(text: String) = ContentBlock(type = "text", text = text)
+private fun thinkingBlock(thinking: String) = ContentBlock(type = "thinking", thinking = thinking)
+private fun toolUseBlock(name: String) = ContentBlock(type = "tool_use", name = name, input = emptyMap())
 
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -280,7 +280,7 @@ class ClaudeServiceTest : FunSpec({
 
         test("unknown block type — no exception and no callback") {
             val statuses = mutableListOf<String>()
-            val block = ContentBlock().also { it.type = "unknown_future_type" }
+            val block = ContentBlock(type = "unknown_future_type")
             service.handleContentBlock(block, { statuses.add(it) }, null)
             statuses.shouldBeEmpty()
         }

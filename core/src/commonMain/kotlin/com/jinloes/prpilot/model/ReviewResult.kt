@@ -32,9 +32,7 @@ class ReviewResult() {
     fun getVerdict(): String = _verdict ?: "COMMENT"
     fun setVerdict(value: String) { _verdict = value }
 
-    fun getLineComments(): MutableList<LineComment> {
-        if (_lineComments == null) _lineComments = mutableListOf()
-        return _lineComments!!
-    }
-    fun setLineComments(value: MutableList<LineComment>) { _lineComments = value }
+    fun getLineComments(): MutableList<LineComment> =
+        _lineComments ?: mutableListOf<LineComment>().also { _lineComments = it }
+    fun setLineComments(value: List<LineComment>) { _lineComments = value.toMutableList() }
 }

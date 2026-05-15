@@ -8,7 +8,9 @@ object DiffParser {
      * `+++ b/<path>` header may refine the name after the `diff --git` header is processed.
      */
     class DiffFile(var name: String) {
-        val lines: MutableList<DiffLine> = mutableListOf()
+        private val _lines: MutableList<DiffLine> = mutableListOf()
+        val lines: List<DiffLine> get() = _lines
+        internal fun addLine(line: DiffLine) { _lines.add(line) }
     }
 
     data class DiffLine(val newLineNum: Int, val type: Char, val content: String, val hunkStart: Boolean)
@@ -59,9 +61,9 @@ object DiffParser {
                     val isHunkStart = nextIsHunkStart
                     nextIsHunkStart = false
                     when (first) {
-                        '+' -> current.lines.add(DiffLine(++newLineNum, '+', content, isHunkStart))
-                        '-' -> current.lines.add(DiffLine(-1, '-', content, isHunkStart))
-                        else -> current.lines.add(DiffLine(++newLineNum, ' ', content, isHunkStart))
+                        '+' -> current.addLine(DiffLine(++newLineNum, '+', content, isHunkStart))
+                        '-' -> current.addLine(DiffLine(-1, '-', content, isHunkStart))
+                        else -> current.addLine(DiffLine(++newLineNum, ' ', content, isHunkStart))
                     }
                 }
             }
@@ -74,12 +76,7 @@ object DiffParser {
      * [40, 120].
      */
     fun computeMaxColumns(files: List<DiffFile>): Int {
-        var max = 40
-        for (f in files) {
-            for (l in f.lines) {
-                if (l.content.length > max) max = l.content.length
-            }
-        }
-        return minOf(max, 120)
+        val max = files.flatMap { it.lines }.maxOfOrNull { it.content.length } ?: 0
+        return max.coerceIn(40, 120)
     }
 }

@@ -59,8 +59,7 @@ class PendingReviewIndex(private val indexFile: Path) {
         private val SAVED_AT_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
     }
 
-    @Synchronized
-    fun list(): MutableList<Entry> {
+    private fun loadEntries(): MutableList<Entry> {
         if (!Files.exists(indexFile)) return mutableListOf()
         return try {
             val json = Files.readString(indexFile, StandardCharsets.UTF_8)
@@ -71,8 +70,11 @@ class PendingReviewIndex(private val indexFile: Path) {
     }
 
     @Synchronized
+    fun list(): List<Entry> = loadEntries()
+
+    @Synchronized
     fun add(owner: String, repo: String, number: Int, title: String, headSha: String?) {
-        val entries = list()
+        val entries = loadEntries()
         entries.removeIf { e -> e.owner == owner && e.repo == repo && e.number == number }
         entries.add(
             0,
@@ -90,12 +92,12 @@ class PendingReviewIndex(private val indexFile: Path) {
 
     @Synchronized
     fun hasDraft(owner: String, repo: String, number: Int): Boolean {
-        return list().any { e -> e.owner == owner && e.repo == repo && e.number == number }
+        return loadEntries().any { e -> e.owner == owner && e.repo == repo && e.number == number }
     }
 
     @Synchronized
     fun remove(owner: String, repo: String, number: Int) {
-        val entries = list()
+        val entries = loadEntries()
         entries.removeIf { e -> e.owner == owner && e.repo == repo && e.number == number }
         save(entries)
     }

@@ -173,19 +173,19 @@ class DiffParserTest : FunSpec({
 
         test("short lines return minimum of 40") {
             val file = DiffParser.DiffFile("f.java")
-            file.lines.add(DiffParser.DiffLine(1, '+', "short", false))
+            file.addLine(DiffParser.DiffLine(1, '+', "short", false))
             DiffParser.computeMaxColumns(listOf(file)) shouldBe 40
         }
 
         test("lines of length 80 return 80") {
             val file = DiffParser.DiffFile("f.java")
-            file.lines.add(DiffParser.DiffLine(1, '+', "x".repeat(80), false))
+            file.addLine(DiffParser.DiffLine(1, '+', "x".repeat(80), false))
             DiffParser.computeMaxColumns(listOf(file)) shouldBe 80
         }
 
         test("lines longer than 120 are capped at 120") {
             val file = DiffParser.DiffFile("f.java")
-            file.lines.add(DiffParser.DiffLine(1, '+', "x".repeat(200), false))
+            file.addLine(DiffParser.DiffLine(1, '+', "x".repeat(200), false))
             DiffParser.computeMaxColumns(listOf(file)) shouldBe 120
         }
 
@@ -195,9 +195,9 @@ class DiffParserTest : FunSpec({
 
         test("multiple files — uses maximum across all") {
             val f1 = DiffParser.DiffFile("a.java")
-            f1.lines.add(DiffParser.DiffLine(1, '+', "x".repeat(60), false))
+            f1.addLine(DiffParser.DiffLine(1, '+', "x".repeat(60), false))
             val f2 = DiffParser.DiffFile("b.java")
-            f2.lines.add(DiffParser.DiffLine(1, '+', "x".repeat(90), false))
+            f2.addLine(DiffParser.DiffLine(1, '+', "x".repeat(90), false))
             DiffParser.computeMaxColumns(listOf(f1, f2)) shouldBe 90
         }
     }
