@@ -363,6 +363,17 @@ function buildCommentArray(review: ReviewResult): object[] {
     return result;
 }
 
+function buildDroppedSection(dropped: Array<Record<string, unknown>>): string {
+    let s = '**Comments not attached inline (invalid diff positions):**\n';
+    for (const c of dropped) {
+        const path = typeof c['path'] === 'string' ? c['path'] : '';
+        const line = typeof c['line'] === 'number' ? c['line'] : 0;
+        const body = typeof c['body'] === 'string' ? c['body'] : '';
+        s += `- \`${path}${line > 0 ? `:${line}` : ''}\`: ${body}\n`;
+    }
+    return s.trimEnd();
+}
+
 // Removed: tryCommentsIndividually — the probe-review approach created orphaned pending reviews
 // that showed up as duplicate comments in the PR diff view. See saveDraftReview fallback instead.
 
@@ -418,9 +429,17 @@ export async function saveDraftReview(
             const bodyResp = await ghRequest(token, url, { method: 'POST', body: JSON.stringify({ ...payload, comments: [] }) });
             const reviewId = (JSON.parse(bodyResp) as { id?: number })?.id?.toString() ?? '';
             const commentsUrl = `${url}/${reviewId}/comments`;
+            const droppedComments: Array<Record<string, unknown>> = [];
             for (const c of comments) {
                 try {
                     await ghRequest(token, commentsUrl, { method: 'POST', body: JSON.stringify(c) });
+                } catch { droppedComments.push(c as Record<string, unknown>); }
+            }
+            if (droppedComments.length > 0) {
+                const section = buildDroppedSection(droppedComments);
+                const updatedBody = `${encodeBody(review)}\n\n${section}`;
+                try {
+                    await ghRequest(token, `${url}/${reviewId}`, { method: 'PUT', body: JSON.stringify({ body: updatedBody }) });
                 } catch { commentsDropped = true; }
             }
             return { reviewId, commentsDropped };

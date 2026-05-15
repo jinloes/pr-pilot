@@ -104,7 +104,16 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
             val exitCode = process.exitValue()
             val stderr = stderrFuture.join()
             if (exitCode != 0) {
-                val msg = "claude exited $exitCode" + if (stderr.isBlank()) "" else ": ${stderr.trim()}"
+                val errorInfo = findErrorInfo(stdoutFile)
+                if (errorInfo.subtype == "error_max_turns" && errorInfo.sessionId != null) {
+                    onStatus.accept("Resuming review session…")
+                    return runResume(errorInfo.sessionId, model, onStatus, onChunk)
+                }
+                val msg = when {
+                    errorInfo.subtype == "error_max_turns" ->
+                        "Review hit the turn limit — the PR may be too large. Try again."
+                    else -> "claude exited $exitCode" + if (stderr.isBlank()) "" else ": ${stderr.trim()}"
+                }
                 throw IOException(msg)
             }
 
@@ -115,6 +124,51 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
             process?.destroy()
             // stdoutFile is kept on failure so the path in the error message can be inspected.
             // The OS /tmp cleaner handles eventual removal.
+        }
+    }
+
+    private fun runResume(
+        sessionId: String,
+        model: String,
+        onStatus: Consumer<String>,
+        onChunk: BiConsumer<String, String>?,
+    ): ReviewResult {
+        var process: Process? = null
+        val stdoutFile = File(System.getProperty("java.io.tmpdir"), "claude-resume-stdout-${System.currentTimeMillis()}.ndjson")
+        try {
+            val args = mutableListOf("--verbose", "--output-format", "stream-json", "--resume", sessionId)
+            if (model.isNotBlank()) {
+                args.add("--model")
+                args.add(model)
+            }
+            process = buildProcess(stdoutFile, RESUME_MAX_TURNS, *args.toTypedArray())
+            activeProcess.set(process)
+
+            val stderrFuture = drainStderr(process)
+            val stdinFuture = CompletableFuture.runAsync { writeStdin(process, RESUME_NUDGE) }
+
+            val finished = process.waitFor(10, TimeUnit.MINUTES)
+            stdinFuture.join()
+            if (!finished) {
+                process.destroyForcibly()
+                throw IOException("Resume timed out — claude did not finish within 10 minutes.")
+            }
+            val exitCode = process.exitValue()
+            val stderr = stderrFuture.join()
+            if (exitCode != 0) {
+                val errorInfo = findErrorInfo(stdoutFile)
+                val msg = when {
+                    errorInfo.subtype == "error_max_turns" ->
+                        "Review hit the turn limit even after resume — the PR may be too large."
+                    else -> "claude exited $exitCode during resume" + if (stderr.isBlank()) "" else ": ${stderr.trim()}"
+                }
+                throw IOException(msg)
+            }
+
+            return parseStdoutFileToResult(stdoutFile, stderr, { onStatus.accept(it) }, onChunk)
+        } finally {
+            activeProcess.set(null)
+            process?.destroy()
         }
     }
 
@@ -386,6 +440,9 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
         private const val STATUS_PARSING = "Parsing review…"
 
         internal const val DEFAULT_MAX_TURNS = 15
+        internal const val RESUME_MAX_TURNS = 3
+        private const val RESUME_NUDGE =
+            "You have gathered sufficient context. Output the review JSON now following the schema exactly — no more tool calls."
 
         private const val CLAUDE_DIR_UNIX = "/.claude/"
         private const val CLAUDE_DIR_WIN = "\\.claude\\"

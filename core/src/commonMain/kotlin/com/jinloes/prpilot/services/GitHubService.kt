@@ -10,6 +10,7 @@ import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -207,6 +208,19 @@ class GitHubService(
 
         private fun truncate(s: String, max: Int): String =
             if (s.length > max) s.substring(0, max) + "..." else s
+
+        fun buildDroppedSection(dropped: List<JsonObject>): String {
+            val sb = StringBuilder("**Comments not attached inline (invalid diff positions):**\n")
+            for (c in dropped) {
+                val path = c["path"]?.jsonPrimitive?.content ?: ""
+                val line = c["line"]?.jsonPrimitive?.intOrNull ?: 0
+                val body = c["body"]?.jsonPrimitive?.content ?: ""
+                sb.append("- `").append(path)
+                if (line > 0) sb.append(":").append(line)
+                sb.append("`: ").append(body).append("\n")
+            }
+            return sb.toString().trimEnd()
+        }
     }
 
     // Internal data classes for GitHub API responses (kotlinx.serialization)
@@ -298,6 +312,22 @@ class GitHubService(
         if (!response.status.isSuccess()) {
             val body = response.bodyAsText()
             throw Exception("GitHub API POST ${response.status.value}: ${truncate(body, 300)}")
+        }
+        return response.bodyAsText()
+    }
+
+    private suspend fun httpPut(token: String, url: String, jsonBody: String): String {
+        val response = httpClient.put(url) {
+            header("Authorization", "Bearer $token")
+            header("Accept", "application/vnd.github.v3+json")
+            header("X-GitHub-Api-Version", "2022-11-28")
+            header("User-Agent", "intellij-claude-reviews/1.0")
+            contentType(ContentType.Application.Json)
+            setBody(jsonBody)
+        }
+        if (!response.status.isSuccess()) {
+            val body = response.bodyAsText()
+            throw Exception("GitHub API PUT ${response.status.value}: ${truncate(body, 300)}")
         }
         return response.bodyAsText()
     }
@@ -435,9 +465,18 @@ class GitHubService(
                 val resp = post(token, url, bodyPayload.toString())
                 val reviewId = JSON.parseToJsonElement(resp).jsonObject["id"]?.jsonPrimitive?.content ?: ""
                 val commentsUrl = "$url/$reviewId/comments"
+                val droppedComments = mutableListOf<JsonObject>()
                 for (i in 0 until comments.size) {
                     try {
                         post(token, commentsUrl, comments[i].toString())
+                    } catch (_: Exception) {
+                        droppedComments.add(comments[i].jsonObject)
+                    }
+                }
+                if (droppedComments.isNotEmpty()) {
+                    val updatedBody = encodeBody(review) + "\n\n" + buildDroppedSection(droppedComments)
+                    try {
+                        httpPut(token, "$url/$reviewId", buildJsonObject { put("body", updatedBody) }.toString())
                     } catch (_: Exception) {
                         commentsDropped = true
                     }

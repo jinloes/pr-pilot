@@ -1,10 +1,35 @@
 package com.jinloes.prpilot.services
 
+import com.jinloes.prpilot.model.PRReviewRequest
+import com.jinloes.prpilot.model.PullRequest
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import java.io.File
 import java.io.IOException
+import java.util.function.Consumer
+
+private fun fakePr() = PullRequest(
+    title = "T", htmlUrl = "https://github.com/o/r/pull/1",
+    owner = "o", repo = "r", number = 1, body = "", author = "a", createdAt = "2024-01-01",
+)
+
+private fun fakeRequest() = PRReviewRequest(pr = fakePr(), diff = "", knownPatterns = "")
+
+/** ClaudeService subclass that returns pre-canned processes instead of spawning real ones. */
+private class FakeClaudeService(
+    private val processSteps: List<Pair<String, Int>>,
+) : ClaudeService() {
+    private var callIndex = 0
+
+    override fun buildProcess(stdoutFile: File?, maxTurns: Int, vararg extraArgs: String): Process {
+        val (ndjson, exitCode) = processSteps[callIndex++]
+        stdoutFile?.writeText(ndjson)
+        return ProcessBuilder("sh", "-c", "cat > /dev/null; exit $exitCode").start()
+    }
+}
 
 class ClaudeServiceKotestTest : FunSpec({
 
@@ -152,6 +177,50 @@ class ClaudeServiceKotestTest : FunSpec({
             } finally {
                 file.delete()
             }
+        }
+    }
+
+    context("reviewPR — resume on error_max_turns") {
+        val successNdjson = run {
+            val json = """{"summary":"s","verdict":"APPROVE","lineComments":[]}"""
+            val escaped = json.replace("\"", "\\\"")
+            """{"type":"result","subtype":"success","is_error":false,"result":"$escaped"}""" + "\n"
+        }
+
+        test("exits 1 with error_max_turns and sessionId — resumes and returns result") {
+            val errorNdjson = """{"type":"result","subtype":"error_max_turns","is_error":true,"session_id":"sess-abc"}""" + "\n"
+            val svc = FakeClaudeService(listOf(errorNdjson to 1, successNdjson to 0))
+            val statuses = mutableListOf<String>()
+            val result = svc.reviewPR(fakeRequest(), "", Consumer { statuses.add(it) })
+            result.getVerdict() shouldBe "APPROVE"
+            statuses shouldContain "Resuming review session…"
+        }
+
+        test("exits 1 with error_max_turns but no sessionId — throws turn-limit message") {
+            val errorNdjson = """{"type":"result","subtype":"error_max_turns","is_error":true}""" + "\n"
+            val svc = FakeClaudeService(listOf(errorNdjson to 1))
+            val ex = shouldThrow<IOException> {
+                svc.reviewPR(fakeRequest(), "", Consumer {})
+            }
+            (ex.message?.contains("turn limit") ?: false) shouldBe true
+        }
+
+        test("exits 1 with no error event in stdout — throws generic claude exited message") {
+            val svc = FakeClaudeService(listOf("\n" to 1))
+            val ex = shouldThrow<IOException> {
+                svc.reviewPR(fakeRequest(), "", Consumer {})
+            }
+            (ex.message?.contains("claude exited 1") ?: false) shouldBe true
+        }
+
+        test("resume fails with error_max_turns — throws resume turn-limit message") {
+            val errorNdjson = """{"type":"result","subtype":"error_max_turns","is_error":true,"session_id":"s1"}""" + "\n"
+            val resumeErrorNdjson = """{"type":"result","subtype":"error_max_turns","is_error":true}""" + "\n"
+            val svc = FakeClaudeService(listOf(errorNdjson to 1, resumeErrorNdjson to 1))
+            val ex = shouldThrow<IOException> {
+                svc.reviewPR(fakeRequest(), "", Consumer {})
+            }
+            (ex.message?.contains("even after resume") ?: false) shouldBe true
         }
     }
 })

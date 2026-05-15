@@ -1,5 +1,6 @@
 package com.jinloes.prpilot.services
 
+import com.jinloes.prpilot.model.LineComment
 import com.jinloes.prpilot.model.ReviewResult
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeFalse
@@ -19,8 +20,24 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 private val MOCK_JSON = Json { ignoreUnknownKeys = true }
+
+private fun mockServiceWithResponseSequence(vararg pairs: Pair<HttpStatusCode, String>): GitHubService {
+    var idx = 0
+    val engine = MockEngine { _ ->
+        val (status, body) = if (idx < pairs.size) pairs[idx++] else HttpStatusCode.OK to "{}"
+        respond(
+            content = body,
+            status = status,
+            headers = headersOf("Content-Type", ContentType.Application.Json.toString()),
+        )
+    }
+    val client = HttpClient(engine) { install(ContentNegotiation) { json(MOCK_JSON) } }
+    return GitHubService("https://api.github.com", client)
+}
 
 private fun mockServiceResponses(vararg bodies: String): GitHubService {
     var idx = 0
@@ -251,6 +268,73 @@ class GitHubServiceNetworkTest : FunSpec({
             summary shouldContain "src/Foo.java"
             summary shouldContain "42"
             summary shouldContain "fix this"
+        }
+    }
+
+    context("buildDroppedSection") {
+
+        test("formats a single dropped comment with file and line") {
+            val obj = JsonObject(mapOf(
+                "path" to JsonPrimitive("src/Foo.java"),
+                "line" to JsonPrimitive(42),
+                "body" to JsonPrimitive("null check needed"),
+            ))
+            val section = GitHubService.buildDroppedSection(listOf(obj))
+            section shouldContain "Comments not attached inline"
+            section shouldContain "src/Foo.java:42"
+            section shouldContain "null check needed"
+        }
+
+        test("omits line number when line is zero") {
+            val obj = JsonObject(mapOf(
+                "path" to JsonPrimitive("README.md"),
+                "line" to JsonPrimitive(0),
+                "body" to JsonPrimitive("note"),
+            ))
+            val section = GitHubService.buildDroppedSection(listOf(obj))
+            section shouldContain "`README.md`"
+            (section.contains(":0")) shouldBe false
+        }
+    }
+
+    context("saveDraftReview — 422 fallback with dropped comments") {
+        // Call sequence when initial POST 422s and a comment also fails individually:
+        // 1. GET reviews → []
+        // 2. GET pull/1 → head sha
+        // 3. POST reviews (with comments) → 422
+        // 4. POST reviews (body-only) → {"id":99}
+        // 5. POST /99/comments (first comment) → 422
+        // 6. PUT /99 (update body with dropped section) → {}
+
+        test("dropped comment recovered via PUT — commentsDropped is false") {
+            val review = ReviewResult("s", "COMMENT",
+                listOf(LineComment("src/Foo.java", 10, "note", "bad line")))
+            val svc = mockServiceWithResponseSequence(
+                HttpStatusCode.OK to "[]",
+                HttpStatusCode.OK to """{"merged":false,"head":{"sha":"sha1"}}""",
+                HttpStatusCode.UnprocessableEntity to """{"message":"Validation Failed"}""",
+                HttpStatusCode.OK to """{"id":99}""",
+                HttpStatusCode.UnprocessableEntity to """{"message":"Validation Failed"}""",
+                HttpStatusCode.OK to """{}"""
+            )
+            val result = svc.saveDraftReview("token", "owner", "repo", 1, review)
+            result.reviewId shouldBe "99"
+            result.commentsDropped.shouldBeFalse()
+        }
+
+        test("PUT body update fails — commentsDropped remains true") {
+            val review = ReviewResult("s", "COMMENT",
+                listOf(LineComment("src/Foo.java", 10, "note", "bad line")))
+            val svc = mockServiceWithResponseSequence(
+                HttpStatusCode.OK to "[]",
+                HttpStatusCode.OK to """{"merged":false,"head":{"sha":"sha1"}}""",
+                HttpStatusCode.UnprocessableEntity to """{"message":"Validation Failed"}""",
+                HttpStatusCode.OK to """{"id":99}""",
+                HttpStatusCode.UnprocessableEntity to """{"message":"Validation Failed"}""",
+                HttpStatusCode.UnprocessableEntity to """{"message":"Validation Failed"}"""
+            )
+            val result = svc.saveDraftReview("token", "owner", "repo", 1, review)
+            result.commentsDropped.shouldBeTrue()
         }
     }
 })
