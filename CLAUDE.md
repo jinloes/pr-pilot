@@ -258,7 +258,7 @@ PR list filters (`prStateFilter`, `assignedToMeFilter`, `reviewRequestedFilter`)
 3. Write tests covering every branch: happy path, edge cases, and error paths.
 4. Run `./gradlew :core:jvmTest :intellij-plugin:unitTest` and confirm all tests pass.
 
-- Core tests live under `core/src/jvmTest/kotlin/com/jinloes/prpilot/` mirroring the main source tree. Written in **Kotest FunSpec** (`io.kotest:kotest-runner-junit5:5.9.1` + `kotest-assertions-core:5.9.1`).
+- Core tests live under `core/src/jvmTest/kotlin/com/jinloes/prpilot/` mirroring the main source tree. Written in **Kotest FunSpec** (`io.kotest:kotest-runner-junit5:6.1.11` + `kotest-assertions-core:6.1.11`).
 - IntelliJ-coupled tests live under `intellij-plugin/src/test/java/com/jinloes/prpilot/`.
 - Core tests use **Kotest** (`FunSpec`, `context(...)`, `test(...)`, `shouldBe`, `shouldContain`, etc.) — not JUnit 5 or AssertJ.
 - IntelliJ plugin tests use **JUnit 5** (`@Test`, `@Nested`, `@TempDir`) and **AssertJ** for assertions.
@@ -288,7 +288,7 @@ The `idea` Gradle plugin is applied to the root project and all subprojects. It 
 
 - Java 17, IntelliJ platform `2024.1` (IC), Gradle IntelliJ plugin `2.13.1`
 - `sinceBuild = 253`, `untilBuild = 253.*`
-- Kotlin Multiplatform `2.1.21`, Ktor `3.1.3`, kotlinx-serialization-json `1.8.1`, kotlinx-coroutines-core `1.10.2`
+- Kotlin Multiplatform `2.2.21`, Ktor `3.1.3`, kotlinx-serialization-json `1.9.0`, kotlinx-coroutines-core `1.11.0`
 - Core commonMain deps: ktor-client-core, ktor-client-content-negotiation, ktor-serialization-kotlinx-json, kotlinx-serialization-json, kotlinx-coroutines-core, SLF4J API 2.0.13
 - Core jvmMain additional deps: ktor-client-java, Commons Lang3 3.18.0, Commons Text 1.12.0, Commons Collections4 4.4, Commons IO 2.15.1
 - Core jsMain additional deps: ktor-client-js
