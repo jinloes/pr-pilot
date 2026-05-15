@@ -47,7 +47,6 @@ core/                                  – KMP module (jvm + js targets); Java s
       GitHubAuthService.kt           – Runs `gh auth token`; probes known gh binary paths
       ClaudeService.kt               – Shells out to `claude --print`; synchronous/blocking API
       PendingReviewIndex.kt          – Local JSON index of saved drafts (~/.pr-pilot/pending-prs.json)
-      PatternKnowledgeBase.kt        – Per-repo pattern knowledge file (~/.pr-pilot/patterns/) [unused in main flow]
       SeenPRSet.kt                   – Local JSON set of notified PR IDs (~/.pr-pilot/seen-prs.json)
       RunBlockingCompat.kt (actual/jvm) – actual delegates to kotlinx.coroutines.runBlocking
       UrlEncode.kt (actual/jvm)      – java.net.URLEncoder implementation
@@ -328,4 +327,3 @@ No API keys or tokens are ever written to disk.
 |------|---------|
 | `~/.pr-pilot/pending-prs.json` | Index of PRs with saved drafts (owner, repo, number, title, savedAt, headSha) |
 | `~/.pr-pilot/seen-prs.json` | Set of `owner/repo#number` strings already notified about |
-| `~/.pr-pilot/patterns/{owner}%{repo}.md` | Per-repo verified pattern log (unused in main flow) |

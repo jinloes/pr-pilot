@@ -60,11 +60,7 @@ kotlin {
             dependencies {
                 implementation "io.ktor:ktor-client-java:$ktorVersion"
                 implementation 'org.apache.commons:commons-lang3:3.18.0'
-                implementation 'org.apache.commons:commons-text:1.12.0'
                 implementation 'commons-io:commons-io:2.15.1'
-                implementation 'org.apache.commons:commons-collections4:4.4'
-
-                compileOnly 'org.projectlombok:lombok:1.18.32'
             }
         }
 
@@ -91,11 +87,6 @@ kotlin {
 // we add the legacy src/main/java directory directly to each compile task.
 tasks.named('compileJvmMainJava', JavaCompile) {
     source fileTree('src/main/java')
-}
-// Lombok annotation processing for jvmMain Java sources.
-dependencies {
-    add('jvmMainCompileOnly', 'org.projectlombok:lombok:1.18.32')
-    add('jvmMainAnnotationProcessor', 'org.projectlombok:lombok:1.18.32')
 }
 
 // Ensure the jvmTest task uses JUnit Platform.

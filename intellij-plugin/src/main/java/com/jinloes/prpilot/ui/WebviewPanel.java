@@ -18,7 +18,6 @@ import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.services.GitHubService;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.services.IntellijGitHubService;
-import com.jinloes.prpilot.services.PatternKnowledgeBase;
 import com.jinloes.prpilot.services.PendingReviewIndex;
 import com.jinloes.prpilot.settings.PluginSettings;
 import com.sun.net.httpserver.HttpExchange;
@@ -119,7 +118,6 @@ public class WebviewPanel {
     private final ObjectMapper mapper =
             new ObjectMapper().registerModule(new KotlinModule.Builder().build());
     private final PendingReviewIndex pendingIndex = new PendingReviewIndex();
-    private final PatternKnowledgeBase patternKb = new PatternKnowledgeBase();
     private final IntellijClaudeService claudeService;
     private final IntellijGitHubService ghSvc = IntellijGitHubService.getInstance();
     private final Project project;
@@ -584,11 +582,8 @@ public class WebviewPanel {
                                             "reviewGenerating", "Sending to Claude…"));
                             final String finalDiff = diff;
                             final String finalExisting = existingReviews;
-                            String knownPatterns =
-                                    patternKb.load(finalPr.getOwner(), finalPr.getRepo());
                             claudeService.reviewPR(
-                                    new PRReviewRequest(
-                                            finalPr, "", knownPatterns, "", finalExisting),
+                                    new PRReviewRequest(finalPr, "", "", "", finalExisting),
                                     statusMsg ->
                                             pushMessage(
                                                     new ReviewGeneratingMsg(
