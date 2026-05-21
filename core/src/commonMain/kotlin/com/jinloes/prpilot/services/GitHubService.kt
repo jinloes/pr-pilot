@@ -59,10 +59,22 @@ class GitHubService(
         const val TAG_END = " -->"
 
         const val APPROVE_BODY = "Looks good to me!"
+        const val REQUEST_CHANGES_BODY = "Requesting changes."
+        const val COMMENT_BODY = "Leaving comments."
 
-        /** Returns the effective review body, defaulting to [APPROVE_BODY] for blank APPROVE submissions. */
+        /**
+         * Returns the effective review body, substituting a default for blank submissions.
+         * GitHub rejects REQUEST_CHANGES (and COMMENT) submissions with an empty body
+         * (`422: You need to leave a comment indicating the requested changes.`), so a
+         * placeholder is required when the caller does not supply one.
+         */
         fun effectiveBody(event: String, body: String): String =
-            if (event == "APPROVE" && body.isBlank()) APPROVE_BODY else body
+            if (body.isBlank()) when (event) {
+                "APPROVE" -> APPROVE_BODY
+                "REQUEST_CHANGES" -> REQUEST_CHANGES_BODY
+                "COMMENT" -> COMMENT_BODY
+                else -> body
+            } else body
 
         private val TYPE_PREFIX = Regex("""^\[([A-Z]+)]\s*""")
 
@@ -188,13 +200,23 @@ class GitHubService(
         }
 
         /** Builds the deduplicated inline-comment [JsonArray] from a [ReviewResult]. */
-        fun buildCommentArray(review: ReviewResult): JsonArray {
+        fun buildCommentArray(review: ReviewResult): JsonArray =
+            buildCommentArray(review, emptyList())
+
+        /**
+         * Builds the deduplicated inline-comment [JsonArray], excluding any pre-known orphans.
+         * The webview pre-validates positions against the diff and forwards orphans separately;
+         * those go in the body's "Comments not attached inline" section, not as inline POSTs.
+         */
+        fun buildCommentArray(review: ReviewResult, orphans: List<LineComment>): JsonArray {
             val seen = linkedSetOf<String>()
+            val orphanKeys = orphans.map { orphanKey(it) }.toHashSet()
             return buildJsonArray {
                 for (c in review.getLineComments()) {
                     var file = c.getFile()
                     if (file.startsWith("a/") || file.startsWith("b/")) file = file.substring(2)
                     if (file.isBlank() || c.getLine() <= 0 || c.getBody().isBlank()) continue
+                    if (orphanKeys.contains(orphanKey(c))) continue
                     if (!seen.add("$file ${c.getLine()} ${c.getBody()}")) continue
                     add(buildJsonObject {
                         put("path", file)
@@ -208,6 +230,25 @@ class GitHubService(
 
         private fun truncate(s: String, max: Int): String =
             if (s.length > max) s.substring(0, max) + "..." else s
+
+        private fun orphanKey(c: LineComment): String =
+            c.getFile() + "|" + c.getLine() + "|" + c.getType() + "|" + c.getBody()
+
+        /**
+         * Formats pre-known orphan [LineComment]s into the body section that GitHub renders
+         * verbatim. Mirrors [buildDroppedSection] but takes typed comments rather than the
+         * intermediate [JsonObject] shape — used when the webview pre-validated and stripped
+         * orphans before the inline POST.
+         */
+        fun buildOrphanSection(orphans: List<LineComment>): String {
+            val sb = StringBuilder("**Comments not attached inline (invalid diff positions):**\n")
+            for (c in orphans) {
+                sb.append("- `").append(c.getFile())
+                if (c.getLine() > 0) sb.append(":").append(c.getLine())
+                sb.append("`: ").append(c.getBody()).append("\n")
+            }
+            return sb.toString().trimEnd()
+        }
 
         fun buildDroppedSection(dropped: List<JsonObject>): String {
             val sb = StringBuilder("**Comments not attached inline (invalid diff positions):**\n")
@@ -428,6 +469,21 @@ class GitHubService(
         repo: String,
         number: Int,
         review: ReviewResult,
+    ): SaveDraftResult = saveDraftReview(token, owner, repo, number, review, emptyList())
+
+    /**
+     * Saves a draft review with a pre-validated list of [orphans] — comments the webview
+     * determined have no valid position in the diff. Orphans are excluded from the inline
+     * POST and instead appended to the review body in a "Comments not attached inline"
+     * section.
+     */
+    fun saveDraftReview(
+        token: String,
+        owner: String,
+        repo: String,
+        number: Int,
+        review: ReviewResult,
+        orphans: List<LineComment>,
     ): SaveDraftResult = runBlockingCompat {
         val existing = getPendingReviewId(token, owner, repo, number)
         if (existing != null) {
@@ -439,11 +495,15 @@ class GitHubService(
         }
 
         val headSha = getPRHeadShaSuspend(token, owner, repo, number)
-        val comments = buildCommentArray(review)
+        val comments = buildCommentArray(review, orphans)
+        val bodyWithOrphans = if (orphans.isNotEmpty())
+            encodeBody(review) + "\n\n" + buildOrphanSection(orphans)
+        else
+            encodeBody(review)
 
         val payload = buildJsonObject {
             put("commit_id", headSha)
-            put("body", encodeBody(review))
+            put("body", bodyWithOrphans)
             // Omitting "event" creates a PENDING (draft) review.
             // Setting event:"PENDING" is invalid and causes a 422.
             put("comments", comments)
@@ -474,7 +534,9 @@ class GitHubService(
                     }
                 }
                 if (droppedComments.isNotEmpty()) {
-                    val updatedBody = encodeBody(review) + "\n\n" + buildDroppedSection(droppedComments)
+                    // Preserve any pre-known orphan section we already added so its entries
+                    // aren't lost when we PUT the updated body.
+                    val updatedBody = bodyWithOrphans + "\n\n" + buildDroppedSection(droppedComments)
                     try {
                         httpPut(token, "$url/$reviewId", buildJsonObject { put("body", updatedBody) }.toString())
                     } catch (_: Exception) {

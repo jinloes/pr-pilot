@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   onHostMessage,
   sendToHost,
@@ -6,6 +6,7 @@ import {
   type ReviewResult,
   type LineComment,
 } from '../../bridge/types'
+import { validateComments } from '@/lib/validateComments'
 import {
   AlertTriangle,
   Check,
@@ -95,9 +96,27 @@ function withSortedComments(result: ReviewResult): ReviewResult {
   return { ...result, lineComments: sortedComments(result.lineComments) }
 }
 
-function commentCountFromState(s: PaneState): number {
-  if (s.kind === 'draftPresent' || s.kind === 'reviewUnsaved') return s.result.lineComments.length
-  return 0
+/**
+ * Runs `validateComments` once at intake and bakes the snapped line numbers back into
+ * `result.lineComments` so the diff viewer renders comments at their corrected positions.
+ * Orphans pass through unchanged; subsequent partitions are computed lazily at render time.
+ */
+function withValidatedComments(result: ReviewResult, diff: string): ReviewResult {
+  const { adjusted, orphans } = validateComments(diff, result.lineComments)
+  return { ...result, lineComments: [...adjusted, ...orphans] }
+}
+
+function diffOf(state: PaneState): string {
+  if (state.kind === 'reviewUnsaved') return state.diff
+  if (state.kind === 'draftPresent') return state.diff ?? ''
+  if (state.kind === 'saveError' || state.kind === 'submitError') return state.diff
+  return ''
+}
+
+function resultOf(state: PaneState): ReviewResult | null {
+  if (state.kind === 'draftPresent' || state.kind === 'reviewUnsaved') return state.result
+  if (state.kind === 'saveError' || state.kind === 'submitError') return state.result
+  return null
 }
 
 function mutateComments(
@@ -162,9 +181,10 @@ export function ReviewPane({ pr }: Props) {
           if (msg.prState === 'MERGED') {
             setState({ kind: 'merged', status: msg.status })
           } else if (msg.prState === 'DRAFT_PRESENT' && msg.result) {
-            const result = withSortedComments(msg.result)
+            const diff = msg.diff ?? ''
+            const result = withSortedComments(withValidatedComments(msg.result, diff))
             setFocusedCommentIdx(0)
-            setState({ kind: 'draftPresent', result, reviewId: msg.reviewId ?? '', staleCommits: msg.staleCommits ?? false, diff: msg.diff })
+            setState({ kind: 'draftPresent', result, reviewId: msg.reviewId ?? '', staleCommits: msg.staleCommits ?? false, diff })
           } else {
             const status = msg.status ?? ''
             setState(status ? { kind: 'authError', message: status } : { kind: 'noDraft' })
@@ -187,9 +207,10 @@ export function ReviewPane({ pr }: Props) {
           break
 
         case 'reviewResult': {
-          const result = withSortedComments(msg.result)
+          const diff = msg.diff ?? ''
+          const result = withSortedComments(withValidatedComments(msg.result, diff))
           setFocusedCommentIdx(0)
-          setState({ kind: 'reviewUnsaved', result, diff: msg.diff ?? '' })
+          setState({ kind: 'reviewUnsaved', result, diff })
           break
         }
 
@@ -302,6 +323,14 @@ export function ReviewPane({ pr }: Props) {
     document.removeEventListener('mouseup', handleChatResizeUp)
   }, [handleChatResizeMove])
 
+  // Hooks must run in the same order on every render — keep all hooks above the early return.
+  const result = resultOf(state)
+  const diff = diffOf(state)
+  const partition = useMemo(
+    () => validateComments(diff, result?.lineComments ?? []),
+    [diff, result?.lineComments],
+  )
+
   if (!pr) {
     return (
       <div className="flex h-full items-center justify-center bg-background">
@@ -326,7 +355,14 @@ export function ReviewPane({ pr }: Props) {
   function handleSave() {
     if (state.kind !== 'reviewUnsaved' && state.kind !== 'draftPresent') return
     setSaving(true)
-    sendToHost({ type: 'saveDraft', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo, result: state.result })
+    sendToHost({
+      type: 'saveDraft',
+      number: currentPr.number,
+      owner: currentPr.owner,
+      repo: currentPr.repo,
+      result: state.result,
+      orphans: orphanComments,
+    })
   }
 
   function handleDelete() {
@@ -338,7 +374,14 @@ export function ReviewPane({ pr }: Props) {
     if (state.kind === 'reviewUnsaved') {
       pendingVerdict.current = verdict
       setSaving(true)
-      sendToHost({ type: 'saveDraft', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo, result: state.result })
+      sendToHost({
+        type: 'saveDraft',
+        number: currentPr.number,
+        owner: currentPr.owner,
+        repo: currentPr.repo,
+        result: state.result,
+        orphans: orphanComments,
+      })
       return
     }
     setSubmitting(true)
@@ -360,33 +403,66 @@ export function ReviewPane({ pr }: Props) {
     document.addEventListener('mouseup', handleChatResizeUp)
   }
 
-  const commentCount = commentCountFromState(state)
+  const inlineComments = partition.adjusted
+  const orphanComments = partition.orphans
+  const commentCount = inlineComments.length
+  const orphanCount = orphanComments.length
+  const totalCount = commentCount + orphanCount
   const hasReview = state.kind === 'draftPresent' || state.kind === 'reviewUnsaved'
+
+  // DiffViewer indexes comments by position in the array we pass it (`inlineComments`),
+  // but our mutators operate on positions in the canonical `result.lineComments`. The
+  // inlineComments references are stable (validateComments returns the same object when
+  // no snap is needed, and snaps are already baked in at intake), so indexOf is safe.
+  function inlineToOriginal(inlineIdx: number): number {
+    if (!result) return -1
+    const target = inlineComments[inlineIdx]
+    return target ? result.lineComments.indexOf(target) : -1
+  }
+
+  function mutateAtOriginal(origIdx: number, fn: (c: LineComment) => LineComment | null) {
+    if (origIdx < 0) return
+    setState((prev) =>
+      mutateComments(prev, ['draftPresent', 'reviewUnsaved'], (comments) => {
+        const next = comments.slice()
+        const updated = fn(next[origIdx])
+        if (updated === null) next.splice(origIdx, 1)
+        else next[origIdx] = updated
+        return next
+      }),
+    )
+  }
 
   const editCommentHandlers = {
     onEditComment: (idx: number, body: string) => {
-      setState((prev) =>
-        mutateComments(prev, ['draftPresent', 'reviewUnsaved'], (comments) =>
-          comments.map((c, i) => (i === idx ? { ...c, body } : c)),
-        ),
-      )
+      mutateAtOriginal(inlineToOriginal(idx), (c) => ({ ...c, body }))
     },
     onDeleteComment: (idx: number) => {
       setFocusedCommentIdx((f) => (f > 0 && f >= idx ? f - 1 : f))
-      setState((prev) =>
-        mutateComments(prev, ['draftPresent', 'reviewUnsaved'], (comments) =>
-          comments.filter((_, i) => i !== idx),
-        ),
-      )
+      mutateAtOriginal(inlineToOriginal(idx), () => null)
     },
     onAddComment: (comment: LineComment) => {
       let newFocusIdx = 0
       setState((prev) => {
         if (prev.kind !== 'draftPresent' && prev.kind !== 'reviewUnsaved') return prev
-        newFocusIdx = prev.result.lineComments.length
+        newFocusIdx = inlineComments.length
         return { ...prev, result: { ...prev.result, lineComments: [...prev.result.lineComments, comment] } }
       })
       setFocusedCommentIdx(newFocusIdx)
+    },
+  }
+
+  function orphanToOriginal(orphan: LineComment): number {
+    if (!result) return -1
+    return result.lineComments.indexOf(orphan)
+  }
+
+  const orphanHandlers = {
+    onEditOrphan: (orphan: LineComment, body: string) => {
+      mutateAtOriginal(orphanToOriginal(orphan), (c) => ({ ...c, body }))
+    },
+    onDeleteOrphan: (orphan: LineComment) => {
+      mutateAtOriginal(orphanToOriginal(orphan), () => null)
     },
   }
 
@@ -463,11 +539,21 @@ export function ReviewPane({ pr }: Props) {
                 <span className={cn('font-mono font-semibold tracking-wide', VERDICT_COLOR[(state as { result: ReviewResult }).result.verdict])}>
                   {VERDICT_LABEL[(state as { result: ReviewResult }).result.verdict]}
                 </span>
-                {commentCount > 0 && (
+                {totalCount > 0 && (
                   <>
                     <span className="text-muted-foreground">·</span>
-                    <span className="text-muted-foreground">{commentCount} comment{commentCount !== 1 ? 's' : ''}</span>
+                    <span className="text-muted-foreground">{totalCount} comment{totalCount !== 1 ? 's' : ''}</span>
                   </>
+                )}
+                {orphanCount > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-status-suggestion font-mono cursor-help">· {orphanCount} unanchored</span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Comment{orphanCount !== 1 ? 's' : ''} GitHub cannot attach inline — line is outside the PR's hunks.
+                    </TooltipContent>
+                  </Tooltip>
                 )}
                 {state.kind === 'reviewUnsaved' && (
                   <span className="text-status-suggestion font-mono">· unsaved</span>
@@ -490,6 +576,10 @@ export function ReviewPane({ pr }: Props) {
                 onGenerate={handleGenerate}
                 onVerifyComment={showChat ? handleVerifyComment : undefined}
                 editCommentHandlers={editCommentHandlers}
+                inlineComments={inlineComments}
+                orphanComments={orphanComments}
+                onEditOrphan={orphanHandlers.onEditOrphan}
+                onDeleteOrphan={orphanHandlers.onDeleteOrphan}
               />
             </div>
           </ContextMenuTrigger>
@@ -501,7 +591,7 @@ export function ReviewPane({ pr }: Props) {
                     "{selectedContext.length > 60 ? selectedContext.slice(0, 60) + '…' : selectedContext}"
                   </ContextMenuLabel>
                   <ContextMenuSeparator />
-                  {(['What does this do?', 'Why is this here?', 'Is this correct?'] as const).map((q) => (
+                  {(['What does this do?', 'Why is this here?', 'Is this correct?', 'Can this be simplified?'] as const).map((q) => (
                     <ContextMenuItem
                       key={q}
                       onSelect={() => {
@@ -577,6 +667,10 @@ interface ContentProps {
     onDeleteComment: (idx: number) => void
     onAddComment: (comment: LineComment) => void
   }
+  inlineComments: LineComment[]
+  orphanComments: LineComment[]
+  onEditOrphan: (orphan: LineComment, body: string) => void
+  onDeleteOrphan: (orphan: LineComment) => void
 }
 
 function useElapsedSeconds(active: boolean): number {
@@ -604,6 +698,10 @@ function ReviewAndDiff({
   editCommentHandlers,
   onVerifyComment,
   staleCommits,
+  inlineComments,
+  orphanComments,
+  onEditOrphan,
+  onDeleteOrphan,
 }: {
   result: ReviewResult
   diff?: string
@@ -612,6 +710,10 @@ function ReviewAndDiff({
   editCommentHandlers: ContentProps['editCommentHandlers']
   onVerifyComment?: (comment: LineComment) => void
   staleCommits?: boolean
+  inlineComments: LineComment[]
+  orphanComments: LineComment[]
+  onEditOrphan: (orphan: LineComment, body: string) => void
+  onDeleteOrphan: (orphan: LineComment) => void
 }) {
   return (
     <>
@@ -626,11 +728,20 @@ function ReviewAndDiff({
       <div className="px-4 pt-3">
         <ReviewDisplay result={result} />
       </div>
+      {orphanComments.length > 0 && (
+        <div className="px-4 pt-3">
+          <OrphanCommentsSection
+            orphans={orphanComments}
+            onEdit={onEditOrphan}
+            onDelete={onDeleteOrphan}
+          />
+        </div>
+      )}
       {diff && (
         <div className="px-4 pb-4">
           <DiffViewer
             diff={diff}
-            comments={result.lineComments}
+            comments={inlineComments}
             focusedCommentIdx={focusedCommentIdx}
             onEditComment={editCommentHandlers.onEditComment}
             onDeleteComment={(idx) => {
@@ -653,6 +764,10 @@ function ErrorWithReview({
   focusedCommentIdx,
   setFocusedCommentIdx,
   editCommentHandlers,
+  inlineComments,
+  orphanComments,
+  onEditOrphan,
+  onDeleteOrphan,
 }: {
   message: string
   result: ReviewResult | null
@@ -660,6 +775,10 @@ function ErrorWithReview({
   focusedCommentIdx: number
   setFocusedCommentIdx: React.Dispatch<React.SetStateAction<number>>
   editCommentHandlers: ContentProps['editCommentHandlers']
+  inlineComments: LineComment[]
+  orphanComments: LineComment[]
+  onEditOrphan: (orphan: LineComment, body: string) => void
+  onDeleteOrphan: (orphan: LineComment) => void
 }) {
   return (
     <div className="flex flex-col">
@@ -670,6 +789,10 @@ function ErrorWithReview({
           focusedCommentIdx={focusedCommentIdx}
           setFocusedCommentIdx={setFocusedCommentIdx}
           editCommentHandlers={editCommentHandlers}
+          inlineComments={inlineComments}
+          orphanComments={orphanComments}
+          onEditOrphan={onEditOrphan}
+          onDeleteOrphan={onDeleteOrphan}
         />
       )}
       <div className="px-4 pb-3">
@@ -688,6 +811,10 @@ function PaneContent({
   onGenerate,
   onVerifyComment,
   editCommentHandlers,
+  inlineComments,
+  orphanComments,
+  onEditOrphan,
+  onDeleteOrphan,
 }: ContentProps) {
   const elapsed = useElapsedSeconds(state.kind === 'generating')
 
@@ -772,6 +899,10 @@ function PaneContent({
           editCommentHandlers={editCommentHandlers}
           onVerifyComment={onVerifyComment}
           staleCommits={state.staleCommits}
+          inlineComments={inlineComments}
+          orphanComments={orphanComments}
+          onEditOrphan={onEditOrphan}
+          onDeleteOrphan={onDeleteOrphan}
         />
       )
 
@@ -784,6 +915,10 @@ function PaneContent({
           setFocusedCommentIdx={setFocusedCommentIdx}
           editCommentHandlers={editCommentHandlers}
           onVerifyComment={onVerifyComment}
+          inlineComments={inlineComments}
+          orphanComments={orphanComments}
+          onEditOrphan={onEditOrphan}
+          onDeleteOrphan={onDeleteOrphan}
         />
       )
 
@@ -830,6 +965,10 @@ function PaneContent({
           focusedCommentIdx={focusedCommentIdx}
           setFocusedCommentIdx={setFocusedCommentIdx}
           editCommentHandlers={editCommentHandlers}
+          inlineComments={inlineComments}
+          orphanComments={orphanComments}
+          onEditOrphan={onEditOrphan}
+          onDeleteOrphan={onDeleteOrphan}
         />
       )
 
@@ -842,6 +981,10 @@ function PaneContent({
           focusedCommentIdx={focusedCommentIdx}
           setFocusedCommentIdx={setFocusedCommentIdx}
           editCommentHandlers={editCommentHandlers}
+          inlineComments={inlineComments}
+          orphanComments={orphanComments}
+          onEditOrphan={onEditOrphan}
+          onDeleteOrphan={onDeleteOrphan}
         />
       )
   }
@@ -1059,5 +1202,141 @@ function SubmitSplitButton({
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+  )
+}
+
+// ── Orphan (unanchored) comments ──────────────────────────────────────────────
+
+const ORPHAN_BADGE: Record<LineComment['type'], string> = {
+  issue:      'text-status-issue border-status-issue/50 bg-status-issue/10',
+  suggestion: 'text-status-suggestion border-status-suggestion/50 bg-status-suggestion/10',
+  note:       'text-status-note border-status-note/50 bg-status-note/10',
+}
+
+function OrphanCommentsSection({
+  orphans,
+  onEdit,
+  onDelete,
+}: {
+  orphans: LineComment[]
+  onEdit: (orphan: LineComment, body: string) => void
+  onDelete: (orphan: LineComment) => void
+}) {
+  return (
+    <div className="rounded border border-status-suggestion/40 bg-status-suggestion/5">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-status-suggestion/30">
+        <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion shrink-0" />
+        <span className="text-xs font-semibold tracking-wide text-status-suggestion">
+          Unanchored comments
+        </span>
+        <span className="text-[10px] text-muted-foreground font-mono">
+          GitHub can't attach these inline
+        </span>
+      </div>
+      <ul className="divide-y divide-status-suggestion/20">
+        {orphans.map((o, i) => (
+          <OrphanRow
+            key={`${o.file}|${o.line}|${i}`}
+            orphan={o}
+            onEdit={(body) => onEdit(o, body)}
+            onDelete={() => onDelete(o)}
+          />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function OrphanRow({
+  orphan,
+  onEdit,
+  onDelete,
+}: {
+  orphan: LineComment
+  onEdit: (body: string) => void
+  onDelete: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(orphan.body)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => { if (!editing) setDraft(orphan.body) }, [editing, orphan.body])
+  useEffect(() => {
+    if (editing && textareaRef.current) {
+      const el = textareaRef.current
+      el.focus()
+      el.style.height = 'auto'
+      el.style.height = el.scrollHeight + 'px'
+    }
+  }, [editing])
+
+  function handleSave() {
+    const trimmed = draft.trim()
+    if (trimmed) onEdit(trimmed)
+    setEditing(false)
+  }
+
+  return (
+    <li className="px-3 py-2 flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <span className={cn('inline-flex items-center rounded border px-1.5 py-0 text-[9px] font-bold tracking-widest uppercase', ORPHAN_BADGE[orphan.type])}>
+          {orphan.type}
+        </span>
+        <span className="font-mono text-[11px] text-muted-foreground truncate flex-1">
+          {orphan.file}:{orphan.line}
+        </span>
+        {!editing && (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+              onClick={() => setEditing(true)}
+              aria-label="Edit unanchored comment"
+            >
+              Edit
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive"
+              onClick={onDelete}
+              aria-label="Delete unanchored comment"
+            >
+              Delete
+            </Button>
+          </div>
+        )}
+      </div>
+      {editing ? (
+        <div className="flex flex-col gap-1.5">
+          <textarea
+            ref={textareaRef}
+            className="diff-comment__textarea"
+            value={draft}
+            rows={2}
+            onChange={(e) => {
+              setDraft(e.target.value)
+              e.target.style.height = 'auto'
+              e.target.style.height = e.target.scrollHeight + 'px'
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSave()
+              if (e.key === 'Escape') setEditing(false)
+            }}
+          />
+          <div className="flex gap-1.5">
+            <Button size="sm" className="h-6 text-xs gap-1" onClick={handleSave}>
+              <Check className="w-3 h-3" />Save
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setEditing(false)}>
+              <X className="w-3 h-3" />Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs leading-snug whitespace-pre-wrap">{orphan.body}</p>
+      )}
+    </li>
   )
 }

@@ -195,7 +195,7 @@ function toolUseStatus(toolName: string, input: Record<string, unknown>): string
     const display = toolName.replace(/^mcp__/, '').replace(/__/g, '/');
     const args = Object.entries(input)
         .filter(([, v]) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')
-        .map(([k, v]) => `${k}=${v}`)
+        .map(([k, v]) => `${k}=${String(v)}`)
         .join(', ');
     return `${display}(${args})`;
 }
@@ -323,7 +323,7 @@ export function reviewPR(options: {
             try {
                 resolve(parseReview(raw));
             } catch (e) {
-                reject(new Error(`Failed to parse review JSON: ${e}`));
+                reject(new Error(`Failed to parse review JSON: ${e instanceof Error ? e.message : String(e)}`));
             }
         });
 
@@ -429,7 +429,7 @@ function resumeReview(options: {
             try {
                 resolve(parseReview(raw));
             } catch (e) {
-                reject(new Error(`Failed to parse review JSON: ${e}`));
+                reject(new Error(`Failed to parse review JSON: ${e instanceof Error ? e.message : String(e)}`));
             }
         });
 

@@ -3,15 +3,31 @@
   "displayName": "PR Pilot",
   "description": "AI-powered pull request reviews",
   "version": "0.1.0",
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Other"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
-      "activitybar": [{ "id": "pr-pilot", "title": "PR Pilot", "icon": "$(git-pull-request)" }]
+      "activitybar": [
+        {
+          "id": "pr-pilot",
+          "title": "PR Pilot",
+          "icon": "$(git-pull-request)"
+        }
+      ]
     },
     "views": {
-      "pr-pilot": [{ "id": "pr-pilot.main", "name": "PR Pilot", "type": "webview" }]
+      "pr-pilot": [
+        {
+          "id": "pr-pilot.main",
+          "name": "PR Pilot",
+          "type": "webview"
+        }
+      ]
     },
     "configuration": {
       "title": "PR Pilot",
@@ -31,14 +47,19 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "watch": "tsc -watch -p tsconfig.json"
+    "watch": "tsc -watch -p tsconfig.json",
+    "lint": "eslint ."
   },
   "dependencies": {
     "core": "file:../core/build/js/packages/core"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^20.0.0",
-    "typescript": "^5.3.0"
+    "@types/vscode": "^1.85.0",
+    "eslint": "^10.4.0",
+    "globals": "^17.6.0",
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^8.59.4"
   }
 }

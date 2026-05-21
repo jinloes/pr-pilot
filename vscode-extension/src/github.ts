@@ -348,19 +348,33 @@ function decodeReview(body: string, apiComments: GhReviewComment[]): ReviewResul
     };
 }
 
-function buildCommentArray(review: ReviewResult): object[] {
+function buildCommentArray(review: ReviewResult, orphans: LineComment[] = []): object[] {
     const seen = new Set<string>();
+    const orphanKeys = new Set(orphans.map(o => `${o.file}|${o.line}|${o.type}|${o.body}`));
     const result: object[] = [];
     for (const c of review.lineComments) {
         let file = c.file;
         if (file.startsWith('a/') || file.startsWith('b/')) file = file.substring(2);
         if (!file || c.line <= 0 || !c.body) continue;
+        // Pre-known orphans go in the body section, not as inline comments.
+        if (orphanKeys.has(`${c.file}|${c.line}|${c.type}|${c.body}`)) continue;
         const key = `${file} ${c.line} ${c.body}`;
         if (seen.has(key)) continue;
         seen.add(key);
         result.push({ path: file, line: c.line, side: 'RIGHT', body: c.body });
     }
     return result;
+}
+
+function buildOrphanSection(orphans: LineComment[]): string {
+    let s = '**Comments not attached inline (invalid diff positions):**\n';
+    for (const c of orphans) {
+        const path = c.file ?? '';
+        const line = c.line ?? 0;
+        const body = c.body ?? '';
+        s += `- \`${path}${line > 0 ? `:${line}` : ''}\`: ${body}\n`;
+    }
+    return s.trimEnd();
 }
 
 function buildDroppedSection(dropped: Array<Record<string, unknown>>): string {
@@ -403,6 +417,7 @@ export async function saveDraftReview(
     repo: string,
     number: number,
     review: ReviewResult,
+    orphans: LineComment[] = [],
 ): Promise<{ reviewId: string; commentsDropped: boolean }> {
     const base = apiBase(githubBaseUrl);
     const existing = await getPendingReviewId(token, githubBaseUrl, owner, repo, number);
@@ -413,9 +428,12 @@ export async function saveDraftReview(
 
     const detail = await getPRDetail(token, githubBaseUrl, owner, repo, number);
     const headSha = detail.head?.sha ?? '';
-    const comments = buildCommentArray(review);
+    const comments = buildCommentArray(review, orphans);
     const url = `${base}/repos/${owner}/${repo}/pulls/${number}/reviews`;
-    const payload: Record<string, unknown> = { commit_id: headSha, body: encodeBody(review), comments };
+    const bodyWithOrphans = orphans.length > 0
+        ? `${encodeBody(review)}\n\n${buildOrphanSection(orphans)}`
+        : encodeBody(review);
+    const payload: Record<string, unknown> = { commit_id: headSha, body: bodyWithOrphans, comments };
     let commentsDropped = false;
 
     try {
@@ -437,7 +455,9 @@ export async function saveDraftReview(
             }
             if (droppedComments.length > 0) {
                 const section = buildDroppedSection(droppedComments);
-                const updatedBody = `${encodeBody(review)}\n\n${section}`;
+                // Preserve any pre-known orphan section we already added so its entries
+                // aren't lost when we PUT the updated body.
+                const updatedBody = `${bodyWithOrphans}\n\n${section}`;
                 try {
                     await ghRequest(token, `${url}/${reviewId}`, { method: 'PUT', body: JSON.stringify({ body: updatedBody }) });
                 } catch { commentsDropped = true; }
@@ -459,7 +479,18 @@ export async function submitReview(
     body: string,
 ): Promise<void> {
     const url = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${number}/reviews/${reviewId}/events`;
-    await ghRequest(token, url, { method: 'POST', body: JSON.stringify({ event, body }) });
+    await ghRequest(token, url, { method: 'POST', body: JSON.stringify({ event, body: effectiveBody(event, body) }) });
+}
+
+// GitHub rejects REQUEST_CHANGES/COMMENT submissions with an empty body
+// (422: "You need to leave a comment indicating the requested changes."),
+// so a placeholder is required when the caller does not supply one.
+export function effectiveBody(event: string, body: string): string {
+    if (body && body.trim().length > 0) return body;
+    if (event === 'APPROVE') return 'Looks good to me!';
+    if (event === 'REQUEST_CHANGES') return 'Requesting changes.';
+    if (event === 'COMMENT') return 'Leaving comments.';
+    return body;
 }
 
 export async function deleteDraftReview(

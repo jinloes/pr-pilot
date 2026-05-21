@@ -179,6 +179,12 @@ export interface SaveDraftRequest {
   owner: string
   repo: string
   result?: ReviewResult
+  /**
+   * Comments the webview pre-validated as having no anchor in the diff. The host
+   * skips these when building the inline-comment POST and appends them to the
+   * review body in a "Comments not attached inline" section instead.
+   */
+  orphans?: LineComment[]
 }
 
 export interface SubmitReviewRequest {

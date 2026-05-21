@@ -12,6 +12,7 @@ import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
 import com.jinloes.prpilot.model.ChatMessage;
+import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewResult;
@@ -258,20 +259,36 @@ public class WebviewPanel {
                 case "cancelReview" -> claudeService.cancelCurrentRequest();
                 case "saveDraft" -> {
                     ReviewResult bridgeResult = null;
+                    List<LineComment> bridgeOrphans = List.of();
                     try {
                         var resultNode = node.path("result");
                         if (!resultNode.isMissingNode()) {
                             bridgeResult = mapper.treeToValue(resultNode, ReviewResult.class);
                         }
+                        var orphansNode = node.path("orphans");
+                        if (orphansNode.isArray()) {
+                            List<LineComment> parsed = new ArrayList<>();
+                            for (var el : orphansNode) {
+                                parsed.add(mapper.treeToValue(el, LineComment.class));
+                            }
+                            bridgeOrphans = parsed;
+                        }
                     } catch (Exception e) {
                         log.warn(
-                                "saveDraft: failed to parse result from bridge: {}",
+                                "saveDraft: failed to parse result/orphans from bridge: {}",
                                 e.getMessage());
                     }
                     final ReviewResult finalResult = bridgeResult;
+                    final List<LineComment> finalOrphans = bridgeOrphans;
                     getApplication()
                             .executeOnPooledThread(
-                                    () -> handleSaveDraft(number, owner, repo, finalResult));
+                                    () ->
+                                            handleSaveDraft(
+                                                    number,
+                                                    owner,
+                                                    repo,
+                                                    finalResult,
+                                                    finalOrphans));
                 }
                 case "submitReview" -> {
                     String verdict = node.path("verdict").asText();
@@ -604,7 +621,12 @@ public class WebviewPanel {
 
     // --- saveDraft ---
 
-    private void handleSaveDraft(int number, String owner, String repo, ReviewResult bridgeResult) {
+    private void handleSaveDraft(
+            int number,
+            String owner,
+            String repo,
+            ReviewResult bridgeResult,
+            List<LineComment> orphans) {
         ReviewResult result = bridgeResult != null ? bridgeResult : lastResult;
         if (result == null) {
             pushMessage(new ErrorMsg("draftSaveError", "No review result to save."));
@@ -620,7 +642,7 @@ public class WebviewPanel {
 
         GitHubService.SaveDraftResult saved;
         try {
-            saved = ghSvc.saveDraftReview(token, owner, repo, number, result);
+            saved = ghSvc.saveDraftReview(token, owner, repo, number, result, orphans);
         } catch (Exception e) {
             pushMessage(new ErrorMsg("draftSaveError", "Save failed: " + e.getMessage()));
             return;

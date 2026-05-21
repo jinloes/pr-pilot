@@ -14,6 +14,7 @@ import io.kotest.matchers.string.shouldContain
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.toByteArray
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -22,6 +23,8 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 private val MOCK_JSON = Json { ignoreUnknownKeys = true }
 
@@ -335,6 +338,111 @@ class GitHubServiceNetworkTest : FunSpec({
             )
             val result = svc.saveDraftReview("token", "owner", "repo", 1, review)
             result.commentsDropped.shouldBeTrue()
+        }
+    }
+
+    context("buildCommentArray with orphans") {
+
+        test("orphan-matching comment is excluded from inline array") {
+            val anchor = LineComment("src/Foo.java", 10, "issue", "good")
+            val orphan = LineComment("src/Foo.java", 999, "note", "bad")
+            val r = ReviewResult("s", "COMMENT", listOf(anchor, orphan))
+            val arr = GitHubService.buildCommentArray(r, listOf(orphan))
+            arr.size shouldBe 1
+            val obj = arr[0].jsonObject
+            obj["path"]?.jsonPrimitive?.content shouldBe "src/Foo.java"
+            obj["line"]?.jsonPrimitive?.content shouldBe "10"
+        }
+
+        test("orphan matching is by file+line+type+body — different type still included inline") {
+            val target = LineComment("src/Foo.java", 10, "issue", "body")
+            val similar = LineComment("src/Foo.java", 10, "note", "body")
+            val r = ReviewResult("s", "COMMENT", listOf(target, similar))
+            // Only `target` is flagged orphan; `similar` has a different type so should remain.
+            val arr = GitHubService.buildCommentArray(r, listOf(target))
+            arr.size shouldBe 1
+        }
+
+        test("empty orphan list is equivalent to single-arg overload") {
+            val c = LineComment("src/Foo.java", 5, "issue", "body")
+            val r = ReviewResult("s", "APPROVE", listOf(c))
+            GitHubService.buildCommentArray(r, emptyList()).size shouldBe
+                GitHubService.buildCommentArray(r).size
+        }
+    }
+
+    context("buildOrphanSection") {
+
+        test("formats orphan with file and line") {
+            val c = LineComment("src/Foo.java", 42, "issue", "throw inside try")
+            val section = GitHubService.buildOrphanSection(listOf(c))
+            section shouldContain "Comments not attached inline (invalid diff positions)"
+            section shouldContain "src/Foo.java:42"
+            section shouldContain "throw inside try"
+        }
+
+        test("omits line when line is zero") {
+            val c = LineComment("README.md", 0, "note", "general")
+            val section = GitHubService.buildOrphanSection(listOf(c))
+            section shouldContain "`README.md`"
+            (section.contains(":0")) shouldBe false
+        }
+
+        test("renders multiple orphans") {
+            val orphans = listOf(
+                LineComment("src/A.java", 10, "issue", "first"),
+                LineComment("src/B.java", 20, "note", "second"),
+            )
+            val section = GitHubService.buildOrphanSection(orphans)
+            section shouldContain "src/A.java:10"
+            section shouldContain "src/B.java:20"
+            section shouldContain "first"
+            section shouldContain "second"
+        }
+    }
+
+    context("saveDraftReview with pre-known orphans") {
+        // When orphans are provided the inline POST excludes them and the body carries the
+        // "Comments not attached inline" section. The 422 fallback is not triggered.
+        //
+        // Call sequence:
+        // 1. GET reviews → []                  (getPendingReviewId)
+        // 2. GET pull/1 → head sha             (getPRHeadShaSuspend)
+        // 3. POST reviews → {"id":42}          (the only inline POST — succeeds)
+
+        test("orphan is stripped from inline POST and added to body") {
+            val anchor = LineComment("src/Foo.java", 10, "issue", "good")
+            val orphan = LineComment("src/Bar.java", 999, "note", "unanchored body")
+            val review = ReviewResult("s", "COMMENT", listOf(anchor, orphan))
+            val capturedBodies = mutableListOf<String>()
+            val engine = MockEngine { req ->
+                val text = req.body.toByteArray().decodeToString()
+                capturedBodies.add(text)
+                val (status, content) = when (capturedBodies.size) {
+                    1 -> HttpStatusCode.OK to "[]"
+                    2 -> HttpStatusCode.OK to """{"merged":false,"head":{"sha":"sha1"}}"""
+                    else -> HttpStatusCode.OK to """{"id":42}"""
+                }
+                respond(
+                    content = content,
+                    status = status,
+                    headers = headersOf("Content-Type", ContentType.Application.Json.toString()),
+                )
+            }
+            val client = HttpClient(engine) {
+                install(ContentNegotiation) { json(MOCK_JSON) }
+            }
+            val svc = GitHubService("https://api.github.com", client)
+            val result = svc.saveDraftReview("token", "owner", "repo", 1, review, listOf(orphan))
+            result.reviewId shouldBe "42"
+            result.commentsDropped.shouldBeFalse()
+            // Three calls total — no 422 fallback was needed.
+            capturedBodies.size shouldBe 3
+            val createReviewBody = capturedBodies.last()
+            createReviewBody shouldContain "src/Foo.java"        // anchored comment present
+            createReviewBody shouldContain "Comments not attached inline"
+            createReviewBody shouldContain "unanchored body"     // orphan body present in section
+            createReviewBody shouldContain "src/Bar.java"        // orphan path in the section
         }
     }
 })

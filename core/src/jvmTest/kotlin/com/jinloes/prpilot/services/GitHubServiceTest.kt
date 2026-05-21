@@ -267,12 +267,28 @@ class GitHubServiceTest : FunSpec({
             GitHubService.effectiveBody("APPROVE", "Custom message") shouldBe "Custom message"
         }
 
-        test("REQUEST_CHANGES with blank body not defaulted") {
-            GitHubService.effectiveBody("REQUEST_CHANGES", "") shouldBe ""
+        test("REQUEST_CHANGES with blank body defaults to 'Requesting changes.'") {
+            GitHubService.effectiveBody("REQUEST_CHANGES", "") shouldBe "Requesting changes."
         }
 
-        test("COMMENT with blank body not defaulted") {
-            GitHubService.effectiveBody("COMMENT", "") shouldBe ""
+        test("REQUEST_CHANGES with whitespace body defaults to 'Requesting changes.'") {
+            GitHubService.effectiveBody("REQUEST_CHANGES", "   ") shouldBe "Requesting changes."
+        }
+
+        test("REQUEST_CHANGES with non-blank body preserves body") {
+            GitHubService.effectiveBody("REQUEST_CHANGES", "Need to fix X") shouldBe "Need to fix X"
+        }
+
+        test("COMMENT with blank body defaults to 'Leaving comments.'") {
+            GitHubService.effectiveBody("COMMENT", "") shouldBe "Leaving comments."
+        }
+
+        test("COMMENT with non-blank body preserves body") {
+            GitHubService.effectiveBody("COMMENT", "Some notes") shouldBe "Some notes"
+        }
+
+        test("unknown event with blank body preserves empty body") {
+            GitHubService.effectiveBody("UNKNOWN", "") shouldBe ""
         }
     }
 

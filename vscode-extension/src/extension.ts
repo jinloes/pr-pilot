@@ -71,9 +71,9 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
         }
         let html = fs.readFileSync(indexPath, 'utf8');
         html = html.replace(/(src|href)="\.\/([^"]+)"/g, (_m, attr, p) =>
-            `${attr}="${webview.asWebviewUri(vscode.Uri.joinPath(distUri, p))}"`);
+            `${attr}="${webview.asWebviewUri(vscode.Uri.joinPath(distUri, p)).toString()}"`);
         html = html.replace(/(src|href)="\/([^"]+)"/g, (_m, attr, p) =>
-            `${attr}="${webview.asWebviewUri(vscode.Uri.joinPath(distUri, p))}"`);
+            `${attr}="${webview.asWebviewUri(vscode.Uri.joinPath(distUri, p)).toString()}"`);
         return html;
     }
 
@@ -213,7 +213,9 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
             github.loadDraftReview(token, base, owner, repo, number),
         ]);
 
-        state.activePR = { number, owner, repo, title: String(msg.title ?? ''), body: String(msg.body ?? '') };
+        const title = typeof msg.title === 'string' ? msg.title : '';
+        const body = typeof msg.body === 'string' ? msg.body : '';
+        state.activePR = { number, owner, repo, title, body };
         state.activeDiff = diff;
         state.activeReviewResult = draft?.result ?? null;
         state.pendingReviewId = draft?.id ?? null;
@@ -287,13 +289,14 @@ async function handleSaveDraft(state: ViewState, msg: Record<string, unknown>): 
     const owner = msg.owner as string;
     const repo = msg.repo as string;
     const resultFromMsg = msg.result as github.ReviewResult | undefined;
+    const orphansFromMsg = (msg.orphans as github.LineComment[] | undefined) ?? [];
     const review = resultFromMsg ?? state.activeReviewResult;
     if (!number || !owner || !repo || !review) return;
 
     try {
         const token = await getToken(state);
         const { reviewId, commentsDropped } = await github.saveDraftReview(
-            token, githubBaseUrl(), owner, repo, number, review,
+            token, githubBaseUrl(), owner, repo, number, review, orphansFromMsg,
         );
         state.pendingReviewId = reviewId;
         push(state, { type: 'draftSaved', reviewId, commentsDropped });

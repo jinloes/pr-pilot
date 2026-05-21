@@ -2,6 +2,7 @@ package com.jinloes.prpilot.services;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.Service;
+import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.settings.PluginSettings;
@@ -48,6 +49,17 @@ public final class IntellijGitHubService {
             String token, String owner, String repo, int number, ReviewResult review)
             throws IOException, InterruptedException {
         return core().saveDraftReview(token, owner, repo, number, review);
+    }
+
+    public GitHubService.SaveDraftResult saveDraftReview(
+            String token,
+            String owner,
+            String repo,
+            int number,
+            ReviewResult review,
+            List<LineComment> orphans)
+            throws IOException, InterruptedException {
+        return core().saveDraftReview(token, owner, repo, number, review, orphans);
     }
 
     public GitHubService.PendingReview loadDraftReview(

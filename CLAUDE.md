@@ -86,6 +86,7 @@ webview/                               – Vite + React + TypeScript webview
   src/
     bridge/types.ts                  – IDE↔webview message types and sendToHost/onHostMessage helpers
     lib/utils.ts                     – cn() helper (clsx + tailwind-merge)
+    lib/validateComments.ts          – Parses diff, partitions LineComments into adjusted (with ±3-line snap) and orphans
     components/ui/                   – shadcn/ui components (button, badge, alert, alert-dialog, context-menu, tooltip, select, toggle-group, scroll-area, textarea, separator, skeleton)
     components/PRList/               – PR list: state/role filters, repo selector, search, keyboard nav
     components/ReviewPane/           – Review pane: state machine, diff viewer, footer actions
@@ -120,7 +121,8 @@ When logic changes in one host, the **parallel file in the other host must be up
 | `ClaudeService.kt` — prompt constants (`REVIEW_INSTRUCTIONS`, `CHAT_PERSONA`) | `vscode-extension/src/claude.ts` — same constants copied verbatim |
 | `ClaudeService.kt` — `buildPrompt`, `buildChatPrompt`, `buildFocusedChatPrompt` | `vscode-extension/src/claude.ts` — same functions |
 | `ClaudeService.kt` — stream-json parsing (`handleStreamEvent`, `textBuffer` fallback) | `vscode-extension/src/claude.ts` — `reviewPR` event loop |
-| `GitHubService.kt` — `encodeBody` / `decodeReview` / `buildCommentArray` | `vscode-extension/src/github.ts` — same functions |
+| `GitHubService.kt` — `encodeBody` / `decodeReview` / `buildCommentArray` / `effectiveBody` / `buildOrphanSection` | `vscode-extension/src/github.ts` — same functions |
+| `webview/src/lib/validateComments.ts` — snap radius and orphan partition rules | No host counterpart; behavior is shared via the bridge's `SaveDraftRequest.orphans` field |
 | `GitHubService.kt` — GitHub API calls (URL structure, headers, error handling) | `vscode-extension/src/github.ts` — `ghRequest` helper and all callers |
 | `PRToolWindowFactory.buildQuery` — PR search query logic | `vscode-extension/src/github.ts` — `searchPRs` |
 | `GitHubAuthService.findGhBinary` — known gh binary paths | `vscode-extension/src/github.ts` — `findGhBinary` |
@@ -228,6 +230,19 @@ Creating a GitHub pending review requires omitting `event` entirely from the POS
 ### 422 fallback — body-first, then add comments individually
 When creating a pending review with inline comments returns 422 (invalid path or line number), `saveDraftReview` falls back to: (1) create the review with an empty comments array, (2) POST each comment individually to `reviews/{id}/comments`. This keeps exactly one pending review in existence at all times. **Do not revert to the old probe-review approach** (creating a temp review per comment and deleting it) — delete failures leave orphaned pending reviews whose comments appear as duplicates in the PR diff view for the author.
 
+### Client-side comment-position validation (`validateComments`) + ±3 snap
+The webview validates each `LineComment` against the parsed diff before sending the save to the host. The rules in `webview/src/lib/validateComments.ts`:
+
+1. **In-hunk lines** (the comment's new-file line number appears in some hunk) — keep as-is.
+2. **Within ±3 lines** of the nearest hunk line in that file — silently snap the comment to the nearest valid line. Counting drift is the most common LLM failure mode; ±3 fixes it without enabling misattribution.
+3. **Anything farther** — partition as an orphan. The webview surfaces orphans in a dedicated "Unanchored comments" section above the diff (not in `DiffViewer`, since their position has no anchor to render against). The header counter only counts inline-eligible comments — the "1/1" counter no longer points at things the user cannot scroll to.
+
+On save the webview passes `orphans: LineComment[]` through `SaveDraftRequest`. Both hosts forward this to `saveDraftReview`, which: (a) excludes orphan tuples (`file|line|type|body`) from `buildCommentArray`, (b) appends a `**Comments not attached inline (invalid diff positions):**` section to the review body via `buildOrphanSection`. The 422 fallback still exists as a safety net for cases where the diff text the webview saw differs from what GitHub anchors against — its dropped-section is concatenated *after* the pre-known orphan section, not replacing it.
+
+**Why not snap farther than 3 lines?** The review prompt's own rule — "a misattributed comment is worse than no comment" — applies here too. Beyond ±3, the snap is no longer "fix counting drift on a hunk Claude was actually looking at"; it's "guess which unrelated change Claude meant," which is the failure mode this code is supposed to avoid.
+
+**Why no JS unit test for `validateComments`?** The webview has no test runner configured (it would require pulling in vitest + jsdom + react-diff-view test fixtures). The orphan-handling end-to-end behavior is covered on the Kotlin side (`GitHubServiceNetworkTest` — orphan stripped from inline POST, body section populated). If the webview gains a test runner in the future, add unit tests for the in-hunk / snap / orphan partitions.
+
 ### SSRF prevention
 `PluginSettings.setGithubBaseUrl()` rejects any URL not starting with `https://`, falling back to `https://github.com`. This prevents a crafted base URL from forwarding GitHub tokens to an attacker-controlled host.
 
@@ -280,6 +295,12 @@ PR list filters (`prStateFilter`, `assignedToMeFilter`, `reviewRequestedFilter`)
 ./gradlew check                                      # run all tests (jvmTest + unitTest wired into check)
 ./gradlew :core:jvmTest :intellij-plugin:unitTest   # run tests directly
 ./gradlew idea                           # regenerate .iml/.ipr files (run after adding new excludeDirs)
+
+# Frontend (TypeScript) — run from inside the respective directory:
+(cd webview && npm run lint)            # ESLint on webview React code (rules-of-hooks errors, others warn)
+(cd webview && npx tsc --noEmit)        # type-check only (no build)
+(cd vscode-extension && npm run lint)   # ESLint on VS Code extension (clean — no warnings expected)
+(cd vscode-extension && npx tsc --noEmit)
 ```
 
 Note: `:core:test` is the old task name (plain Java plugin). The KMP equivalent is `:core:jvmTest`.
@@ -303,6 +324,7 @@ The `idea` Gradle plugin is applied to the root project and all subprojects. It 
 - **Google Java Style** (4-space indent, 100-col limit, Spotless enforced): no FQNs in method bodies (always add an import), descriptive local variable names, static imports before non-static, braces on all blocks.
 - **Comments**: only where the *why* is non-obvious — intentionally swallowed exceptions, non-obvious platform workarounds, magic error codes. Never restate what the method name says.
 - **Commit conventions**: no `Co-Authored-By` trailer.
+- **Frontend ESLint**: `npm run lint` must exit 0 for both `webview/` and `vscode-extension/` before completing any TypeScript task. The `webview/` config keeps `react-hooks/rules-of-hooks` as **error** (catches calling hooks inside conditionals or after early returns — the bug class behind a recent blank-screen regression). Other react-hooks v7 strictness (`set-state-in-effect`, `immutability`, `refs`) is downgraded to warn so pre-existing patterns don't block work; clean those up incrementally. The `vscode-extension/` config enables `no-floating-promises`, `no-misused-promises`, and `await-thenable` — async bugs that would silently fail at runtime. Do not add `// eslint-disable` comments without a `--` comment explaining why.
 
 ---
 
