@@ -7,7 +7,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.module.kotlin.KotlinModule;
 import com.intellij.ide.BrowserUtil;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
@@ -23,15 +25,23 @@ import com.jinloes.prpilot.services.PendingReviewIndex;
 import com.jinloes.prpilot.settings.PluginSettings;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import java.awt.Container;
+import java.awt.Window;
+import java.awt.event.HierarchyEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.awt.event.WindowFocusListener;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import javax.swing.JComponent;
+import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.cef.browser.CefBrowser;
@@ -53,7 +63,7 @@ import org.cef.handler.CefLoadHandlerAdapter;
  * </ul>
  */
 @Slf4j
-public class WebviewPanel {
+public class WebviewPanel implements Disposable {
 
     // --- Outbound DTO records (Java → JS) ---
 
@@ -113,7 +123,8 @@ public class WebviewPanel {
 
     // --- Infrastructure ---
 
-    private final HttpServer httpServer;
+    private volatile HttpServer httpServer;
+    private volatile boolean disposed;
     private final JBCefBrowser browser;
     private final JBCefJSQuery bridgeQuery;
     private final ObjectMapper mapper =
@@ -138,10 +149,12 @@ public class WebviewPanel {
     private Consumer<PullRequest> onPRSelected = pr -> {};
     private Runnable onPageReady = () -> {};
 
+    private volatile Window listenedWindow;
+    private volatile WindowFocusListener focusListener;
+
     public WebviewPanel(Project project) {
         this.project = project;
         this.claudeService = new IntellijClaudeService(project.getBasePath());
-        httpServer = tryStartServer();
         browser = new JBCefBrowser();
         bridgeQuery = JBCefJSQuery.create((JBCefBrowserBase) browser);
 
@@ -166,17 +179,91 @@ public class WebviewPanel {
                         },
                         browser.getCefBrowser());
 
-        if (httpServer != null) {
-            String url = "http://127.0.0.1:" + httpServer.getAddress().getPort() + "/";
-            log.info("Loading webview from {}", url);
-            browser.loadURL(url);
-        } else {
-            browser.loadHTML(
-                    "<html><body style='color:#e8a030;background:#0a0805;"
-                            + "font-family:monospace'>"
-                            + "<p>Could not start webview server</p>"
-                            + "</body></html>");
+        browser.loadHTML(
+                "<html><body style='color:#888;background:#0a0805;"
+                        + "font-family:monospace;padding:1em'>"
+                        + "<p>Starting webview…</p>"
+                        + "</body></html>");
+
+        getApplication().executeOnPooledThread(this::startServerAndLoad);
+
+        installPostSleepResizeFix();
+    }
+
+    private void startServerAndLoad() {
+        HttpServer server = tryStartServer();
+        if (disposed) {
+            if (server != null) {
+                server.stop(0);
+            }
+            return;
         }
+        httpServer = server;
+        if (server == null) {
+            getApplication()
+                    .invokeLater(
+                            () ->
+                                    browser.loadHTML(
+                                            "<html><body style='color:#e8a030;"
+                                                    + "background:#0a0805;"
+                                                    + "font-family:monospace'>"
+                                                    + "<p>Could not start webview server</p>"
+                                                    + "</body></html>"));
+            return;
+        }
+        String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
+        log.info("Loading webview from {}", url);
+        getApplication().invokeLater(() -> browser.loadURL(url));
+    }
+
+    /**
+     * After a macOS wake-from-sleep, the heavyweight JCEF native surface can keep its pre-sleep
+     * bounds while the Swing parent has already resized — leaving the browser visibly clipped or
+     * letterboxed inside the tool window. Re-syncing the layout whenever the host IDE window
+     * regains focus reliably catches the wake case (focus is restored when the user interacts after
+     * the screen comes back).
+     */
+    private void installPostSleepResizeFix() {
+        JComponent comp = (JComponent) browser.getComponent();
+        comp.addHierarchyListener(
+                e -> {
+                    if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0) {
+                        attachFocusListener(comp);
+                    }
+                });
+    }
+
+    private void attachFocusListener(JComponent comp) {
+        Window window = SwingUtilities.getWindowAncestor(comp);
+        if (window == listenedWindow) {
+            return;
+        }
+        if (listenedWindow != null && focusListener != null) {
+            listenedWindow.removeWindowFocusListener(focusListener);
+        }
+        listenedWindow = window;
+        if (window == null) {
+            focusListener = null;
+            return;
+        }
+        focusListener =
+                new WindowAdapter() {
+                    @Override
+                    public void windowGainedFocus(WindowEvent e) {
+                        SwingUtilities.invokeLater(() -> resyncBrowserBounds(comp));
+                    }
+                };
+        window.addWindowFocusListener(focusListener);
+    }
+
+    static void resyncBrowserBounds(JComponent comp) {
+        Container parent = comp.getParent();
+        if (parent != null) {
+            parent.doLayout();
+        }
+        comp.invalidate();
+        comp.revalidate();
+        comp.repaint();
     }
 
     private HttpServer tryStartServer() {
@@ -184,7 +271,6 @@ public class WebviewPanel {
             HttpServer s = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             s.createContext("/", this::serveResource);
             s.start();
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> s.stop(0)));
             log.debug("Webview HTTP server listening on port {}", s.getAddress().getPort());
             return s;
         } catch (IOException e) {
@@ -194,23 +280,43 @@ public class WebviewPanel {
     }
 
     private void serveResource(HttpExchange exchange) throws IOException {
-        String path = exchange.getRequestURI().getPath();
-        if ("/".equals(path)) {
-            path = "/index.html";
+        String resource = resolveResourcePath(exchange.getRequestURI().getPath());
+        if (resource == null) {
+            exchange.sendResponseHeaders(404, 0);
+            exchange.close();
+            return;
         }
-        try (InputStream in = WebviewPanel.class.getResourceAsStream("/webview" + path)) {
+        try (InputStream in = WebviewPanel.class.getResourceAsStream(resource)) {
             if (in == null) {
                 exchange.sendResponseHeaders(404, 0);
-                exchange.getResponseBody().close();
+                exchange.close();
                 return;
             }
             byte[] bytes = in.readAllBytes();
-            exchange.getResponseHeaders().add("Content-Type", mimeFor(path));
+            exchange.getResponseHeaders().add("Content-Type", mimeFor(resource));
             exchange.getResponseHeaders().add("Cache-Control", "no-store");
             exchange.sendResponseHeaders(200, bytes.length);
-            exchange.getResponseBody().write(bytes);
-            exchange.getResponseBody().close();
+            try (var out = exchange.getResponseBody()) {
+                out.write(bytes);
+            }
         }
+    }
+
+    /**
+     * Maps a request path to a classpath resource path under {@code /webview/}, or returns null if
+     * the request would escape that root.
+     */
+    static String resolveResourcePath(String requestPath) {
+        if (StringUtils.isBlank(requestPath) || !requestPath.startsWith("/")) {
+            return null;
+        }
+        String path = "/".equals(requestPath) ? "/index.html" : requestPath;
+        String candidate = "/webview" + path;
+        String normalized = URI.create(candidate).normalize().getPath();
+        if (!normalized.startsWith("/webview/")) {
+            return null;
+        }
+        return normalized;
     }
 
     private static String mimeFor(String path) {
@@ -803,17 +909,18 @@ public class WebviewPanel {
 
     /**
      * Serializes {@code payload} to JSON and pushes it into the webview via {@code
-     * __handleMessage}.
+     * __handleMessage}. The JSON is embedded directly as a JS expression (JSON is a valid JS
+     * literal) instead of as a quoted string, avoiding script-injection risk from untrusted PR
+     * content. U+2028/U+2029 are escaped because they are line terminators in JS but appear as
+     * literal characters inside JSON strings.
      */
     private void pushMessage(Object payload) {
         try {
             String json = mapper.writeValueAsString(payload);
-            String escaped = escapeForJsString(json);
+            String safe = json.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029");
             browser.getCefBrowser()
                     .executeJavaScript(
-                            "if(window.__handleMessage){window.__handleMessage('"
-                                    + escaped
-                                    + "');}",
+                            "if(window.__handleMessage){window.__handleMessage(" + safe + ");}",
                             browser.getCefBrowser().getURL(),
                             0);
         } catch (JsonProcessingException e) {
@@ -833,13 +940,6 @@ public class WebviewPanel {
                                                 c.getFile(), c.getLine(), c.getType(), c.getBody()))
                         .toList();
         return new ReviewResultDto(r.getSummary(), r.getVerdict(), comments);
-    }
-
-    private static String escapeForJsString(String s) {
-        return s.replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace("\r", "\\r")
-                .replace("\n", "\\n");
     }
 
     /** Pushes the PR list into the webview via the bridge. Call from the EDT. */
@@ -897,5 +997,26 @@ public class WebviewPanel {
 
     public JComponent getComponent() {
         return browser.getComponent();
+    }
+
+    @Override
+    public void dispose() {
+        disposed = true;
+        if (listenedWindow != null && focusListener != null) {
+            listenedWindow.removeWindowFocusListener(focusListener);
+            listenedWindow = null;
+            focusListener = null;
+        }
+        HttpServer server = httpServer;
+        if (server != null) {
+            try {
+                server.stop(0);
+            } catch (Exception e) {
+                log.warn("HttpServer.stop failed: {}", e.getMessage());
+            }
+            httpServer = null;
+        }
+        Disposer.dispose(bridgeQuery);
+        Disposer.dispose(browser);
     }
 }

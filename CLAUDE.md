@@ -204,6 +204,16 @@ The review prompt instructs Claude to use IDE tools (via Claude Code's IDE MCP i
 ### Review prompt output schema
 Output must be a strict JSON object: `summary` (string, max 800 chars, markdown with `## Overview` / `## Key Changes` / `## Risk Areas` sections), `verdict` (`"APPROVE"` | `"REQUEST_CHANGES"` | `"COMMENT"`), `lineComments` array (max 12) with `file`, `line` (positive int), `type` (`"issue"` | `"suggestion"` | `"note"`), `body` (≤300 chars). All untrusted input tags (`<pr_metadata>`, `<pr_description>`, `<prior_review>`, `<known_patterns>`, `<existing_reviews>`) are marked data-only in `REVIEW_INSTRUCTIONS` to guard against prompt injection.
 
+### Prompt-injection escape: untrusted content closing tags
+Untrusted content (PR body, prior review, existing reviews, known patterns, chat history, chat selection, diff in chat context) is wrapped in data-only tags before being sent to Claude. Because the Claude CLI is invoked with `--dangerously-skip-permissions`, a successful tag-breakout would grant the attacker full tool access (Bash, Read, Write, network). Every wrapper function escapes the closing tag of its container inside the untrusted payload:
+
+- `ClaudeService.buildPrompt` — escapes `</pr_description>`, `</known_patterns>`, `</prior_review>`, `</existing_reviews>` via `escapeClosingTag(content, tag)`, which replaces `</tag>` with `&lt;/tag>`.
+- `ClaudeService.buildChatPrompt` — escapes `</pr_context>`, `</turn>` (per history message), `</user_message>`.
+- `ClaudeService.buildFocusedChatPrompt` — escapes `</code_context>`, `</user_message>`.
+- `vscode-extension/src/claude.ts` mirrors all of the above via its own `escapeClosingTag`.
+
+The escape lives **inside the wrapping function** so callers (e.g. `WebviewPanel.buildPrContext`, `extension.ts buildPrContext`) don't need to know which tag wraps their content. Do not move the escape into callers.
+
 ### gh MCP tool prerequisite for review generation
 Both the IntelliJ plugin and VS Code extension pass `diff = ""` in `PRReviewRequest` / `buildPrompt`. There is no inline `<diff>` path. `buildPrompt` always emits a `<fetch_diff>` block instructing Claude to run `gh pr diff <number> --repo <owner>/<repo>` before reviewing.
 
@@ -254,6 +264,14 @@ On save the webview passes `orphans: LineComment[]` through `SaveDraftRequest`. 
 
 ### Webview served via embedded HTTP server
 `intellij-plugin/build.gradle` runs `npm run build` in `webview/` and copies `dist/**` into the plugin JAR as `webview/**`. At runtime, `WebviewPanel` starts a `com.sun.net.httpserver.HttpServer` on a random loopback port and streams classpath resources on demand (e.g. `GET /index.html` → `/webview/index.html`). The browser loads `http://127.0.0.1:PORT/`. This gives Chromium a proper HTTP same-origin context so ES modules load correctly. `file://` is not used — Chromium assigns `null` origin to every local file, which silently blocks ES module scripts even for same-directory resources.
+
+Server startup is deferred to a pooled thread (`HttpServer.create` performs a blocking `bind()` syscall) — the JCEF browser shows a "Starting webview…" placeholder until the port is known. The path-traversal guard `WebviewPanel.resolveResourcePath` normalizes the request URI and rejects anything that does not stay under `/webview/`; `HttpExchange` already percent-decodes the path so `..` segments and their `%2e%2e` forms are both rejected.
+
+### `WebviewPanel` is `Disposable`
+`WebviewPanel` implements `com.intellij.openapi.Disposable` and is registered as a child of `toolWindow.getDisposable()` in `PRToolWindowFactory`. `dispose()` stops the embedded `HttpServer`, removes the wake-from-sleep focus listener, and disposes `bridgeQuery` and `browser`. Do not register a per-panel JVM shutdown hook for the server — the disposer tree is the canonical lifecycle, and shutdown hooks leak across tool-window re-creations.
+
+### Webview push messages: JSON as a JS expression
+`WebviewPanel.pushMessage` serializes the payload via Jackson and embeds the JSON directly into the `executeJavaScript` call as a JS expression — `window.__handleMessage({...})` rather than `window.__handleMessage('...escaped JSON string...')`. JSON is a valid JS literal, so no character-by-character escaping is needed. The only post-processing is to replace the LINE SEPARATOR and PARAGRAPH SEPARATOR code points (U+2028 / U+2029) with their `\u2028` / `\u2029` Unicode-escape forms, because those characters terminate JS string literals despite appearing as literal code points inside JSON strings. **Do not reintroduce the previous `escapeForJsString` approach** — it failed to escape `</script>`, control characters, and the line-separator characters above, so any untrusted text containing them could break out of the JS string literal.
 
 ### JCEF availability guard
 `PRToolWindowFactory` checks `JBCefApp.isSupported()` before creating `WebviewPanel`. JCEF is unavailable in some IntelliJ variants (e.g., remote development thin clients). When JCEF is not available, a plain label is shown explaining the requirement; no fallback Swing UI is present.

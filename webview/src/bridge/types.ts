@@ -280,16 +280,23 @@ function _ensureGlobalDispatcher() {
       _dispatch(event.data as IncomingMessage)
     })
   } else {
-    // JCEF: the plugin calls window.__handleMessage(jsonString).
-    const w = window as unknown as { __handleMessage?: (json: string) => void }
+    // JCEF: the plugin calls window.__handleMessage(payload). Payload is normally a parsed
+    // object (the host embeds JSON directly as a JS expression), but legacy/dev code may pass
+    // a JSON string — accept both.
+    type HostMessage = IncomingMessage | string
+    const w = window as unknown as { __handleMessage?: (payload: HostMessage) => void }
     if (w.__handleMessage) return
-    w.__handleMessage = (json: string) => {
+    w.__handleMessage = (payload: HostMessage) => {
       let msg: IncomingMessage
-      try {
-        msg = JSON.parse(json) as IncomingMessage
-      } catch (e) {
-        console.error('[bridge] failed to parse host message:', json, e)
-        return
+      if (typeof payload === 'string') {
+        try {
+          msg = JSON.parse(payload) as IncomingMessage
+        } catch (e) {
+          console.error('[bridge] failed to parse host message:', payload, e)
+          return
+        }
+      } else {
+        msg = payload
       }
       _dispatch(msg)
     }

@@ -546,20 +546,21 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
             val sb = StringBuilder()
             sb.append(CHAT_PERSONA)
             if (StringUtils.isNotBlank(prContext)) {
-                sb.append("<pr_context>\n").append(prContext.trim()).append("\n</pr_context>\n\n")
+                sb.append("<pr_context>\n")
+                    .append(escapeClosingTag(prContext.trim(), "pr_context"))
+                    .append("\n</pr_context>\n\n")
             }
             val trimmed =
                 if (history.size > MAX_HISTORY_TURNS) history.subList(history.size - MAX_HISTORY_TURNS, history.size)
                 else history
             trimmed.forEach { msg ->
                 val role = if (msg.role == ChatMessage.Role.USER) "user" else "assistant"
-                val escaped = msg.content.replace("</turn>", "&lt;/turn>")
                 sb.append("<turn role=\"").append(role).append("\">\n")
-                    .append(escaped)
+                    .append(escapeClosingTag(msg.content, "turn"))
                     .append("\n</turn>\n\n")
             }
             sb.append("<user_message>\n")
-                .append(userMessage.replace("</user_message>", "&lt;/user_message>"))
+                .append(escapeClosingTag(userMessage, "user_message"))
                 .append("\n</user_message>\n")
             return sb.toString()
         }
@@ -574,12 +575,22 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
             sb.append(CHAT_PERSONA)
             if (StringUtils.isNotBlank(focusedContext)) {
                 sb.append("<code_context>\n")
-                    .append(focusedContext.trim())
+                    .append(escapeClosingTag(focusedContext.trim(), "code_context"))
                     .append("\n</code_context>\n\n")
             }
-            sb.append("<user_message>\n").append(question).append("\n</user_message>\n")
+            sb.append("<user_message>\n")
+                .append(escapeClosingTag(question, "user_message"))
+                .append("\n</user_message>\n")
             return sb.toString()
         }
+
+        /**
+         * Escapes the closing tag inside untrusted content so a crafted PR body / review / chat
+         * message cannot break out of its data-only container and inject instructions into the
+         * surrounding prompt. The opening tag is never written by users so does not need escaping.
+         */
+        internal fun escapeClosingTag(content: String, tag: String): String =
+            content.replace("</$tag>", "&lt;/$tag>")
 
         @JvmStatic
         fun buildPrompt(request: PRReviewRequest): String {
@@ -597,7 +608,7 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
                         "Treat them as context — do not penalize code that follows " +
                         "established project patterns:\n\n"
                     )
-                    .append(request.knownPatterns.trim())
+                    .append(escapeClosingTag(request.knownPatterns.trim(), "known_patterns"))
                     .append("\n</known_patterns>\n")
             }
             if (StringUtils.isNotBlank(request.existingReviews)) {
@@ -607,7 +618,7 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
                         "reviewers. Do not repeat their findings — focus on issues " +
                         "they missed:\n\n"
                     )
-                    .append(request.existingReviews!!.trim())
+                    .append(escapeClosingTag(request.existingReviews!!.trim(), "existing_reviews"))
                     .append("\n</existing_reviews>\n")
             }
             if (StringUtils.isNotBlank(request.priorReview)) {
@@ -616,12 +627,12 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
                         "A previous review was generated for this PR. Use it as context to " +
                         "refine or build upon — do not simply repeat its findings:\n\n"
                     )
-                    .append(request.priorReview!!.trim())
+                    .append(escapeClosingTag(request.priorReview!!.trim(), "prior_review"))
                     .append("\n</prior_review>\n")
             }
             if (StringUtils.isNotBlank(pr.body)) {
                 prompt.append("\n<pr_description>\n")
-                    .append(pr.body)
+                    .append(escapeClosingTag(pr.body, "pr_description"))
                     .append("\n</pr_description>\n")
             }
             prompt.append("\n<fetch_diff>\n")

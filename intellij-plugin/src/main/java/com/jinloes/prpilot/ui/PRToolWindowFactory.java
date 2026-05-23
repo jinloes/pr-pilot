@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
 import com.intellij.openapi.wm.ToolWindowType;
@@ -45,6 +46,7 @@ public class PRToolWindowFactory implements ToolWindowFactory {
         }
 
         WebviewPanel webviewPanel = new WebviewPanel(project);
+        Disposer.register(toolWindow.getDisposable(), webviewPanel);
         wireWebviewLoading(project, webviewPanel);
         Content webContent = factory.createContent(webviewPanel.getComponent(), "Review", false);
         toolWindow.getContentManager().addContent(webContent);

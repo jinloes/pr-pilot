@@ -109,6 +109,14 @@ function findClaudeBinary(): string {
 
 // ── Prompt building ────────────────────────────────────────────────────────────
 
+/**
+ * Escapes the closing tag inside untrusted content so a crafted PR body / review / chat message
+ * cannot break out of its data-only container and inject instructions into the surrounding prompt.
+ */
+export function escapeClosingTag(content: string, tag: string): string {
+    return content.split(`</${tag}>`).join(`&lt;/${tag}>`);
+}
+
 export function buildPrompt(options: {
     pr: PR;
     existingReviews?: string;
@@ -119,16 +127,16 @@ export function buildPrompt(options: {
     let prompt = REVIEW_INSTRUCTIONS;
     prompt += `\n<pr_metadata>\nnumber: ${pr.number}\nrepo: ${pr.owner}/${pr.repo}\ntitle: ${pr.title}\n</pr_metadata>\n`;
     if (knownPatterns?.trim()) {
-        prompt += `\n<known_patterns>\nThe following patterns have been noted in this repository. Treat them as context — do not penalize code that follows established project patterns:\n\n${knownPatterns.trim()}\n</known_patterns>\n`;
+        prompt += `\n<known_patterns>\nThe following patterns have been noted in this repository. Treat them as context — do not penalize code that follows established project patterns:\n\n${escapeClosingTag(knownPatterns.trim(), 'known_patterns')}\n</known_patterns>\n`;
     }
     if (existingReviews?.trim()) {
-        prompt += `\n<existing_reviews>\nThe following reviews have already been submitted by other reviewers. Do not repeat their findings — focus on issues they missed:\n\n${existingReviews.trim()}\n</existing_reviews>\n`;
+        prompt += `\n<existing_reviews>\nThe following reviews have already been submitted by other reviewers. Do not repeat their findings — focus on issues they missed:\n\n${escapeClosingTag(existingReviews.trim(), 'existing_reviews')}\n</existing_reviews>\n`;
     }
     if (priorReview?.trim()) {
-        prompt += `\n<prior_review>\nA previous review was generated for this PR. Use it as context to refine or build upon — do not simply repeat its findings:\n\n${priorReview.trim()}\n</prior_review>\n`;
+        prompt += `\n<prior_review>\nA previous review was generated for this PR. Use it as context to refine or build upon — do not simply repeat its findings:\n\n${escapeClosingTag(priorReview.trim(), 'prior_review')}\n</prior_review>\n`;
     }
     if (pr.body?.trim()) {
-        prompt += `\n<pr_description>\n${pr.body}\n</pr_description>\n`;
+        prompt += `\n<pr_description>\n${escapeClosingTag(pr.body, 'pr_description')}\n</pr_description>\n`;
     }
     prompt += `\n<fetch_diff>\nRun: gh pr diff ${pr.number} --repo ${pr.owner}/${pr.repo}\n</fetch_diff>\n`;
     return prompt;
@@ -141,26 +149,25 @@ export function buildChatPrompt(
 ): string {
     let prompt = CHAT_PERSONA;
     if (prContext.trim()) {
-        prompt += `<pr_context>\n${prContext.trim()}\n</pr_context>\n\n`;
+        prompt += `<pr_context>\n${escapeClosingTag(prContext.trim(), 'pr_context')}\n</pr_context>\n\n`;
     }
     const trimmed = history.length > MAX_HISTORY_TURNS
         ? history.slice(history.length - MAX_HISTORY_TURNS)
         : history;
     for (const msg of trimmed) {
         const role = msg.role === 'USER' ? 'user' : 'assistant';
-        const escaped = msg.content.replace(/<\/turn>/g, '&lt;/turn>');
-        prompt += `<turn role="${role}">\n${escaped}\n</turn>\n\n`;
+        prompt += `<turn role="${role}">\n${escapeClosingTag(msg.content, 'turn')}\n</turn>\n\n`;
     }
-    prompt += `<user_message>\n${userMessage.replace(/<\/user_message>/g, '&lt;/user_message>')}\n</user_message>\n`;
+    prompt += `<user_message>\n${escapeClosingTag(userMessage, 'user_message')}\n</user_message>\n`;
     return prompt;
 }
 
 export function buildFocusedChatPrompt(focusedContext: string, question: string): string {
     let prompt = CHAT_PERSONA;
     if (focusedContext.trim()) {
-        prompt += `<code_context>\n${focusedContext.trim()}\n</code_context>\n\n`;
+        prompt += `<code_context>\n${escapeClosingTag(focusedContext.trim(), 'code_context')}\n</code_context>\n\n`;
     }
-    prompt += `<user_message>\n${question}\n</user_message>\n`;
+    prompt += `<user_message>\n${escapeClosingTag(question, 'user_message')}\n</user_message>\n`;
     return prompt;
 }
 
