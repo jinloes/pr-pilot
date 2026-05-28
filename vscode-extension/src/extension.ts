@@ -3,6 +3,21 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as github from './github';
 import * as claude from './claude';
+import * as copilot from './copilot';
+
+type Provider = 'claude' | 'copilot';
+
+function provider(): Provider {
+    const value = config().get<string>('reviewProvider', 'claude');
+    return value === 'copilot' ? 'copilot' : 'claude';
+}
+
+function cancelActiveProvider(): void {
+    // Cancel both — only one has an active process at any time, but reading the provider
+    // setting here can race with a config change so we just send the signal to both.
+    claude.cancelCurrentRequest();
+    copilot.cancelCurrentRequest();
+}
 
 export function activate(context: vscode.ExtensionContext) {
     const provider = new ClaudeReviewsViewProvider(context.extensionUri);
@@ -91,7 +106,7 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
                     await handleGenerateReview(state, msg);
                     break;
                 case 'cancelReview':
-                    claude.cancelCurrentRequest();
+                    cancelActiveProvider();
                     break;
                 case 'saveDraft':
                     await handleSaveDraft(state, msg);
@@ -154,7 +169,13 @@ function githubBaseUrl(): string {
 }
 
 function reviewModel(): string {
-    return config().get<string>('reviewModel', '');
+    const key = provider() === 'copilot' ? 'reviewModelCopilot' : 'reviewModel';
+    return config().get<string>(key, '');
+}
+
+function reviewEffort(): string {
+    const value = config().get<string>('reviewEffort', 'medium');
+    return value && value.trim().length > 0 ? value : 'medium';
 }
 
 function workingDir(): string {
@@ -191,7 +212,7 @@ async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>):
     } catch (err) {
         const message = errorMessage(err);
         state.cachedToken = null;
-        vscode.window.showErrorMessage(`Claude Reviews: ${message}`);
+        vscode.window.showErrorMessage(`PR Pilot: ${message}`);
         push(state, { type: 'prListLoaded', prs: [] });
     }
 }
@@ -268,14 +289,24 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         };
 
         const prompt = claude.buildPrompt({ pr, existingReviews });
+        const isCopilot = provider() === 'copilot';
 
-        const result = await claude.reviewPR({
-            prompt,
-            model: reviewModel(),
-            workingDir: workingDir(),
-            onStatus: (status) => push(state, { type: 'reviewGenerating', message: status }),
-            onChunk: (kind, chunk) => push(state, { type: 'reviewChunk', kind, chunk }),
-        });
+        const result = isCopilot
+            ? await copilot.reviewPR({
+                prompt,
+                model: reviewModel(),
+                effort: reviewEffort(),
+                workingDir: workingDir(),
+                onStatus: (status) => push(state, { type: 'reviewGenerating', message: status }),
+                onChunk: (kind, chunk) => push(state, { type: 'reviewChunk', kind, chunk }),
+            })
+            : await claude.reviewPR({
+                prompt,
+                model: reviewModel(),
+                workingDir: workingDir(),
+                onStatus: (status) => push(state, { type: 'reviewGenerating', message: status }),
+                onChunk: (kind, chunk) => push(state, { type: 'reviewChunk', kind, chunk }),
+            });
 
         state.activeReviewResult = result;
         push(state, { type: 'reviewResult', result, diff });
@@ -363,12 +394,20 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
         ? claude.buildFocusedChatPrompt(context, question)
         : claude.buildChatPrompt(buildPrContext(state), history.slice(0, -1), question);
 
+    const isCopilot = provider() === 'copilot';
     try {
-        const response = await claude.chat({
-            prompt,
-            workingDir: workingDir(),
-            onChunk: (chunk) => push(state, { type: 'chatChunk', chunk }),
-        });
+        const response = isCopilot
+            ? await copilot.chat({
+                prompt,
+                effort: reviewEffort(),
+                workingDir: workingDir(),
+                onChunk: (chunk) => push(state, { type: 'chatChunk', chunk }),
+            })
+            : await claude.chat({
+                prompt,
+                workingDir: workingDir(),
+                onChunk: (chunk) => push(state, { type: 'chatChunk', chunk }),
+            });
         history.push({ role: 'ASSISTANT', content: response });
         push(state, { type: 'chatResponse', response });
     } catch (err) {

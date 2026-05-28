@@ -1,6 +1,6 @@
 # PR Pilot
 
-IntelliJ and VS Code extension that lists GitHub Pull Requests and generates AI-powered code reviews using a local AI CLI.
+IntelliJ and VS Code extension that lists GitHub Pull Requests and generates AI-powered code reviews using a local AI CLI (Claude Code or GitHub Copilot, selected per-host in settings).
 
 > **CLAUDE.md maintenance rule:** Update this file as part of every coding task.
 > - Update "Project layout" when files are added or renamed.
@@ -24,6 +24,7 @@ core/                                  – KMP module (jvm + js targets); Java s
       LineComment.kt                 – @Serializable class; file, line, type ("issue"|"suggestion"|"note"), body
       ChatMessage.kt                 – @Serializable data class; Role + content for chat history
       PRReviewRequest.kt             – @Serializable data class; parameter object for ClaudeService.reviewPR
+      ReviewProvider.kt              – enum (CLAUDE | COPILOT); fromId(id) Java-friendly factory
     parser/
       DiffParser.kt                  – Kotlin object; unified diff parser; DiffFile / DiffLine types
     util/
@@ -32,6 +33,8 @@ core/                                  – KMP module (jvm + js targets); Java s
     services/
       GitHubAuthService.kt           – Runs `gh auth token`; probes known gh binary paths
       ClaudeService.kt               – Shells out to `claude --print`; synchronous/blocking API
+      CopilotService.kt              – Shells out to `copilot -p <prompt> --allow-all-tools -s`; mirrors ClaudeService API; reuses ClaudeService prompt builders + parseReview
+      CopilotModelDiscovery.kt       – Runs `copilot help config` once per session, parses the model list, caches in memory
     services/stream/
       StreamEvent.kt                 – @Serializable DTO for claude stream-json events
       EventMessage.kt                – @Serializable DTO for message payload inside a stream event
@@ -68,7 +71,7 @@ intellij-plugin/                       – IntelliJ Platform plugin; depends on 
   src/main/java/com/jinloes/prpilot/
     services/
       IntellijGitHubService.java     – @Service adapter: wraps core GitHubService with PluginSettings apiBase
-      IntellijClaudeService.java     – Wrapper: dispatches core ClaudeService to pooled thread, callbacks to EDT
+      IntellijClaudeService.java     – Wrapper: dispatches core ClaudeService or CopilotService (per PluginSettings.reviewProvider) to pooled thread, callbacks to EDT
       PRNotificationService.java     – Background polling service; fires IDE balloon notifications
       PRNotificationStartup.java     – postStartupActivity that starts polling if enabled
     settings/
@@ -102,11 +105,12 @@ webview/                               – Vite + React + TypeScript webview
 
 vscode-extension/                      – VS Code extension (npm build, no Gradle tasks)
   src/
-    extension.ts                       – Entry point; ClaudeReviewsViewProvider; wires all webview messages to github/claude services
+    extension.ts                       – Entry point; ClaudeReviewsViewProvider; dispatches review/chat between claude and copilot based on `pr-pilot.reviewProvider` config
     github.ts                          – GitHub API service: resolveToken (via gh CLI), searchPRs, getPRDiff, loadDraftReview, saveDraftReview, submitReview, deleteDraftReview, getExistingReviewsSummary, detectCurrentRepo
     claude.ts                          – Claude CLI service: reviewPR (stream-json), chat (plain --print), buildPrompt/buildChatPrompt/buildFocusedChatPrompt, cancelCurrentRequest
+    copilot.ts                         – Copilot CLI service: reviewPR + chat via `copilot -p <prompt> --allow-all-tools -s`; re-exports buildPrompt/buildChatPrompt/buildFocusedChatPrompt from claude.ts; cancelCurrentRequest
     core.d.ts                          – Ambient type declarations for the KMP-compiled core module (not yet used; requires @JsExport on Kotlin classes)
-  package.json / tsconfig.json         – TypeScript build config; vscode engine ^1.85.0; contributes claude-reviews.githubBaseUrl + claude-reviews.reviewModel settings
+  package.json / tsconfig.json         – TypeScript build config; vscode engine ^1.85.0; contributes pr-pilot.githubBaseUrl + pr-pilot.reviewModel + pr-pilot.reviewProvider settings
   build.gradle                         – Empty placeholder so settings.gradle include is valid
 ```
 
@@ -126,6 +130,10 @@ When logic changes in one host, the **parallel file in the other host must be up
 | `GitHubService.kt` — GitHub API calls (URL structure, headers, error handling) | `vscode-extension/src/github.ts` — `ghRequest` helper and all callers |
 | `PRToolWindowFactory.buildQuery` — PR search query logic | `vscode-extension/src/github.ts` — `searchPRs` |
 | `GitHubAuthService.findGhBinary` — known gh binary paths | `vscode-extension/src/github.ts` — `findGhBinary` |
+| `ClaudeService.findClaudeBinary` / `CopilotService.findCopilotBinary` — known CLI binary paths | `vscode-extension/src/claude.ts` — `findClaudeBinary` AND `vscode-extension/src/copilot.ts` — `findCopilotBinary` |
+| `CopilotService.kt` — CLI flags (`-p`, `--allow-all-tools`, `--no-color`, `--output-format json`, `--stream on`, `--reasoning-effort`, `--model`) | `vscode-extension/src/copilot.ts` — `runProcess` arg list |
+| `CopilotService.parseCopilotEvent` — JSONL shape coverage | `vscode-extension/src/copilot.ts` — `parseCopilotEvent` |
+| `CopilotService.DEFAULT_REASONING_EFFORT` | `vscode-extension/src/copilot.ts` — `DEFAULT_REASONING_EFFORT` |
 | `webview/src/bridge/types.ts` — any `OutgoingMessage` or `IncomingMessage` shape | `WebviewPanel.java` (IntelliJ) AND `vscode-extension/src/extension.ts` — all message handlers |
 | `PluginSettings` — add a new setting | `vscode-extension/package.json` contributes.configuration AND `vscode-extension/src/extension.ts` reader |
 
@@ -179,21 +187,44 @@ Core `ClaudeService.reviewPR()`, `chat()`, and `chatFocused()` are blocking — 
 
 `ClaudeService(String projectDir)` sets the working directory for all spawned `claude` processes to the project root. This lets the CLI discover and inject `CLAUDE.md` automatically — the plugin does not read or forward `CLAUDE.md` content manually. When `projectDir` is blank/null, the working directory falls back to `$HOME`.
 
+### Provider toggle: Claude vs. Copilot
+`CopilotService` mirrors `ClaudeService`'s public API and is selected per call by reading `PluginSettings.getReviewProvider()` (IntelliJ) or the `pr-pilot.reviewProvider` config (VS Code). Both providers share the same prompt builders (`ClaudeService.buildPrompt` / `buildChatPrompt` / `buildFocusedChatPrompt`) and the same best-effort JSON extract (`ClaudeService.parseReview`) — no provider-specific prompts. Do not duplicate the prompt constants in `CopilotService`; always call into `ClaudeService`'s companion.
+
+**Why one set of prompts:** prompt instructions reference `gh pr diff` (a generic shell command) and "IDE tools" (a no-op when not available). Both CLIs can satisfy the prompt with their own tool ecosystem (Claude Code via MCP, Copilot via `--allow-all-tools` + GitHub MCP). Splitting prompts per provider would multiply the surface that must stay in sync across both hosts.
+
+**Cancel semantics:** `IntellijClaudeService.cancelCurrentRequest()` and the VS Code `cancelActiveProvider()` helper cancel both backends unconditionally. Only one has an active process at any time, but reading the provider setting at cancel time races with a settings change, so we just send the signal to both. This is cheap (each is a CAS + `destroyForcibly()` on a null reference when idle).
+
+**Copilot CLI flags:** `copilot -p <prompt> --allow-all-tools --no-color --output-format json --stream on --reasoning-effort medium [--model <id>]`. `--allow-all-tools` is required for non-interactive mode. `--output-format json --stream on` emits JSONL events so we can stream text deltas to `onChunk("text", …)` and tool-use names to `onStatus(…)` while the agent works — closing most of the perceived latency gap vs. Claude's stream-json. `--reasoning-effort medium` is the documented sane default for review work (enough depth for real bugs, no Opus-tier wall-clock). **Do not** pass the prompt via stdin to `copilot` — the CLI does not support reading the prompt from stdin; prompts are always passed via `-p`. Our prompts stay well under `ARG_MAX` because the diff is fetched on demand inside the review, not embedded.
+
+**Default model:** `reviewModelCopilot` defaults to `claude-sonnet-4.6` — strong at structured JSON output and code reasoning at sub-Opus latency. Users can clear it (empty string → CLI's default routing) or pick any other model.
+
+**Reasoning effort knob:** `reviewEffort` (PluginSettings / `pr-pilot.reviewEffort`) sets `--reasoning-effort`. Default `medium`. The IntelliJ adapter and `extension.ts` read it on every call and pass it through to `CopilotService.reviewPR/chat/chatFocused`; `CopilotService.buildProcess` falls back to `DEFAULT_REASONING_EFFORT = "medium"` if the caller passes a blank string, so settings drift can't accidentally send a missing flag to the CLI. The Claude path ignores this setting.
+
+**Model discovery (`CopilotModelDiscovery`):** the IntelliJ settings UI auto-populates the Copilot model dropdown by running `copilot help config` once per session in a pooled thread, then parsing the indented `` `model`: `` section's `- "model-id"` bullets. Results are cached in a singleton `AtomicReference`; `invalidate()` drops the cache. The probe is best-effort — binary missing, policy-blocked account, schema drift, or 10-second timeout all return an empty list, and the dropdown stays on the hardcoded `COPILOT_MODEL_SUGGESTIONS`. The leading-whitespace regex is intentionally permissive (`^\s*` not `^\s+`) so tests can use `trimIndent()` for readability without breaking the parser. **VS Code does not get this:** the settings schema's `enum` is static at JSON-schema time, so the `pr-pilot.reviewModelCopilot` field stays freeform with `examples`.
+
+**JSONL event parser (`CopilotService.parseCopilotEvent`):** the CLI's JSONL schema is not documented publicly, so the parser is permissive. It recognizes four shapes — simple `{type, text|name}` events, Claude-style streaming (`content_block_delta` / `content_block_start`), Claude full messages (`{type:"assistant", message:{content:[…]}}`), and OpenAI-style (`choices[0].delta.{content,tool_calls}`) — and returns an empty event for unknown shapes. If a run produces only unknown shapes, we log a schema-drift warning rather than crash; the user sees the standard "produced no output" error. The same logic lives in `vscode-extension/src/copilot.ts:parseCopilotEvent` and must stay in sync.
+
+**Stale comment caveat:** if Copilot returns prose with no recoverable JSON, `parseReview` throws and the review surfaces a parse error. There is no fallback that treats the full prose as the `summary`; the user retries.
+
 ### GitHub authentication — no stored token
 The plugin never writes a token to disk. `GitHubAuthService.resolveToken()` runs `gh auth token` each time.
 
-### Finding the `gh` binary
-`GitHubAuthService.findGhBinary()` probes hard-coded paths before falling back to bare `"gh"`:
+### Finding the `gh`, `claude`, and `copilot` binaries
+Each binary lookup probes hard-coded paths before falling back to the bare command name. Same rationale for all three: IntelliJ launched from the macOS Dock doesn't inherit the user's shell `PATH`.
+
+`GitHubAuthService.findGhBinary()` probes:
 ```
 /opt/homebrew/bin/gh   ← Apple Silicon Homebrew
 /usr/local/bin/gh      ← Intel Homebrew / manual
 /usr/bin/gh            ← system package managers
 /home/linuxbrew/.linuxbrew/bin/gh
 ```
-**Why:** IntelliJ launched from the macOS Dock doesn't inherit the user's shell `PATH`. Wrapping in `zsh --login -c` doesn't source `~/.zshrc`, so tools added only there (asdf, mise, etc.) are still not found. `HOME` is set explicitly on the `ProcessBuilder` so `gh` can find its config.
+`ClaudeService.findClaudeBinary()` probes `~/.local/bin/claude`, `~/.npm-global/bin/claude`, `/usr/local/bin/claude`, `/opt/homebrew/bin/claude`, `/usr/bin/claude`. `CopilotService.findCopilotBinary()` probes the same list with `claude` → `copilot`.
+
+**Why:** Wrapping in `zsh --login -c` doesn't source `~/.zshrc`, so tools added only there (asdf, mise, etc.) are still not found. `HOME` is set explicitly on the `ProcessBuilder` so each CLI can find its config.
 
 ### Claude invocation
-The full prompt is written to `stdin` (not passed as a CLI arg) to avoid OS argument-length limits. `claude --print` enables non-interactive mode.
+The full prompt is written to `stdin` (not passed as a CLI arg) to avoid OS argument-length limits. `claude --print` enables non-interactive mode. (Copilot CLI does not support stdin prompts — see "Provider toggle" above for `copilot -p` rationale.)
 
 ### Cancel support — `AtomicReference<Process>`
 `cancelCurrentRequest()` uses `getAndSet(null)` to atomically read and clear `activeProcess` before calling `destroyForcibly()`. This eliminates the TOCTOU race a `volatile` field would leave between the null-check and the destroy call.
@@ -203,6 +234,9 @@ The review prompt instructs Claude to use IDE tools (via Claude Code's IDE MCP i
 
 ### Review prompt output schema
 Output must be a strict JSON object: `summary` (string, max 800 chars, markdown with `## Overview` / `## Key Changes` / `## Risk Areas` sections), `verdict` (`"APPROVE"` | `"REQUEST_CHANGES"` | `"COMMENT"`), `lineComments` array (max 12) with `file`, `line` (positive int), `type` (`"issue"` | `"suggestion"` | `"note"`), `body` (≤300 chars). All untrusted input tags (`<pr_metadata>`, `<pr_description>`, `<prior_review>`, `<known_patterns>`, `<existing_reviews>`) are marked data-only in `REVIEW_INSTRUCTIONS` to guard against prompt injection.
+
+### Cross-layer validation guard in `REVIEW_INSTRUCTIONS`
+The prompt explicitly tells the reviewer to read the request type's schema (proto / OpenAPI / JSON Schema) for field-level constraints before flagging a missing validation in handler code. Required-field, range, and format annotations are typically enforced by a framework validator (e.g. a service-level `validateRequest(ctx)` call, gRPC interceptor, or `@Valid`-style entrypoint annotation) that runs before the handler. **Why:** the most common false-positive pattern observed in reviews of proto-based gRPC services (e.g. LinkedIn Gagarin with SI framework `(validation) = { required: true }`) is the model flagging "missing null check in handler" when the SI framework already rejects the request with `INVALID_ARGUMENT`. The guidance is phrased generically so it covers protoc-gen-validate, OpenAPI, JSON Schema, Spring `@Valid`, etc. — not just LinkedIn's SI. Locked in by `ClaudeServiceTest "schema-validation cross-layer guard present"`.
 
 ### Prompt-injection escape: untrusted content closing tags
 Untrusted content (PR body, prior review, existing reviews, known patterns, chat history, chat selection, diff in chat context) is wrapped in data-only tags before being sent to Claude. Because the Claude CLI is invoked with `--dangerously-skip-permissions`, a successful tag-breakout would grant the attacker full tool access (Bash, Read, Write, network). Every wrapper function escapes the closing tag of its container inside the untrusted payload:
@@ -355,7 +389,10 @@ The `idea` Gradle plugin is applied to the root project and all subprojects. It 
 - `notifyReviewRequested` (default `true`)
 - `notifyStarredRepos` (default `false`)
 - `notificationPollMinutes` (default `5`)
-- `reviewModel` (default `""` — uses CLI default; non-empty passed as `--model <id>`)
+- `reviewModel` (default `""` — Claude CLI model ID; non-empty passed as `--model <id>`)
+- `reviewModelCopilot` (default `"claude-sonnet-4.6"` — Copilot CLI model ID; non-empty passed as `--model <id>`. Sonnet is the speed/quality sweet spot for JSON-schema-constrained review work. Empty string falls back to the CLI's auto-routing. Intentionally freeform: Copilot's available models change over time, so we don't pin a list — `copilot help config` is the source of truth, and the IntelliJ field is an editable combo box with a handful of suggestions plus typing.)
+- `reviewProvider` (default `"claude"` — values `"claude"` | `"copilot"`; selects the backend CLI for both review and chat. `getActiveReviewModel()` returns the model for the currently selected provider.)
+- `reviewEffort` (default `"medium"` — values `"none"` | `"low"` | `"medium"` | `"high"` | `"xhigh"` | `"max"`; passed as `--reasoning-effort <level>` to the Copilot CLI. Only applied when `reviewProvider` is COPILOT. Higher = deeper review, slower. Blank/null defaults back to `"medium"`.)
 
 No API keys or tokens are ever written to disk.
 

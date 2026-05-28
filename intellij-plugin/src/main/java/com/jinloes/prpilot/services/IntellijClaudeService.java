@@ -3,6 +3,7 @@ package com.jinloes.prpilot.services;
 import com.intellij.openapi.application.ApplicationManager;
 import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.PRReviewRequest;
+import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.settings.PluginSettings;
 import java.util.List;
@@ -11,27 +12,27 @@ import java.util.function.Consumer;
 import org.apache.commons.lang3.StringUtils;
 
 /**
- * IntelliJ wrapper around the core {@link ClaudeService}.
+ * IntelliJ adapter that fronts both the Claude and Copilot CLI backends. The active provider is
+ * read from {@link PluginSettings} on every call so a settings change takes effect immediately.
  *
  * <p>Dispatches all blocking I/O to a pooled thread and marshals callbacks back to the EDT so
  * callers in the UI layer never need to manage threading themselves.
  */
 public class IntellijClaudeService {
 
-    private final ClaudeService core;
+    private final ClaudeService claude;
+    private final CopilotService copilot;
 
     public IntellijClaudeService() {
-        this.core = new ClaudeService();
+        this.claude = new ClaudeService();
+        this.copilot = new CopilotService();
     }
 
     public IntellijClaudeService(String projectDir) {
-        this.core = new ClaudeService(projectDir);
+        this.claude = new ClaudeService(projectDir);
+        this.copilot = new CopilotService(projectDir);
     }
 
-    /**
-     * Generates a review asynchronously. {@code onStatus}, {@code onComplete}, and {@code onError}
-     * are called on the EDT.
-     */
     public void reviewPR(
             PRReviewRequest request,
             Consumer<String> onStatus,
@@ -40,51 +41,51 @@ public class IntellijClaudeService {
         reviewPR(request, onStatus, null, onComplete, onError);
     }
 
-    /**
-     * Like {@link #reviewPR(PRReviewRequest, Consumer, Consumer, Consumer)} but also delivers
-     * streaming text and thinking chunks via {@code onChunk}. The first argument is the kind
-     * ({@code "text"} or {@code "thinking"}); the second is the content. All callbacks are invoked
-     * on the EDT.
-     */
     public void reviewPR(
             PRReviewRequest request,
             Consumer<String> onStatus,
             BiConsumer<String, String> onChunk,
             Consumer<ReviewResult> onComplete,
             Consumer<String> onError) {
-        String model = PluginSettings.getInstance().getReviewModel();
+        PluginSettings settings = PluginSettings.getInstance();
+        ReviewProvider provider = settings.getReviewProvider();
+        String model = settings.getActiveReviewModel();
+        String effort = settings.getReviewEffort();
         ApplicationManager.getApplication()
                 .executeOnPooledThread(
                         () -> {
                             try {
+                                BiConsumer<String, String> wrappedChunk =
+                                        onChunk == null
+                                                ? null
+                                                : (kind, chunk) ->
+                                                        invokeLater(
+                                                                () -> onChunk.accept(kind, chunk));
+                                Consumer<String> wrappedStatus =
+                                        status -> invokeLater(() -> onStatus.accept(status));
                                 ReviewResult result =
-                                        core.reviewPR(
-                                                request,
-                                                model,
-                                                status ->
-                                                        invokeLater(() -> onStatus.accept(status)),
-                                                onChunk == null
-                                                        ? null
-                                                        : (kind, chunk) ->
-                                                                invokeLater(
-                                                                        () ->
-                                                                                onChunk.accept(
-                                                                                        kind,
-                                                                                        chunk)));
+                                        provider == ReviewProvider.COPILOT
+                                                ? copilot.reviewPR(
+                                                        request,
+                                                        model,
+                                                        effort,
+                                                        wrappedStatus,
+                                                        wrappedChunk)
+                                                : claude.reviewPR(
+                                                        request,
+                                                        model,
+                                                        wrappedStatus,
+                                                        wrappedChunk);
                                 invokeLater(() -> onComplete.accept(result));
                             } catch (InterruptedException e) {
                                 Thread.currentThread().interrupt();
                                 invokeLater(() -> onError.accept("Review interrupted."));
                             } catch (Exception e) {
-                                invokeLater(() -> onError.accept(friendlyMessage(e)));
+                                invokeLater(() -> onError.accept(friendlyMessage(provider, e)));
                             }
                         });
     }
 
-    /**
-     * Sends a chat message asynchronously. {@code onChunk}, {@code onDone}, and {@code onError} are
-     * called on the EDT.
-     */
     public void chat(
             String prContext,
             List<ChatMessage> history,
@@ -92,69 +93,60 @@ public class IntellijClaudeService {
             Consumer<String> onChunk,
             Consumer<String> onDone,
             Consumer<String> onError) {
+        PluginSettings settings = PluginSettings.getInstance();
+        ReviewProvider provider = settings.getReviewProvider();
+        String effort = settings.getReviewEffort();
         ApplicationManager.getApplication()
                 .executeOnPooledThread(
                         () -> {
                             try {
+                                Consumer<String> wrappedChunk =
+                                        chunk -> invokeLater(() -> onChunk.accept(chunk));
                                 String result =
-                                        core.chat(
-                                                prContext,
-                                                history,
-                                                userMessage,
-                                                chunk -> invokeLater(() -> onChunk.accept(chunk)));
+                                        provider == ReviewProvider.COPILOT
+                                                ? copilot.chat(
+                                                        prContext,
+                                                        history,
+                                                        userMessage,
+                                                        effort,
+                                                        wrappedChunk)
+                                                : claude.chat(
+                                                        prContext,
+                                                        history,
+                                                        userMessage,
+                                                        wrappedChunk);
                                 invokeLater(() -> onDone.accept(result));
                             } catch (InterruptedException e) {
                                 Thread.currentThread().interrupt();
                                 invokeLater(() -> onError.accept("Chat interrupted."));
                             } catch (Exception e) {
-                                invokeLater(() -> onError.accept(friendlyMessage(e)));
+                                invokeLater(() -> onError.accept(friendlyMessage(provider, e)));
                             }
                         });
     }
 
-    /**
-     * Sends a focused code question asynchronously. {@code onChunk}, {@code onDone}, and {@code
-     * onError} are called on the EDT.
-     */
-    public void chatFocused(
-            String focusedContext,
-            String question,
-            Consumer<String> onChunk,
-            Consumer<String> onDone,
-            Consumer<String> onError) {
-        ApplicationManager.getApplication()
-                .executeOnPooledThread(
-                        () -> {
-                            try {
-                                String result =
-                                        core.chatFocused(
-                                                focusedContext,
-                                                question,
-                                                chunk -> invokeLater(() -> onChunk.accept(chunk)));
-                                invokeLater(() -> onDone.accept(result));
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                                invokeLater(() -> onError.accept("Chat interrupted."));
-                            } catch (Exception e) {
-                                invokeLater(() -> onError.accept(friendlyMessage(e)));
-                            }
-                        });
-    }
-
-    /** Cancels the currently running request, if any. */
+    /** Cancels the currently running request on either backend. */
     public void cancelCurrentRequest() {
-        core.cancelCurrentRequest();
+        // Cancel both — only one has an active process at any time, but reading the provider
+        // setting here can race with a settings change so we just send the signal to both.
+        claude.cancelCurrentRequest();
+        copilot.cancelCurrentRequest();
     }
 
     private static void invokeLater(Runnable r) {
         ApplicationManager.getApplication().invokeLater(r);
     }
 
-    private static String friendlyMessage(Exception e) {
+    static String friendlyMessage(ReviewProvider provider, Exception e) {
         String msg = StringUtils.defaultString(e.getMessage());
-        if (msg.contains("No such file") || msg.contains("error=2"))
-            return "'claude' not found on PATH. Make sure Claude Code is installed and accessible"
-                    + " from your terminal.";
+        if (msg.contains("No such file") || msg.contains("error=2")) {
+            String binary = provider == ReviewProvider.COPILOT ? "copilot" : "claude";
+            return "'"
+                    + binary
+                    + "' not found on PATH. Make sure the "
+                    + provider.getDisplayName()
+                    + " CLI is installed and accessible from your terminal.";
+        }
         return msg.isBlank() ? "Unexpected error." : msg;
     }
 }

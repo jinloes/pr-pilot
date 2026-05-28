@@ -40,7 +40,40 @@
         "pr-pilot.reviewModel": {
           "type": "string",
           "default": "",
-          "description": "Model ID to use for reviews. Empty uses the CLI default."
+          "description": "Model ID for the Claude CLI. Empty uses the CLI default.",
+          "examples": [
+            "",
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-6",
+            "claude-opus-4-7"
+          ]
+        },
+        "pr-pilot.reviewModelCopilot": {
+          "type": "string",
+          "default": "claude-sonnet-4.6",
+          "description": "Model ID for the GitHub Copilot CLI. Default `claude-sonnet-4.6` balances JSON schema adherence and code-review depth without Opus-tier latency. Empty uses the CLI's default routing. Run `copilot help config` to list supported IDs — the field is freeform because the catalog changes over time.",
+          "examples": [
+            "claude-sonnet-4.6",
+            "claude-opus-4.7",
+            "gpt-5.5",
+            "gpt-5.4"
+          ]
+        },
+        "pr-pilot.reviewProvider": {
+          "type": "string",
+          "enum": ["claude", "copilot"],
+          "enumDescriptions": [
+            "Claude Code (claude CLI)",
+            "GitHub Copilot (copilot CLI)"
+          ],
+          "default": "claude",
+          "description": "Backend CLI used to generate reviews and chat replies."
+        },
+        "pr-pilot.reviewEffort": {
+          "type": "string",
+          "enum": ["none", "low", "medium", "high", "xhigh", "max"],
+          "default": "medium",
+          "description": "Reasoning effort passed to `copilot --reasoning-effort`. Higher = deeper review, slower. Only applied when `pr-pilot.reviewProvider` is `copilot`. Default `medium` balances catching real issues against latency."
         }
       }
     }

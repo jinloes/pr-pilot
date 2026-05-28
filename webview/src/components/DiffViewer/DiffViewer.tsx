@@ -552,12 +552,12 @@ function InlineCommentRow({ comment, globalIdx, focused, onEdit, onDelete, onVer
                         size="sm"
                         className="h-6 w-6 p-0 text-muted-foreground hover:text-amber-400"
                         onClick={onVerify}
-                        aria-label="Verify with Claude"
+                        aria-label="Verify with AI"
                       >
                         <ShieldCheck className="w-3.5 h-3.5" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="top">Verify with Claude</TooltipContent>
+                    <TooltipContent side="top">Verify with AI</TooltipContent>
                   </Tooltip>
                 )}
                 {onEdit && (

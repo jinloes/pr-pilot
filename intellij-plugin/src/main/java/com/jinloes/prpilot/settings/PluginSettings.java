@@ -4,6 +4,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
+import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.services.GitHubAuthService;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -32,6 +33,23 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
         /** Model ID passed to the claude CLI for reviews. Empty string uses the CLI default. */
         public String reviewModel = "";
+
+        /**
+         * Model ID passed to the copilot CLI for reviews. Defaults to {@code claude-sonnet-4.6}:
+         * strong at structured JSON output and code reasoning at sub-Opus latency. Empty string
+         * uses the CLI's default routing.
+         */
+        public String reviewModelCopilot = "claude-sonnet-4.6";
+
+        /** Backend CLI used to generate reviews and chat replies. */
+        public String reviewProvider = ReviewProvider.CLAUDE.getId();
+
+        /**
+         * Reasoning effort passed to {@code copilot --reasoning-effort}. One of "none", "low",
+         * "medium", "high", "xhigh", "max". Defaults to "medium" — enough depth for real bugs
+         * without Opus-tier wall-clock. Only applied when {@code reviewProvider} is COPILOT.
+         */
+        public String reviewEffort = "medium";
     }
 
     private State myState = new State();
@@ -120,6 +138,40 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
     public void setReviewModel(String model) {
         myState.reviewModel = model != null ? model : "";
+    }
+
+    public String getReviewModelCopilot() {
+        return myState.reviewModelCopilot != null ? myState.reviewModelCopilot : "";
+    }
+
+    public void setReviewModelCopilot(String model) {
+        myState.reviewModelCopilot = model != null ? model : "";
+    }
+
+    /** Returns the model ID for the currently selected provider. */
+    public String getActiveReviewModel() {
+        return getReviewProvider() == ReviewProvider.COPILOT
+                ? getReviewModelCopilot()
+                : getReviewModel();
+    }
+
+    public ReviewProvider getReviewProvider() {
+        return ReviewProvider.fromId(myState.reviewProvider);
+    }
+
+    public void setReviewProvider(ReviewProvider provider) {
+        myState.reviewProvider =
+                provider != null ? provider.getId() : ReviewProvider.CLAUDE.getId();
+    }
+
+    public String getReviewEffort() {
+        return myState.reviewEffort != null && !myState.reviewEffort.isBlank()
+                ? myState.reviewEffort
+                : "medium";
+    }
+
+    public void setReviewEffort(String effort) {
+        myState.reviewEffort = effort != null ? effort : "medium";
     }
 
     /**

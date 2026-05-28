@@ -13,7 +13,7 @@ public class PluginSettingsConfigurable implements Configurable {
     @Nls(capitalization = Nls.Capitalization.Title)
     @Override
     public String getDisplayName() {
-        return "Claude PR Reviews";
+        return "PR Pilot";
     }
 
     @Override
@@ -30,7 +30,10 @@ public class PluginSettingsConfigurable implements Configurable {
                 || component.isNotifyReviewRequested() != s.isNotifyReviewRequested()
                 || component.isNotifyStarredRepos() != s.isNotifyStarredRepos()
                 || component.getNotificationPollMinutes() != s.getNotificationPollMinutes()
-                || !component.getReviewModel().equals(s.getReviewModel());
+                || !component.getReviewModel().equals(s.getReviewModel())
+                || !component.getReviewModelCopilot().equals(s.getReviewModelCopilot())
+                || component.getReviewProvider() != s.getReviewProvider()
+                || !component.getReviewEffort().equals(s.getReviewEffort());
     }
 
     @Override
@@ -42,6 +45,9 @@ public class PluginSettingsConfigurable implements Configurable {
         s.setNotifyStarredRepos(component.isNotifyStarredRepos());
         s.setNotificationPollMinutes(component.getNotificationPollMinutes());
         s.setReviewModel(component.getReviewModel());
+        s.setReviewModelCopilot(component.getReviewModelCopilot());
+        s.setReviewProvider(component.getReviewProvider());
+        s.setReviewEffort(component.getReviewEffort());
 
         // Restart/stop polling to reflect the new settings immediately
         PRNotificationService svc = PRNotificationService.getInstance();
@@ -61,6 +67,9 @@ public class PluginSettingsConfigurable implements Configurable {
         component.setNotifyStarredRepos(s.isNotifyStarredRepos());
         component.setNotificationPollMinutes(s.getNotificationPollMinutes());
         component.setReviewModel(s.getReviewModel());
+        component.setReviewModelCopilot(s.getReviewModelCopilot());
+        component.setReviewProvider(s.getReviewProvider());
+        component.setReviewEffort(s.getReviewEffort());
     }
 
     @Override

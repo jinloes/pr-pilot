@@ -121,6 +121,16 @@ class ClaudeServiceTest : FunSpec({
             prompt shouldContain "trace"
         }
 
+        test("schema-validation cross-layer guard present") {
+            // Validation often lives in the schema (proto / OpenAPI / JSON Schema) and is
+            // enforced by a framework validator before the handler runs. Flagging "missing
+            // null check" in handler code without reading the schema produces false positives.
+            val prompt = ClaudeService.buildPrompt(PRReviewRequest(pr(), "", ""))
+            prompt shouldContain "Before flagging missing input validation in handler code"
+            prompt shouldContain "validateRequest"
+            prompt shouldContain "proto"
+        }
+
         test("unverifiable issue guard present") {
             val prompt = ClaudeService.buildPrompt(PRReviewRequest(pr(), "", ""))
             prompt shouldContain "library internals"

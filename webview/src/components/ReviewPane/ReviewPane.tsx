@@ -509,10 +509,10 @@ export function ReviewPane({ pr }: Props) {
                 size="sm"
                 className="h-6 px-2 text-xs shrink-0 gap-1.5"
                 onClick={() => setChatVisible((v) => !v)}
-                title={chatVisible ? 'Collapse chat' : 'Open Ask Claude'}
+                title={chatVisible ? 'Collapse chat' : 'Open chat'}
               >
                 <MessageSquare className="w-3.5 h-3.5" />
-                Ask Claude
+                Chat
               </Button>
             )}
 
@@ -608,7 +608,7 @@ export function ReviewPane({ pr }: Props) {
               ) : (
                 <ContextMenuItem disabled className="gap-2 text-xs opacity-60">
                   <MessageSquare className="w-3.5 h-3.5" />
-                  Select text to ask Claude
+                  Select text to chat about it
                 </ContextMenuItem>
               )
             ) : (
@@ -876,7 +876,7 @@ function PaneContent({
 
           {isThinking && (
             <p className="text-xs text-muted-foreground italic">
-              {elapsed >= 60 ? 'Large diffs may take a few minutes…' : 'Claude is thinking…'}
+              {elapsed >= 60 ? 'Large diffs may take a few minutes…' : 'AI is thinking…'}
             </p>
           )}
 

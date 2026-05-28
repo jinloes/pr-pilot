@@ -120,7 +120,7 @@ export function ChatPane({
         title={onResizeStart ? 'Drag to resize' : undefined}
       >
         <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-          Ask Claude
+          Chat
         </span>
         {hasContent && (
           <Button variant="ghost" size="sm" onClick={handleClear} className="h-6 px-2 text-xs">
@@ -135,7 +135,7 @@ export function ChatPane({
           {messages.map((m, i) => (
             <div key={i} className={cn('flex flex-col gap-1', m.role === 'user' ? 'items-end' : 'items-start')}>
               <span className="text-[10px] font-medium tracking-widest uppercase text-muted-foreground px-1">
-                {m.role === 'user' ? 'you' : 'claude'}
+                {m.role === 'user' ? 'you' : 'ai'}
               </span>
               <div
                 className={cn(
@@ -165,7 +165,7 @@ export function ChatPane({
 
           {busy && !streaming && (
             <div className="flex flex-col gap-1 items-start">
-              <span className="text-[10px] font-medium tracking-widest uppercase text-muted-foreground px-1">claude</span>
+              <span className="text-[10px] font-medium tracking-widest uppercase text-muted-foreground px-1">ai</span>
               <div className="bg-secondary rounded-md px-3 py-2 flex gap-1">
                 {[0, 200, 400].map((delay) => (
                   <span
@@ -180,7 +180,7 @@ export function ChatPane({
 
           {streaming && (
             <div className="flex flex-col gap-1 items-start">
-              <span className="text-[10px] font-medium tracking-widest uppercase text-muted-foreground px-1">claude</span>
+              <span className="text-[10px] font-medium tracking-widest uppercase text-muted-foreground px-1">ai</span>
               <div className="bg-secondary text-secondary-foreground rounded-md px-3 py-2 text-sm max-w-[90%]">
                 <div className="prose prose-sm prose-invert max-w-none [&_code]:font-mono [&_code]:text-xs [&_code]:bg-background/50 [&_code]:px-1 [&_code]:rounded [&_p]:my-0.5">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{streaming}</ReactMarkdown>
@@ -227,7 +227,7 @@ export function ChatPane({
         </Button>
       </div>
       <p className="px-3 pb-2 text-[11px] text-muted-foreground/60">
-        Includes PR body, diff, and review as context · right-click selected text to ask Claude
+        Includes PR body, diff, and review as context · right-click selected text to ask about it
       </p>
     </div>
   )

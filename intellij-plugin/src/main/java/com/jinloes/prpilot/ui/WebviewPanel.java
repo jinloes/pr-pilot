@@ -699,10 +699,10 @@ public class WebviewPanel implements Disposable {
                                 }
                             }
 
-                            // Start Claude — callbacks fired on EDT
+                            // Kick off the review — callbacks fired on EDT
                             pushMessage(
                                     new ReviewGeneratingMsg(
-                                            "reviewGenerating", "Sending to Claude…"));
+                                            "reviewGenerating", "Sending review request…"));
                             final String finalDiff = diff;
                             final String finalExisting = existingReviews;
                             claudeService.reviewPR(
@@ -856,7 +856,7 @@ public class WebviewPanel implements Disposable {
         String prContext = buildPrContext(pr);
         List<ChatMessage> history = chatHistory;
 
-        // When the user has selected a code snippet, prepend it so Claude can reference it.
+        // When the user has selected a code snippet, prepend it so the AI can reference it.
         String fullQuestion =
                 StringUtils.isBlank(context)
                         ? question
