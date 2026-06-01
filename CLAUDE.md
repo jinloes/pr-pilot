@@ -1,3 +1,10 @@
+**JSONL event parser (`CopilotService.parseCopilotEvent`):** the CLI's JSONL schema is not documented publicly, so the parser is permissive. It recognizes four shapes — simple `{type, text|name}` events, Claude-style streaming (`content_block_delta` / `content_block_start`), Claude full messages (`{type:"assistant", message:{content:[…]}}`), and OpenAI-style (`choices[0].delta.{content,tool_calls}`) — and returns an empty event for unknown shapes. If a run produces only unknown shapes, we log a schema-drift warning rather than crash; the user sees the standard "produced no output" error. The same logic lives in `vscode-extension/src/copilot.ts:parseCopilotEvent` and must stay in sync.
+
+**Reasoning effort knob:** `reviewEffort` (PluginSettings / `pr-pilot.reviewEffort`) sets `--reasoning-effort`. Default `medium`. The IntelliJ adapter and `extension.ts` read it on every call and pass it through to `CopilotService.reviewPR/chat/chatFocused`; `CopilotService.buildProcess` falls back to `DEFAULT_REASONING_EFFORT = "medium"` if the caller passes a blank string, so settings drift can't accidentally send a missing flag to the CLI. The Claude path ignores this setting.
+**Copilot CLI flags:** `copilot -p <prompt> --allow-all-tools --no-color --output-format json --stream on --reasoning-effort medium [--model <id>]`. `--allow-all-tools` is required for non-interactive mode. `--output-format json --stream on` emits JSONL events so we can stream text deltas to `onChunk("text", …)` and tool-use names to `onStatus(…)` while the agent works — closing most of the perceived latency gap vs. Claude's stream-json. `--reasoning-effort medium` is the documented sane default for review work (enough depth for real bugs, no Opus-tier wall-clock). **Do not** pass the prompt via stdin to `copilot` — the CLI does not support reading the prompt from stdin; prompts are always passed via `-p`. Our prompts stay well under `ARG_MAX` because the diff is fetched on demand inside the review, not embedded.
+| `ClaudeService.findClaudeBinary` / `CopilotService.findCopilotBinary` — known CLI binary paths | `vscode-extension/src/claude.ts` — `findClaudeBinary` AND `vscode-extension/src/copilot.ts` — `findCopilotBinary` |
+| `CopilotService.kt` — CLI flags (`-p`, `--allow-all-tools`, `--no-color`, `--output-format json`, `--stream on`, `--reasoning-effort`, `--model`) | `vscode-extension/src/copilot.ts` — `runProcess` arg list |
+| `CopilotService.parseCopilotEvent` — JSONL shape coverage | `vscode-extension/src/copilot.ts` — `parseCopilotEvent` |
 # PR Pilot
 
 IntelliJ and VS Code extension that lists GitHub Pull Requests and generates AI-powered code reviews using a local AI CLI (Claude Code or GitHub Copilot, selected per-host in settings).
@@ -111,6 +118,8 @@ vscode-extension/                      – VS Code extension (npm build, no Grad
     copilot.ts                         – Copilot CLI service: reviewPR + chat via `copilot -p <prompt> --allow-all-tools -s`; re-exports buildPrompt/buildChatPrompt/buildFocusedChatPrompt from claude.ts; cancelCurrentRequest
     core.d.ts                          – Ambient type declarations for the KMP-compiled core module (not yet used; requires @JsExport on Kotlin classes)
   package.json / tsconfig.json         – TypeScript build config; vscode engine ^1.85.0; contributes pr-pilot.githubBaseUrl + pr-pilot.reviewModel + pr-pilot.reviewProvider settings
+    copilot.test.ts                    – Node test runner unit tests for Copilot service helpers (reasoning-effort normalization)
+  package.json / tsconfig.json / tsconfig.test.json – TypeScript build + unit-test compile config; vscode engine ^1.90.0; contributes pr-pilot.githubBaseUrl + pr-pilot.reviewModel + pr-pilot.reviewProvider settings
   build.gradle                         – Empty placeholder so settings.gradle include is valid
 ```
 
@@ -130,9 +139,8 @@ When logic changes in one host, the **parallel file in the other host must be up
 | `GitHubService.kt` — GitHub API calls (URL structure, headers, error handling) | `vscode-extension/src/github.ts` — `ghRequest` helper and all callers |
 | `PRToolWindowFactory.buildQuery` — PR search query logic | `vscode-extension/src/github.ts` — `searchPRs` |
 | `GitHubAuthService.findGhBinary` — known gh binary paths | `vscode-extension/src/github.ts` — `findGhBinary` |
-| `ClaudeService.findClaudeBinary` / `CopilotService.findCopilotBinary` — known CLI binary paths | `vscode-extension/src/claude.ts` — `findClaudeBinary` AND `vscode-extension/src/copilot.ts` — `findCopilotBinary` |
-| `CopilotService.kt` — CLI flags (`-p`, `--allow-all-tools`, `--no-color`, `--output-format json`, `--stream on`, `--reasoning-effort`, `--model`) | `vscode-extension/src/copilot.ts` — `runProcess` arg list |
-| `CopilotService.parseCopilotEvent` — JSONL shape coverage | `vscode-extension/src/copilot.ts` — `parseCopilotEvent` |
+| `ClaudeService.findClaudeBinary` / `CopilotService.findCopilotBinary` — known CLI/runtime binary paths | `vscode-extension/src/claude.ts` — `findClaudeBinary` AND `vscode-extension/src/copilot.ts` — `findCopilotBinary` |
+| `CopilotService.kt` — Copilot SDK client/session setup (working directory, permission handler, streaming event subscriptions, reasoning-effort normalization) | `vscode-extension/src/copilot.ts` — same SDK setup and normalization |
 | `CopilotService.DEFAULT_REASONING_EFFORT` | `vscode-extension/src/copilot.ts` — `DEFAULT_REASONING_EFFORT` |
 | `webview/src/bridge/types.ts` — any `OutgoingMessage` or `IncomingMessage` shape | `WebviewPanel.java` (IntelliJ) AND `vscode-extension/src/extension.ts` — all message handlers |
 | `PluginSettings` — add a new setting | `vscode-extension/package.json` contributes.configuration AND `vscode-extension/src/extension.ts` reader |
@@ -194,15 +202,13 @@ Core `ClaudeService.reviewPR()`, `chat()`, and `chatFocused()` are blocking — 
 
 **Cancel semantics:** `IntellijClaudeService.cancelCurrentRequest()` and the VS Code `cancelActiveProvider()` helper cancel both backends unconditionally. Only one has an active process at any time, but reading the provider setting at cancel time races with a settings change, so we just send the signal to both. This is cheap (each is a CAS + `destroyForcibly()` on a null reference when idle).
 
-**Copilot CLI flags:** `copilot -p <prompt> --allow-all-tools --no-color --output-format json --stream on --reasoning-effort medium [--model <id>]`. `--allow-all-tools` is required for non-interactive mode. `--output-format json --stream on` emits JSONL events so we can stream text deltas to `onChunk("text", …)` and tool-use names to `onStatus(…)` while the agent works — closing most of the perceived latency gap vs. Claude's stream-json. `--reasoning-effort medium` is the documented sane default for review work (enough depth for real bugs, no Opus-tier wall-clock). **Do not** pass the prompt via stdin to `copilot` — the CLI does not support reading the prompt from stdin; prompts are always passed via `-p`. Our prompts stay well under `ARG_MAX` because the diff is fetched on demand inside the review, not embedded.
+**Copilot SDK runtime:** Both hosts now use the official Copilot SDKs (`com.github:copilot-sdk-java` in IntelliJ/core jvmMain, `@github/copilot-sdk` in VS Code) to control the local `copilot` runtime instead of parsing raw CLI JSONL. The SDK still requires the local `copilot` binary and the same working-directory semantics as before, but it gives typed `assistant.message_delta`, `assistant.message`, `tool.execution_start`, and `session.error` events. We stream deltas to `onChunk("text", …)`, surface tool names to `onStatus(…)`, and parse the final `assistant.message` content as review JSON, falling back to accumulated deltas only if no final assistant message arrives.
 
 **Default model:** `reviewModelCopilot` defaults to `claude-sonnet-4.6` — strong at structured JSON output and code reasoning at sub-Opus latency. Users can clear it (empty string → CLI's default routing) or pick any other model.
 
-**Reasoning effort knob:** `reviewEffort` (PluginSettings / `pr-pilot.reviewEffort`) sets `--reasoning-effort`. Default `medium`. The IntelliJ adapter and `extension.ts` read it on every call and pass it through to `CopilotService.reviewPR/chat/chatFocused`; `CopilotService.buildProcess` falls back to `DEFAULT_REASONING_EFFORT = "medium"` if the caller passes a blank string, so settings drift can't accidentally send a missing flag to the CLI. The Claude path ignores this setting.
+**Reasoning effort knob:** `reviewEffort` (PluginSettings / `pr-pilot.reviewEffort`) still stores `none|low|medium|high|xhigh|max`, but the Copilot SDK only accepts `low|medium|high|xhigh`. Both hosts therefore normalize before session creation: blank/unknown → `medium`, `none` → `low`, `max` → `xhigh`, supported values pass through unchanged. Keep the normalization logic in sync between `CopilotService.kt` and `vscode-extension/src/copilot.ts`. The Claude path ignores this setting.
 
 **Model discovery (`CopilotModelDiscovery`):** the IntelliJ settings UI auto-populates the Copilot model dropdown by running `copilot help config` once per session in a pooled thread, then parsing the indented `` `model`: `` section's `- "model-id"` bullets. Results are cached in a singleton `AtomicReference`; `invalidate()` drops the cache. The probe is best-effort — binary missing, policy-blocked account, schema drift, or 10-second timeout all return an empty list, and the dropdown stays on the hardcoded `COPILOT_MODEL_SUGGESTIONS`. The leading-whitespace regex is intentionally permissive (`^\s*` not `^\s+`) so tests can use `trimIndent()` for readability without breaking the parser. **VS Code does not get this:** the settings schema's `enum` is static at JSON-schema time, so the `pr-pilot.reviewModelCopilot` field stays freeform with `examples`.
-
-**JSONL event parser (`CopilotService.parseCopilotEvent`):** the CLI's JSONL schema is not documented publicly, so the parser is permissive. It recognizes four shapes — simple `{type, text|name}` events, Claude-style streaming (`content_block_delta` / `content_block_start`), Claude full messages (`{type:"assistant", message:{content:[…]}}`), and OpenAI-style (`choices[0].delta.{content,tool_calls}`) — and returns an empty event for unknown shapes. If a run produces only unknown shapes, we log a schema-drift warning rather than crash; the user sees the standard "produced no output" error. The same logic lives in `vscode-extension/src/copilot.ts:parseCopilotEvent` and must stay in sync.
 
 **Stale comment caveat:** if Copilot returns prose with no recoverable JSON, `parseReview` throws and the review surfaces a parse error. There is no fallback that treats the full prose as the `summary`; the user retries.
 
@@ -353,6 +359,7 @@ PR list filters (`prStateFilter`, `assignedToMeFilter`, `reviewRequestedFilter`)
 (cd webview && npx tsc --noEmit)        # type-check only (no build)
 (cd vscode-extension && npm run lint)   # ESLint on VS Code extension (clean — no warnings expected)
 (cd vscode-extension && npx tsc --noEmit)
+(cd vscode-extension && npm run test:unit) # compile and run Node unit tests for VS Code extension logic
 ```
 
 Note: `:core:test` is the old task name (plain Java plugin). The KMP equivalent is `:core:jvmTest`.

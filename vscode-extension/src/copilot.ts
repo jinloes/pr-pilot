@@ -1,7 +1,12 @@
 import * as fs from 'fs';
 import * as os from 'os';
-import * as path from 'path';
-import { spawn, ChildProcess } from 'child_process';
+import {
+    CopilotClient,
+    RuntimeConnection,
+    approveAll,
+    type CopilotSession,
+    type ReasoningEffort,
+} from '@github/copilot-sdk';
 import type { ReviewResult, LineComment } from './github';
 import type { ChatMessage, PR } from './claude';
 import { buildPrompt, buildChatPrompt, buildFocusedChatPrompt } from './claude';
@@ -16,6 +21,7 @@ export { buildPrompt, buildChatPrompt, buildFocusedChatPrompt };
  * schema, without burning the latency of `high`/`xhigh`/`max`.
  */
 export const DEFAULT_REASONING_EFFORT = 'medium';
+const REQUEST_TIMEOUT_MS = 30 * 60 * 1000;
 
 // ── Binary resolution ──────────────────────────────────────────────────────────
 
@@ -34,6 +40,22 @@ function findCopilotBinary(): string {
     return 'copilot';
 }
 
+function normalizeReasoningEffort(effort: string): ReasoningEffort {
+    switch (effort.trim().toLowerCase()) {
+        case 'low':
+        case 'medium':
+        case 'high':
+        case 'xhigh':
+            return effort.trim().toLowerCase() as ReasoningEffort;
+        case 'none':
+            return 'low';
+        case 'max':
+            return 'xhigh';
+        default:
+            return DEFAULT_REASONING_EFFORT;
+    }
+}
+
 // ── Best-effort review JSON extraction ────────────────────────────────────────
 
 function parseReview(raw: string): ReviewResult {
@@ -49,163 +71,8 @@ function parseReview(raw: string): ReviewResult {
     return JSON.parse(json) as ReviewResult;
 }
 
-// ── JSONL event parser ────────────────────────────────────────────────────────
-
-interface CopilotEvent {
-    text?: string;
-    tool?: string;
-    /**
-     * If true, `text` is the consolidated content of a finalized message and the caller should
-     * clear any previously-accumulated text. Used to discard intermediate-turn commentary so only
-     * the last turn's content (the review JSON) survives into parseReview.
-     */
-    replacesText?: boolean;
-}
-
-/**
- * Permissive JSONL event parser — same shape coverage as `CopilotService.parseCopilotEvent`:
- *   A. simple `{type, text|name}` events
- *   B. Claude streaming (`content_block_delta`, `content_block_start`)
- *   C. Claude full message (`{type:"assistant", message:{content:[...]}}`)
- *   D. OpenAI-style `{choices:[{delta:{content,tool_calls}}]}`
- * Returns an empty object for unknown shapes so the caller can count and warn without crashing.
- */
-export function parseCopilotEvent(line: string): CopilotEvent {
-    let obj: Record<string, unknown>;
-    try {
-        const parsed: unknown = JSON.parse(line);
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-        obj = parsed as Record<string, unknown>;
-    } catch {
-        return {};
-    }
-
-    const type = stringOrUndef(obj['type']);
-
-    // Shape A
-    if (type === 'text') return { text: stringOrUndef(obj['text']) };
-    if (type === 'tool_use' || type === 'tool_call' || type === 'tool') {
-        return {
-            tool:
-                stringOrUndef(obj['name']) ??
-                stringOrUndef(obj['tool']) ??
-                stringOrUndef(asObj(obj['function'])?.['name']),
-        };
-    }
-    if (type === 'response') {
-        return {
-            text: stringOrUndef(obj['response']) ?? stringOrUndef(obj['text']),
-        };
-    }
-
-    // Shape E: Copilot CLI's actual JSONL schema (confirmed against v1.0.54 output). Mirrors
-    // CopilotService.parseCopilotEvent — keep these in sync. See the Kotlin comment for the full
-    // rationale on why we use deltas for streaming + assistant.message for the final buffer.
-    if (type === 'assistant.message_delta') {
-        return { text: stringOrUndef(asObj(obj['data'])?.['deltaContent']) };
-    }
-    if (type === 'assistant.message') {
-        const content = stringOrUndef(asObj(obj['data'])?.['content']);
-        if (content) return { text: content, replacesText: true };
-    }
-    if (type === 'tool.execution_start') {
-        return { tool: stringOrUndef(asObj(obj['data'])?.['toolName']) };
-    }
-
-    // Shape B
-    if (type === 'content_block_delta') {
-        const delta = asObj(obj['delta']);
-        const deltaType = stringOrUndef(delta?.['type']);
-        if (deltaType === 'text_delta' || deltaType === 'input_text_delta') {
-            return { text: stringOrUndef(delta?.['text']) };
-        }
-    }
-    if (type === 'content_block_start') {
-        const block = asObj(obj['content_block']);
-        const blockType = stringOrUndef(block?.['type']);
-        if (blockType === 'text') return { text: stringOrUndef(block?.['text']) };
-        if (blockType === 'tool_use') return { tool: stringOrUndef(block?.['name']) };
-    }
-
-    // Shape C
-    if (type === 'assistant') {
-        const content = asObj(obj['message'])?.['content'];
-        if (Array.isArray(content)) {
-            let text = '';
-            let tool: string | undefined;
-            for (const block of content) {
-                if (typeof block !== 'object' || block === null) continue;
-                const blockObj = block as Record<string, unknown>;
-                const blockType = stringOrUndef(blockObj['type']);
-                if (blockType === 'text') {
-                    const t = stringOrUndef(blockObj['text']);
-                    if (t) text += t;
-                } else if (blockType === 'tool_use' && tool === undefined) {
-                    tool = stringOrUndef(blockObj['name']);
-                }
-            }
-            if (text.length > 0 || tool !== undefined) return { text: text || undefined, tool };
-        }
-    }
-
-    // Shape D
-    const choices = obj['choices'];
-    if (Array.isArray(choices) && choices.length > 0) {
-        const first = choices[0] as Record<string, unknown>;
-        const delta = asObj(first['delta']) ?? asObj(first['message']);
-        if (delta) {
-            const text = stringOrUndef(delta['content']);
-            const toolCalls = delta['tool_calls'];
-            let tool: string | undefined;
-            if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-                const fn = asObj((toolCalls[0] as Record<string, unknown>)['function']);
-                tool = stringOrUndef(fn?.['name']);
-            }
-            if (text || tool) return { text, tool };
-        }
-    }
-
-    return {};
-}
-
 function stringOrUndef(v: unknown): string | undefined {
     return typeof v === 'string' ? v : undefined;
-}
-
-/**
- * Joins exit code, stderr, and sampled unparseable stdout into a single error string. Copilot
- * writes user-facing errors (policy block, auth failure, unknown flag) as plain text on stdout
- * in JSON-output mode, so we have to dig them out of the sample buffer.
- */
-export function buildExitErrorMessage(
-    exitCode: number,
-    stderr: string,
-    unparseableSample: string[],
-): string {
-    const parts = [`copilot exited ${exitCode}`];
-    if (stderr.trim()) parts.push(stderr.trim());
-    if (unparseableSample.length > 0) parts.push(unparseableSample.join('\n').trim());
-    return parts.join(': ');
-}
-
-/**
- * Builds a diagnostic detail string for the "produced no output" error path. Includes the first
- * unparseable lines (if any) and always points at the stdout file so the user has a concrete
- * artifact to share when reporting the issue.
- */
-export function buildNoOutputDetail(unparseableSample: string[], stdoutFile: string): string {
-    const parts: string[] = [];
-    if (unparseableSample.length === 0) {
-        parts.push(
-            'The CLI exited cleanly but emitted no events we recognized — the review prompt may have been rejected or the model failed silently.',
-        );
-    } else {
-        parts.push(
-            `The CLI emitted ${unparseableSample.length} unrecognized stdout line(s). First lines:\n${unparseableSample.join('\n')}`,
-        );
-    }
-    parts.push(`Full stdout at ${stdoutFile}`);
-    return parts.join(' ');
 }
 
 function asObj(v: unknown): Record<string, unknown> | undefined {
@@ -214,126 +81,122 @@ function asObj(v: unknown): Record<string, unknown> | undefined {
         : undefined;
 }
 
-// ── Process management ─────────────────────────────────────────────────────────
+// ── Runtime management ────────────────────────────────────────────────────────
 
-let activeProcess: ChildProcess | null = null;
+interface ActiveRun {
+    client: CopilotClient;
+    session?: CopilotSession;
+    cancelled: boolean;
+}
+
+let activeRun: ActiveRun | null = null;
 
 export function cancelCurrentRequest(): void {
-    const p = activeProcess;
-    activeProcess = null;
-    p?.kill('SIGKILL');
+    const run = activeRun;
+    activeRun = null;
+    if (!run) return;
+    run.cancelled = true;
+    void run.session?.abort().catch(() => undefined);
+    void run.client.forceStop().catch(() => undefined);
 }
 
 interface ProcessCallbacks {
-    onStatus?: (status: string) => void;
-    onChunk?: (text: string) => void;
-    onTool?: (name: string) => void;
+    onChunk?: (chunk: string) => void;
+    onTool?: (toolName: string) => void;
 }
 
-interface RunResult {
-    text: string;
-    unparseableSample: string[];
-    stdoutFile: string;
-}
-
-function runProcess(options: {
+async function runSession(options: {
     prompt: string;
     model: string;
     effort: string;
     workingDir?: string;
     callbacks: ProcessCallbacks;
-}): Promise<RunResult> {
-    return new Promise((resolve, reject) => {
-        const { prompt, model, effort, workingDir, callbacks } = options;
-        const resolvedEffort = effort && effort.trim().length > 0 ? effort : DEFAULT_REASONING_EFFORT;
-        const args = [
-            '-p', prompt,
-            '--allow-all-tools',
-            '--no-color',
-            '--output-format', 'json',
-            '--stream', 'on',
-            '--reasoning-effort', resolvedEffort,
-        ];
-        if (model) { args.push('--model', model); }
-
-        const stdoutFile = path.join(os.tmpdir(), `copilot-stdout-${Date.now()}.ndjson`);
-        const teeStream = fs.createWriteStream(stdoutFile, { encoding: 'utf8' });
-
-        const proc = spawn(findCopilotBinary(), args, {
-            cwd: workingDir || os.homedir(),
-            env: {
-                ...process.env,
-                HOME: process.env.HOME || os.homedir(),
-                PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH ?? ''}`,
-            },
-        });
-        activeProcess = proc;
-
-        let stdoutBuf = '';
-        const textBuffer: string[] = [];
-        let stderrBuf = '';
-        const unparseableSample: string[] = [];
-        const MAX_UNPARSEABLE_SAMPLES = 10;
-        const MAX_UNPARSEABLE_LINE_LEN = 500;
-
-        proc.stdout.on('data', (chunk: Buffer) => {
-            const text = chunk.toString('utf8');
-            teeStream.write(text);
-            stdoutBuf += text;
-            const lines = stdoutBuf.split('\n');
-            stdoutBuf = lines.pop() ?? '';
-            for (const line of lines) {
-                if (!line.trim()) continue;
-                const event = parseCopilotEvent(line);
-                if (!event.text && !event.tool) {
-                    if (unparseableSample.length < MAX_UNPARSEABLE_SAMPLES) {
-                        unparseableSample.push(line.slice(0, MAX_UNPARSEABLE_LINE_LEN));
-                    }
-                    continue;
-                }
-                if (event.text) {
-                    if (event.replacesText) {
-                        // Consolidated turn content — discard accumulated deltas so the buffer
-                        // ends each turn with just that turn's content. We don't re-stream to
-                        // the UI; the deltas already covered it.
-                        textBuffer.length = 0;
-                        textBuffer.push(event.text);
-                    } else {
-                        textBuffer.push(event.text);
-                        callbacks.onChunk?.(event.text);
-                    }
-                }
-                if (event.tool) {
-                    callbacks.onTool?.(event.tool);
-                }
-            }
-        });
-
-        proc.stderr.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString('utf8'); });
-
-        proc.on('close', (code) => {
-            if (activeProcess === proc) activeProcess = null;
-            teeStream.end();
-            if (code !== 0 && code !== null) {
-                reject(new Error(
-                    `${buildExitErrorMessage(code, stderrBuf, unparseableSample)}. Full stdout at ${stdoutFile}`,
-                ));
-                return;
-            }
-            if (textBuffer.length === 0 && unparseableSample.length > 0) {
-                console.warn(
-                    `[pr-pilot] copilot emitted ${unparseableSample.length} unrecognized stdout lines but no text events — schema may have changed. Full stdout at ${stdoutFile}. First lines:\n${unparseableSample.join('\n')}`,
-                );
-            }
-            resolve({ text: textBuffer.join(''), unparseableSample, stdoutFile });
-        });
-
-        proc.on('error', (err) => {
-            if (activeProcess === proc) activeProcess = null;
-            teeStream.end();
-            reject(err);
-        });
+}): Promise<string> {
+    const { prompt, model, effort, workingDir, callbacks } = options;
+    const runtimeEnv = {
+        ...process.env,
+        HOME: process.env.HOME || os.homedir(),
+        PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH ?? ''}`,
+    };
+    const client = new CopilotClient({
+        connection: RuntimeConnection.forStdio({ path: findCopilotBinary() }),
+        workingDirectory: workingDir || os.homedir(),
+        env: runtimeEnv,
+        mode: 'copilot-cli',
     });
+    const run: ActiveRun = { client, cancelled: false };
+    activeRun = run;
+
+    let session: CopilotSession | undefined;
+    const unsubscribes: Array<() => void> = [];
+    let finalMessage = '';
+    let sessionError = '';
+    const deltaBuffer: string[] = [];
+
+    try {
+        await client.start();
+        session = await client.createSession({
+            model: model.trim() || undefined,
+            reasoningEffort: normalizeReasoningEffort(effort),
+            onPermissionRequest: approveAll,
+            streaming: true,
+        });
+        run.session = session;
+
+        unsubscribes.push(session.on('assistant.message_delta', (event) => {
+            const delta = event.data.deltaContent;
+            if (delta && delta.length > 0) {
+                deltaBuffer.push(delta);
+                callbacks.onChunk?.(delta);
+            }
+        }));
+        unsubscribes.push(session.on('assistant.message', (event) => {
+            const content = event.data.content;
+            if (content && content.trim().length > 0) {
+                finalMessage = content;
+            }
+        }));
+        unsubscribes.push(session.on('tool.execution_start', (event) => {
+            const toolName = event.data.toolName;
+            if (toolName && toolName.trim().length > 0) {
+                callbacks.onTool?.(toolName);
+            }
+        }));
+        unsubscribes.push(session.on('session.error', (event) => {
+            const message = event.data.message;
+            if (!sessionError && message && message.trim().length > 0) {
+                sessionError = message;
+            }
+        }));
+
+        const response = await session.sendAndWait(prompt, REQUEST_TIMEOUT_MS);
+        if (!finalMessage && response?.data.content?.trim()) {
+            finalMessage = response.data.content;
+        }
+
+        const raw = finalMessage.trim() ? finalMessage : deltaBuffer.join('');
+        if (!raw.trim() && sessionError.trim()) {
+            throw new Error(sessionError);
+        }
+        return raw;
+    } catch (err) {
+        if (run.cancelled) {
+            throw new Error('copilot request cancelled');
+        }
+        if (err instanceof Error) {
+            throw err;
+        }
+        throw new Error(String(err));
+    } finally {
+        unsubscribes.forEach((unsubscribe) => unsubscribe());
+        if (activeRun === run) activeRun = null;
+        await session?.disconnect().catch(() => undefined);
+        if (run.cancelled) {
+            await client.forceStop().catch(() => undefined);
+        } else {
+            await client.stop().catch(() => undefined);
+        }
+    }
 }
 
 // ── Review ─────────────────────────────────────────────────────────────────────
@@ -348,7 +211,7 @@ export async function reviewPR(options: {
 }): Promise<ReviewResult> {
     const { prompt, model, effort, workingDir, onStatus, onChunk } = options;
     onStatus('Generating review…');
-    const result = await runProcess({
+    const raw = await runSession({
         prompt,
         model,
         effort,
@@ -358,19 +221,17 @@ export async function reviewPR(options: {
             onTool: (name) => onStatus(name),
         },
     });
-    if (!result.text.trim()) {
-        throw new Error(
-            `copilot produced no output. ${buildNoOutputDetail(result.unparseableSample, result.stdoutFile)}`,
-        );
+    if (!raw.trim()) {
+        throw new Error('copilot produced no output.');
     }
     onStatus('Parsing review…');
     try {
-        return parseReview(result.text);
+        return parseReview(raw);
     } catch (e) {
         // ES2020 target lacks the Error(message, {cause}) overload; attach cause manually so
         // `preserve-caught-error` is satisfied without bumping the language target.
         const wrapped: Error & { cause?: unknown } = new Error(
-            `Failed to parse review JSON from copilot output: ${e instanceof Error ? e.message : String(e)}. Full stdout at ${result.stdoutFile}`,
+            `Failed to parse review JSON from copilot output: ${e instanceof Error ? e.message : String(e)}`,
         );
         wrapped.cause = e;
         throw wrapped;
@@ -385,12 +246,12 @@ export async function chat(options: {
     workingDir?: string;
     onChunk: (chunk: string) => void;
 }): Promise<string> {
-    const result = await runProcess({
+    const result = await runSession({
         prompt: options.prompt,
         model: '',
         effort: options.effort,
         workingDir: options.workingDir,
         callbacks: { onChunk: options.onChunk },
     });
-    return result.text;
+    return result;
 }

@@ -311,6 +311,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         state.activeReviewResult = result;
         push(state, { type: 'reviewResult', result, diff });
     } catch (err) {
+        if (isCancellationError(err)) return;
         push(state, { type: 'reviewError', message: errorMessage(err) });
     }
 }
@@ -411,6 +412,7 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
         history.push({ role: 'ASSISTANT', content: response });
         push(state, { type: 'chatResponse', response });
     } catch (err) {
+        if (isCancellationError(err)) return;
         history.pop(); // remove the user turn we added on error
         push(state, { type: 'chatError', message: errorMessage(err) });
     }
@@ -438,6 +440,10 @@ function buildPrContext(state: ViewState): string {
 
 function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
+}
+
+function isCancellationError(err: unknown): boolean {
+    return errorMessage(err).toLowerCase().includes('cancel');
 }
 
 function errorHtml(message: string): string {

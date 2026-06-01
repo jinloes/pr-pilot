@@ -1,44 +1,58 @@
 package com.jinloes.prpilot.services
 
+import com.github.copilot.CopilotClient
+import com.github.copilot.CopilotSession
+import com.github.copilot.generated.AssistantMessageDeltaEvent
+import com.github.copilot.generated.AssistantMessageEvent
+import com.github.copilot.generated.SessionErrorEvent
+import com.github.copilot.generated.ToolExecutionStartEvent
+import com.github.copilot.rpc.CopilotClientMode
+import com.github.copilot.rpc.CopilotClientOptions
+import com.github.copilot.rpc.MessageOptions
+import com.github.copilot.rpc.PermissionHandler
+import com.github.copilot.rpc.SessionConfig
 import com.jinloes.prpilot.model.ChatMessage
 import com.jinloes.prpilot.model.PRReviewRequest
 import com.jinloes.prpilot.model.ReviewResult
 import com.jinloes.prpilot.util.ProcessUtil
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import org.apache.commons.io.IOUtils
 import org.apache.commons.lang3.StringUtils
 import org.slf4j.LoggerFactory
+import java.io.Closeable
 import java.io.File
 import java.io.IOException
-import java.io.InputStreamReader
-import java.nio.charset.StandardCharsets
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.BiConsumer
 import java.util.function.Consumer
 
 /**
- * Shells out to the GitHub Copilot CLI. Mirrors the synchronous API of [ClaudeService] so callers
- * can swap providers without changing threading.
+ * Drives the GitHub Copilot runtime via the official Java SDK. Mirrors the synchronous API of
+ * [ClaudeService] so callers can swap providers without changing threading.
  *
- * Uses `--output-format json --stream on` so we can stream tool-use status and text deltas to the
- * UI as the agent works. The exact JSONL schema is not documented publicly, so [parseCopilotEvent]
- * is permissive: it recognizes Claude-style (`content_block_delta`, `assistant.message.content[]`),
- * OpenAI-style (`choices[0].delta.content`), and bare-shape events (`{type:"text", text:"..."}`),
- * and silently ignores unknown event types.
+ * The SDK still requires the local `copilot` CLI/runtime, but it gives us typed session events
+ * instead of a hand-rolled JSONL parser. We keep the same outward behavior: stream text deltas to
+ * the UI, surface tool names as status updates, and parse the final assistant message as review
+ * JSON.
  */
-open class CopilotService @JvmOverloads constructor(projectDir: String? = null) {
+open class CopilotService @JvmOverloads constructor(
+    projectDir: String? = null,
+) {
+
+    internal constructor(
+        projectDir: String? = null,
+        runtimeFactory: RuntimeFactory,
+    ) : this(projectDir) {
+        this.runtimeFactory = runtimeFactory
+    }
 
     private val workingDir: File =
         if (!projectDir.isNullOrBlank()) File(projectDir)
         else File(System.getProperty("user.home", "/"))
 
-    private val activeProcess = AtomicReference<Process?>()
+    private var runtimeFactory: RuntimeFactory = SdkRuntimeFactory()
+
+    private val activeRun = AtomicReference<ActiveRun?>()
 
     @Throws(IOException::class, InterruptedException::class)
     fun reviewPR(
@@ -74,26 +88,19 @@ open class CopilotService @JvmOverloads constructor(projectDir: String? = null) 
         onChunk: BiConsumer<String, String>?,
     ): ReviewResult {
         onStatus.accept(STATUS_GENERATING)
-        val result = runProcess(prompt, model, effort, onStatus, onChunk)
-        if (result.text.isBlank()) {
-            throw IOException(
-                "copilot produced no output. " +
-                    buildNoOutputDetail(result.unparseableSample, result.stdoutFile),
-            )
+        val raw = runSession(prompt, model, effort, onStatus, onChunk)
+        if (raw.isBlank()) {
+            throw IOException("copilot produced no output.")
         }
         onStatus.accept(STATUS_PARSING)
         return try {
-            ClaudeService.parseReview(result.text)
+            ClaudeService.parseReview(raw)
         } catch (parseEx: Exception) {
             log.warn(
                 "Failed to parse Copilot review JSON (first 500 chars): {}",
-                if (result.text.length > 500) result.text.substring(0, 500) else result.text,
+                if (raw.length > 500) raw.substring(0, 500) else raw,
             )
-            throw IOException(
-                "Failed to parse review JSON from copilot output: ${parseEx.message}. " +
-                    "Full stdout at ${result.stdoutFile.absolutePath}",
-                parseEx,
-            )
+            throw IOException("Failed to parse review JSON from copilot output: ${parseEx.message}", parseEx)
         }
     }
 
@@ -106,162 +113,281 @@ open class CopilotService @JvmOverloads constructor(projectDir: String? = null) 
         onChunk: Consumer<String>,
     ): String {
         val prompt = ClaudeService.buildChatPrompt(prContext, history, userMessage)
-        return runProcess(prompt, "", effort, { /* ignore status during chat */ }) { _, chunk ->
+        return runSession(prompt, "", effort, { /* ignore status during chat */ }) { _, chunk ->
             onChunk.accept(chunk)
-        }.text
+        }
     }
 
     /**
-     * Spawns the copilot CLI in JSONL streaming mode. Forwards extracted text to [onChunk] (as
-     * `"text"` kind, matching ClaudeService's protocol) and tool-use markers to [onStatus]. Always
-     * tees the raw stdout to a temp ndjson file so we have a forensic trail for diagnosing schema
-     * drift — the path is included in the returned [RunResult] and surfaced in error messages.
+     * Starts a fresh Copilot SDK client + session, forwards text deltas to [onChunk] (as `"text"`
+     * chunks, matching ClaudeService's protocol) and tool names to [onStatus], then returns the
+     * final assistant message content. If the SDK never delivers a consolidated assistant message,
+     * we fall back to the accumulated deltas.
      */
-    private fun runProcess(
+    private fun runSession(
         prompt: String,
         model: String,
         effort: String,
         onStatus: Consumer<String>,
         onChunk: BiConsumer<String, String>?,
-    ): RunResult {
-        val stdoutFile = File(
-            System.getProperty("java.io.tmpdir"),
-            "copilot-stdout-${System.currentTimeMillis()}.ndjson",
-        )
-        var process: Process? = null
+    ): String {
+        var activeRun: ActiveRun? = null
         try {
-            process = buildProcess(prompt, model, effort)
-            activeProcess.set(process)
+            val client = runtimeFactory.createClient(buildClientRequest())
+            activeRun = ActiveRun(client)
+            this.activeRun.set(activeRun)
 
-            val stderrFuture = drainStderr(process)
-            val textBuffer = StringBuilder()
-            val unparseableSample = mutableListOf<String>()
+            client.start()
+            val session = client.createSession(buildSessionRequest(model, effort))
+            activeRun.attachSession(session)
 
-            IOUtils.toBufferedReader(
-                InputStreamReader(process.inputStream, StandardCharsets.UTF_8)
-            ).use { reader ->
-                stdoutFile.bufferedWriter(StandardCharsets.UTF_8).use { tee ->
-                    reader.lineSequence().forEach { line ->
-                        tee.write(line)
-                        tee.newLine()
-                        if (line.isBlank()) return@forEach
-                        val event = parseCopilotEvent(line)
-                        if (event.isEmpty()) {
-                            if (unparseableSample.size < MAX_UNPARSEABLE_SAMPLES) {
-                                unparseableSample.add(line.take(MAX_UNPARSEABLE_LINE_LEN))
-                            }
-                            return@forEach
-                        }
-                        if (StringUtils.isNotEmpty(event.text)) {
-                            if (event.replacesText) {
-                                // Consolidated turn content — discard accumulated deltas so the
-                                // buffer ends each turn with just that turn's content. We don't
-                                // re-stream to the UI; the deltas already covered it.
-                                textBuffer.setLength(0)
-                                textBuffer.append(event.text)
-                            } else {
-                                textBuffer.append(event.text)
-                                onChunk?.accept("text", event.text!!)
-                            }
-                        }
-                        if (StringUtils.isNotBlank(event.tool)) {
-                            onStatus.accept(event.tool!!)
-                        }
-                    }
+            val subscriptions = mutableListOf<Closeable>()
+            val deltaBuffer = StringBuilder()
+            val finalMessage = AtomicReference<String?>()
+            val sessionError = AtomicReference<String?>()
+
+            subscriptions += session.onAssistantMessageDelta { delta ->
+                if (StringUtils.isNotEmpty(delta)) {
+                    deltaBuffer.append(delta)
+                    onChunk?.accept("text", delta!!)
+                }
+            }
+            subscriptions += session.onAssistantMessage { content ->
+                if (StringUtils.isNotBlank(content)) {
+                    finalMessage.set(content)
+                }
+            }
+            subscriptions += session.onToolExecutionStart { toolName ->
+                if (StringUtils.isNotBlank(toolName)) {
+                    onStatus.accept(toolName!!)
+                }
+            }
+            subscriptions += session.onSessionError { message ->
+                if (StringUtils.isNotBlank(message)) {
+                    sessionError.compareAndSet(null, message)
                 }
             }
 
-            val finished = process.waitFor(30, TimeUnit.MINUTES)
-            if (!finished) {
-                process.destroyForcibly()
-                throw IOException(
-                    "copilot did not finish within 30 minutes. Stdout at ${stdoutFile.absolutePath}",
-                )
+            session.sendAndWait(prompt, REQUEST_TIMEOUT_MS)
+            subscriptions.forEach { closeQuietly(it) }
+
+            val raw = StringUtils.defaultIfBlank(finalMessage.get(), deltaBuffer.toString()) ?: ""
+            if (StringUtils.isBlank(raw) && StringUtils.isNotBlank(sessionError.get())) {
+                throw IOException(sessionError.get())
             }
-            val exitCode = process.exitValue()
-            val stderr = stderrFuture.join()
-            if (exitCode != 0) {
-                throw IOException(
-                    buildExitErrorMessage(exitCode, stderr, unparseableSample) +
-                        ". Full stdout at ${stdoutFile.absolutePath}",
-                )
+            return raw
+        } catch (ex: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw ex
+        } catch (ex: Exception) {
+            if (activeRun?.cancelled?.get() == true) {
+                throw InterruptedException("copilot request cancelled")
             }
-            if (textBuffer.isEmpty() && unparseableSample.isNotEmpty()) {
-                log.warn(
-                    "copilot emitted {} unrecognized stdout lines but no text events — schema may have changed. Full stdout at {}. First lines:\n{}",
-                    unparseableSample.size,
-                    stdoutFile.absolutePath,
-                    unparseableSample.joinToString("\n"),
-                )
-            }
-            return RunResult(textBuffer.toString(), unparseableSample, stdoutFile)
+            throw asIOException(ex)
         } finally {
-            activeProcess.set(null)
-            process?.destroy()
-            // Note: we intentionally keep stdoutFile on disk so the path in error messages is
-            // valid for the user to share. The OS /tmp cleaner handles eventual removal.
+            this.activeRun.compareAndSet(activeRun, null)
+            closeQuietly(activeRun)
         }
     }
-
-    /** Bundles the extracted text with diagnostics so callers can produce useful error messages. */
-    internal data class RunResult(
-        val text: String,
-        val unparseableSample: List<String>,
-        val stdoutFile: File,
-    )
 
     fun cancelCurrentRequest() {
-        activeProcess.getAndSet(null)?.destroyForcibly()
+        activeRun.getAndSet(null)?.cancel()
     }
 
-    internal open fun buildProcess(prompt: String, model: String, effort: String): Process {
-        val resolvedEffort = effort.ifBlank { DEFAULT_REASONING_EFFORT }
-        val cmd = mutableListOf(
-            findCopilotBinary(),
-            "-p", prompt,
-            "--allow-all-tools",
-            "--no-color",
-            "--output-format", "json",
-            "--stream", "on",
-            "--reasoning-effort", resolvedEffort,
+    private fun buildClientRequest(): ClientRequest {
+        val env = linkedMapOf<String, String>()
+        System.getenv().forEach { (key, value) -> env[key] = value }
+        env["HOME"] = System.getProperty("user.home", "/")
+        val existingPath = env["PATH"] ?: ""
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:$existingPath"
+        return ClientRequest(
+            cliPath = findCopilotBinary(),
+            workingDir = workingDir,
+            environment = env,
         )
-        if (model.isNotBlank()) {
-            cmd.add("--model")
-            cmd.add(model)
-        }
-        val pb = ProcessBuilder(cmd)
-        pb.directory(workingDir)
-        pb.environment()["HOME"] = System.getProperty("user.home", "/")
-        // Prepend known tool paths so gh/git are found without relying on shell PATH inheritance.
-        val existingPath = pb.environment()["PATH"] ?: ""
-        pb.environment()["PATH"] = "/opt/homebrew/bin:/usr/local/bin:$existingPath"
-        return pb.start()
     }
 
-    /**
-     * Parsed view of one JSONL event line. All fields are null/empty/false when nothing was
-     * recognized.
-     *
-     * @property replacesText if true, [text] is the *complete* content of a finalized message and
-     *   the caller should clear any previously-accumulated text. We use this to discard
-     *   intermediate-turn commentary so only the last turn's content (the review JSON) survives
-     *   into the parseReview input.
-     */
-    internal data class CopilotEvent(
-        val text: String? = null,
-        val tool: String? = null,
-        val replacesText: Boolean = false,
-    ) {
-        fun isEmpty(): Boolean = text.isNullOrEmpty() && tool.isNullOrBlank()
+    private fun buildSessionRequest(model: String, effort: String): SessionRequest =
+        SessionRequest(
+            model = model,
+            effort = normalizeReasoningEffort(effort),
+            workingDir = workingDir,
+        )
+
+    private fun asIOException(ex: Exception): IOException {
+        val root = if (ex is ExecutionException && ex.cause is Exception) ex.cause as Exception else ex
+        if (root is IOException) {
+            return root
+        }
+        val message = StringUtils.defaultIfBlank(root.message, "copilot request failed")
+        return IOException(message, root)
+    }
+
+    private fun closeQuietly(closeable: AutoCloseable?) {
+        try {
+            closeable?.close()
+        } catch (_: Exception) {
+            // Best effort cleanup only.
+        }
+    }
+
+    internal data class ClientRequest(
+        val cliPath: String,
+        val workingDir: File,
+        val environment: Map<String, String>,
+    )
+
+    internal data class SessionRequest(
+        val model: String,
+        val effort: String,
+        val workingDir: File,
+    )
+
+    internal interface RuntimeFactory {
+        fun createClient(request: ClientRequest): RuntimeClient
+    }
+
+    internal interface RuntimeClient : AutoCloseable {
+        @Throws(Exception::class)
+        fun start()
+
+        @Throws(Exception::class)
+        fun createSession(request: SessionRequest): RuntimeSession
+
+        fun forceStop()
+    }
+
+    internal interface RuntimeSession : AutoCloseable {
+        fun onAssistantMessageDelta(listener: Consumer<String?>): Closeable
+
+        fun onAssistantMessage(listener: Consumer<String?>): Closeable
+
+        fun onToolExecutionStart(listener: Consumer<String?>): Closeable
+
+        fun onSessionError(listener: Consumer<String?>): Closeable
+
+        @Throws(Exception::class)
+        fun sendAndWait(prompt: String, timeoutMs: Long)
+
+        fun abort()
+    }
+
+    internal class SdkRuntimeFactory : RuntimeFactory {
+        override fun createClient(request: ClientRequest): RuntimeClient = SdkRuntimeClient(request)
+    }
+
+    internal class SdkRuntimeClient(
+        private val request: ClientRequest,
+    ) : RuntimeClient {
+        private val client = CopilotClient(
+            CopilotClientOptions()
+                .setCliPath(request.cliPath)
+                .setCwd(request.workingDir.absolutePath)
+                .setEnvironment(request.environment)
+                .setMode(CopilotClientMode.COPILOT_CLI)
+                .setAutoStart(false),
+        )
+
+        override fun start() {
+            client.start().get()
+        }
+
+        override fun createSession(request: SessionRequest): RuntimeSession {
+            val config = SessionConfig()
+                .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
+                .setStreaming(true)
+                .setWorkingDirectory(request.workingDir.absolutePath)
+                .setReasoningEffort(request.effort)
+            if (request.model.isNotBlank()) {
+                config.setModel(request.model)
+            }
+            return SdkRuntimeSession(client.createSession(config).get())
+        }
+
+        override fun forceStop() {
+            client.forceStop()
+        }
+
+        override fun close() {
+            client.close()
+        }
+    }
+
+    internal class SdkRuntimeSession(
+        private val session: CopilotSession,
+    ) : RuntimeSession {
+        override fun onAssistantMessageDelta(listener: Consumer<String?>): Closeable =
+            session.on(AssistantMessageDeltaEvent::class.java) { event ->
+                listener.accept(event.getData()?.deltaContent())
+            }
+
+        override fun onAssistantMessage(listener: Consumer<String?>): Closeable =
+            session.on(AssistantMessageEvent::class.java) { event ->
+                listener.accept(event.getData()?.content())
+            }
+
+        override fun onToolExecutionStart(listener: Consumer<String?>): Closeable =
+            session.on(ToolExecutionStartEvent::class.java) { event ->
+                listener.accept(event.getData()?.toolName())
+            }
+
+        override fun onSessionError(listener: Consumer<String?>): Closeable =
+            session.on(SessionErrorEvent::class.java) { event ->
+                listener.accept(event.getData()?.message())
+            }
+
+        override fun sendAndWait(prompt: String, timeoutMs: Long) {
+            session.sendAndWait(MessageOptions().setPrompt(prompt), timeoutMs).get()
+        }
+
+        override fun abort() {
+            session.abort()
+        }
+
+        override fun close() {
+            session.close()
+        }
+    }
+
+    private class ActiveRun(
+        private val client: RuntimeClient,
+    ) : AutoCloseable {
+        val cancelled = AtomicBoolean(false)
+        private val sessionRef = AtomicReference<RuntimeSession?>()
+
+        fun attachSession(session: RuntimeSession) {
+            sessionRef.set(session)
+        }
+
+        fun cancel() {
+            cancelled.set(true)
+            try {
+                sessionRef.get()?.abort()
+            } catch (_: Exception) {
+                // Best effort only.
+            }
+            try {
+                client.forceStop()
+            } catch (_: Exception) {
+                // Best effort only.
+            }
+        }
+
+        override fun close() {
+            try {
+                sessionRef.getAndSet(null)?.close()
+            } finally {
+                client.close()
+            }
+        }
     }
 
     companion object {
         private val log = LoggerFactory.getLogger(CopilotService::class.java)
 
-        private val JSON = Json { ignoreUnknownKeys = true }
-
         private const val STATUS_GENERATING = "Generating review…"
         private const val STATUS_PARSING = "Parsing review…"
+        private const val REQUEST_TIMEOUT_MS = 30L * 60L * 1000L
 
         /**
          * Sane default for PR review work: enough depth to catch real bugs and follow the strict
@@ -270,182 +396,14 @@ open class CopilotService @JvmOverloads constructor(projectDir: String? = null) 
          */
         const val DEFAULT_REASONING_EFFORT = "medium"
 
-        /**
-         * Caps on how much unparseable stdout to keep for error reporting. Copilot's policy /
-         * auth / unknown-flag errors are written as plain text on stdout, not JSON events, so we
-         * need to capture some of it to surface a useful message — but bounded, since a runaway
-         * process could write megabytes.
-         */
-        private const val MAX_UNPARSEABLE_SAMPLES = 10
-        private const val MAX_UNPARSEABLE_LINE_LEN = 500
-
-        /**
-         * Permissive JSONL event parser. Recognizes the four shapes documented in the class
-         * KDoc; returns an empty [CopilotEvent] for unknown shapes so the caller can count them
-         * and surface a schema-drift warning without crashing the run.
-         */
         @JvmStatic
-        internal fun parseCopilotEvent(line: String): CopilotEvent {
-            val obj = try {
-                JSON.parseToJsonElement(line) as? JsonObject ?: return CopilotEvent()
-            } catch (_: Exception) {
-                return CopilotEvent()
-            }
-
-            // Shape A: simple {type, text|name} events
-            val type = obj.string("type")
-            when (type) {
-                "text" -> return CopilotEvent(text = obj.string("text"))
-                "tool_use", "tool_call", "tool" ->
-                    return CopilotEvent(
-                        tool = obj.string("name")
-                            ?: obj.string("tool")
-                            ?: (obj["function"] as? JsonObject)?.string("name")
-                    )
-                "response" ->
-                    return CopilotEvent(
-                        text = obj.string("response") ?: obj.string("text")
-                    )
-            }
-
-            // Shape E: Copilot CLI's actual JSONL schema (confirmed against v1.0.54 output). Full
-            // catalog observed: session.*, user.message, assistant.message_start, assistant.message_delta,
-            // assistant.reasoning, assistant.message, assistant.turn_start/end, tool.execution_start,
-            // tool.execution_complete, result.
-            //
-            //   - `assistant.message_delta` data.deltaContent is the streaming text token; we
-            //     forward it to the UI for live feedback and *also* accumulate it into the buffer
-            //     as a fallback in case no consolidated `assistant.message` arrives.
-            //   - `assistant.message` data.content is the consolidated content of a finished turn.
-            //     Reviews go through 8+ tool-using turns before the final JSON; if we just
-            //     accumulated all delta text we'd hand parseReview a mix of commentary + tool
-            //     transcripts + JSON. Marking these events as `replacesText` clears the buffer
-            //     each turn so the buffer ends up with *only* the last turn's content (the review).
-            //   - `tool.execution_start` data.toolName drives the user-visible status updates.
-            //
-            // We intentionally skip `assistant.reasoning` (opaque blob), the session.* / user.* /
-            // turn_start/end / tool.execution_complete / result events (setup metadata, no payload
-            // we need).
-            if (type == "assistant.message_delta") {
-                val data = obj["data"] as? JsonObject
-                return CopilotEvent(text = data?.string("deltaContent"))
-            }
-            if (type == "assistant.message") {
-                val data = obj["data"] as? JsonObject
-                val content = data?.string("content")
-                if (!content.isNullOrEmpty()) {
-                    return CopilotEvent(text = content, replacesText = true)
-                }
-            }
-            if (type == "tool.execution_start") {
-                val data = obj["data"] as? JsonObject
-                return CopilotEvent(tool = data?.string("toolName"))
-            }
-
-            // Shape B: Claude streaming events
-            if (type == "content_block_delta") {
-                val delta = obj["delta"] as? JsonObject
-                val deltaType = delta?.string("type")
-                if (deltaType == "text_delta" || deltaType == "input_text_delta") {
-                    return CopilotEvent(text = delta.string("text"))
-                }
-            }
-            if (type == "content_block_start") {
-                val block = obj["content_block"] as? JsonObject
-                if (block != null) {
-                    when (block.string("type")) {
-                        "text" -> return CopilotEvent(text = block.string("text"))
-                        "tool_use" -> return CopilotEvent(tool = block.string("name"))
-                    }
-                }
-            }
-
-            // Shape C: Claude full assistant message {type:"assistant", message:{content:[...]}}
-            if (type == "assistant") {
-                val content = (obj["message"] as? JsonObject)?.get("content") as? JsonArray
-                if (content != null) {
-                    val sb = StringBuilder()
-                    var tool: String? = null
-                    for (block in content) {
-                        if (block !is JsonObject) continue
-                        when (block.string("type")) {
-                            "text" -> block.string("text")?.let { sb.append(it) }
-                            "tool_use" -> if (tool == null) tool = block.string("name")
-                        }
-                    }
-                    return CopilotEvent(text = sb.toString().takeIf { it.isNotEmpty() }, tool = tool)
-                }
-            }
-
-            // Shape D: OpenAI-style {choices:[{delta:{content,tool_calls}}]}
-            val firstChoice = (obj["choices"] as? JsonArray)?.firstOrNull() as? JsonObject
-            if (firstChoice != null) {
-                val delta = (firstChoice["delta"] as? JsonObject)
-                    ?: (firstChoice["message"] as? JsonObject)
-                if (delta != null) {
-                    val text = delta.string("content")
-                    val tool = (delta["tool_calls"] as? JsonArray)?.firstOrNull()?.let { tc ->
-                        ((tc as? JsonObject)?.get("function") as? JsonObject)?.string("name")
-                    }
-                    if (!text.isNullOrEmpty() || !tool.isNullOrBlank()) {
-                        return CopilotEvent(text = text, tool = tool)
-                    }
-                }
-            }
-
-            return CopilotEvent()
+        internal fun normalizeReasoningEffort(effort: String?): String = when (effort?.trim()?.lowercase()) {
+            "low", "medium", "high", "xhigh" -> effort.trim().lowercase()
+            "none" -> "low"
+            "max" -> "xhigh"
+            else -> DEFAULT_REASONING_EFFORT
         }
 
-        private fun JsonObject.string(key: String): String? =
-            (this[key] as? JsonPrimitive)?.contentOrNull
-
-        /**
-         * Joins exit code, stderr, and sampled unparseable stdout into a single error string.
-         * Copilot writes user-facing errors (policy block, auth failure, unknown flag) as plain
-         * text on stdout in JSON-output mode, so we have to dig them out of the sample buffer.
-         */
-        internal fun buildExitErrorMessage(
-            exitCode: Int,
-            stderr: String,
-            unparseableSample: List<String>,
-        ): String {
-            val parts = mutableListOf("copilot exited $exitCode")
-            if (stderr.isNotBlank()) parts.add(stderr.trim())
-            if (unparseableSample.isNotEmpty()) {
-                parts.add(unparseableSample.joinToString("\n").trim())
-            }
-            return parts.joinToString(": ")
-        }
-
-        /**
-         * Builds a diagnostic detail string for the "produced no output" error path. Includes the
-         * first unparseable lines (if any) and always points at the stdout file so the user has a
-         * concrete artifact to share when reporting the issue.
-         */
-        internal fun buildNoOutputDetail(unparseableSample: List<String>, stdoutFile: File): String {
-            val parts = mutableListOf<String>()
-            if (unparseableSample.isEmpty()) {
-                parts.add(
-                    "The CLI exited cleanly but emitted no events we recognized — the review prompt may have been rejected or the model failed silently.",
-                )
-            } else {
-                parts.add(
-                    "The CLI emitted ${unparseableSample.size} unrecognized stdout line(s). First lines:\n" +
-                        unparseableSample.joinToString("\n"),
-                )
-            }
-            parts.add("Full stdout at ${stdoutFile.absolutePath}")
-            return parts.joinToString(" ")
-        }
-
-        private fun drainStderr(process: Process): CompletableFuture<String> =
-            CompletableFuture.supplyAsync {
-                try {
-                    IOUtils.toString(process.errorStream, StandardCharsets.UTF_8)
-                } catch (e: IOException) {
-                    ""
-                }
-            }
 
         @JvmStatic
         fun findCopilotBinary(): String {
