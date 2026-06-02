@@ -1,0 +1,61 @@
+package com.jinloes.prpilot.services;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.io.IOException;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+
+class PRNotificationServiceTest {
+
+    @Nested
+    class SanitizeError {
+
+        @Test
+        void plainMessageIsReturnedAsIs() {
+            String result =
+                    PRNotificationService.sanitizeError(new IOException("connection refused"));
+            assertThat(result).isEqualTo("connection refused");
+        }
+
+        @Test
+        void bearerTokenIsRedacted() {
+            String result =
+                    PRNotificationService.sanitizeError(
+                            new IOException(
+                                    "401 Unauthorized: Bearer ghp_abc123XYZ token rejected"));
+            assertThat(result).doesNotContain("ghp_abc123XYZ");
+            assertThat(result).contains("[redacted]");
+        }
+
+        @Test
+        void tokenKeywordIsRedacted() {
+            String result =
+                    PRNotificationService.sanitizeError(
+                            new IOException("invalid token: ghs_secretvalue"));
+            assertThat(result).doesNotContain("ghs_secretvalue");
+            assertThat(result).contains("[redacted]");
+        }
+
+        @Test
+        void caseInsensitiveRedaction() {
+            String result =
+                    PRNotificationService.sanitizeError(
+                            new IOException("TOKEN=abc123secret rejected"));
+            assertThat(result).doesNotContain("abc123secret");
+            assertThat(result).contains("[redacted]");
+        }
+
+        @Test
+        void nullMessageFallsBackToUnknownError() {
+            String result = PRNotificationService.sanitizeError(new IOException((String) null));
+            assertThat(result).isEqualTo("unknown error");
+        }
+
+        @Test
+        void blankMessageFallsBackToUnknownError() {
+            String result = PRNotificationService.sanitizeError(new IOException("   "));
+            assertThat(result).isEqualTo("unknown error");
+        }
+    }
+}

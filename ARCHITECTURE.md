@@ -56,6 +56,8 @@ intellij-plugin/                       – IntelliJ plugin host; depends on :cor
     ui/
       PRToolWindowFactory.java
       WebviewPanel.java
+      ReviewMapper.java              – MapStruct mapper (core model -> webview DTOs)
+      WebviewDtos.java               – package-private DTO records serialized to webview bridge
       RepoDetector.java
 
 webview/                               – Vite + React + TypeScript webview
@@ -121,6 +123,9 @@ Review prompts do not embed full diff; model fetches diff on demand via `gh pr d
 
 ### Cross-host parity
 When host-specific logic changes in IntelliJ or VS Code, update the paired implementation in the other host. The mapping table and enforcement workflow live in `AGENTS.md`.
+
+### DTO mapping in IntelliJ webview bridge
+`WebviewPanel` model-to-DTO conversion uses MapStruct (`ReviewMapper`) instead of hand-rolled mappers so field drift fails at compile time.
 
 ### Max-turns recovery for Claude
 If stream-json returns `error_max_turns` with `session_id`, auto-resume via `claude --resume <session_id> --max-turns 3` and nudge for final JSON.

@@ -4,6 +4,7 @@ import static com.intellij.openapi.application.ApplicationManager.getApplication
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.module.kotlin.KotlinModule;
 import com.intellij.ide.BrowserUtil;
@@ -66,6 +67,8 @@ import org.cef.handler.CefLoadHandlerAdapter;
 public class WebviewPanel implements Disposable {
 
     // --- Outbound DTO records (Java → JS) ---
+    // ReviewResultDto and LineCommentDto live in WebviewDtos.java (package-private);
+    // see ReviewMapper for compile-time-verified model→DTO mapping.
 
     private record WebviewPr(
             int number,
@@ -81,13 +84,6 @@ public class WebviewPanel implements Disposable {
             String type, List<WebviewPr> prs, @JsonProperty("defaultRepo") String defaultRepo) {}
 
     private record DraftLoadingMsg(String type) {}
-
-    private record ReviewResultDto(
-            String summary,
-            String verdict,
-            @JsonProperty("lineComments") List<LineCommentDto> lineComments) {}
-
-    private record LineCommentDto(String file, int line, String type, String body) {}
 
     private record DraftLoadedMsg(
             String type,
@@ -128,7 +124,9 @@ public class WebviewPanel implements Disposable {
     private final JBCefBrowser browser;
     private final JBCefJSQuery bridgeQuery;
     private final ObjectMapper mapper =
-            new ObjectMapper().registerModule(new KotlinModule.Builder().build());
+            new ObjectMapper()
+                    .registerModule(new KotlinModule.Builder().build())
+                    .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     private final PendingReviewIndex pendingIndex = new PendingReviewIndex();
     private final IntellijClaudeService claudeService;
     private final IntellijGitHubService ghSvc = IntellijGitHubService.getInstance();
@@ -439,12 +437,16 @@ public class WebviewPanel implements Disposable {
             return;
         }
 
-        activePR = pr;
-        lastResult = null;
-        pendingReviewId = null;
-        prefetchedDiff = null;
-        prefetchedExistingReviews = null;
-        chatHistory = List.of();
+        // Synchronize the field-clearing so a concurrent handleGenerateReview
+        // on a pooled thread cannot read a stale activePR/prefetchedDiff pair.
+        synchronized (this) {
+            activePR = pr;
+            lastResult = null;
+            pendingReviewId = null;
+            prefetchedDiff = null;
+            prefetchedExistingReviews = null;
+            chatHistory = List.of();
+        }
 
         getApplication().invokeLater(() -> onPRSelected.accept(pr));
         pushMessage(new DraftLoadingMsg("draftLoading"));
@@ -558,9 +560,18 @@ public class WebviewPanel implements Disposable {
 
                             boolean merged = mergedFuture.join();
                             GitHubService.PendingReview pending = pendingFuture.join();
-                            prefetchedDiff = diffFuture.join();
-                            prefetchedExistingReviews = reviewsFuture.join();
+                            String fetchedDiff = diffFuture.join();
+                            String fetchedReviews = reviewsFuture.join();
                             String currentHeadSha = headShaFuture.join();
+
+                            // Write prefetched data only if the same PR is still active to
+                            // avoid clobbering state for a PR the user already switched away from.
+                            synchronized (WebviewPanel.this) {
+                                if (activePR == pr) {
+                                    prefetchedDiff = fetchedDiff;
+                                    prefetchedExistingReviews = fetchedReviews;
+                                }
+                            }
 
                             // Delete stale draft on a merged PR, best-effort.
                             if (merged && pending != null) {
@@ -590,7 +601,7 @@ public class WebviewPanel implements Disposable {
                                 boolean stale =
                                         StringUtils.isNotBlank(savedHeadSha)
                                                 && !savedHeadSha.equals(currentHeadSha);
-                                ReviewResultDto dto = toDto(pending.getResult());
+                                ReviewResultDto dto = ReviewMapper.INSTANCE.toDto(pending.getResult());
                                 pushMessage(
                                         new DraftLoadedMsg(
                                                 "draftLoaded",
@@ -663,10 +674,20 @@ public class WebviewPanel implements Disposable {
                                 }
                             }
 
+                            // Atomically snapshot prefetched data to prevent check-then-act
+                            // races with a concurrent handleSelectPR on the JCEF bridge thread.
+                            String snapshotDiff;
+                            String snapshotReviews;
+                            synchronized (WebviewPanel.this) {
+                                boolean samepr = activePR == finalPr;
+                                snapshotDiff = samepr ? prefetchedDiff : null;
+                                snapshotReviews = samepr ? prefetchedExistingReviews : null;
+                            }
+
                             // Reuse prefetched diff; fall back to live fetch only if stale.
                             String diff;
-                            if (activePR == finalPr && StringUtils.isNotBlank(prefetchedDiff)) {
-                                diff = prefetchedDiff;
+                            if (StringUtils.isNotBlank(snapshotDiff)) {
+                                diff = snapshotDiff;
                             } else {
                                 pushMessage(
                                         new ReviewGeneratingMsg(
@@ -685,8 +706,8 @@ public class WebviewPanel implements Disposable {
                             // Reuse prefetched existing reviews; fall back to live fetch only if
                             // stale.
                             String existingReviews;
-                            if (activePR == finalPr && prefetchedExistingReviews != null) {
-                                existingReviews = prefetchedExistingReviews;
+                            if (snapshotReviews != null) {
+                                existingReviews = snapshotReviews;
                             } else {
                                 try {
                                     existingReviews =
@@ -719,9 +740,18 @@ public class WebviewPanel implements Disposable {
                                         pendingReviewId = null;
                                         pushMessage(
                                                 new ReviewResultMsg(
-                                                        "reviewResult", toDto(result), finalDiff));
+                                                        "reviewResult",
+                                                        ReviewMapper.INSTANCE.toDto(result),
+                                                        finalDiff));
                                     },
-                                    err -> pushMessage(new ErrorMsg("reviewError", err)));
+                                    err -> {
+                                        // Cancellations are user-initiated — don't surface as errors.
+                                        String lower = err.toLowerCase(java.util.Locale.ROOT);
+                                        if (!lower.contains("cancel")
+                                                && !lower.contains("interrupt")) {
+                                            pushMessage(new ErrorMsg("reviewError", err));
+                                        }
+                                    });
                         });
     }
 
@@ -926,20 +956,6 @@ public class WebviewPanel implements Disposable {
         } catch (JsonProcessingException e) {
             log.warn("pushMessage serialization failed: {}", e.getMessage());
         }
-    }
-
-    private static ReviewResultDto toDto(ReviewResult r) {
-        if (r == null) {
-            return null;
-        }
-        List<LineCommentDto> comments =
-                r.getLineComments().stream()
-                        .map(
-                                c ->
-                                        new LineCommentDto(
-                                                c.getFile(), c.getLine(), c.getType(), c.getBody()))
-                        .toList();
-        return new ReviewResultDto(r.getSummary(), r.getVerdict(), comments);
     }
 
     /** Pushes the PR list into the webview via the bridge. Call from the EDT. */
