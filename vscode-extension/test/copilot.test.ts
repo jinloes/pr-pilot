@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEFAULT_REASONING_EFFORT, normalizeReasoningEffort } from '../src/copilot';
+import { DEFAULT_REASONING_EFFORT, normalizeReasoningEffort, withTimeout } from '../src/copilot';
 
 test('normalizeReasoningEffort keeps supported values', () => {
   assert.equal(normalizeReasoningEffort('low'), 'low');
@@ -28,4 +28,17 @@ test('normalizeReasoningEffort falls back to default on unknown values', () => {
 
 test('normalizeReasoningEffort falls back to default on blank input', () => {
   assert.equal(normalizeReasoningEffort('   '), DEFAULT_REASONING_EFFORT);
+});
+
+test('withTimeout returns resolved value before timeout', async () => {
+  const value = await withTimeout(Promise.resolve('ok'), 50, 'runtime startup');
+  assert.equal(value, 'ok');
+});
+
+test('withTimeout rejects when operation exceeds timeout', async () => {
+  const never = new Promise<string>(() => undefined);
+  await assert.rejects(
+    withTimeout(never, 20, 'session creation'),
+    /copilot session creation timed out after 1s/,
+  );
 });

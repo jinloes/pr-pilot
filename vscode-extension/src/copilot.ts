@@ -21,6 +21,7 @@ export { buildPrompt, buildChatPrompt, buildFocusedChatPrompt };
  * schema, without burning the latency of `high`/`xhigh`/`max`.
  */
 export const DEFAULT_REASONING_EFFORT = 'medium';
+export const SDK_BOOT_TIMEOUT_MS = 60 * 1000;
 const REQUEST_TIMEOUT_MS = 30 * 60 * 1000;
 
 // ── Binary resolution ──────────────────────────────────────────────────────────
@@ -81,6 +82,23 @@ function asObj(v: unknown): Record<string, unknown> | undefined {
         : undefined;
 }
 
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
+    const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+    let timer: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            reject(new Error(`copilot ${operation} timed out after ${timeoutSeconds}s`));
+        }, timeoutMs);
+    });
+    try {
+        return await Promise.race([promise, timeoutPromise]);
+    } finally {
+        if (timer) {
+            clearTimeout(timer);
+        }
+    }
+}
+
 // ── Runtime management ────────────────────────────────────────────────────────
 
 interface ActiveRun {
@@ -134,13 +152,13 @@ async function runSession(options: {
     const deltaBuffer: string[] = [];
 
     try {
-        await client.start();
-        session = await client.createSession({
+        await withTimeout(client.start(), SDK_BOOT_TIMEOUT_MS, 'runtime startup');
+        session = await withTimeout(client.createSession({
             model: model.trim() || undefined,
             reasoningEffort: normalizeReasoningEffort(effort),
             onPermissionRequest: approveAll,
             streaming: true,
-        });
+        }), SDK_BOOT_TIMEOUT_MS, 'session creation');
         run.session = session;
 
         unsubscribes.push(session.on('assistant.message_delta', (event) => {
