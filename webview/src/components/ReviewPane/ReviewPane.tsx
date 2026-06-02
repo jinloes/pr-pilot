@@ -79,9 +79,14 @@ type PaneState =
   | { kind: 'draftLoading' }
   | { kind: 'noDraft' }
   | { kind: 'authError'; message: string }
-  | { kind: 'draftPresent'; result: ReviewResult; reviewId: string; staleCommits: boolean; diff?: string }
-  | { kind: 'generating'; messages: string[]; chunks: Array<{ kind: 'text' | 'thinking'; content: string }> }
-  | { kind: 'reviewUnsaved'; result: ReviewResult; diff: string }
+  | { kind: 'draftPresent'; result: ReviewResult; reviewId: string; staleCommits: boolean; diff?: string; generationElapsedSec?: number }
+  | {
+      kind: 'generating'
+      messages: string[]
+      chunks: Array<{ kind: 'text' | 'thinking'; content: string }>
+      startedAtMs: number
+    }
+  | { kind: 'reviewUnsaved'; result: ReviewResult; diff: string; generationElapsedSec?: number }
   | { kind: 'merged'; status?: string }
   | { kind: 'submitted' }
   | { kind: 'error'; message: string }
@@ -196,6 +201,7 @@ export function ReviewPane({ pr }: Props) {
             kind: 'generating',
             messages: prev.kind === 'generating' ? [...prev.messages, msg.message] : [msg.message],
             chunks: prev.kind === 'generating' ? prev.chunks : [],
+            startedAtMs: prev.kind === 'generating' ? prev.startedAtMs : Date.now(),
           }))
           break
 
@@ -210,7 +216,13 @@ export function ReviewPane({ pr }: Props) {
           const diff = msg.diff ?? ''
           const result = withSortedComments(withValidatedComments(msg.result, diff))
           setFocusedCommentIdx(0)
-          setState({ kind: 'reviewUnsaved', result, diff })
+          setState((prev) => {
+            const elapsedSec =
+              prev.kind === 'generating'
+                ? Math.max(0, Math.round((Date.now() - prev.startedAtMs) / 1000))
+                : undefined
+            return { kind: 'reviewUnsaved', result, diff, generationElapsedSec: elapsedSec }
+          })
           break
         }
 
@@ -233,6 +245,7 @@ export function ReviewPane({ pr }: Props) {
               reviewId: msg.reviewId,
               staleCommits: false,
               diff: prev.diff,
+              generationElapsedSec: prev.generationElapsedSec,
             }
           })
           const verdict = pendingVerdict.current
@@ -342,7 +355,7 @@ export function ReviewPane({ pr }: Props) {
   const currentPr = pr
 
   function handleGenerate() {
-    setState({ kind: 'generating', messages: ['Starting review…'], chunks: [] })
+    setState({ kind: 'generating', messages: ['Starting review…'], chunks: [], startedAtMs: Date.now() })
     sendToHost({ type: 'generateReview', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo })
   }
 
@@ -690,9 +703,15 @@ function formatElapsed(s: number): string {
   return m > 0 ? `${m}:${String(sec).padStart(2, '0')}` : `${sec}s`
 }
 
+function formatGenerationSummary(elapsedSec?: number): string | null {
+  if (elapsedSec == null || elapsedSec < 0) return null
+  return `Generated in ${formatElapsed(elapsedSec)}`
+}
+
 function ReviewAndDiff({
   result,
   diff,
+  generationElapsedSec,
   focusedCommentIdx,
   setFocusedCommentIdx,
   editCommentHandlers,
@@ -705,6 +724,7 @@ function ReviewAndDiff({
 }: {
   result: ReviewResult
   diff?: string
+  generationElapsedSec?: number
   focusedCommentIdx: number
   setFocusedCommentIdx: React.Dispatch<React.SetStateAction<number>>
   editCommentHandlers: ContentProps['editCommentHandlers']
@@ -715,6 +735,7 @@ function ReviewAndDiff({
   onEditOrphan: (orphan: LineComment, body: string) => void
   onDeleteOrphan: (orphan: LineComment) => void
 }) {
+  const generationSummary = formatGenerationSummary(generationElapsedSec)
   return (
     <>
       {staleCommits && (
@@ -724,6 +745,9 @@ function ReviewAndDiff({
             Draft generated against an older commit — new commits may have been pushed.
           </AlertDescription>
         </Alert>
+      )}
+      {generationSummary && (
+        <p className="px-4 pt-3 text-xs text-muted-foreground">{generationSummary}</p>
       )}
       <div className="px-4 pt-3">
         <ReviewDisplay result={result} />
@@ -894,6 +918,7 @@ function PaneContent({
         <ReviewAndDiff
           result={state.result}
           diff={state.diff}
+          generationElapsedSec={state.generationElapsedSec}
           focusedCommentIdx={focusedCommentIdx}
           setFocusedCommentIdx={setFocusedCommentIdx}
           editCommentHandlers={editCommentHandlers}
@@ -911,6 +936,7 @@ function PaneContent({
         <ReviewAndDiff
           result={state.result}
           diff={state.diff}
+          generationElapsedSec={state.generationElapsedSec}
           focusedCommentIdx={focusedCommentIdx}
           setFocusedCommentIdx={setFocusedCommentIdx}
           editCommentHandlers={editCommentHandlers}

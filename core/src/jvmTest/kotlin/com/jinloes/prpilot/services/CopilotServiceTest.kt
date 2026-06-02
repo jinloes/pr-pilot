@@ -16,6 +16,7 @@ import io.kotest.matchers.string.shouldStartWith
 import java.io.File
 import java.io.Closeable
 import java.io.IOException
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
@@ -136,6 +137,9 @@ private class FakeRuntimeSession : CopilotService.RuntimeSession {
     fun emitError(message: String) {
         errorListeners.forEach { it.accept(message) }
     }
+
+    fun listenerCount(): Int =
+        deltaListeners.size + messageListeners.size + toolListeners.size + errorListeners.size
 
     private fun register(
         listeners: MutableList<Consumer<String?>>,
@@ -314,6 +318,48 @@ class CopilotServiceTest : FunSpec({
             ex.message shouldBe "policy denied tool access"
         }
 
+        test("runtime failure — closes all SDK event subscriptions") {
+            val sessionRef = AtomicReference<FakeRuntimeSession>()
+            val factory = FakeRuntimeFactory {
+                FakeRuntimeClient {
+                    FakeRuntimeSession().apply {
+                        sessionRef.set(this)
+                        sendFailure = IOException("send failed")
+                    }
+                }
+            }
+            val svc = CopilotService(runtimeFactory = factory)
+
+            shouldThrow<IOException> {
+                svc.reviewPR(fakeRequest(), "", "medium", Consumer {})
+            }
+
+            sessionRef.get().shouldNotBeNull().listenerCount() shouldBe 0
+        }
+
+        test("wrapped interrupted exception — preserves interrupt flag") {
+            val factory = FakeRuntimeFactory {
+                FakeRuntimeClient {
+                    FakeRuntimeSession().apply {
+                        sendFailure = ExecutionException(InterruptedException("stopped by caller"))
+                    }
+                }
+            }
+            val svc = CopilotService(runtimeFactory = factory)
+
+            try {
+                val ex = shouldThrow<IOException> {
+                    svc.reviewPR(fakeRequest(), "", "medium", Consumer {})
+                }
+
+                ex.message shouldBe "copilot request interrupted"
+                Thread.currentThread().isInterrupted shouldBe true
+            } finally {
+                // Clear interrupted state so it does not leak into later tests.
+                Thread.interrupted()
+            }
+        }
+
         test("non-JSON output — parse error") {
             val factory = FakeRuntimeFactory {
                 FakeRuntimeClient {
@@ -457,6 +503,25 @@ class CopilotServiceTest : FunSpec({
 
         test("is medium — sane balance of depth and latency") {
             CopilotService.DEFAULT_REASONING_EFFORT shouldBe "medium"
+        }
+    }
+
+    context("awaitWithTimeout") {
+
+        test("completed future — returns value") {
+            val future = CompletableFuture.completedFuture("ready")
+
+            CopilotService.awaitWithTimeout(future, "runtime startup") shouldBe "ready"
+        }
+
+        test("incomplete future — wraps timeout as IOException") {
+            val future = CompletableFuture<String>()
+
+            val ex = shouldThrow<IOException> {
+                CopilotService.awaitWithTimeout(future, "session creation")
+            }
+
+            ex.message shouldBe "copilot session creation timed out after 60s"
         }
     }
 })

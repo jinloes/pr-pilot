@@ -21,6 +21,9 @@ import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.BiConsumer
@@ -131,25 +134,26 @@ open class CopilotService @JvmOverloads constructor(
         onStatus: Consumer<String>,
         onChunk: BiConsumer<String, String>?,
     ): String {
-        var activeRun: ActiveRun? = null
+        var currentRun: ActiveRun? = null
+        val subscriptions = mutableListOf<Closeable>()
         try {
             val client = runtimeFactory.createClient(buildClientRequest())
-            activeRun = ActiveRun(client)
-            this.activeRun.set(activeRun)
+            currentRun = ActiveRun(client)
+            this.activeRun.set(currentRun)
 
             client.start()
             val session = client.createSession(buildSessionRequest(model, effort))
-            activeRun.attachSession(session)
+            currentRun.attachSession(session)
 
-            val subscriptions = mutableListOf<Closeable>()
             val deltaBuffer = StringBuilder()
             val finalMessage = AtomicReference<String?>()
             val sessionError = AtomicReference<String?>()
 
             subscriptions += session.onAssistantMessageDelta { delta ->
                 if (StringUtils.isNotEmpty(delta)) {
-                    deltaBuffer.append(delta)
-                    onChunk?.accept("text", delta!!)
+                    val chunk = delta ?: ""
+                    deltaBuffer.append(chunk)
+                    onChunk?.accept("text", chunk)
                 }
             }
             subscriptions += session.onAssistantMessage { content ->
@@ -159,7 +163,7 @@ open class CopilotService @JvmOverloads constructor(
             }
             subscriptions += session.onToolExecutionStart { toolName ->
                 if (StringUtils.isNotBlank(toolName)) {
-                    onStatus.accept(toolName!!)
+                    onStatus.accept(toolName ?: "")
                 }
             }
             subscriptions += session.onSessionError { message ->
@@ -169,7 +173,6 @@ open class CopilotService @JvmOverloads constructor(
             }
 
             session.sendAndWait(prompt, REQUEST_TIMEOUT_MS)
-            subscriptions.forEach { closeQuietly(it) }
 
             val raw = StringUtils.defaultIfBlank(finalMessage.get(), deltaBuffer.toString()) ?: ""
             if (StringUtils.isBlank(raw) && StringUtils.isNotBlank(sessionError.get())) {
@@ -180,13 +183,14 @@ open class CopilotService @JvmOverloads constructor(
             Thread.currentThread().interrupt()
             throw ex
         } catch (ex: Exception) {
-            if (activeRun?.cancelled?.get() == true) {
+            if (currentRun?.cancelled?.get() == true) {
                 throw InterruptedException("copilot request cancelled")
             }
             throw asIOException(ex)
         } finally {
-            this.activeRun.compareAndSet(activeRun, null)
-            closeQuietly(activeRun)
+            subscriptions.forEach { closeQuietly(it) }
+            this.activeRun.compareAndSet(currentRun, null)
+            closeQuietly(currentRun)
         }
     }
 
@@ -216,6 +220,10 @@ open class CopilotService @JvmOverloads constructor(
 
     private fun asIOException(ex: Exception): IOException {
         val root = if (ex is ExecutionException && ex.cause is Exception) ex.cause as Exception else ex
+        if (root is InterruptedException) {
+            Thread.currentThread().interrupt()
+            return IOException("copilot request interrupted", root)
+        }
         if (root is IOException) {
             return root
         }
@@ -289,7 +297,7 @@ open class CopilotService @JvmOverloads constructor(
         )
 
         override fun start() {
-            client.start().get()
+            awaitWithTimeout(client.start(), "runtime startup")
         }
 
         override fun createSession(request: SessionRequest): RuntimeSession {
@@ -301,7 +309,7 @@ open class CopilotService @JvmOverloads constructor(
             if (request.model.isNotBlank()) {
                 config.setModel(request.model)
             }
-            return SdkRuntimeSession(client.createSession(config).get())
+            return SdkRuntimeSession(awaitWithTimeout(client.createSession(config), "session creation"))
         }
 
         override fun forceStop() {
@@ -388,6 +396,7 @@ open class CopilotService @JvmOverloads constructor(
         private const val STATUS_GENERATING = "Generating review…"
         private const val STATUS_PARSING = "Parsing review…"
         private const val REQUEST_TIMEOUT_MS = 30L * 60L * 1000L
+        private const val SDK_BOOT_TIMEOUT_MS = 60L * 1000L
 
         /**
          * Sane default for PR review work: enough depth to catch real bugs and follow the strict
@@ -402,6 +411,17 @@ open class CopilotService @JvmOverloads constructor(
             "none" -> "low"
             "max" -> "xhigh"
             else -> DEFAULT_REASONING_EFFORT
+        }
+
+        @JvmStatic
+        @Throws(IOException::class)
+        internal fun <T> awaitWithTimeout(future: Future<T>, operation: String): T = try {
+            future.get(SDK_BOOT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        } catch (timeout: TimeoutException) {
+            throw IOException(
+                "copilot $operation timed out after ${SDK_BOOT_TIMEOUT_MS / 1000}s",
+                timeout,
+            )
         }
 
 
