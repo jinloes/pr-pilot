@@ -47,6 +47,7 @@ intellij-plugin/                       – IntelliJ plugin host; depends on :cor
     services/
       IntellijGitHubService.java
       IntellijClaudeService.java
+      UserFacingErrors.java           – Maps runtime/network exceptions to actionable UI copy
       PRNotificationService.java
       PRNotificationStartup.java
     settings/
@@ -73,9 +74,13 @@ vscode-extension/                      – VS Code extension host
     github.ts
     claude.ts
     copilot.ts                         – Copilot SDK service (`@github/copilot-sdk`) with streaming/status forwarding
+    userFacingError.ts                 – Maps host/provider errors to user-actionable copy
     core.d.ts
+  shared/
+    user-facing-errors.yaml            – Shared message templates consumed by both hosts
   test/
     copilot.test.ts
+    userFacingError.test.ts
 ```
 
 ## Key design decisions
@@ -123,6 +128,12 @@ Review prompts do not embed full diff; model fetches diff on demand via `gh pr d
 
 ### Cross-host parity
 When host-specific logic changes in IntelliJ or VS Code, update the paired implementation in the other host. The mapping table and enforcement workflow live in `AGENTS.md`.
+
+### User-facing error copy
+Do not surface raw provider/HTTP exception strings directly to users in review/draft/chat flows. Both hosts map low-level errors to actionable guidance (`UserFacingErrors` in IntelliJ, `userFacingError.ts` in VS Code) to keep messaging consistent across providers. Message strings live in shared YAML templates (`vscode-extension/shared/user-facing-errors.yaml`) and support `{placeholder}` substitution.
+
+### First-run onboarding path
+When GitHub auth is unavailable on startup, both hosts push a `setupRequired` bridge message (`reason`: `gh_not_installed` or `gh_not_authenticated`, `detail`: actionable instruction string) instead of silently failing or pushing an empty `prListLoaded`. `PRList` renders a full-pane setup screen with a Refresh button when this message is received. IntelliJ uses `PluginSettings.diagnoseAuth()` to classify the failure; VS Code inspects the error message in `handleRefreshPRs`. The VS Code host also triggers an initial `handleRefreshPRs` call immediately after `resolveWebviewView` so the webview never hangs on its initial loading state.
 
 ### DTO mapping in IntelliJ webview bridge
 `WebviewPanel` model-to-DTO conversion uses MapStruct (`ReviewMapper`) instead of hand-rolled mappers so field drift fails at compile time.

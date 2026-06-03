@@ -130,7 +130,18 @@ public class PRToolWindowFactory implements ToolWindowFactory {
     private void loadAndPushPRs(Project project, WebviewPanel webviewPanel) throws Exception {
         String token = PluginSettings.getInstance().getGithubToken();
         if (token == null) {
-            log.info("No GitHub token available — skipping webview PR load");
+            PluginSettings.AuthDiagnosis diagnosis = PluginSettings.getInstance().diagnoseAuth();
+            String detail =
+                    diagnosis == PluginSettings.AuthDiagnosis.NOT_INSTALLED
+                            ? "The 'gh' CLI was not found. Install it from https://cli.github.com,"
+                                    + " then run 'gh auth login' in a terminal and click Refresh."
+                            : "Run 'gh auth login' in a terminal to authenticate, then click"
+                                    + " Refresh.";
+            ApplicationManager.getApplication()
+                    .invokeLater(
+                            () ->
+                                    webviewPanel.pushSetupRequired(
+                                            diagnosis.name().toLowerCase(), detail));
             return;
         }
         String currentRepo = RepoDetector.detectCurrentRepo(project.getBasePath());

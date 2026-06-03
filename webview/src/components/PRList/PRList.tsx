@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -31,6 +31,7 @@ export function PRList({ onSelect }: Props) {
   const [stateFilter, setStateFilter] = useState<StateFilter>('open')
   const [assignedToMe, setAssignedToMe] = useState(false)
   const [reviewRequested, setReviewRequested] = useState(false)
+  const [setupRequired, setSetupRequired] = useState<{ reason: string; detail: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -40,8 +41,13 @@ export function PRList({ onSelect }: Props) {
         setRepoFilter(msg.defaultRepo ?? 'all')
         setLoading(false)
         setRefreshing(false)
+        setSetupRequired(null)
       } else if (msg.type === 'prLoading') {
         setRefreshing(true)
+      } else if (msg.type === 'setupRequired') {
+        setSetupRequired({ reason: msg.reason, detail: msg.detail })
+        setLoading(false)
+        setRefreshing(false)
       } else if (msg.type === 'prDraftStatusUpdated') {
         setPRs((prev) =>
           prev.map((pr) =>
@@ -136,6 +142,19 @@ export function PRList({ onSelect }: Props) {
 
   return (
     <div className="flex flex-col h-full bg-background border-r border-border">
+      {/* Setup-required onboarding screen — shown instead of the full list */}
+      {setupRequired && (
+        <SetupScreen
+          reason={setupRequired.reason}
+          detail={setupRequired.detail}
+          refreshing={refreshing}
+          onRefresh={() => fetchWithFilters()}
+        />
+      )}
+
+      {/* Normal list UI — hidden while setup screen is active */}
+      {!setupRequired && (
+        <>
       {/* Header */}
       <div className="shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-border">
         {/* Title row */}
@@ -308,12 +327,13 @@ export function PRList({ onSelect }: Props) {
           ))}
         </div>
       </ScrollArea>
+      </>
+      )}
     </div>
   )
 }
 
 // ── PRItem ──────────────────────────────────────────────────────────────────
-
 interface ItemProps {
   pr: PR
   selected: boolean
@@ -366,5 +386,36 @@ function PRItem({ pr, selected, index, onClick }: ItemProps) {
         </div>
       </div>
     </button>
+  )
+}
+
+// ── SetupScreen ──────────────────────────────────────────────────────────────
+
+interface SetupScreenProps {
+  reason: string
+  detail: string
+  refreshing: boolean
+  onRefresh: () => void
+}
+
+function SetupScreen({ detail, refreshing, onRefresh }: SetupScreenProps) {
+  return (
+    <div className="flex flex-col h-full items-center justify-center gap-5 px-6 text-center">
+      <TriangleAlert className="w-10 h-10 text-status-suggestion shrink-0" />
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-semibold text-foreground">GitHub not connected</p>
+        <p className="text-xs text-muted-foreground leading-relaxed">{detail}</p>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        className="gap-1.5 text-xs"
+        onClick={onRefresh}
+        disabled={refreshing}
+      >
+        <RefreshCw className={cn('w-3 h-3', refreshing && 'animate-spin')} />
+        Refresh
+      </Button>
+    </div>
   )
 }

@@ -99,6 +99,13 @@ export interface ChatErrorMessage {
   message: string
 }
 
+export interface SetupRequiredMessage {
+  type: 'setupRequired'
+  /** 'gh_not_installed' | 'gh_not_authenticated' */
+  reason: string
+  detail: string
+}
+
 export type IncomingMessage =
   | PRListLoadedMessage
   | PRLoadingMessage
@@ -118,6 +125,7 @@ export type IncomingMessage =
   | ChatChunkMessage
   | ChatResponseMessage
   | ChatErrorMessage
+  | SetupRequiredMessage
 
 export interface PR {
   number: number

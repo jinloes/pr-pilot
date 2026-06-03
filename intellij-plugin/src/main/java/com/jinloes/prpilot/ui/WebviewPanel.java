@@ -23,6 +23,7 @@ import com.jinloes.prpilot.services.GitHubService;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.services.PendingReviewIndex;
+import com.jinloes.prpilot.services.UserFacingErrors;
 import com.jinloes.prpilot.settings.PluginSettings;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -116,6 +117,8 @@ public class WebviewPanel implements Disposable {
             String owner,
             String repo,
             @JsonProperty("hasDraft") boolean hasDraft) {}
+
+    private record SetupRequiredMsg(String type, String reason, String detail) {}
 
     // --- Infrastructure ---
 
@@ -601,7 +604,8 @@ public class WebviewPanel implements Disposable {
                                 boolean stale =
                                         StringUtils.isNotBlank(savedHeadSha)
                                                 && !savedHeadSha.equals(currentHeadSha);
-                                ReviewResultDto dto = ReviewMapper.INSTANCE.toDto(pending.getResult());
+                                ReviewResultDto dto =
+                                        ReviewMapper.INSTANCE.toDto(pending.getResult());
                                 pushMessage(
                                         new DraftLoadedMsg(
                                                 "draftLoaded",
@@ -698,7 +702,8 @@ public class WebviewPanel implements Disposable {
                                     pushMessage(
                                             new ErrorMsg(
                                                     "reviewError",
-                                                    "Failed to fetch diff: " + e.getMessage()));
+                                                    UserFacingErrors.forGitHub(
+                                                            e, "load the PR diff")));
                                     return;
                                 }
                             }
@@ -745,11 +750,19 @@ public class WebviewPanel implements Disposable {
                                                         finalDiff));
                                     },
                                     err -> {
-                                        // Cancellations are user-initiated — don't surface as errors.
+                                        // Cancellations are user-initiated — don't surface as
+                                        // errors.
                                         String lower = err.toLowerCase(java.util.Locale.ROOT);
                                         if (!lower.contains("cancel")
                                                 && !lower.contains("interrupt")) {
-                                            pushMessage(new ErrorMsg("reviewError", err));
+                                            pushMessage(
+                                                    new ErrorMsg(
+                                                            "reviewError",
+                                                            UserFacingErrors.forProvider(
+                                                                    PluginSettings.getInstance()
+                                                                            .getReviewProvider(),
+                                                                    new Exception(err),
+                                                                    "generate a review")));
                                         }
                                     });
                         });
@@ -780,7 +793,10 @@ public class WebviewPanel implements Disposable {
         try {
             saved = ghSvc.saveDraftReview(token, owner, repo, number, result, orphans);
         } catch (Exception e) {
-            pushMessage(new ErrorMsg("draftSaveError", "Save failed: " + e.getMessage()));
+            pushMessage(
+                    new ErrorMsg(
+                            "draftSaveError",
+                            UserFacingErrors.forGitHub(e, "save the draft review")));
             return;
         }
 
@@ -828,7 +844,10 @@ public class WebviewPanel implements Disposable {
         try {
             ghSvc.submitDraftReview(token, owner, repo, number, reviewId, verdict, comment);
         } catch (Exception e) {
-            pushMessage(new ErrorMsg("reviewSubmitError", "Submit failed: " + e.getMessage()));
+            pushMessage(
+                    new ErrorMsg(
+                            "reviewSubmitError",
+                            UserFacingErrors.forGitHub(e, "submit the draft review")));
             return;
         }
 
@@ -858,7 +877,10 @@ public class WebviewPanel implements Disposable {
         try {
             ghSvc.deleteDraftReview(token, owner, repo, number, reviewId);
         } catch (Exception e) {
-            pushMessage(new ErrorMsg("draftDeleteError", "Delete failed: " + e.getMessage()));
+            pushMessage(
+                    new ErrorMsg(
+                            "draftDeleteError",
+                            UserFacingErrors.forGitHub(e, "delete the draft review")));
             return;
         }
 
@@ -907,7 +929,14 @@ public class WebviewPanel implements Disposable {
                     chatHistory = updated;
                     pushMessage(new ChatResponseMsg("chatResponse", response));
                 },
-                err -> pushMessage(new ErrorMsg("chatError", err)));
+                err ->
+                        pushMessage(
+                                new ErrorMsg(
+                                        "chatError",
+                                        UserFacingErrors.forProvider(
+                                                PluginSettings.getInstance().getReviewProvider(),
+                                                new Exception(err),
+                                                "answer chat question"))));
     }
 
     private String buildPrContext(PullRequest pr) {
@@ -993,6 +1022,11 @@ public class WebviewPanel implements Disposable {
 
     public void setOnPageReady(Runnable callback) {
         this.onPageReady = callback;
+    }
+
+    /** Pushes a setup-required screen into the webview. Call from the EDT. */
+    public void pushSetupRequired(String reason, String detail) {
+        pushMessage(new SetupRequiredMsg("setupRequired", reason, detail));
     }
 
     public String getPrStateFilter() {

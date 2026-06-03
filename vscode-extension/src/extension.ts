@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as github from './github';
 import * as claude from './claude';
 import * as copilot from './copilot';
+import { toUserFacingError } from './userFacingError';
 
 type Provider = 'claude' | 'copilot';
 
@@ -77,6 +78,10 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
         };
 
         this.setupMessageBridge(state);
+
+        // Trigger initial PR load so the user sees results (or setup guidance) immediately
+        // rather than an indefinite loading spinner.
+        handleRefreshPRs(state, {}).catch(console.error);
     }
 
     private getHtmlContent(webview: vscode.Webview, distUri: vscode.Uri): string {
@@ -210,10 +215,21 @@ async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>):
         prs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         push(state, { type: 'prListLoaded', prs, defaultRepo: currentRepo ?? undefined });
     } catch (err) {
-        const message = errorMessage(err);
         state.cachedToken = null;
-        vscode.window.showErrorMessage(`PR Pilot: ${message}`);
-        push(state, { type: 'prListLoaded', prs: [] });
+        const errMsg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+        const notInstalled = errMsg.includes('enoent') || errMsg.includes('no such file') || errMsg.includes('error=2');
+        const isAuthError = notInstalled || errMsg.includes('gh auth') || errMsg.includes('auth token');
+        if (isAuthError) {
+            const reason = notInstalled ? 'gh_not_installed' : 'gh_not_authenticated';
+            const detail = notInstalled
+                ? "The 'gh' CLI was not found. Install it from https://cli.github.com, then run 'gh auth login' in a terminal and click Refresh."
+                : "Run 'gh auth login' in a terminal to authenticate, then click Refresh.";
+            push(state, { type: 'setupRequired', reason, detail });
+        } else {
+            const message = toUserFacingError(err, 'load pull requests');
+            vscode.window.showErrorMessage(`PR Pilot: ${message}`);
+            push(state, { type: 'prListLoaded', prs: [] });
+        }
     }
 }
 
@@ -257,7 +273,11 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         }
     } catch (err) {
         state.cachedToken = null;
-        push(state, { type: 'draftLoaded', prState: 'NO_DRAFT', status: errorMessage(err) });
+        push(state, {
+            type: 'draftLoaded',
+            prState: 'NO_DRAFT',
+            status: toUserFacingError(err, 'load PR details'),
+        });
     }
 }
 
@@ -312,7 +332,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         push(state, { type: 'reviewResult', result, diff });
     } catch (err) {
         if (isCancellationError(err)) return;
-        push(state, { type: 'reviewError', message: errorMessage(err) });
+        push(state, { type: 'reviewError', message: toUserFacingError(err, 'generate review') });
     }
 }
 
@@ -334,7 +354,10 @@ async function handleSaveDraft(state: ViewState, msg: Record<string, unknown>): 
         push(state, { type: 'draftSaved', reviewId, commentsDropped });
     } catch (err) {
         state.cachedToken = null;
-        push(state, { type: 'draftSaveError', message: errorMessage(err) });
+        push(state, {
+            type: 'draftSaveError',
+            message: toUserFacingError(err, 'save draft review'),
+        });
     }
 }
 
@@ -356,7 +379,10 @@ async function handleSubmitReview(state: ViewState, msg: Record<string, unknown>
         push(state, { type: 'reviewSubmitted' });
     } catch (err) {
         state.cachedToken = null;
-        push(state, { type: 'reviewSubmitError', message: errorMessage(err) });
+        push(state, {
+            type: 'reviewSubmitError',
+            message: toUserFacingError(err, 'submit draft review'),
+        });
     }
 }
 
@@ -375,7 +401,10 @@ async function handleDeleteDraft(state: ViewState, msg: Record<string, unknown>)
         push(state, { type: 'draftDeleted' });
     } catch (err) {
         state.cachedToken = null;
-        push(state, { type: 'draftDeleteError', message: errorMessage(err) });
+        push(state, {
+            type: 'draftDeleteError',
+            message: toUserFacingError(err, 'delete draft review'),
+        });
     }
 }
 
@@ -414,7 +443,7 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
     } catch (err) {
         if (isCancellationError(err)) return;
         history.pop(); // remove the user turn we added on error
-        push(state, { type: 'chatError', message: errorMessage(err) });
+        push(state, { type: 'chatError', message: toUserFacingError(err, 'answer chat question') });
     }
 }
 

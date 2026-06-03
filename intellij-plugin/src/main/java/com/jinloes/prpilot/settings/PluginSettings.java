@@ -191,4 +191,35 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
         String token = getGithubToken();
         return token != null && !token.isBlank();
     }
+
+    /** Diagnosis result returned by {@link #diagnoseAuth()}. */
+    public enum AuthDiagnosis {
+        OK,
+        NOT_AUTHENTICATED,
+        NOT_INSTALLED,
+    }
+
+    /**
+     * Probes GitHub authentication and returns a fine-grained diagnosis so callers can surface
+     * actionable guidance instead of silently failing.
+     */
+    public AuthDiagnosis diagnoseAuth() {
+        try {
+            String token = authService.resolveToken(getGithubBaseUrl());
+            return org.apache.commons.lang3.StringUtils.isNotBlank(token)
+                    ? AuthDiagnosis.OK
+                    : AuthDiagnosis.NOT_AUTHENTICATED;
+        } catch (Exception e) {
+            return classifyAuthError(e);
+        }
+    }
+
+    /** Classifies an exception thrown by the auth service into a diagnosis reason. */
+    static AuthDiagnosis classifyAuthError(Exception e) {
+        String msg =
+                org.apache.commons.lang3.StringUtils.defaultString(e.getMessage()).toLowerCase();
+        return (msg.contains("no such file") || msg.contains("error=2"))
+                ? AuthDiagnosis.NOT_INSTALLED
+                : AuthDiagnosis.NOT_AUTHENTICATED;
+    }
 }
