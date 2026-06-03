@@ -216,8 +216,7 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
     /** Classifies an exception thrown by the auth service into a diagnosis reason. */
     static AuthDiagnosis classifyAuthError(Exception e) {
-        String msg =
-                org.apache.commons.lang3.StringUtils.defaultString(e.getMessage()).toLowerCase();
+        String msg = org.apache.commons.lang3.StringUtils.defaultString(e.getMessage()).toLowerCase();
         return (msg.contains("no such file") || msg.contains("error=2"))
                 ? AuthDiagnosis.NOT_INSTALLED
                 : AuthDiagnosis.NOT_AUTHENTICATED;

@@ -9,7 +9,6 @@ import com.jinloes.prpilot.settings.PluginSettings;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import org.apache.commons.lang3.StringUtils;
 
 /**
  * IntelliJ adapter that fronts both the Claude and Copilot CLI backends. The active provider is
@@ -138,15 +137,6 @@ public class IntellijClaudeService {
     }
 
     static String friendlyMessage(ReviewProvider provider, Exception e) {
-        String msg = StringUtils.defaultString(e.getMessage());
-        if (msg.contains("No such file") || msg.contains("error=2")) {
-            String binary = provider == ReviewProvider.COPILOT ? "copilot" : "claude";
-            return "'"
-                    + binary
-                    + "' not found on PATH. Make sure the "
-                    + provider.getDisplayName()
-                    + " CLI is installed and accessible from your terminal.";
-        }
-        return msg.isBlank() ? "Unexpected error." : msg;
+        return UserFacingErrors.forProvider(provider, e, "generate response");
     }
 }

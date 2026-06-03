@@ -1,0 +1,7 @@
+templates:
+  github_auth_failed: "GitHub authentication failed. Run '{auth_command}', then retry."
+  provider_binary_missing: "'{binary}' is not available on PATH. Install {provider_cli} and retry."
+  request_timed_out: "The request timed out while trying to {operation}. Retry, or try a smaller diff / lower reasoning effort."
+  invalid_review_format: "The model returned an invalid review format. Retry, or switch to a more reliable model."
+  network_error: "Network error while trying to {operation}. Check connectivity/VPN and retry."
+  generic_failure: "Couldn't {operation}. Please retry."

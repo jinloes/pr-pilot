@@ -36,16 +36,16 @@ class IntellijClaudeServiceTest {
             String msg =
                     IntellijClaudeService.friendlyMessage(
                             ReviewProvider.CLAUDE, new IOException(""));
-            assertThat(msg).isEqualTo("Unexpected error.");
+            assertThat(msg).isEqualTo("Couldn't generate response. Please retry.");
         }
 
         @Test
-        void nonMatchingMessageIsReturnedAsIs() {
+        void parseFailuresAreMappedToActionableMessage() {
             String msg =
                     IntellijClaudeService.friendlyMessage(
                             ReviewProvider.COPILOT,
                             new IOException("Failed to parse review JSON: unexpected token"));
-            assertThat(msg).isEqualTo("Failed to parse review JSON: unexpected token");
+            assertThat(msg).contains("invalid review format").contains("Retry");
         }
     }
 }

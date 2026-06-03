@@ -604,8 +604,7 @@ public class WebviewPanel implements Disposable {
                                 boolean stale =
                                         StringUtils.isNotBlank(savedHeadSha)
                                                 && !savedHeadSha.equals(currentHeadSha);
-                                ReviewResultDto dto =
-                                        ReviewMapper.INSTANCE.toDto(pending.getResult());
+                                ReviewResultDto dto = ReviewMapper.INSTANCE.toDto(pending.getResult());
                                 pushMessage(
                                         new DraftLoadedMsg(
                                                 "draftLoaded",
@@ -750,8 +749,7 @@ public class WebviewPanel implements Disposable {
                                                         finalDiff));
                                     },
                                     err -> {
-                                        // Cancellations are user-initiated — don't surface as
-                                        // errors.
+                                        // Cancellations are user-initiated — don't surface as errors.
                                         String lower = err.toLowerCase(java.util.Locale.ROOT);
                                         if (!lower.contains("cancel")
                                                 && !lower.contains("interrupt")) {

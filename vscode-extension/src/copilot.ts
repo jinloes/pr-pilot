@@ -5,7 +5,6 @@ import {
     RuntimeConnection,
     approveAll,
     type CopilotSession,
-    type ReasoningEffort,
 } from '@github/copilot-sdk';
 import type { ReviewResult, LineComment } from './github';
 import type { ChatMessage, PR } from './claude';
@@ -41,7 +40,9 @@ function findCopilotBinary(): string {
     return 'copilot';
 }
 
-function normalizeReasoningEffort(effort: string): ReasoningEffort {
+type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+
+export function normalizeReasoningEffort(effort: string): ReasoningEffort {
     switch (effort.trim().toLowerCase()) {
         case 'low':
         case 'medium':

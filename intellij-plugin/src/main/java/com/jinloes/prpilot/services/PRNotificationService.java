@@ -178,16 +178,15 @@ public final class PRNotificationService implements Disposable {
 
     /**
      * Returns a display-safe error summary from the given exception, stripping anything that looks
-     * like a Bearer token or other secret that GitHub HTTP errors may echo back in the message body.
+     * like a Bearer token or other secret that GitHub HTTP errors may echo back in the message
+     * body.
      */
     static String sanitizeError(Exception e) {
         String msg = e.getMessage();
         if (msg == null || msg.isBlank()) return "unknown error";
         String sanitized = msg;
         sanitized = sanitized.replaceAll("(?i)bearer\\s+[^\\s\"'&,;)]+", "Bearer [redacted]");
-        sanitized =
-                sanitized.replaceAll(
-                        "(?i)(token\\s*[:=]\\s*)[^\\s\"'&,;)]+", "$1[redacted]");
+        sanitized = sanitized.replaceAll("(?i)(token\\s*[:=]\\s*)[^\\s\"'&,;)]+", "$1[redacted]");
         sanitized = sanitized.replaceAll("(?i)(token\\s+)[^\\s\"'&,;)]+", "$1[redacted]");
         sanitized = sanitized.replaceAll("\\bgh[pousr]_[A-Za-z0-9_]+\\b", "[redacted]");
         return sanitized;

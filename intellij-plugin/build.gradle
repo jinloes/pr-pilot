@@ -26,6 +26,7 @@ dependencies {
     implementation project(':core')
 
     implementation 'com.fasterxml.jackson.module:jackson-module-kotlin:2.17.1'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.1'
     implementation 'commons-io:commons-io:2.16.1'
     implementation 'org.apache.commons:commons-lang3:3.17.0'
     implementation 'org.apache.commons:commons-text:1.12.0'
@@ -115,4 +116,7 @@ tasks.register('buildWebview', Exec) {
 tasks.named('processResources') {
     dependsOn 'buildWebview'
     from("$webviewSrcDir/dist") { into 'webview' }
+    from("$rootDir/vscode-extension/shared") {
+        include 'user-facing-errors.yaml'
+    }
 }
