@@ -9,6 +9,31 @@ import org.junit.jupiter.api.Test;
 class PRNotificationServiceTest {
 
     @Nested
+    class FormatPollStatus {
+
+        @Test
+        void noPollYetReturnsNull() {
+            String result = PRNotificationService.formatPollStatus(0L, null, 10_000L);
+            assertThat(result).isNull();
+        }
+
+        @Test
+        void successStatusUsesLastPolledPrefix() {
+            String result = PRNotificationService.formatPollStatus(9_000L, null, 10_000L);
+            assertThat(result).isEqualTo("Last polled: 1s ago");
+        }
+
+        @Test
+        void errorStatusIncludesErrorText() {
+            String result =
+                    PRNotificationService.formatPollStatus(
+                            120_000L, PRNotificationService.AUTH_MISSING_ERROR, 180_000L);
+            assertThat(result)
+                    .isEqualTo("Last poll: 1 min ago — Error: " + PRNotificationService.AUTH_MISSING_ERROR);
+        }
+    }
+
+    @Nested
     class SanitizeError {
 
         @Test

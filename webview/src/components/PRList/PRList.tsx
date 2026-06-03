@@ -20,6 +20,7 @@ interface Props {
 }
 
 type StateFilter = 'open' | 'closed' | 'all'
+type SetupReason = 'gh_not_installed' | 'gh_not_authenticated' | 'load_failed'
 
 export function PRList({ onSelect }: Props) {
   const [prs, setPRs] = useState<PR[]>([])
@@ -31,7 +32,7 @@ export function PRList({ onSelect }: Props) {
   const [stateFilter, setStateFilter] = useState<StateFilter>('open')
   const [assignedToMe, setAssignedToMe] = useState(false)
   const [reviewRequested, setReviewRequested] = useState(false)
-  const [setupRequired, setSetupRequired] = useState<{ reason: string; detail: string } | null>(null)
+  const [setupRequired, setSetupRequired] = useState<{ reason: SetupReason; detail: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -392,18 +393,19 @@ function PRItem({ pr, selected, index, onClick }: ItemProps) {
 // ── SetupScreen ──────────────────────────────────────────────────────────────
 
 interface SetupScreenProps {
-  reason: string
+  reason: 'gh_not_installed' | 'gh_not_authenticated' | 'load_failed'
   detail: string
   refreshing: boolean
   onRefresh: () => void
 }
 
-function SetupScreen({ detail, refreshing, onRefresh }: SetupScreenProps) {
+function SetupScreen({ reason, detail, refreshing, onRefresh }: SetupScreenProps) {
+  const title = reason === 'load_failed' ? 'Could not load pull requests' : 'GitHub not connected'
   return (
     <div className="flex flex-col h-full items-center justify-center gap-5 px-6 text-center">
       <TriangleAlert className="w-10 h-10 text-status-suggestion shrink-0" />
       <div className="flex flex-col gap-2">
-        <p className="text-sm font-semibold text-foreground">GitHub not connected</p>
+        <p className="text-sm font-semibold text-foreground">{title}</p>
         <p className="text-xs text-muted-foreground leading-relaxed">{detail}</p>
       </div>
       <Button

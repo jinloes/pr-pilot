@@ -35,6 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 public final class PRNotificationService implements Disposable {
 
     static final String NOTIFICATION_GROUP = "PR Pilot";
+    static final String AUTH_MISSING_ERROR = "Not signed in — run 'gh auth login'.";
 
     private record PollStatus(long epochMs, String error) {}
 
@@ -79,12 +80,20 @@ public final class PRNotificationService implements Disposable {
      */
     public String getLastPollStatus() {
         PollStatus status = lastPollStatus;
-        if (status.epochMs() == 0) return null;
-        long agoSec = (System.currentTimeMillis() - status.epochMs()) / 1000;
+        return formatPollStatus(status.epochMs(), status.error(), System.currentTimeMillis());
+    }
+
+    static String formatPollStatus(long pollEpochMs, String error, long nowMs) {
+        if (pollEpochMs == 0) return null;
+        long agoSec = (nowMs - pollEpochMs) / 1000;
         String when = agoSec < 60 ? agoSec + "s ago" : (agoSec / 60) + " min ago";
-        return status.error() != null
-                ? "Last poll: " + when + " — Error: " + status.error()
+        return error != null
+                ? "Last poll: " + when + " — Error: " + error
                 : "Last polled: " + when;
+    }
+
+    void recordPollStatus(String error) {
+        lastPollStatus = new PollStatus(System.currentTimeMillis(), error);
     }
 
     @Override
@@ -101,7 +110,10 @@ public final class PRNotificationService implements Disposable {
         if (!settings.isNotificationsEnabled()) return;
 
         String token = settings.getGithubToken();
-        if (token == null || token.isBlank()) return;
+        if (token == null || token.isBlank()) {
+            recordPollStatus(AUTH_MISSING_ERROR);
+            return;
+        }
 
         String pollError = null;
         List<PullRequest> found = new ArrayList<>();
@@ -131,7 +143,7 @@ public final class PRNotificationService implements Disposable {
             }
         }
 
-        lastPollStatus = new PollStatus(System.currentTimeMillis(), pollError);
+        recordPollStatus(pollError);
 
         if (!seenSet.isSeeded()) {
             // First run: populate the seen set without showing any notifications

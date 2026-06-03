@@ -14,6 +14,7 @@ import com.intellij.ui.content.ContentFactory;
 import com.intellij.ui.jcef.JBCefApp;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.services.IntellijGitHubService;
+import com.jinloes.prpilot.services.UserFacingErrors;
 import com.jinloes.prpilot.settings.PluginSettings;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -123,6 +124,20 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                                                 log.warn(
                                                         "Webview PR load failed: {}",
                                                         e.getMessage());
+                                                ApplicationManager.getApplication()
+                                                        .invokeLater(
+                                                                () ->
+                                                                        webviewPanel.pushSetupRequired(
+                                                                                "load_failed",
+                                                                                "Couldn't load pull"
+                                                                                        + " requests."
+                                                                                        + " Check"
+                                                                                        + " connectivity"
+                                                                                        + " and retry."
+                                                                                        + " If auth"
+                                                                                        + " is stale,"
+                                                                                        + " run 'gh auth"
+                                                                                        + " login'."));
                                             }
                                         }));
     }
@@ -141,37 +156,50 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                     .invokeLater(
                             () ->
                                     webviewPanel.pushSetupRequired(
-                                            diagnosis.name().toLowerCase(), detail));
+                                            setupReason(diagnosis), detail));
             return;
         }
-        String currentRepo = RepoDetector.detectCurrentRepo(project.getBasePath());
-
-        List<String> starred;
         try {
-            starred = IntellijGitHubService.getInstance().getStarredRepos(token);
+            String currentRepo = RepoDetector.detectCurrentRepo(project.getBasePath());
+
+            List<String> starred;
+            try {
+                starred = IntellijGitHubService.getInstance().getStarredRepos(token);
+            } catch (Exception e) {
+                log.warn("Could not fetch starred repos: {}", e.getMessage());
+                starred = List.of();
+            }
+
+            String query =
+                    buildQuery(
+                            currentRepo,
+                            starred,
+                            webviewPanel.getPrStateFilter(),
+                            webviewPanel.isAssignedToMeFilter(),
+                            webviewPanel.isReviewRequestedFilter());
+            log.info("Webview PR query: {}", query);
+            List<PullRequest> prs = IntellijGitHubService.getInstance().searchPRs(token, query);
+            prs.sort(Comparator.comparing(PullRequest::getCreatedAt).reversed());
+
+            String defaultRepo =
+                    StringUtils.isNotBlank(currentRepo)
+                            ? currentRepo
+                            : starred.isEmpty() ? null : starred.get(0);
+
+            ApplicationManager.getApplication()
+                    .invokeLater(() -> webviewPanel.loadPRs(prs, defaultRepo));
         } catch (Exception e) {
-            log.warn("Could not fetch starred repos: {}", e.getMessage());
-            starred = List.of();
+            log.warn("Failed to load PR list for webview: {}", e.getMessage());
+            String detail = UserFacingErrors.forGitHub(e, "load pull requests");
+            ApplicationManager.getApplication()
+                    .invokeLater(() -> webviewPanel.pushSetupRequired("load_failed", detail));
         }
+    }
 
-        String query =
-                buildQuery(
-                        currentRepo,
-                        starred,
-                        webviewPanel.getPrStateFilter(),
-                        webviewPanel.isAssignedToMeFilter(),
-                        webviewPanel.isReviewRequestedFilter());
-        log.info("Webview PR query: {}", query);
-        List<PullRequest> prs = IntellijGitHubService.getInstance().searchPRs(token, query);
-        prs.sort(Comparator.comparing(PullRequest::getCreatedAt).reversed());
-
-        String defaultRepo =
-                StringUtils.isNotBlank(currentRepo)
-                        ? currentRepo
-                        : starred.isEmpty() ? null : starred.get(0);
-
-        ApplicationManager.getApplication()
-                .invokeLater(() -> webviewPanel.loadPRs(prs, defaultRepo));
+    static String setupReason(PluginSettings.AuthDiagnosis diagnosis) {
+        return diagnosis == PluginSettings.AuthDiagnosis.NOT_INSTALLED
+                ? "gh_not_installed"
+                : "gh_not_authenticated";
     }
 
     static String buildQuery(

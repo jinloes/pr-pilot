@@ -2,11 +2,32 @@ package com.jinloes.prpilot.ui;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jinloes.prpilot.settings.PluginSettings;
 import java.util.List;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class PRToolWindowFactoryTest {
+
+    @Nested
+    class SetupReason {
+
+        @Test
+        void notInstalledMapsToGhNotInstalled() {
+            assertThat(PRToolWindowFactory.setupReason(PluginSettings.AuthDiagnosis.NOT_INSTALLED))
+                    .isEqualTo("gh_not_installed");
+        }
+
+        @Test
+        void nonInstalledMapsToGhNotAuthenticated() {
+            assertThat(PRToolWindowFactory.setupReason(PluginSettings.AuthDiagnosis.OK))
+                    .isEqualTo("gh_not_authenticated");
+            assertThat(
+                            PRToolWindowFactory.setupReason(
+                                    PluginSettings.AuthDiagnosis.NOT_AUTHENTICATED))
+                    .isEqualTo("gh_not_authenticated");
+        }
+    }
 
     @Nested
     class BuildQuery {

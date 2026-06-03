@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as github from './github';
 import * as claude from './claude';
 import * as copilot from './copilot';
+import { classifySetupAuthError } from './authError';
 import { toUserFacingError } from './userFacingError';
 
 type Provider = 'claude' | 'copilot';
@@ -216,12 +217,9 @@ async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>):
         push(state, { type: 'prListLoaded', prs, defaultRepo: currentRepo ?? undefined });
     } catch (err) {
         state.cachedToken = null;
-        const errMsg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-        const notInstalled = errMsg.includes('enoent') || errMsg.includes('no such file') || errMsg.includes('error=2');
-        const isAuthError = notInstalled || errMsg.includes('gh auth') || errMsg.includes('auth token');
-        if (isAuthError) {
-            const reason = notInstalled ? 'gh_not_installed' : 'gh_not_authenticated';
-            const detail = notInstalled
+        const reason = classifySetupAuthError(err);
+        if (reason) {
+            const detail = reason === 'gh_not_installed'
                 ? "The 'gh' CLI was not found. Install it from https://cli.github.com, then run 'gh auth login' in a terminal and click Refresh."
                 : "Run 'gh auth login' in a terminal to authenticate, then click Refresh.";
             push(state, { type: 'setupRequired', reason, detail });

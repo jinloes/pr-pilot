@@ -101,8 +101,8 @@ export interface ChatErrorMessage {
 
 export interface SetupRequiredMessage {
   type: 'setupRequired'
-  /** 'gh_not_installed' | 'gh_not_authenticated' */
-  reason: string
+  /** 'gh_not_installed' | 'gh_not_authenticated' | 'load_failed' */
+  reason: 'gh_not_installed' | 'gh_not_authenticated' | 'load_failed'
   detail: string
 }
 
