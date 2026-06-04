@@ -29,7 +29,9 @@ class PRNotificationServiceTest {
                     PRNotificationService.formatPollStatus(
                             120_000L, PRNotificationService.AUTH_MISSING_ERROR, 180_000L);
             assertThat(result)
-                    .isEqualTo("Last poll: 1 min ago — Error: " + PRNotificationService.AUTH_MISSING_ERROR);
+                    .isEqualTo(
+                            "Last poll: 1 min ago — Error: "
+                                    + PRNotificationService.AUTH_MISSING_ERROR);
         }
     }
 

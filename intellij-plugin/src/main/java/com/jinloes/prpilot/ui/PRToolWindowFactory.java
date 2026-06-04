@@ -127,17 +127,18 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                                                 ApplicationManager.getApplication()
                                                         .invokeLater(
                                                                 () ->
-                                                                        webviewPanel.pushSetupRequired(
-                                                                                "load_failed",
-                                                                                "Couldn't load pull"
-                                                                                        + " requests."
-                                                                                        + " Check"
-                                                                                        + " connectivity"
-                                                                                        + " and retry."
-                                                                                        + " If auth"
-                                                                                        + " is stale,"
-                                                                                        + " run 'gh auth"
-                                                                                        + " login'."));
+                                                                        webviewPanel
+                                                                                .pushSetupRequired(
+                                                                                        "load_failed",
+                                                                                        "Couldn't load pull"
+                                                                                                + " requests."
+                                                                                                + " Check"
+                                                                                                + " connectivity"
+                                                                                                + " and retry."
+                                                                                                + " If auth"
+                                                                                                + " is stale,"
+                                                                                                + " run 'gh auth"
+                                                                                                + " login'."));
                                             }
                                         }));
     }
@@ -154,9 +155,7 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                                     + " Refresh.";
             ApplicationManager.getApplication()
                     .invokeLater(
-                            () ->
-                                    webviewPanel.pushSetupRequired(
-                                            setupReason(diagnosis), detail));
+                            () -> webviewPanel.pushSetupRequired(setupReason(diagnosis), detail));
             return;
         }
         try {

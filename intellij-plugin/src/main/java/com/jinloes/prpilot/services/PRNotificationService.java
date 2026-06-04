@@ -87,9 +87,7 @@ public final class PRNotificationService implements Disposable {
         if (pollEpochMs == 0) return null;
         long agoSec = (nowMs - pollEpochMs) / 1000;
         String when = agoSec < 60 ? agoSec + "s ago" : (agoSec / 60) + " min ago";
-        return error != null
-                ? "Last poll: " + when + " — Error: " + error
-                : "Last polled: " + when;
+        return error != null ? "Last poll: " + when + " — Error: " + error : "Last polled: " + when;
     }
 
     void recordPollStatus(String error) {

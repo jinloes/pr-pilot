@@ -65,7 +65,12 @@ interface GhSubmittedReview {
 
 interface PrDetail {
     merged: boolean;
-    head: { sha: string } | null;
+    head: {
+        sha: string;
+        ref: string;
+        repo: { full_name: string; clone_url: string } | null;
+    } | null;
+    base: { repo: { full_name: string } | null } | null;
 }
 
 interface SearchItem {
@@ -231,6 +236,22 @@ export async function getPRDetail(
 ): Promise<PrDetail> {
     const url = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${prNumber}`;
     return JSON.parse(await ghRequest(token, url, {})) as PrDetail;
+}
+
+/** Fetches the head branch name and fork status for a PR. Mirrors GitHubService.getPRHeadInfo. */
+export async function getPRHeadInfo(
+    token: string,
+    githubBaseUrl: string,
+    owner: string,
+    repo: string,
+    prNumber: number,
+): Promise<{ ref: string; isFork: boolean; forkCloneUrl: string }> {
+    const detail = await getPRDetail(token, githubBaseUrl, owner, repo, prNumber);
+    const ref = detail.head?.ref ?? '';
+    const headFullName = detail.head?.repo?.full_name ?? `${owner}/${repo}`;
+    const baseFullName = detail.base?.repo?.full_name ?? `${owner}/${repo}`;
+    const isFork = headFullName !== '' && headFullName !== baseFullName;
+    return { ref, isFork, forkCloneUrl: isFork ? (detail.head?.repo?.clone_url ?? '') : '' };
 }
 
 export async function getExistingReviewsSummary(

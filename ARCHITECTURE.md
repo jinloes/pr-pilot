@@ -35,6 +35,7 @@ core/                                  – KMP module (jvm + js targets); Java s
       ClaudeService.kt               – Shells out to `claude --print`; synchronous/blocking API
       CopilotService.kt              – Uses the official Copilot Java SDK to drive local `copilot`; mirrors ClaudeService API
       CopilotModelDiscovery.kt       – Runs `copilot help config` once per session and caches model list
+      GitWorktreeService.kt          – Creates/removes temporary git worktrees for PR branch reviews
       PendingReviewIndex.kt          – Local JSON index of saved drafts (~/.pr-pilot/pending-prs.json)
       SeenPRSet.kt                   – Local JSON set of notified PR IDs (~/.pr-pilot/seen-prs.json)
   src/jsMain/kotlin/com/jinloes/prpilot/
@@ -125,6 +126,9 @@ When wrapping untrusted payloads in XML-like tags, escape matching closing tags 
 
 ### Diff acquisition model
 Review prompts do not embed full diff; model fetches diff on demand via `gh pr diff` instruction in prompt (`diff = ""` in request object).
+
+### Worktree-based review context
+When the PR's repo matches the open IntelliJ project and a git root is found, `WebviewPanel` creates a temporary git worktree checked out to the PR branch before invoking the AI service. This gives the model accurate local file context (correct branch state) for type lookups and cross-file references. Worktree creation uses `GitWorktreeService`; cleanup always runs in a `finally`-equivalent callback after the review completes or errors. Falls back silently to `project.getBasePath()` if worktree creation fails or the PR is from an unrelated repo. Fork PRs use `git fetch <clone_url> <branch>` + `FETCH_HEAD`.
 
 ### Cross-host parity
 When host-specific logic changes in IntelliJ or VS Code, update the paired implementation in the other host. The mapping table and enforcement workflow live in `AGENTS.md`.

@@ -100,4 +100,10 @@ public final class IntellijGitHubService {
             throws IOException, InterruptedException {
         return core().getPRHeadSha(token, owner, repo, number);
     }
+
+    public GitHubService.PRHeadInfo getPRHeadInfo(
+            String token, String owner, String repo, int number)
+            throws IOException, InterruptedException {
+        return core().getPRHeadInfo(token, owner, repo, number);
+    }
 }

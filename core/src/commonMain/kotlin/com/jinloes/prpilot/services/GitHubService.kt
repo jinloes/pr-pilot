@@ -311,10 +311,40 @@ class GitHubService(
     )
 
     @Serializable
-    private data class PrDetail(val merged: Boolean = false, val head: HeadRef? = null)
+    private data class PrDetail(
+        val merged: Boolean = false,
+        val head: HeadRef? = null,
+        val base: BaseRef? = null,
+    )
 
     @Serializable
-    private data class HeadRef(val sha: String = "")
+    private data class HeadRef(
+        val sha: String = "",
+        val ref: String = "",
+        val repo: HeadRepo? = null,
+    )
+
+    @Serializable
+    private data class HeadRepo(
+        @SerialName("full_name") val fullName: String = "",
+        @SerialName("clone_url") val cloneUrl: String = "",
+    )
+
+    @Serializable
+    private data class BaseRef(val repo: BaseRepoInfo? = null)
+
+    @Serializable
+    private data class BaseRepoInfo(@SerialName("full_name") val fullName: String = "")
+
+    /**
+     * Carries the head branch name and fork information for a pull request, as returned by
+     * [getPRHeadInfo].
+     */
+    data class PRHeadInfo(
+        val ref: String,
+        val isFork: Boolean,
+        val forkCloneUrl: String,
+    )
 
     /** Carries a pending review ID together with its decoded [ReviewResult]. */
     data class PendingReview(val id: String, val result: ReviewResult)
@@ -689,6 +719,27 @@ class GitHubService(
         val detail = JSON.decodeFromString<PrDetail>(get(token, url, "application/vnd.github.v3+json"))
         return detail.head?.sha ?: ""
     }
+
+    /**
+     * Fetches the head branch name and fork status for a pull request. Blocking.
+     *
+     * Returns a [PRHeadInfo] with [PRHeadInfo.isFork] == true when the PR comes from a fork (i.e.
+     * the head and base repos differ). [PRHeadInfo.forkCloneUrl] is populated only for forks.
+     */
+    fun getPRHeadInfo(token: String, owner: String, repo: String, number: Int): PRHeadInfo =
+        runBlockingCompat {
+            val url = "$apiBase/repos/$owner/$repo/pulls/$number"
+            val detail = JSON.decodeFromString<PrDetail>(get(token, url, "application/vnd.github.v3+json"))
+            val ref = detail.head?.ref ?: ""
+            val headFullName = detail.head?.repo?.fullName ?: "$owner/$repo"
+            val baseFullName = detail.base?.repo?.fullName ?: "$owner/$repo"
+            val isFork = headFullName.isNotBlank() && headFullName != baseFullName
+            PRHeadInfo(
+                ref = ref,
+                isFork = isFork,
+                forkCloneUrl = if (isFork) detail.head?.repo?.cloneUrl ?: "" else "",
+            )
+        }
 }
 
 /** Platform-agnostic URL encoding. Uses java.net.URLEncoder on JVM, encodeURIComponent on JS. */

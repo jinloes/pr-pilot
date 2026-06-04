@@ -20,6 +20,7 @@ import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.services.GitHubService;
+import com.jinloes.prpilot.services.GitWorktreeService;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.services.PendingReviewIndex;
@@ -132,8 +133,15 @@ public class WebviewPanel implements Disposable {
                     .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     private final PendingReviewIndex pendingIndex = new PendingReviewIndex();
     private final IntellijClaudeService claudeService;
+    private final GitWorktreeService worktreeService = new GitWorktreeService();
     private final IntellijGitHubService ghSvc = IntellijGitHubService.getInstance();
     private final Project project;
+
+    /**
+     * Points to the service that owns the currently running review process (may be a per-worktree
+     * instance). Reset to {@code claudeService} after every review.
+     */
+    private volatile IntellijClaudeService activeReviewService;
 
     private volatile List<PullRequest> cachedPRs = List.of();
     private volatile PullRequest activePR = null;
@@ -156,6 +164,7 @@ public class WebviewPanel implements Disposable {
     public WebviewPanel(Project project) {
         this.project = project;
         this.claudeService = new IntellijClaudeService(project.getBasePath());
+        this.activeReviewService = this.claudeService;
         browser = new JBCefBrowser();
         bridgeQuery = JBCefJSQuery.create((JBCefBrowserBase) browser);
 
@@ -363,7 +372,7 @@ public class WebviewPanel implements Disposable {
                     }
                 }
                 case "generateReview" -> handleGenerateReview(number, owner, repo);
-                case "cancelReview" -> claudeService.cancelCurrentRequest();
+                case "cancelReview" -> activeReviewService.cancelCurrentRequest();
                 case "saveDraft" -> {
                     ReviewResult bridgeResult = null;
                     List<LineComment> bridgeOrphans = List.of();
@@ -725,13 +734,90 @@ public class WebviewPanel implements Disposable {
                                 }
                             }
 
+                            // Try to create a git worktree for the PR branch so Claude reads
+                            // files at the PR state rather than the user's current checkout.
+                            // Falls back to project dir silently on any failure.
+                            java.io.File worktreeDir = null;
+                            java.io.File gitRoot = null;
+                            IntellijClaudeService reviewService = claudeService;
+
+                            String projectPath = project.getBasePath();
+                            if (projectPath != null) {
+                                java.io.File detectedRoot =
+                                        worktreeService.findGitRoot(new java.io.File(projectPath));
+                                String currentRepo = RepoDetector.detectCurrentRepo(projectPath);
+                                boolean sameRepo =
+                                        currentRepo != null
+                                                && currentRepo.equalsIgnoreCase(owner + "/" + repo);
+                                if (detectedRoot != null && sameRepo) {
+                                    pushMessage(
+                                            new ReviewGeneratingMsg(
+                                                    "reviewGenerating", "Preparing PR branch…"));
+                                    try {
+                                        GitHubService.PRHeadInfo headInfo =
+                                                ghSvc.getPRHeadInfo(
+                                                        finalToken, owner, repo, number);
+                                        if (!headInfo.getRef().isBlank()) {
+                                            java.io.File wt =
+                                                    new java.io.File(
+                                                            System.getProperty("java.io.tmpdir"),
+                                                            "pr-pilot-wt-"
+                                                                    + number
+                                                                    + "-"
+                                                                    + System.currentTimeMillis());
+                                            if (headInfo.isFork()) {
+                                                worktreeService.createWorktreeFromFork(
+                                                        detectedRoot,
+                                                        headInfo.getForkCloneUrl(),
+                                                        headInfo.getRef(),
+                                                        wt);
+                                            } else {
+                                                worktreeService.createWorktree(
+                                                        detectedRoot, headInfo.getRef(), wt);
+                                            }
+                                            worktreeDir = wt;
+                                            gitRoot = detectedRoot;
+                                            reviewService =
+                                                    new IntellijClaudeService(wt.getAbsolutePath());
+                                            log.info("Using worktree {} for PR #{}", wt, number);
+                                        }
+                                    } catch (Exception e) {
+                                        log.warn(
+                                                "Worktree creation for PR #{} failed; falling"
+                                                        + " back to project dir: {}",
+                                                number,
+                                                e.getMessage());
+                                        worktreeDir = null;
+                                        reviewService = claudeService;
+                                    }
+                                }
+                            }
+
+                            activeReviewService = reviewService;
+
+                            final IntellijClaudeService finalReviewService = reviewService;
+                            final java.io.File finalWorktreeDir = worktreeDir;
+                            final java.io.File finalGitRoot = gitRoot;
+                            final Runnable cleanupWorktree =
+                                    () -> {
+                                        activeReviewService = claudeService;
+                                        if (finalWorktreeDir != null && finalGitRoot != null) {
+                                            getApplication()
+                                                    .executeOnPooledThread(
+                                                            () ->
+                                                                    worktreeService.removeWorktree(
+                                                                            finalGitRoot,
+                                                                            finalWorktreeDir));
+                                        }
+                                    };
+
                             // Kick off the review — callbacks fired on EDT
                             pushMessage(
                                     new ReviewGeneratingMsg(
                                             "reviewGenerating", "Sending review request…"));
                             final String finalDiff = diff;
                             final String finalExisting = existingReviews;
-                            claudeService.reviewPR(
+                            finalReviewService.reviewPR(
                                     new PRReviewRequest(finalPr, "", "", "", finalExisting),
                                     statusMsg ->
                                             pushMessage(
@@ -741,6 +827,7 @@ public class WebviewPanel implements Disposable {
                                             pushMessage(
                                                     new ReviewChunkMsg("reviewChunk", kind, chunk)),
                                     result -> {
+                                        cleanupWorktree.run();
                                         lastResult = result;
                                         pendingReviewId = null;
                                         pushMessage(
@@ -750,6 +837,7 @@ public class WebviewPanel implements Disposable {
                                                         finalDiff));
                                     },
                                     err -> {
+                                        cleanupWorktree.run();
                                         // Cancellations are user-initiated — don't surface as
                                         // errors.
                                         String lower = err.toLowerCase(java.util.Locale.ROOT);
