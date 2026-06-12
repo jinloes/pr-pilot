@@ -40,3 +40,5 @@ package-lock.json
 
 # Logs
 *.log
+# Machine-specific VS Code settings (personal chat auto-approve rules, etc.)
+.vscode/settings.json

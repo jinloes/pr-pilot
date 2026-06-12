@@ -21,6 +21,8 @@ Update docs as part of each coding task:
 
 ## IntelliJ <-> VS Code sync obligations
 
+**Feature parity is mandatory.** Every user-facing feature must work in both the IntelliJ plugin and the VS Code extension. When you add or change a feature in one host, implement the equivalent in the other host in the same change — do not ship a feature to only one host. If a true platform constraint makes parity impossible, document the gap and the reason in `ARCHITECTURE.md` "Key design decisions" and call it out explicitly in the PR description. Logic that belongs in shared code goes in `core` (`commonMain` when it must compile to JS for the extension; `jvmMain` only for JVM-only/IntelliJ code); host wiring is mirrored between `WebviewPanel.java`/`PRToolWindowFactory.java` and `vscode-extension/src/extension.ts`.
+
 When logic changes in one host, update the parallel file in the other host:
 
 | Changed file | Must also update |
@@ -30,10 +32,14 @@ When logic changes in one host, update the parallel file in the other host:
 | `ClaudeService.kt` stream-json review parsing | `vscode-extension/src/claude.ts` review event loop |
 | `GitHubService.kt` encode/decode/comment-body helpers | `vscode-extension/src/github.ts` matching helpers |
 | `GitHubService.kt` API call structure/headers/error handling | `vscode-extension/src/github.ts` `ghRequest` + callers |
+| `GitWorktreeService.kt` worktree create/remove/find-root logic | `vscode-extension/src/worktree.ts` matching functions |
+| `WebviewPanel.resolvePrClaudeService`/worktree lifecycle | `vscode-extension/src/extension.ts` `resolveWorkingDir`/`clearWorktree` |
 | `PRToolWindowFactory.buildQuery` query behavior | `vscode-extension/src/github.ts` `searchPRs` |
 | `GitHubAuthService.findGhBinary` binary path probes | `vscode-extension/src/github.ts` `findGhBinary` |
 | `ClaudeService.findClaudeBinary` / `CopilotService.findCopilotBinary` | `vscode-extension/src/claude.ts` + `vscode-extension/src/copilot.ts` |
 | `CopilotService.kt` SDK session setup, stream events, effort normalization | `vscode-extension/src/copilot.ts` |
+| `CopilotModelDiscovery` model probing / `PluginSettingsComponent` model combo | `vscode-extension/src/copilot.ts` `listModels`/`filterModelIds` + `extension.ts` `selectCopilotModel` command |
+| `PluginSettingsComponent` settings UI (provider-aware model selector, effort, base URL) | `vscode-extension/src/settings.ts` + `settingsView.ts` settings webview |
 | `CopilotService.DEFAULT_REASONING_EFFORT` | `vscode-extension/src/copilot.ts` |
 | `webview/src/bridge/types.ts` message schemas | `WebviewPanel.java` and `vscode-extension/src/extension.ts` handlers |
 | `PluginSettings` adding new setting | `vscode-extension/package.json` config contribution + `vscode-extension/src/extension.ts` reader |

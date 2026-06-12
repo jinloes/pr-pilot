@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { spawn, ChildProcess } from 'child_process';
 import type { ReviewResult, LineComment } from './github';
+import { parseReview } from './review';
 
 export type { ReviewResult, LineComment };
 
@@ -132,7 +133,7 @@ export function buildPrompt(options: {
 }): string {
     const { pr, existingReviews, knownPatterns, priorReview } = options;
     let prompt = REVIEW_INSTRUCTIONS;
-    prompt += `\n<pr_metadata>\nnumber: ${pr.number}\nrepo: ${pr.owner}/${pr.repo}\ntitle: ${pr.title}\n</pr_metadata>\n`;
+    prompt += `\n<pr_metadata>\nnumber: ${pr.number}\nrepo: ${pr.owner}/${pr.repo}\ntitle: ${escapeClosingTag(pr.title, 'pr_metadata')}\n</pr_metadata>\n`;
     if (knownPatterns?.trim()) {
         prompt += `\n<known_patterns>\nThe following patterns have been noted in this repository. Treat them as context — do not penalize code that follows established project patterns:\n\n${escapeClosingTag(knownPatterns.trim(), 'known_patterns')}\n</known_patterns>\n`;
     }
@@ -214,27 +215,13 @@ function toolUseStatus(toolName: string, input: Record<string, unknown>): string
     return `${display}(${args})`;
 }
 
-function parseReview(raw: string): ReviewResult {
-    let json = raw.trim();
-    if (json.startsWith('```')) {
-        const newline = json.indexOf('\n');
-        const closing = json.lastIndexOf('```');
-        if (newline > 0 && closing > newline) json = json.substring(newline + 1, closing).trim();
-    }
-    const start = json.indexOf('{');
-    const end = json.lastIndexOf('}');
-    if (start >= 0 && end > start) json = json.substring(start, end + 1);
-    return JSON.parse(json) as ReviewResult;
-}
-
 // ── Process management ─────────────────────────────────────────────────────────
 
-let activeProcess: ChildProcess | null = null;
+const activeProcesses = new Set<ChildProcess>();
 
 export function cancelCurrentRequest(): void {
-    const p = activeProcess;
-    activeProcess = null;
-    p?.kill('SIGKILL');
+    for (const p of activeProcesses) p.kill('SIGKILL');
+    activeProcesses.clear();
 }
 
 // ── Review ─────────────────────────────────────────────────────────────────────
@@ -255,7 +242,7 @@ export function reviewPR(options: {
             cwd: workingDir || os.homedir(),
             env: { ...process.env, HOME: process.env.HOME || os.homedir() },
         });
-        activeProcess = proc;
+        activeProcesses.add(proc);
 
         const resultBuffer: string[] = [];
         let stdoutBuf = '';
@@ -315,7 +302,7 @@ export function reviewPR(options: {
         proc.stderr.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString('utf8'); });
 
         proc.on('close', (code) => {
-            if (activeProcess === proc) activeProcess = null;
+            activeProcesses.delete(proc);
             if (code !== 0 && code !== null) {
                 if (errorSubtype === 'error_max_turns' && errorSessionId) {
                     resumeReview({ sessionId: errorSessionId, model, workingDir, onStatus, onChunk })
@@ -342,7 +329,7 @@ export function reviewPR(options: {
         });
 
         proc.on('error', (err) => {
-            if (activeProcess === proc) activeProcess = null;
+            activeProcesses.delete(proc);
             reject(err);
         });
     });
@@ -369,7 +356,7 @@ function resumeReview(options: {
             cwd: workingDir || os.homedir(),
             env: { ...process.env, HOME: process.env.HOME || os.homedir() },
         });
-        activeProcess = proc;
+        activeProcesses.add(proc);
 
         const resultBuffer: string[] = [];
         let stdoutBuf = '';
@@ -427,7 +414,7 @@ function resumeReview(options: {
         proc.stderr.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString('utf8'); });
 
         proc.on('close', (code) => {
-            if (activeProcess === proc) activeProcess = null;
+            activeProcesses.delete(proc);
             if (code !== 0 && code !== null) {
                 const msg = errorSubtype === 'error_max_turns'
                     ? 'Review hit the turn limit even after resume — the PR may be too large.'
@@ -448,7 +435,7 @@ function resumeReview(options: {
         });
 
         proc.on('error', (err) => {
-            if (activeProcess === proc) activeProcess = null;
+            activeProcesses.delete(proc);
             reject(err);
         });
     });
@@ -468,7 +455,7 @@ export function chat(options: {
             cwd: workingDir || os.homedir(),
             env: { ...process.env, HOME: process.env.HOME || os.homedir() },
         });
-        activeProcess = proc;
+        activeProcesses.add(proc);
 
         let buffer = '';
         let stderrBuf = '';
@@ -485,7 +472,7 @@ export function chat(options: {
         proc.stderr.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString('utf8'); });
 
         proc.on('close', (code) => {
-            if (activeProcess === proc) activeProcess = null;
+            activeProcesses.delete(proc);
             if (code !== 0 && code !== null) {
                 const msg = `claude exited ${code}` + (stderrBuf.trim() ? `: ${stderrBuf.trim()}` : '');
                 reject(new Error(msg));
@@ -495,7 +482,7 @@ export function chat(options: {
         });
 
         proc.on('error', (err) => {
-            if (activeProcess === proc) activeProcess = null;
+            activeProcesses.delete(proc);
             reject(err);
         });
     });

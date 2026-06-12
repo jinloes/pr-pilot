@@ -52,16 +52,16 @@ class PRToolWindowFactoryTest {
         }
 
         @Test
-        void starredOnly_noCurrentRepo_includesAllStarred() {
+        void starredOnly_noCurrentRepo_doesNotAffectCurrentRepoScope() {
             String q = buildQuery("", List.of("alice/foo", "bob/bar"));
-            assertThat(q).contains("repo:alice/foo").contains("repo:bob/bar");
-            assertThat(q).doesNotContain("author:@me");
+            assertThat(q).isEqualTo("is:pr is:open draft:false author:@me");
         }
 
         @Test
-        void currentRepoPrefixedBeforeStarred() {
+        void currentRepoScopeIgnoresStarredRepos() {
             String q = buildQuery("acme/platform", List.of("acme/infra", "alice/foo"));
-            assertThat(q.indexOf("repo:acme/platform")).isLessThan(q.indexOf("repo:acme/infra"));
+            assertThat(q).isEqualTo("is:pr is:open draft:false repo:acme/platform");
+            assertThat(q).doesNotContain("acme/infra").doesNotContain("alice/foo");
         }
 
         @Test
@@ -70,40 +70,25 @@ class PRToolWindowFactoryTest {
             assertThat(countOccurrences(q, "repo:acme/platform")).isEqualTo(1);
         }
 
-        @Test
-        void cappedAtTwentyRepos() {
-            List<String> many = new java.util.ArrayList<>();
-            for (int i = 0; i < 25; i++) many.add("user/repo" + i);
-            assertThat(countOccurrences(buildQuery("", many), "repo:")).isEqualTo(20);
-        }
-
-        @Test
-        void currentRepoCountsTowardCap() {
-            List<String> starred = new java.util.ArrayList<>();
-            for (int i = 0; i < 20; i++) starred.add("user/repo" + i);
-            assertThat(countOccurrences(buildQuery("acme/platform", starred), "repo:"))
-                    .isEqualTo(20);
-        }
-
         // ── State filter ──────────────────────────────────────────────────────
 
         @Test
         void closedState_usesIsClosedQualifier() {
-            String q = buildQuery("acme/platform", List.of(), "closed", false, false);
+            String q = buildQuery("acme/platform", List.of(), "closed", "currentRepo");
             assertThat(q).contains("is:closed");
             assertThat(q).doesNotContain("is:open");
         }
 
         @Test
         void allState_omitsStateQualifier() {
-            String q = buildQuery("acme/platform", List.of(), "all", false, false);
+            String q = buildQuery("acme/platform", List.of(), "all", "currentRepo");
             assertThat(q).doesNotContain("is:open");
             assertThat(q).doesNotContain("is:closed");
         }
 
         @Test
         void openState_usesIsOpenQualifier() {
-            String q = buildQuery("acme/platform", List.of(), "open", false, false);
+            String q = buildQuery("acme/platform", List.of(), "open", "currentRepo");
             assertThat(q).contains("is:open");
             assertThat(q).doesNotContain("is:closed");
         }
@@ -111,15 +96,16 @@ class PRToolWindowFactoryTest {
         // ── Assigned-to-me filter ─────────────────────────────────────────────
 
         @Test
-        void assignedToMe_withRepo_appendsAssigneeQualifier() {
-            String q = buildQuery("acme/platform", List.of(), "open", true, false);
+        void assignedToMe_scopeUsesAssigneeQualifier() {
+            String q = buildQuery("acme/platform", List.of(), "open", "assigned");
             assertThat(q).contains("assignee:@me");
             assertThat(q).doesNotContain("author:@me");
+            assertThat(q).doesNotContain("repo:acme/platform");
         }
 
         @Test
         void assignedToMe_noRepo_replacesAuthorMe() {
-            String q = buildQuery("", List.of(), "open", true, false);
+            String q = buildQuery("", List.of(), "open", "assigned");
             assertThat(q).contains("assignee:@me");
             assertThat(q).doesNotContain("author:@me");
         }
@@ -127,38 +113,41 @@ class PRToolWindowFactoryTest {
         // ── Review-requested filter ───────────────────────────────────────────
 
         @Test
-        void reviewRequested_withRepo_appendsQualifier() {
-            String q = buildQuery("acme/platform", List.of(), "open", false, true);
+        void reviewRequested_scopeUsesQualifier() {
+            String q = buildQuery("acme/platform", List.of(), "open", "reviewRequested");
             assertThat(q).contains("review-requested:@me");
+            assertThat(q).doesNotContain("repo:acme/platform");
         }
 
         @Test
         void reviewRequested_noRepo_replacesAuthorMe() {
-            String q = buildQuery("", List.of(), "open", false, true);
+            String q = buildQuery("", List.of(), "open", "reviewRequested");
             assertThat(q).contains("review-requested:@me");
             assertThat(q).doesNotContain("author:@me");
         }
 
         @Test
-        void bothUserFilters_canCombine() {
-            String q = buildQuery("acme/platform", List.of(), "open", true, true);
-            assertThat(q).contains("assignee:@me").contains("review-requested:@me");
+        void authored_scopeUsesAuthorMe() {
+            String q = buildQuery("acme/platform", List.of(), "open", "authored");
+            assertThat(q).contains("author:@me");
+            assertThat(q).doesNotContain("repo:acme/platform");
+        }
+
+        @Test
+        void unknownScopeFallsBackToCurrentRepo() {
+            assertThat(buildQuery("acme/platform", List.of(), "open", "surprise"))
+                    .isEqualTo("is:pr is:open draft:false repo:acme/platform");
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────
 
         private static String buildQuery(String currentRepo, List<String> starred) {
-            return PRToolWindowFactory.buildQuery(currentRepo, starred, "open", false, false);
+            return PRToolWindowFactory.buildQuery(currentRepo, starred, "open", "currentRepo");
         }
 
         private static String buildQuery(
-                String currentRepo,
-                List<String> starred,
-                String state,
-                boolean assignedToMe,
-                boolean reviewRequested) {
-            return PRToolWindowFactory.buildQuery(
-                    currentRepo, starred, state, assignedToMe, reviewRequested);
+                String currentRepo, List<String> starred, String state, String searchScope) {
+            return PRToolWindowFactory.buildQuery(currentRepo, starred, state, searchScope);
         }
 
         private static long countOccurrences(String haystack, String needle) {

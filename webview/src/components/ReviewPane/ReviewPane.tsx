@@ -79,7 +79,7 @@ type PaneState =
   | { kind: 'draftLoading' }
   | { kind: 'noDraft' }
   | { kind: 'authError'; message: string }
-  | { kind: 'draftPresent'; result: ReviewResult; reviewId: string; staleCommits: boolean; diff?: string; generationElapsedSec?: number }
+  | { kind: 'draftPresent'; result: ReviewResult; reviewId: string; staleCommits: boolean; importedFromGitHub: boolean; diff?: string; generationElapsedSec?: number }
   | {
       kind: 'generating'
       messages: string[]
@@ -147,6 +147,10 @@ const VERDICT_LABEL: Record<ReviewResult['verdict'], string> = {
   COMMENT: 'Comment',
 }
 
+function prKey(pr: Pick<PR, 'owner' | 'repo' | 'number'>): string {
+  return `${pr.owner}/${pr.repo}#${pr.number}`
+}
+
 export function ReviewPane({ pr }: Props) {
   const [state, setState] = useState<PaneState>({ kind: 'idle' })
   const [saving, setSaving] = useState(false)
@@ -159,14 +163,16 @@ export function ReviewPane({ pr }: Props) {
   const [chatHeight, setChatHeight] = useState(loadChatHeight)
   const chatHeightRef = useRef(chatHeight)
   const chatDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
-  const pendingVerdict = useRef<Verdict | null>(null)
+  const pendingSubmit = useRef<{ verdict: Verdict; comment: string } | null>(null)
   const currentPrRef = useRef(pr)
 
-  currentPrRef.current = pr
+  useEffect(() => {
+    currentPrRef.current = pr
+  }, [pr])
 
   useEffect(() => {
     setState({ kind: pr ? 'draftLoading' : 'idle' })
-    pendingVerdict.current = null
+    pendingSubmit.current = null
     setSaving(false)
     setSubmitting(false)
     setDeleting(false)
@@ -177,6 +183,9 @@ export function ReviewPane({ pr }: Props) {
 
   useEffect(() => {
     const cleanup = onHostMessage((msg) => {
+      const activePr = currentPrRef.current
+      if ('prKey' in msg && msg.prKey && (!activePr || msg.prKey !== prKey(activePr))) return
+
       switch (msg.type) {
         case 'draftLoading':
           setState({ kind: 'draftLoading' })
@@ -189,7 +198,14 @@ export function ReviewPane({ pr }: Props) {
             const diff = msg.diff ?? ''
             const result = withSortedComments(withValidatedComments(msg.result, diff))
             setFocusedCommentIdx(0)
-            setState({ kind: 'draftPresent', result, reviewId: msg.reviewId ?? '', staleCommits: msg.staleCommits ?? false, diff })
+            setState({
+              kind: 'draftPresent',
+              result,
+              reviewId: msg.reviewId ?? '',
+              staleCommits: msg.staleCommits ?? false,
+              importedFromGitHub: msg.importedFromGitHub ?? false,
+              diff,
+            })
           } else {
             const status = msg.status ?? ''
             setState(status ? { kind: 'authError', message: status } : { kind: 'noDraft' })
@@ -244,23 +260,31 @@ export function ReviewPane({ pr }: Props) {
               result: prev.result,
               reviewId: msg.reviewId,
               staleCommits: false,
+              importedFromGitHub: false,
               diff: prev.diff,
               generationElapsedSec: prev.generationElapsedSec,
             }
           })
-          const verdict = pendingVerdict.current
-          const activePr = currentPrRef.current
-          if (verdict && activePr) {
-            pendingVerdict.current = null
+          const pending = pendingSubmit.current
+          const submitPr = currentPrRef.current
+          if (pending && submitPr) {
+            pendingSubmit.current = null
             setSubmitting(true)
-            sendToHost({ type: 'submitReview', number: activePr.number, owner: activePr.owner, repo: activePr.repo, verdict, comment: '' })
+            sendToHost({
+              type: 'submitReview',
+              number: submitPr.number,
+              owner: submitPr.owner,
+              repo: submitPr.repo,
+              verdict: pending.verdict,
+              comment: pending.comment,
+            })
           }
           break
         }
 
         case 'draftSaveError':
           setSaving(false)
-          pendingVerdict.current = null
+          pendingSubmit.current = null
           setState((prev) => ({
             kind: 'saveError',
             message: msg.message,
@@ -301,10 +325,10 @@ export function ReviewPane({ pr }: Props) {
     return cleanup
   }, [])
 
-  const showChat = state.kind === 'draftPresent' || state.kind === 'reviewUnsaved'
+  const showChat = Boolean(pr)
 
   useEffect(() => {
-    if (!showChat) {
+    if (!pr) {
       setSelectedContext('')
       return
     }
@@ -317,7 +341,7 @@ export function ReviewPane({ pr }: Props) {
 
     document.addEventListener('mouseup', handleMouseUp)
     return () => document.removeEventListener('mouseup', handleMouseUp)
-  }, [showChat])
+  }, [pr])
 
   const handleChatResizeMove = useCallback((e: MouseEvent) => {
     if (!chatDragRef.current) return
@@ -383,9 +407,9 @@ export function ReviewPane({ pr }: Props) {
     sendToHost({ type: 'deleteDraft', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo })
   }
 
-  function handleSubmit(verdict: Verdict) {
+  function handleSubmit(verdict: Verdict, comment = '') {
     if (state.kind === 'reviewUnsaved') {
-      pendingVerdict.current = verdict
+      pendingSubmit.current = { verdict, comment }
       setSaving(true)
       sendToHost({
         type: 'saveDraft',
@@ -398,7 +422,7 @@ export function ReviewPane({ pr }: Props) {
       return
     }
     setSubmitting(true)
-    sendToHost({ type: 'submitReview', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo, verdict, comment: '' })
+    sendToHost({ type: 'submitReview', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo, verdict, comment })
   }
 
   function handleVerifyComment(comment: LineComment) {
@@ -422,6 +446,7 @@ export function ReviewPane({ pr }: Props) {
   const orphanCount = orphanComments.length
   const totalCount = commentCount + orphanCount
   const hasReview = state.kind === 'draftPresent' || state.kind === 'reviewUnsaved'
+  const contextSummary = chatContextSummary(pr, diff, result, selectedContext)
 
   // DiffViewer indexes comments by position in the array we pass it (`inlineComments`),
   // but our mutators operate on positions in the canonical `result.lineComments`. The
@@ -529,6 +554,19 @@ export function ReviewPane({ pr }: Props) {
               </Button>
             )}
 
+            {showChat && selectedContext && !chatVisible && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-6 px-2 text-xs shrink-0 gap-1.5"
+                onClick={() => setChatVisible(true)}
+                title="Open chat with selected text attached"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                Ask selection
+              </Button>
+            )}
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -587,7 +625,7 @@ export function ReviewPane({ pr }: Props) {
                 focusedCommentIdx={focusedCommentIdx}
                 setFocusedCommentIdx={setFocusedCommentIdx}
                 onGenerate={handleGenerate}
-                onVerifyComment={showChat ? handleVerifyComment : undefined}
+                onVerifyComment={hasReview ? handleVerifyComment : undefined}
                 editCommentHandlers={editCommentHandlers}
                 inlineComments={inlineComments}
                 orphanComments={orphanComments}
@@ -597,7 +635,7 @@ export function ReviewPane({ pr }: Props) {
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
-            {showChat ? (
+            {pr ? (
               selectedContext ? (
                 <>
                   <ContextMenuLabel className="text-[10px] font-normal text-muted-foreground max-w-[220px] truncate py-1">
@@ -627,7 +665,7 @@ export function ReviewPane({ pr }: Props) {
             ) : (
               <ContextMenuItem disabled className="gap-2 text-xs opacity-60">
                 <MessageSquare className="w-3.5 h-3.5" />
-                Generate a review to enable chat
+                Select text to chat about it
               </ContextMenuItem>
             )}
           </ContextMenuContent>
@@ -646,6 +684,7 @@ export function ReviewPane({ pr }: Props) {
               pendingMessage={pendingChatMessage ?? undefined}
               onPendingMessageSent={() => setPendingChatMessage(null)}
               onResizeStart={handleChatResizeDown}
+              contextSummary={contextSummary}
             />
           </div>
         )}
@@ -661,6 +700,9 @@ export function ReviewPane({ pr }: Props) {
           onCancel={handleCancel}
           onRegenerate={handleGenerate}
           onDelete={handleDelete}
+          inlineCommentCount={commentCount}
+          orphanCommentCount={orphanCount}
+          summary={result?.summary ?? ''}
         />
       </div>
     </TooltipProvider>
@@ -708,6 +750,24 @@ function formatGenerationSummary(elapsedSec?: number): string | null {
   return `Generated in ${formatElapsed(elapsedSec)}`
 }
 
+function isDiffTruncated(diff?: string): boolean {
+  return Boolean(diff?.includes('[... diff truncated at 80 KB ...]'))
+}
+
+function chatContextSummary(
+  pr: PR | null,
+  diff: string,
+  result: ReviewResult | null,
+  selectedContext: string,
+): string[] {
+  if (!pr) return []
+  const items = ['PR title/body']
+  if (diff) items.push(isDiffTruncated(diff) ? 'diff excerpt' : 'diff')
+  if (result) items.push('generated review')
+  if (selectedContext) items.push('selected text')
+  return items
+}
+
 function ReviewAndDiff({
   result,
   diff,
@@ -717,6 +777,7 @@ function ReviewAndDiff({
   editCommentHandlers,
   onVerifyComment,
   staleCommits,
+  importedFromGitHub,
   inlineComments,
   orphanComments,
   onEditOrphan,
@@ -730,6 +791,7 @@ function ReviewAndDiff({
   editCommentHandlers: ContentProps['editCommentHandlers']
   onVerifyComment?: (comment: LineComment) => void
   staleCommits?: boolean
+  importedFromGitHub?: boolean
   inlineComments: LineComment[]
   orphanComments: LineComment[]
   onEditOrphan: (orphan: LineComment, body: string) => void
@@ -743,6 +805,22 @@ function ReviewAndDiff({
           <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
           <AlertDescription className="text-xs text-status-suggestion/90">
             Draft generated against an older commit — new commits may have been pushed.
+          </AlertDescription>
+        </Alert>
+      )}
+      {importedFromGitHub && (
+        <Alert className="mx-4 mt-3 mb-0 border-status-suggestion/40 bg-status-suggestion/5">
+          <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
+          <AlertDescription className="text-xs text-status-suggestion/90">
+            Draft was reconstructed from GitHub comments — hidden PR Pilot metadata was missing, so review details may be incomplete.
+          </AlertDescription>
+        </Alert>
+      )}
+      {isDiffTruncated(diff) && (
+        <Alert className="mx-4 mt-3 mb-0 border-status-suggestion/40 bg-status-suggestion/5">
+          <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
+          <AlertDescription className="text-xs text-status-suggestion/90">
+            Diff display and chat context are truncated at 80 KB. Use smaller focused questions for large PRs.
           </AlertDescription>
         </Alert>
       )}
@@ -924,6 +1002,7 @@ function PaneContent({
           editCommentHandlers={editCommentHandlers}
           onVerifyComment={onVerifyComment}
           staleCommits={state.staleCommits}
+          importedFromGitHub={state.importedFromGitHub}
           inlineComments={inlineComments}
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
@@ -1024,10 +1103,13 @@ interface FooterProps {
   submitting: boolean
   deleting: boolean
   onSave: () => void
-  onSubmit: (v: Verdict) => void
+  onSubmit: (v: Verdict, comment?: string) => void
   onCancel: () => void
   onRegenerate: () => void
   onDelete: () => void
+  inlineCommentCount: number
+  orphanCommentCount: number
+  summary: string
 }
 
 function ReviewFooter({
@@ -1040,6 +1122,9 @@ function ReviewFooter({
   onCancel,
   onRegenerate,
   onDelete,
+  inlineCommentCount,
+  orphanCommentCount,
+  summary,
 }: FooterProps) {
   if (state.kind === 'generating') {
     return (
@@ -1121,7 +1206,15 @@ function ReviewFooter({
           {saving ? 'Saving…' : 'Save Draft'}
         </Button>
 
-        <SubmitSplitButton verdict={state.kind === 'draftPresent' || state.kind === 'reviewUnsaved' ? state.result.verdict : 'APPROVE'} onSubmit={onSubmit} submitting={submitting} disabled={saving || deleting} />
+        <SubmitSplitButton
+          verdict={state.kind === 'draftPresent' || state.kind === 'reviewUnsaved' ? state.result.verdict : 'APPROVE'}
+          onSubmit={onSubmit}
+          submitting={submitting}
+          disabled={saving || deleting}
+          inlineCommentCount={inlineCommentCount}
+          orphanCommentCount={orphanCommentCount}
+          summary={summary}
+        />
       </div>
     )
   }
@@ -1133,7 +1226,15 @@ function ReviewFooter({
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CloudUpload className="w-3.5 h-3.5" />}
           {saving ? 'Saving…' : 'Retry Save'}
         </Button>
-        <SubmitSplitButton verdict={state.kind === 'saveError' && state.result ? state.result.verdict : 'APPROVE'} onSubmit={onSubmit} submitting={submitting} disabled={saving} />
+        <SubmitSplitButton
+          verdict={state.kind === 'saveError' && state.result ? state.result.verdict : 'APPROVE'}
+          onSubmit={onSubmit}
+          submitting={submitting}
+          disabled={saving}
+          inlineCommentCount={inlineCommentCount}
+          orphanCommentCount={orphanCommentCount}
+          summary={summary}
+        />
       </div>
     )
   }
@@ -1141,7 +1242,15 @@ function ReviewFooter({
   if (state.kind === 'submitError') {
     return (
       <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-t border-border bg-card">
-        <SubmitSplitButton verdict={state.kind === 'submitError' && state.result ? state.result.verdict : 'APPROVE'} onSubmit={onSubmit} submitting={submitting} disabled={false} />
+        <SubmitSplitButton
+          verdict={state.kind === 'submitError' && state.result ? state.result.verdict : 'APPROVE'}
+          onSubmit={onSubmit}
+          submitting={submitting}
+          disabled={false}
+          inlineCommentCount={inlineCommentCount}
+          orphanCommentCount={orphanCommentCount}
+          summary={summary}
+        />
       </div>
     )
   }
@@ -1156,12 +1265,20 @@ function SubmitSplitButton({
   onSubmit,
   submitting,
   disabled,
+  inlineCommentCount,
+  orphanCommentCount,
+  summary,
 }: {
   verdict: Verdict
-  onSubmit: (v: Verdict) => void
+  onSubmit: (v: Verdict, comment?: string) => void
   submitting: boolean
   disabled: boolean
+  inlineCommentCount: number
+  orphanCommentCount: number
+  summary: string
 }) {
+  const [confirming, setConfirming] = useState<Verdict | null>(null)
+  const [comment, setComment] = useState('')
   const ICON: Record<Verdict, React.ReactNode> = {
     APPROVE: <Check className="w-3.5 h-3.5" />,
     REQUEST_CHANGES: <XCircle className="w-3.5 h-3.5" />,
@@ -1186,7 +1303,7 @@ function SubmitSplitButton({
         variant={VARIANT[verdict]}
         size="sm"
         className="text-xs rounded-r-none gap-1.5 border-r border-white/20"
-        onClick={() => onSubmit(verdict)}
+        onClick={() => setConfirming(verdict)}
         disabled={submitting || disabled}
       >
         {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : ICON[verdict]}
@@ -1208,7 +1325,7 @@ function SubmitSplitButton({
           {others.filter((v) => v !== 'REQUEST_CHANGES').map((v) => (
             <DropdownMenuItem
               key={v}
-              onSelect={() => onSubmit(v)}
+              onSelect={() => setConfirming(v)}
               className="gap-2 text-xs cursor-pointer"
             >
               {ICON[v]}
@@ -1218,7 +1335,7 @@ function SubmitSplitButton({
           {others.includes('REQUEST_CHANGES') && <DropdownMenuSeparator />}
           {others.includes('REQUEST_CHANGES') && (
             <DropdownMenuItem
-              onSelect={() => onSubmit('REQUEST_CHANGES')}
+              onSelect={() => setConfirming('REQUEST_CHANGES')}
               className="gap-2 text-xs cursor-pointer text-destructive focus:text-destructive"
             >
               {ICON.REQUEST_CHANGES}
@@ -1227,6 +1344,41 @@ function SubmitSplitButton({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+      <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && setConfirming(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Submit {confirming ? LABEL[confirming].toLowerCase() : 'review'}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will publish the pending GitHub review with {inlineCommentCount} inline comment{inlineCommentCount === 1 ? '' : 's'}
+              {orphanCommentCount > 0 ? ` and ${orphanCommentCount} unanchored comment${orphanCommentCount === 1 ? '' : 's'} in the review body` : ''}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {summary && (
+            <div className="max-h-28 overflow-y-auto rounded border border-border bg-muted/30 p-2 text-xs text-muted-foreground">
+              {summary}
+            </div>
+          )}
+          <textarea
+            className="min-h-[72px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-ring"
+            placeholder="Optional final review body…"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setComment('')}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirming) onSubmit(confirming, comment.trim())
+                setComment('')
+                setConfirming(null)
+              }}
+              className={confirming === 'REQUEST_CHANGES' ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : undefined}
+            >
+              Submit {confirming ? LABEL[confirming] : 'Review'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

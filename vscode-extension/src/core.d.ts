@@ -86,6 +86,7 @@ declare module 'core' {
     interface PendingReview {
         readonly id: string;
         readonly result: ReviewResult;
+        readonly importedFromGitHub: boolean;
     }
 
     interface SaveDraftResult {

@@ -75,12 +75,18 @@ vscode-extension/                      – VS Code extension host
     github.ts
     claude.ts
     copilot.ts                         – Copilot SDK service (`@github/copilot-sdk`) with streaming/status forwarding
+    review.ts                          – Shared review-JSON extraction + schema validation (used by claude.ts + copilot.ts)
+    worktree.ts                        – Creates/removes temporary git worktrees for PR branch reviews (mirrors GitWorktreeService.kt)
+    settings.ts                        – Settings webview controller (panel lifecycle + config read/write); mirrors PluginSettingsConfigurable
+    settingsView.ts                    – Pure settings-webview view logic (HTML, model-merge, escaping); no vscode import, unit-tested
     userFacingError.ts                 – Maps host/provider errors to user-actionable copy
     core.d.ts
   shared/
     user-facing-errors.yaml            – Shared message templates consumed by both hosts
   test/
+    claude.test.ts
     copilot.test.ts
+    review.test.ts
     userFacingError.test.ts
 ```
 
@@ -116,7 +122,14 @@ Both hosts use official Copilot SDKs (`com.github:copilot-sdk-java` and `@github
 Persisted values are `none|low|medium|high|xhigh|max`; SDK accepts `low|medium|high|xhigh`. Normalize before session creation: `none -> low`, `max -> xhigh`, blank/unknown -> `medium`.
 
 ### Copilot model discovery
-IntelliJ model suggestions are discovered from `copilot help config` once per session and cached. VS Code setting remains freeform (schema enum is static).
+Both hosts discover the available Copilot model list at runtime and cache it for the session, falling back to a short hardcoded suggestion list on probe failure.
+
+- **IntelliJ**: `CopilotModelDiscovery` runs `copilot help config` and parses the `` `model`: `` section; `PluginSettingsComponent` merges the result into the (editable) model combo in Settings → Tools → PR Pilot.
+- **VS Code**: `copilot.ts` `listModels()` queries the SDK's `client.listModels()` directly (no CLI parsing) and `filterModelIds()` drops policy-`disabled`/blank IDs. Surfaced two ways: (1) the **settings webview** (`settings.ts` + `settingsView.ts`) — opened via the gear in the PR Pilot view title or the `pr-pilot.openSettings` command — shows a live model dropdown and hides the non-active provider's model field; (2) the `pr-pilot.selectCopilotModel` quick-pick command (palette). VS Code's declarative settings JSON can't self-populate an enum or conditionally hide fields, which is why a webview is used for the rich settings UI. The underlying settings (`reviewProvider`, `reviewModel`, `reviewModelCopilot`, `reviewEffort`, `githubBaseUrl`) remain editable in native Settings too.
+  The settings webview validates `githubBaseUrl` before saving, posts per-field saved/error feedback, exposes model-refresh status, and has a `Test` action that verifies `gh` authentication for the configured host.
+
+### PR discovery scope
+The shared PR list sends an explicit `searchScope` on `refreshPRs`: `currentRepo`, `reviewRequested`, `assigned`, or `authored`. Both hosts build GitHub search queries from that scope and return `listStatus` (`searchScope`, `currentRepo`, `resultLimit`, `limited`) with `prListLoaded` so the webview can explain what was searched and when the 50-result GitHub search page may hide additional PRs. `currentRepo` searches only the detected repository; if no repo is detected it falls back to `author:@me`. Starred repositories are used only by optional notification polling, not by the main list's current-repo scope.
 
 ### Binary resolution
 Probe known hard-coded paths for `gh`, `claude`, and `copilot` before falling back to command name, because GUI-launched IntelliJ often has incomplete `PATH`.
@@ -127,8 +140,11 @@ When wrapping untrusted payloads in XML-like tags, escape matching closing tags 
 ### Diff acquisition model
 Review prompts do not embed full diff; model fetches diff on demand via `gh pr diff` instruction in prompt (`diff = ""` in request object).
 
-### Worktree-based review context
-When the PR's repo matches the open IntelliJ project and a git root is found, `WebviewPanel` creates a temporary git worktree checked out to the PR branch before invoking the AI service. This gives the model accurate local file context (correct branch state) for type lookups and cross-file references. Worktree creation uses `GitWorktreeService`; cleanup always runs in a `finally`-equivalent callback after the review completes or errors. Falls back silently to `project.getBasePath()` if worktree creation fails or the PR is from an unrelated repo. Fork PRs use `git fetch <clone_url> <branch>` + `FETCH_HEAD`.
+### Worktree-based PR context
+When the PR's repo matches the open project/workspace and a git root is found, both hosts create a temporary git worktree checked out to the PR branch and reuse it for both review and chat. This gives the model accurate local file context (correct branch state) for type lookups and cross-file references across the full PR session. Cleanup runs when the active PR changes or the view is disposed. Falls back silently to the open project/workspace dir if worktree creation fails or the PR is from an unrelated repo. Fork PRs use `git fetch <clone_url> <branch>` + `FETCH_HEAD`.
+
+- **IntelliJ**: `WebviewPanel.resolvePrClaudeService` builds a per-PR `IntellijClaudeService` pointed at the worktree, using `GitWorktreeService` (jvmMain).
+- **VS Code**: `extension.ts` `resolveWorkingDir`/`clearWorktree` resolve the per-view worktree dir passed as `workingDir` to the review/chat CLIs, using `worktree.ts`. Chat reuses an existing worktree with the cached token only (never triggers a fresh auth).
 
 ### Cross-host parity
 When host-specific logic changes in IntelliJ or VS Code, update the paired implementation in the other host. The mapping table and enforcement workflow live in `AGENTS.md`.
@@ -137,16 +153,28 @@ When host-specific logic changes in IntelliJ or VS Code, update the paired imple
 Do not surface raw provider/HTTP exception strings directly to users in review/draft/chat flows. Both hosts map low-level errors to actionable guidance (`UserFacingErrors` in IntelliJ, `userFacingError.ts` in VS Code) to keep messaging consistent across providers. Message strings live in shared YAML templates (`vscode-extension/shared/user-facing-errors.yaml`) and support `{placeholder}` substitution.
 
 ### First-run onboarding path
-When startup PR loading fails, hosts push a `setupRequired` bridge message with actionable detail instead of silently failing. Supported reasons are `gh_not_installed`, `gh_not_authenticated`, and `load_failed` (non-auth load errors). `PRList` renders a full-pane setup/error screen with a Refresh button when this message is received. IntelliJ maps auth diagnosis to stable reason IDs via `PRToolWindowFactory.setupReason` and also emits `load_failed` for post-auth load exceptions; VS Code classifies setup-worthy auth failures (including 401/403/bad-credentials responses) in `classifySetupAuthError`. The VS Code host also triggers an initial `handleRefreshPRs` call immediately after `resolveWebviewView` so the webview never hangs on its initial loading state.
+When startup PR loading fails, hosts push a `setupRequired` bridge message with actionable detail instead of silently failing. Supported reasons are `gh_not_installed`, `gh_not_authenticated`, and `load_failed` (non-auth load errors). `PRList` renders a full-pane setup/error screen with a checklist covering GitHub CLI installation, GitHub authentication, and PR loading, plus a Refresh button when this message is received. IntelliJ maps auth diagnosis to stable reason IDs via `PRToolWindowFactory.setupReason` and also emits `load_failed` for post-auth load exceptions; VS Code classifies setup-worthy auth failures (including 401/403/bad-credentials responses) in `classifySetupAuthError`. The VS Code host also triggers an initial `handleRefreshPRs` call immediately after `resolveWebviewView` so the webview never hangs on its initial loading state.
+
+### PR chat scope
+Chat is available after PR selection, before and after review generation. Hosts build chat context from the active PR, diff excerpt, and generated review when one exists; the webview displays which context buckets are attached and adds selected text when the user right-clicks or verifies a comment. Chat reuses the PR worktree when available.
 
 ### DTO mapping in IntelliJ webview bridge
 `WebviewPanel` model-to-DTO conversion uses MapStruct (`ReviewMapper`) instead of hand-rolled mappers so field drift fails at compile time.
+
+### Webview bridge PR correlation
+PR-scoped lifecycle messages (`draftLoaded`, review generation/chunks/results/errors, draft save/submit/delete, and chat responses) carry a `prKey` of `owner/repo#number`. The React webview drops keyed messages that do not match the active PR so late async results from a previously selected PR cannot repaint or submit against the current PR. When adding a new PR-scoped host message, include the same `prKey` in both hosts.
 
 ### Max-turns recovery for Claude
 If stream-json returns `error_max_turns` with `session_id`, auto-resume via `claude --resume <session_id> --max-turns 3` and nudge for final JSON.
 
 ### Draft review storage semantics
-Inline comment metadata is encoded in review body HTML comment for resilient draft reload. Pending review creation omits `event`. On 422 for inline comments, fallback to body-first creation then per-comment POST.
+Inline comment metadata is encoded in review body HTML comment for resilient draft reload. Pending review creation omits `event`. On 422 for inline comments, fallback to body-first creation then per-comment POST. When a pending draft lacks usable hidden metadata, hosts fall back to GitHub API review comments and set `importedFromGitHub`; the webview warns that recovered review details may be incomplete.
+
+### Large diff visibility
+GitHub diffs are truncated at 80 KB in both hosts. The webview detects the truncation marker and warns that diff display and chat context are incomplete, while `DiffViewer` still lazily limits rendered changed lines for browser performance.
+
+### Notification parity
+Background PR notifications are available in both hosts and are off by default. The first poll seeds existing PRs silently. Both hosts support review-requested PR notifications and optional starred-repository PR notifications, using the persisted settings listed below.
 
 ### Comment anchoring policy
 Client-side validation partitions comments: keep in-hunk, snap within +-3 lines, orphan otherwise. Orphans are excluded from inline POST and appended to review body section.
@@ -162,6 +190,10 @@ Repo detection walks upward to `.git/config`, handling SCP and `ssh://` remotes 
 `PluginSettings` (`claudeReviews.xml`) stores:
 
 - `githubBaseUrl` (default `https://github.com`)
+- `notificationsEnabled` (default `false`)
+- `notifyReviewRequested` (default `true`)
+- `notifyStarredRepos` (default `false`)
+- `notificationPollMinutes` (default `5`)
 - `githubUsername` (display cache)
 - `notificationsEnabled` (default `false`)
 - `notifyReviewRequested` (default `true`)

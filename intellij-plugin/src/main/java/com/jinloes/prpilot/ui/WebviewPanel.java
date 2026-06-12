@@ -82,35 +82,54 @@ public class WebviewPanel implements Disposable {
             @JsonProperty("htmlUrl") String htmlUrl,
             @JsonProperty("hasDraft") boolean hasDraft) {}
 
-    private record PrListMessage(
-            String type, List<WebviewPr> prs, @JsonProperty("defaultRepo") String defaultRepo) {}
+    private record PrListStatus(
+            String searchScope, String currentRepo, int resultLimit, boolean limited) {}
 
-    private record DraftLoadingMsg(String type) {}
+    private record PrListMessage(
+            String type,
+            List<WebviewPr> prs,
+            @JsonProperty("defaultRepo") String defaultRepo,
+            @JsonProperty("listStatus") PrListStatus listStatus) {}
+
+    private record DraftLoadingMsg(String type, @JsonProperty("prKey") String prKey) {}
 
     private record DraftLoadedMsg(
             String type,
+            @JsonProperty("prKey") String prKey,
             String prState,
             @JsonProperty("reviewId") String reviewId,
             @JsonProperty("result") ReviewResultDto result,
             String diff,
             boolean staleCommits,
+            boolean importedFromGitHub,
             String status) {}
 
-    private record ReviewGeneratingMsg(String type, String message) {}
+    private record ReviewGeneratingMsg(
+            String type, @JsonProperty("prKey") String prKey, String message) {}
 
-    private record ReviewChunkMsg(String type, String kind, String chunk) {}
+    private record ReviewChunkMsg(
+            String type, @JsonProperty("prKey") String prKey, String kind, String chunk) {}
 
-    private record ReviewResultMsg(String type, ReviewResultDto result, String diff) {}
+    private record ReviewResultMsg(
+            String type,
+            @JsonProperty("prKey") String prKey,
+            ReviewResultDto result,
+            String diff) {}
 
-    private record ErrorMsg(String type, String message) {}
+    private record ErrorMsg(String type, @JsonProperty("prKey") String prKey, String message) {}
 
-    private record DraftSavedMsg(String type, String reviewId, boolean commentsDropped) {}
+    private record DraftSavedMsg(
+            String type,
+            @JsonProperty("prKey") String prKey,
+            String reviewId,
+            boolean commentsDropped) {}
 
-    private record SimpleMsg(String type) {}
+    private record SimpleMsg(String type, @JsonProperty("prKey") String prKey) {}
 
-    private record ChatChunkMsg(String type, String chunk) {}
+    private record ChatChunkMsg(String type, @JsonProperty("prKey") String prKey, String chunk) {}
 
-    private record ChatResponseMsg(String type, String response) {}
+    private record ChatResponseMsg(
+            String type, @JsonProperty("prKey") String prKey, String response) {}
 
     private record PrDraftStatusMsg(
             String type,
@@ -150,10 +169,13 @@ public class WebviewPanel implements Disposable {
     private volatile String prefetchedDiff = null;
     private volatile String prefetchedExistingReviews = null;
     private volatile List<ChatMessage> chatHistory = List.of();
+    private volatile IntellijClaudeService activePrClaudeService = null;
+    private volatile java.io.File activePrWorktreeDir = null;
+    private volatile java.io.File activePrGitRoot = null;
+    private volatile String activePrWorktreeKey = null;
 
     private volatile String prStateFilter = "open";
-    private volatile boolean assignedToMeFilter = false;
-    private volatile boolean reviewRequestedFilter = false;
+    private volatile String searchScope = "currentRepo";
 
     private Consumer<PullRequest> onPRSelected = pr -> {};
     private Runnable onPageReady = () -> {};
@@ -361,8 +383,14 @@ public class WebviewPanel implements Disposable {
                 case "refreshPRs" -> {
                     String state = node.path("state").asText("open");
                     prStateFilter = StringUtils.defaultIfBlank(state, "open");
-                    assignedToMeFilter = node.path("assignedToMe").asBoolean(false);
-                    reviewRequestedFilter = node.path("reviewRequested").asBoolean(false);
+                    String scope = node.path("searchScope").asText("");
+                    if (StringUtils.isNotBlank(scope)) {
+                        searchScope = normalizeSearchScope(scope);
+                    } else if (node.path("assignedToMe").asBoolean(false)) {
+                        searchScope = "assigned";
+                    } else if (node.path("reviewRequested").asBoolean(false)) {
+                        searchScope = "reviewRequested";
+                    }
                     getApplication().invokeLater(onPageReady);
                 }
                 case "openUrl" -> {
@@ -436,6 +464,7 @@ public class WebviewPanel implements Disposable {
     // --- selectPR ---
 
     private void handleSelectPR(int number, String owner, String repo) {
+        String key = bridgePrKey(number, owner, repo);
         PullRequest pr =
                 cachedPRs.stream()
                         .filter(
@@ -449,6 +478,8 @@ public class WebviewPanel implements Disposable {
             return;
         }
 
+        clearActivePrWorktree();
+
         // Synchronize the field-clearing so a concurrent handleGenerateReview
         // on a pooled thread cannot read a stale activePR/prefetchedDiff pair.
         synchronized (this) {
@@ -461,7 +492,7 @@ public class WebviewPanel implements Disposable {
         }
 
         getApplication().invokeLater(() -> onPRSelected.accept(pr));
-        pushMessage(new DraftLoadingMsg("draftLoading"));
+        pushMessage(new DraftLoadingMsg("draftLoading", key));
 
         getApplication()
                 .executeOnPooledThread(
@@ -471,10 +502,12 @@ public class WebviewPanel implements Disposable {
                                 pushMessage(
                                         new DraftLoadedMsg(
                                                 "draftLoaded",
+                                                key,
                                                 "NO_DRAFT",
                                                 null,
                                                 null,
                                                 null,
+                                                false,
                                                 false,
                                                 "No GitHub token configured."));
                                 return;
@@ -600,10 +633,12 @@ public class WebviewPanel implements Disposable {
                                 pushMessage(
                                         new DraftLoadedMsg(
                                                 "draftLoaded",
+                                                key,
                                                 "MERGED",
                                                 null,
                                                 null,
                                                 null,
+                                                false,
                                                 false,
                                                 "PR is merged."));
                                 return;
@@ -618,11 +653,13 @@ public class WebviewPanel implements Disposable {
                                 pushMessage(
                                         new DraftLoadedMsg(
                                                 "draftLoaded",
+                                                key,
                                                 "DRAFT_PRESENT",
                                                 pending.getId(),
                                                 dto,
                                                 prefetchedDiff,
                                                 stale,
+                                                pending.component3(),
                                                 "Loaded pending draft review."));
                                 pendingReviewId = pending.getId();
                                 lastResult = pending.getResult();
@@ -632,10 +669,12 @@ public class WebviewPanel implements Disposable {
                             pushMessage(
                                     new DraftLoadedMsg(
                                             "draftLoaded",
+                                            key,
                                             "NO_DRAFT",
                                             null,
                                             null,
                                             null,
+                                            false,
                                             false,
                                             ""));
                         });
@@ -644,6 +683,7 @@ public class WebviewPanel implements Disposable {
     // --- generateReview ---
 
     private void handleGenerateReview(int number, String owner, String repo) {
+        String key = bridgePrKey(number, owner, repo);
         PullRequest pr =
                 cachedPRs.stream()
                         .filter(
@@ -654,13 +694,13 @@ public class WebviewPanel implements Disposable {
                         .findFirst()
                         .orElse(null);
         if (pr == null) {
-            pushMessage(new ErrorMsg("reviewError", "PR not found."));
+            pushMessage(new ErrorMsg("reviewError", key, "PR not found."));
             return;
         }
 
         String token = PluginSettings.getInstance().getGithubToken();
         if (StringUtils.isBlank(token)) {
-            pushMessage(new ErrorMsg("reviewError", "No GitHub token configured."));
+            pushMessage(new ErrorMsg("reviewError", key, "No GitHub token configured."));
             return;
         }
 
@@ -704,13 +744,14 @@ public class WebviewPanel implements Disposable {
                             } else {
                                 pushMessage(
                                         new ReviewGeneratingMsg(
-                                                "reviewGenerating", "Fetching diff…"));
+                                                "reviewGenerating", key, "Fetching diff…"));
                                 try {
                                     diff = ghSvc.getPRDiff(finalToken, owner, repo, number);
                                 } catch (Exception e) {
                                     pushMessage(
                                             new ErrorMsg(
                                                     "reviewError",
+                                                    key,
                                                     UserFacingErrors.forGitHub(
                                                             e, "load the PR diff")));
                                     return;
@@ -734,87 +775,26 @@ public class WebviewPanel implements Disposable {
                                 }
                             }
 
-                            // Try to create a git worktree for the PR branch so Claude reads
-                            // files at the PR state rather than the user's current checkout.
-                            // Falls back to project dir silently on any failure.
-                            java.io.File worktreeDir = null;
-                            java.io.File gitRoot = null;
                             IntellijClaudeService reviewService = claudeService;
-
-                            String projectPath = project.getBasePath();
-                            if (projectPath != null) {
-                                java.io.File detectedRoot =
-                                        worktreeService.findGitRoot(new java.io.File(projectPath));
-                                String currentRepo = RepoDetector.detectCurrentRepo(projectPath);
-                                boolean sameRepo =
-                                        currentRepo != null
-                                                && currentRepo.equalsIgnoreCase(owner + "/" + repo);
-                                if (detectedRoot != null && sameRepo) {
-                                    pushMessage(
-                                            new ReviewGeneratingMsg(
-                                                    "reviewGenerating", "Preparing PR branch…"));
-                                    try {
-                                        GitHubService.PRHeadInfo headInfo =
-                                                ghSvc.getPRHeadInfo(
-                                                        finalToken, owner, repo, number);
-                                        if (!headInfo.getRef().isBlank()) {
-                                            java.io.File wt =
-                                                    new java.io.File(
-                                                            System.getProperty("java.io.tmpdir"),
-                                                            "pr-pilot-wt-"
-                                                                    + number
-                                                                    + "-"
-                                                                    + System.currentTimeMillis());
-                                            if (headInfo.isFork()) {
-                                                worktreeService.createWorktreeFromFork(
-                                                        detectedRoot,
-                                                        headInfo.getForkCloneUrl(),
-                                                        headInfo.getRef(),
-                                                        wt);
-                                            } else {
-                                                worktreeService.createWorktree(
-                                                        detectedRoot, headInfo.getRef(), wt);
-                                            }
-                                            worktreeDir = wt;
-                                            gitRoot = detectedRoot;
-                                            reviewService =
-                                                    new IntellijClaudeService(wt.getAbsolutePath());
-                                            log.info("Using worktree {} for PR #{}", wt, number);
-                                        }
-                                    } catch (Exception e) {
-                                        log.warn(
-                                                "Worktree creation for PR #{} failed; falling"
-                                                        + " back to project dir: {}",
-                                                number,
-                                                e.getMessage());
-                                        worktreeDir = null;
-                                        reviewService = claudeService;
-                                    }
-                                }
+                            try {
+                                reviewService = resolvePrClaudeService(finalPr, finalToken, true);
+                            } catch (Exception e) {
+                                log.warn(
+                                        "Worktree resolution for PR #{} failed; falling back to"
+                                                + " project dir: {}",
+                                        number,
+                                        e.getMessage());
+                                reviewService = claudeService;
                             }
 
                             activeReviewService = reviewService;
 
                             final IntellijClaudeService finalReviewService = reviewService;
-                            final java.io.File finalWorktreeDir = worktreeDir;
-                            final java.io.File finalGitRoot = gitRoot;
-                            final Runnable cleanupWorktree =
-                                    () -> {
-                                        activeReviewService = claudeService;
-                                        if (finalWorktreeDir != null && finalGitRoot != null) {
-                                            getApplication()
-                                                    .executeOnPooledThread(
-                                                            () ->
-                                                                    worktreeService.removeWorktree(
-                                                                            finalGitRoot,
-                                                                            finalWorktreeDir));
-                                        }
-                                    };
 
                             // Kick off the review — callbacks fired on EDT
                             pushMessage(
                                     new ReviewGeneratingMsg(
-                                            "reviewGenerating", "Sending review request…"));
+                                            "reviewGenerating", key, "Sending review request…"));
                             final String finalDiff = diff;
                             final String finalExisting = existingReviews;
                             finalReviewService.reviewPR(
@@ -822,22 +802,24 @@ public class WebviewPanel implements Disposable {
                                     statusMsg ->
                                             pushMessage(
                                                     new ReviewGeneratingMsg(
-                                                            "reviewGenerating", statusMsg)),
+                                                            "reviewGenerating", key, statusMsg)),
                                     (kind, chunk) ->
                                             pushMessage(
-                                                    new ReviewChunkMsg("reviewChunk", kind, chunk)),
+                                                    new ReviewChunkMsg(
+                                                            "reviewChunk", key, kind, chunk)),
                                     result -> {
-                                        cleanupWorktree.run();
+                                        activeReviewService = claudeService;
                                         lastResult = result;
                                         pendingReviewId = null;
                                         pushMessage(
                                                 new ReviewResultMsg(
                                                         "reviewResult",
+                                                        key,
                                                         ReviewMapper.INSTANCE.toDto(result),
                                                         finalDiff));
                                     },
                                     err -> {
-                                        cleanupWorktree.run();
+                                        activeReviewService = claudeService;
                                         // Cancellations are user-initiated — don't surface as
                                         // errors.
                                         String lower = err.toLowerCase(java.util.Locale.ROOT);
@@ -846,6 +828,7 @@ public class WebviewPanel implements Disposable {
                                             pushMessage(
                                                     new ErrorMsg(
                                                             "reviewError",
+                                                            key,
                                                             UserFacingErrors.forProvider(
                                                                     PluginSettings.getInstance()
                                                                             .getReviewProvider(),
@@ -864,16 +847,17 @@ public class WebviewPanel implements Disposable {
             String repo,
             ReviewResult bridgeResult,
             List<LineComment> orphans) {
+        String key = bridgePrKey(number, owner, repo);
         ReviewResult result = bridgeResult != null ? bridgeResult : lastResult;
         if (result == null) {
-            pushMessage(new ErrorMsg("draftSaveError", "No review result to save."));
+            pushMessage(new ErrorMsg("draftSaveError", key, "No review result to save."));
             return;
         }
         lastResult = result;
 
         String token = PluginSettings.getInstance().getGithubToken();
         if (StringUtils.isBlank(token)) {
-            pushMessage(new ErrorMsg("draftSaveError", "No GitHub token configured."));
+            pushMessage(new ErrorMsg("draftSaveError", key, "No GitHub token configured."));
             return;
         }
 
@@ -884,6 +868,7 @@ public class WebviewPanel implements Disposable {
             pushMessage(
                     new ErrorMsg(
                             "draftSaveError",
+                            key,
                             UserFacingErrors.forGitHub(e, "save the draft review")));
             return;
         }
@@ -909,7 +894,8 @@ public class WebviewPanel implements Disposable {
         pendingReviewId = saved.getReviewId();
 
         pushMessage(
-                new DraftSavedMsg("draftSaved", saved.getReviewId(), saved.getCommentsDropped()));
+                new DraftSavedMsg(
+                        "draftSaved", key, saved.getReviewId(), saved.getCommentsDropped()));
         pushMessage(new PrDraftStatusMsg("prDraftStatusUpdated", number, owner, repo, true));
     }
 
@@ -917,15 +903,17 @@ public class WebviewPanel implements Disposable {
 
     private void handleSubmitReview(
             int number, String owner, String repo, String verdict, String comment) {
+        String key = bridgePrKey(number, owner, repo);
         String reviewId = pendingReviewId;
         if (StringUtils.isBlank(reviewId)) {
-            pushMessage(new ErrorMsg("reviewSubmitError", "No pending draft review to submit."));
+            pushMessage(
+                    new ErrorMsg("reviewSubmitError", key, "No pending draft review to submit."));
             return;
         }
 
         String token = PluginSettings.getInstance().getGithubToken();
         if (StringUtils.isBlank(token)) {
-            pushMessage(new ErrorMsg("reviewSubmitError", "No GitHub token configured."));
+            pushMessage(new ErrorMsg("reviewSubmitError", key, "No GitHub token configured."));
             return;
         }
 
@@ -935,6 +923,7 @@ public class WebviewPanel implements Disposable {
             pushMessage(
                     new ErrorMsg(
                             "reviewSubmitError",
+                            key,
                             UserFacingErrors.forGitHub(e, "submit the draft review")));
             return;
         }
@@ -943,22 +932,24 @@ public class WebviewPanel implements Disposable {
         lastResult = null;
         pendingReviewId = null;
 
-        pushMessage(new SimpleMsg("reviewSubmitted"));
+        pushMessage(new SimpleMsg("reviewSubmitted", key));
         pushMessage(new PrDraftStatusMsg("prDraftStatusUpdated", number, owner, repo, false));
     }
 
     // --- deleteDraft ---
 
     private void handleDeleteDraft(int number, String owner, String repo) {
+        String key = bridgePrKey(number, owner, repo);
         String reviewId = pendingReviewId;
         if (StringUtils.isBlank(reviewId)) {
-            pushMessage(new ErrorMsg("draftDeleteError", "No pending draft review to delete."));
+            pushMessage(
+                    new ErrorMsg("draftDeleteError", key, "No pending draft review to delete."));
             return;
         }
 
         String token = PluginSettings.getInstance().getGithubToken();
         if (StringUtils.isBlank(token)) {
-            pushMessage(new ErrorMsg("draftDeleteError", "No GitHub token configured."));
+            pushMessage(new ErrorMsg("draftDeleteError", key, "No GitHub token configured."));
             return;
         }
 
@@ -968,6 +959,7 @@ public class WebviewPanel implements Disposable {
             pushMessage(
                     new ErrorMsg(
                             "draftDeleteError",
+                            key,
                             UserFacingErrors.forGitHub(e, "delete the draft review")));
             return;
         }
@@ -976,7 +968,7 @@ public class WebviewPanel implements Disposable {
         lastResult = null;
         pendingReviewId = null;
 
-        pushMessage(new SimpleMsg("draftDeleted"));
+        pushMessage(new SimpleMsg("draftDeleted", key));
         pushMessage(new PrDraftStatusMsg("prDraftStatusUpdated", number, owner, repo, false));
     }
 
@@ -989,9 +981,10 @@ public class WebviewPanel implements Disposable {
 
         PullRequest pr = activePR;
         if (pr == null) {
-            pushMessage(new ErrorMsg("chatError", "No PR selected."));
+            pushMessage(new ErrorMsg("chatError", null, "No PR selected."));
             return;
         }
+        String key = bridgePrKey(pr.getNumber(), pr.getOwner(), pr.getRepo());
 
         String prContext = buildPrContext(pr);
         List<ChatMessage> history = chatHistory;
@@ -1005,26 +998,153 @@ public class WebviewPanel implements Disposable {
                                 + "\n</selection_context>\n\n"
                                 + question;
 
-        claudeService.chat(
+        String token = PluginSettings.getInstance().getGithubToken();
+        IntellijClaudeService chatService = resolvePrClaudeService(pr, token, false);
+
+        chatService.chat(
                 prContext,
                 history,
                 fullQuestion,
-                chunk -> pushMessage(new ChatChunkMsg("chatChunk", chunk)),
+                chunk -> pushMessage(new ChatChunkMsg("chatChunk", key, chunk)),
                 response -> {
                     List<ChatMessage> updated = new ArrayList<>(history);
                     updated.add(new ChatMessage(ChatMessage.Role.USER, fullQuestion));
                     updated.add(new ChatMessage(ChatMessage.Role.ASSISTANT, response));
                     chatHistory = updated;
-                    pushMessage(new ChatResponseMsg("chatResponse", response));
+                    pushMessage(new ChatResponseMsg("chatResponse", key, response));
                 },
                 err ->
                         pushMessage(
                                 new ErrorMsg(
                                         "chatError",
+                                        key,
                                         UserFacingErrors.forProvider(
                                                 PluginSettings.getInstance().getReviewProvider(),
                                                 new Exception(err),
                                                 "answer chat question"))));
+    }
+
+    static String worktreeKey(int number, String owner, String repo) {
+        return owner.toLowerCase(java.util.Locale.ROOT)
+                + "/"
+                + repo.toLowerCase(java.util.Locale.ROOT)
+                + "#"
+                + number;
+    }
+
+    static String bridgePrKey(int number, String owner, String repo) {
+        return owner + "/" + repo + "#" + number;
+    }
+
+    static String normalizeSearchScope(String value) {
+        return switch (value) {
+            case "authored", "assigned", "reviewRequested" -> value;
+            default -> "currentRepo";
+        };
+    }
+
+    static boolean isSamePr(PullRequest left, PullRequest right) {
+        if (left == null || right == null) {
+            return false;
+        }
+        return left.getNumber() == right.getNumber()
+                && StringUtils.equalsIgnoreCase(left.getOwner(), right.getOwner())
+                && StringUtils.equalsIgnoreCase(left.getRepo(), right.getRepo());
+    }
+
+    private synchronized IntellijClaudeService resolvePrClaudeService(
+            PullRequest pr, String token, boolean emitStatus) {
+        if (pr == null || !isSamePr(activePR, pr)) {
+            return claudeService;
+        }
+
+        String key = worktreeKey(pr.getNumber(), pr.getOwner(), pr.getRepo());
+        if (activePrClaudeService != null && key.equals(activePrWorktreeKey)) {
+            return activePrClaudeService;
+        }
+
+        if (StringUtils.isBlank(token)) {
+            return claudeService;
+        }
+
+        String projectPath = project.getBasePath();
+        if (projectPath == null) {
+            return claudeService;
+        }
+
+        java.io.File detectedRoot = worktreeService.findGitRoot(new java.io.File(projectPath));
+        String currentRepo = RepoDetector.detectCurrentRepo(projectPath);
+        boolean sameRepo =
+                currentRepo != null
+                        && currentRepo.equalsIgnoreCase(pr.getOwner() + "/" + pr.getRepo());
+        if (detectedRoot == null || !sameRepo) {
+            return claudeService;
+        }
+
+        if (emitStatus) {
+            pushMessage(
+                    new ReviewGeneratingMsg(
+                            "reviewGenerating",
+                            bridgePrKey(pr.getNumber(), pr.getOwner(), pr.getRepo()),
+                            "Preparing PR branch…"));
+        }
+
+        try {
+            GitHubService.PRHeadInfo headInfo =
+                    ghSvc.getPRHeadInfo(token, pr.getOwner(), pr.getRepo(), pr.getNumber());
+            if (headInfo.getRef().isBlank()) {
+                return claudeService;
+            }
+
+            java.io.File wt =
+                    new java.io.File(
+                            System.getProperty("java.io.tmpdir"),
+                            "pr-pilot-wt-" + pr.getNumber() + "-" + System.currentTimeMillis());
+            if (headInfo.isFork()) {
+                worktreeService.createWorktreeFromFork(
+                        detectedRoot, headInfo.getForkCloneUrl(), headInfo.getRef(), wt);
+            } else {
+                worktreeService.createWorktree(detectedRoot, headInfo.getRef(), wt);
+            }
+
+            if (!isSamePr(activePR, pr)) {
+                getApplication()
+                        .executeOnPooledThread(
+                                () -> worktreeService.removeWorktree(detectedRoot, wt));
+                return claudeService;
+            }
+
+            activePrClaudeService = new IntellijClaudeService(wt.getAbsolutePath());
+            activePrWorktreeDir = wt;
+            activePrGitRoot = detectedRoot;
+            activePrWorktreeKey = key;
+            log.info("Using worktree {} for PR #{}", wt, pr.getNumber());
+            return activePrClaudeService;
+        } catch (Exception e) {
+            log.warn(
+                    "Worktree creation for PR #{} failed; falling back to project dir: {}",
+                    pr.getNumber(),
+                    e.getMessage());
+            return claudeService;
+        }
+    }
+
+    private void clearActivePrWorktree() {
+        final java.io.File worktreeToRemove;
+        final java.io.File gitRoot;
+        synchronized (this) {
+            worktreeToRemove = activePrWorktreeDir;
+            gitRoot = activePrGitRoot;
+            activePrClaudeService = null;
+            activePrWorktreeDir = null;
+            activePrGitRoot = null;
+            activePrWorktreeKey = null;
+        }
+        if (worktreeToRemove != null && gitRoot != null) {
+            getApplication()
+                    .executeOnPooledThread(
+                            () -> worktreeService.removeWorktree(gitRoot, worktreeToRemove));
+        }
     }
 
     private String buildPrContext(PullRequest pr) {
@@ -1076,7 +1196,8 @@ public class WebviewPanel implements Disposable {
     }
 
     /** Pushes the PR list into the webview via the bridge. Call from the EDT. */
-    public void loadPRs(List<PullRequest> prs, String defaultRepo) {
+    public void loadPRs(
+            List<PullRequest> prs, String defaultRepo, String searchScope, String currentRepo) {
         cachedPRs = prs;
         Set<String> draftKeys =
                 pendingIndex.list().stream()
@@ -1101,7 +1222,12 @@ public class WebviewPanel implements Disposable {
                                                                 + "#"
                                                                 + pr.getNumber())))
                         .toList();
-        pushMessage(new PrListMessage("prListLoaded", dtos, defaultRepo));
+        pushMessage(
+                new PrListMessage(
+                        "prListLoaded",
+                        dtos,
+                        defaultRepo,
+                        new PrListStatus(searchScope, currentRepo, 50, prs.size() >= 50)));
     }
 
     public void setOnPRSelected(Consumer<PullRequest> callback) {
@@ -1121,12 +1247,8 @@ public class WebviewPanel implements Disposable {
         return prStateFilter;
     }
 
-    public boolean isAssignedToMeFilter() {
-        return assignedToMeFilter;
-    }
-
-    public boolean isReviewRequestedFilter() {
-        return reviewRequestedFilter;
+    public String getSearchScope() {
+        return searchScope;
     }
 
     public void reload() {
@@ -1140,6 +1262,7 @@ public class WebviewPanel implements Disposable {
     @Override
     public void dispose() {
         disposed = true;
+        clearActivePrWorktree();
         if (listenedWindow != null && focusListener != null) {
             listenedWindow.removeWindowFocusListener(focusListener);
             listenedWindow = null;

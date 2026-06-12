@@ -2,10 +2,57 @@ package com.jinloes.prpilot.ui;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jinloes.prpilot.model.PullRequest;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class WebviewPanelTest {
+
+    @Nested
+    class WorktreeKey {
+
+        @Test
+        void normalizesOwnerAndRepoCase() {
+            assertThat(WebviewPanel.worktreeKey(42, "JinLoes", "PR-Pilot"))
+                    .isEqualTo("jinloes/pr-pilot#42");
+        }
+
+        @Test
+        void keyIncludesPrNumber() {
+            assertThat(WebviewPanel.worktreeKey(1, "a", "b"))
+                    .isNotEqualTo(WebviewPanel.worktreeKey(2, "a", "b"));
+        }
+    }
+
+    @Nested
+    class IsSamePr {
+
+        @Test
+        void matchesByNumberAndRepoIgnoringCase() {
+            PullRequest left = new PullRequest("t", "", "OwNeR", "RePo", 7, "", "a", "");
+            PullRequest right = new PullRequest("t2", "", "owner", "repo", 7, "", "b", "");
+
+            assertThat(WebviewPanel.isSamePr(left, right)).isTrue();
+        }
+
+        @Test
+        void rejectsDifferentNumberOrRepo() {
+            PullRequest base = new PullRequest("t", "", "owner", "repo", 7, "", "a", "");
+            PullRequest differentNumber = new PullRequest("t", "", "owner", "repo", 8, "", "a", "");
+            PullRequest differentRepo = new PullRequest("t", "", "owner", "other", 7, "", "a", "");
+
+            assertThat(WebviewPanel.isSamePr(base, differentNumber)).isFalse();
+            assertThat(WebviewPanel.isSamePr(base, differentRepo)).isFalse();
+        }
+
+        @Test
+        void returnsFalseWhenEitherIsNull() {
+            PullRequest pr = new PullRequest("t", "", "owner", "repo", 7, "", "a", "");
+
+            assertThat(WebviewPanel.isSamePr(pr, null)).isFalse();
+            assertThat(WebviewPanel.isSamePr(null, pr)).isFalse();
+        }
+    }
 
     @Nested
     class ResolveResourcePath {

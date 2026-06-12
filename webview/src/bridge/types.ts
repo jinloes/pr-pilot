@@ -5,6 +5,14 @@ export interface PRListLoadedMessage {
   type: 'prListLoaded'
   prs: PR[]
   defaultRepo?: string
+  listStatus?: PRListStatus
+}
+
+export interface PRListStatus {
+  searchScope: PRSearchScope
+  currentRepo?: string
+  resultLimit: number
+  limited: boolean
 }
 
 export interface PRLoadingMessage {
@@ -13,66 +21,79 @@ export interface PRLoadingMessage {
 
 export interface DraftLoadingMessage {
   type: 'draftLoading'
+  prKey?: string
 }
 
 export interface DraftLoadedMessage {
   type: 'draftLoaded'
+  prKey?: string
   prState: 'NO_DRAFT' | 'DRAFT_PRESENT' | 'MERGED'
   reviewId?: string
   result?: ReviewResult
   diff?: string
   staleCommits?: boolean
+  importedFromGitHub?: boolean
   status?: string
 }
 
 export interface ReviewGeneratingMessage {
   type: 'reviewGenerating'
+  prKey?: string
   message: string
 }
 
 export interface ReviewChunkMessage {
   type: 'reviewChunk'
+  prKey?: string
   kind: 'text' | 'thinking'
   chunk: string
 }
 
 export interface ReviewResultMessage {
   type: 'reviewResult'
+  prKey?: string
   result: ReviewResult
   diff: string
 }
 
 export interface ReviewErrorMessage {
   type: 'reviewError'
+  prKey?: string
   message: string
 }
 
 export interface DraftSavedMessage {
   type: 'draftSaved'
+  prKey?: string
   reviewId: string
   commentsDropped: boolean
 }
 
 export interface DraftSaveErrorMessage {
   type: 'draftSaveError'
+  prKey?: string
   message: string
 }
 
 export interface ReviewSubmittedMessage {
   type: 'reviewSubmitted'
+  prKey?: string
 }
 
 export interface ReviewSubmitErrorMessage {
   type: 'reviewSubmitError'
+  prKey?: string
   message: string
 }
 
 export interface DraftDeletedMessage {
   type: 'draftDeleted'
+  prKey?: string
 }
 
 export interface DraftDeleteErrorMessage {
   type: 'draftDeleteError'
+  prKey?: string
   message: string
 }
 
@@ -86,16 +107,19 @@ export interface PrDraftStatusUpdatedMessage {
 
 export interface ChatChunkMessage {
   type: 'chatChunk'
+  prKey?: string
   chunk: string
 }
 
 export interface ChatResponseMessage {
   type: 'chatResponse'
+  prKey?: string
   response: string
 }
 
 export interface ChatErrorMessage {
   type: 'chatError'
+  prKey?: string
   message: string
 }
 
@@ -164,9 +188,12 @@ export interface SelectPRRequest {
 export interface RefreshPRsRequest {
   type: 'refreshPRs'
   state?: string
+  searchScope?: PRSearchScope
   assignedToMe?: boolean
   reviewRequested?: boolean
 }
+
+export type PRSearchScope = 'currentRepo' | 'authored' | 'assigned' | 'reviewRequested'
 
 export interface GenerateReviewRequest {
   type: 'generateReview'

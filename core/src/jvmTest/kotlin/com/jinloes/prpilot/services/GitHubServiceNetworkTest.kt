@@ -7,6 +7,7 @@ import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -73,6 +74,21 @@ private fun mockServiceWith422ThenOk(body422: String = "{}", bodyOk: String = "{
                 headers = headersOf("Content-Type", ContentType.Application.Json.toString()),
             )
         }
+    }
+    val client = HttpClient(engine) { install(ContentNegotiation) { json(MOCK_JSON) } }
+    return GitHubService("https://api.github.com", client)
+}
+
+// Matches responses by request URL rather than call order, so it stays deterministic even when
+// requests are issued concurrently (e.g. the parallel comment fetch in getExistingReviewsSummary).
+private fun mockServiceByUrl(routes: Map<String, String>): GitHubService {
+    val engine = MockEngine { request ->
+        val match = routes.entries.firstOrNull { request.url.encodedPath.endsWith(it.key) }
+        respond(
+            content = match?.value ?: "[]",
+            status = HttpStatusCode.OK,
+            headers = headersOf("Content-Type", ContentType.Application.Json.toString()),
+        )
     }
     val client = HttpClient(engine) { install(ContentNegotiation) { json(MOCK_JSON) } }
     return GitHubService("https://api.github.com", client)
@@ -189,6 +205,18 @@ class GitHubServiceNetworkTest : FunSpec({
             pending.shouldNotBeNull()
             pending.id shouldBe "5"
             pending.result.getVerdict() shouldBe "APPROVE"
+            pending.importedFromGitHub shouldBe false
+        }
+
+        test("marks pending review imported when embedded metadata is missing") {
+            val svc = mockServiceResponses(
+                """[{"id":5,"state":"PENDING","body":""}]""",
+                """{"id":5,"state":"PENDING","body":"plain review body"}""",
+                "[]"
+            )
+            val pending = svc.loadDraftReview("token", "owner", "repo", 1)
+            pending.shouldNotBeNull()
+            pending.importedFromGitHub shouldBe true
         }
     }
 
@@ -271,6 +299,25 @@ class GitHubServiceNetworkTest : FunSpec({
             summary shouldContain "src/Foo.java"
             summary shouldContain "42"
             summary shouldContain "fix this"
+        }
+
+        test("aggregates multiple reviews' comments in order (parallel fetch)") {
+            val svc = mockServiceByUrl(
+                mapOf(
+                    "/pulls/1/reviews" to """[
+                        {"id":1,"state":"APPROVED","body":"","user":{"login":"alice"},"submitted_at":"2024-01-15T10:00:00Z"},
+                        {"id":2,"state":"APPROVED","body":"","user":{"login":"bob"},"submitted_at":"2024-01-16T10:00:00Z"}
+                    ]""",
+                    "/reviews/1/comments" to """[{"path":"A.kt","line":1,"body":"alice-comment"}]""",
+                    "/reviews/2/comments" to """[{"path":"B.kt","line":2,"body":"bob-comment"}]""",
+                )
+            )
+            val summary = svc.getExistingReviewsSummary("token", "owner", "repo", 1)
+            // Both reviewers' comments are present and stay matched to the right review, in order.
+            summary shouldContain "alice-comment"
+            summary shouldContain "bob-comment"
+            summary.indexOf("@alice") shouldBeLessThan summary.indexOf("@bob")
+            summary.indexOf("alice-comment") shouldBeLessThan summary.indexOf("bob-comment")
         }
     }
 

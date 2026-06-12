@@ -434,24 +434,38 @@ function HunkRows({
         const oldLine = oldLineOf(change)
         const lineComments = newLine !== undefined ? (comments.get(newLine) ?? []) : []
         const clickableLine = newLine ?? oldLine
+        const canAddOldLineComment = onLineClick && oldLine !== undefined && clickableLine !== undefined
+        const canAddNewLineComment = onLineClick && newLine !== undefined && clickableLine !== undefined
+        const handleAddComment = () => {
+          if (onLineClick && clickableLine !== undefined) onLineClick(clickableLine)
+        }
+        const handleAddCommentKeyDown = (e: React.KeyboardEvent<HTMLTableCellElement>) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return
+          e.preventDefault()
+          handleAddComment()
+        }
         return (
           <Fragment key={i}>
             <tr className={cn(`diff-line diff-line--${change.type}`, searchQuery && change.content.toLowerCase().includes(searchQuery.toLowerCase()) && 'diff-line--search-match')}>
               <td
-                className={cn('diff-gutter', onLineClick && oldLine && 'diff-gutter--clickable')}
-                onClick={() => onLineClick && clickableLine && onLineClick(clickableLine)}
+                className={cn('diff-gutter', canAddOldLineComment && 'diff-gutter--clickable')}
+                onClick={canAddOldLineComment ? handleAddComment : undefined}
+                onKeyDown={canAddOldLineComment ? handleAddCommentKeyDown : undefined}
                 title={onLineClick && clickableLine ? `Add comment at line ${clickableLine}` : undefined}
-                role={onLineClick && oldLine ? 'button' : undefined}
-                aria-label={onLineClick && oldLine ? `Add comment at line ${oldLine}` : undefined}
+                role={canAddOldLineComment ? 'button' : undefined}
+                tabIndex={canAddOldLineComment ? 0 : undefined}
+                aria-label={canAddOldLineComment ? `Add comment at line ${oldLine}` : undefined}
               >
                 {oldLineOf(change) ?? ''}
               </td>
               <td
-                className={cn('diff-gutter', onLineClick && newLine && 'diff-gutter--clickable')}
-                onClick={() => onLineClick && clickableLine && onLineClick(clickableLine)}
+                className={cn('diff-gutter', canAddNewLineComment && 'diff-gutter--clickable')}
+                onClick={canAddNewLineComment ? handleAddComment : undefined}
+                onKeyDown={canAddNewLineComment ? handleAddCommentKeyDown : undefined}
                 title={onLineClick && clickableLine ? `Add comment at line ${clickableLine}` : undefined}
-                role={onLineClick && newLine ? 'button' : undefined}
-                aria-label={onLineClick && newLine ? `Add comment at line ${newLine}` : undefined}
+                role={canAddNewLineComment ? 'button' : undefined}
+                tabIndex={canAddNewLineComment ? 0 : undefined}
+                aria-label={canAddNewLineComment ? `Add comment at line ${newLine}` : undefined}
               >
                 {newLine ?? ''}
               </td>

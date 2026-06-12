@@ -42,6 +42,8 @@ export interface ReviewResult {
     lineComments: LineComment[];
 }
 
+export type PRSearchScope = 'currentRepo' | 'authored' | 'assigned' | 'reviewRequested';
+
 export interface GhReviewComment {
     path: string | null;
     line: number | null;
@@ -81,6 +83,10 @@ interface SearchItem {
     user: { login: string } | null;
     created_at: string | null;
     repository_url: string | null;
+}
+
+interface StarredRepo {
+    full_name?: string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -175,26 +181,22 @@ export async function searchPRs(
     token: string,
     githubBaseUrl: string,
     state: string,
-    assignedToMe: boolean,
-    reviewRequested: boolean,
+    searchScope: PRSearchScope,
     currentRepo?: string,
 ): Promise<PR[]> {
-    let q = 'is:pr';
-    if (state === 'closed') q += ' is:closed';
-    else if (state !== 'all') q += ' is:open';
-    q += ' draft:false';
-    if (currentRepo) {
-        q += ` repo:${currentRepo}`;
-    } else if (!assignedToMe && !reviewRequested) {
-        q += ' author:@me';
-    }
-    if (assignedToMe) q += ' assignee:@me';
-    if (reviewRequested) q += ' review-requested:@me';
+    const q = buildPRSearchQuery(state, searchScope, currentRepo);
+    return searchPRsByQuery(token, githubBaseUrl, q);
+}
 
+export async function searchPRsByQuery(
+    token: string,
+    githubBaseUrl: string,
+    q: string,
+): Promise<PR[]> {
     const url = `${apiBase(githubBaseUrl)}/search/issues?q=${encodeURIComponent(q)}&per_page=50&sort=updated`;
     const body = await ghRequest(token, url, {});
-    const result: { items: SearchItem[] } = JSON.parse(body);
-    return result.items.map(el => {
+    const result: { items?: SearchItem[] } = JSON.parse(body);
+    return (result.items ?? []).map(el => {
         const parts = (el.repository_url ?? '').split('/');
         const owner = parts.length >= 2 ? parts[parts.length - 2] : '';
         const repo = parts.length >= 1 ? parts[parts.length - 1] : '';
@@ -209,6 +211,52 @@ export async function searchPRs(
             hasDraft: false,
         };
     });
+}
+
+export function buildPRSearchQuery(
+    state: string,
+    searchScope: PRSearchScope,
+    currentRepo?: string,
+): string {
+    let q = 'is:pr';
+    if (state === 'closed') q += ' is:closed';
+    else if (state !== 'all') q += ' is:open';
+    q += ' draft:false';
+
+    switch (searchScope) {
+        case 'currentRepo':
+            q += currentRepo ? ` repo:${currentRepo}` : ' author:@me';
+            break;
+        case 'assigned':
+            q += ' assignee:@me';
+            break;
+        case 'reviewRequested':
+            q += ' review-requested:@me';
+            break;
+        case 'authored':
+            q += ' author:@me';
+            break;
+    }
+
+    return q;
+}
+
+export async function getStarredRepos(
+    token: string,
+    githubBaseUrl: string,
+): Promise<string[]> {
+    const repos: string[] = [];
+    for (let page = 1; repos.length < 200; page++) {
+        const url = `${apiBase(githubBaseUrl)}/user/starred?per_page=100&sort=updated&page=${page}`;
+        const body = await ghRequest(token, url, {});
+        const items = JSON.parse(body) as StarredRepo[];
+        if (items.length === 0) break;
+        for (const item of items) {
+            if (item.full_name) repos.push(item.full_name);
+        }
+        if (items.length < 100) break;
+    }
+    return repos;
 }
 
 // ── PR details ─────────────────────────────────────────────────────────────────
@@ -266,8 +314,24 @@ export async function getExistingReviewsSummary(
     const submitted = reviews.filter(r => r.state !== 'PENDING');
     if (submitted.length === 0) return '';
 
+    // Fetch every review's inline comments in parallel (order-preserving) to avoid an
+    // N+1 sequential waterfall on PRs with many prior reviews. Concurrency is bounded to
+    // stay well under GitHub's secondary rate limits on bursts of simultaneous requests.
+    const CONCURRENCY = 5;
+    const commentsPerReview: GhReviewComment[][] = [];
+    for (let i = 0; i < submitted.length; i += CONCURRENCY) {
+        const chunk = await Promise.all(
+            submitted.slice(i, i + CONCURRENCY).map(r =>
+                ghRequest(token, `${url}/${r.id}/comments`, {})
+                    .then(body => JSON.parse(body) as GhReviewComment[])
+                    .catch(() => [] as GhReviewComment[]),
+            ),
+        );
+        commentsPerReview.push(...chunk);
+    }
+
     const lines: string[] = [];
-    for (const r of submitted) {
+    submitted.forEach((r, i) => {
         const reviewer = r.user ? `@${r.user.login}` : 'unknown';
         const state = r.state ?? 'COMMENTED';
         const date = r.submitted_at?.substring(0, 10) ?? '';
@@ -276,18 +340,14 @@ export async function getExistingReviewsSummary(
         if (reviewBody) {
             lines.push(`  Overall: "${reviewBody.replace(/\n/g, ' ').substring(0, 300)}"`);
         }
-        try {
-            const commentsBody = await ghRequest(token, `${url}/${r.id}/comments`, {});
-            const comments: GhReviewComment[] = JSON.parse(commentsBody);
-            for (const c of comments) {
-                const text = c.body?.trim()?.replace(/\n/g, ' ') ?? '';
-                if (!text) continue;
-                const line = c.line ?? c.original_line ?? 0;
-                lines.push(`  - ${c.path ?? ''}${line > 0 ? `:${line}` : ''}: "${text.substring(0, 200)}"`);
-            }
-        } catch { /* non-fatal */ }
+        for (const c of commentsPerReview[i]) {
+            const text = c.body?.trim()?.replace(/\n/g, ' ') ?? '';
+            if (!text) continue;
+            const line = c.line ?? c.original_line ?? 0;
+            lines.push(`  - ${c.path ?? ''}${line > 0 ? `:${line}` : ''}: "${text.substring(0, 200)}"`);
+        }
         lines.push('');
-    }
+    });
     return lines.join('\n').trim();
 }
 
@@ -379,7 +439,7 @@ function buildCommentArray(review: ReviewResult, orphans: LineComment[] = []): o
         if (!file || c.line <= 0 || !c.body) continue;
         // Pre-known orphans go in the body section, not as inline comments.
         if (orphanKeys.has(`${c.file}|${c.line}|${c.type}|${c.body}`)) continue;
-        const key = `${file} ${c.line} ${c.body}`;
+        const key = `${file}\u0000${c.line}\u0000${c.body}`;
         if (seen.has(key)) continue;
         seen.add(key);
         result.push({ path: file, line: c.line, side: 'RIGHT', body: c.body });
@@ -418,7 +478,7 @@ export async function loadDraftReview(
     owner: string,
     repo: string,
     number: number,
-): Promise<{ id: string; result: ReviewResult } | null> {
+): Promise<{ id: string; result: ReviewResult; importedFromGitHub: boolean } | null> {
     const id = await getPendingReviewId(token, githubBaseUrl, owner, repo, number);
     if (!id) return null;
     const reviewUrl = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${number}/reviews/${id}`;
@@ -428,7 +488,21 @@ export async function loadDraftReview(
     ]);
     const review: GhReview = JSON.parse(reviewBody);
     const ghComments: GhReviewComment[] = JSON.parse(commentsBody);
-    return { id, result: decodeReview(review.body ?? '', ghComments) };
+    const body = review.body ?? '';
+    return { id, result: decodeReview(body, ghComments), importedFromGitHub: !hasUsableEmbeddedComments(body) };
+}
+
+function hasUsableEmbeddedComments(body: string): boolean {
+    const embeddedIdx = body.indexOf(COMMENTS_TAG);
+    if (embeddedIdx < 0) return false;
+    const endIdx = body.indexOf(TAG_END, embeddedIdx + COMMENTS_TAG.length);
+    if (endIdx < 0) return false;
+    const json = body.substring(embeddedIdx + COMMENTS_TAG.length, endIdx).trim();
+    try {
+        return Array.isArray(JSON.parse(json));
+    } catch {
+        return false;
+    }
 }
 
 export async function saveDraftReview(

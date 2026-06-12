@@ -9,6 +9,7 @@ import {
 import type { ReviewResult, LineComment } from './github';
 import type { ChatMessage, PR } from './claude';
 import { buildPrompt, buildChatPrompt, buildFocusedChatPrompt } from './claude';
+import { parseReview } from './review';
 
 export type { ReviewResult, LineComment, ChatMessage, PR };
 export { buildPrompt, buildChatPrompt, buildFocusedChatPrompt };
@@ -60,19 +61,6 @@ export function normalizeReasoningEffort(effort: string): ReasoningEffort {
 
 // ── Best-effort review JSON extraction ────────────────────────────────────────
 
-function parseReview(raw: string): ReviewResult {
-    let json = raw.trim();
-    if (json.startsWith('```')) {
-        const newline = json.indexOf('\n');
-        const closing = json.lastIndexOf('```');
-        if (newline > 0 && closing > newline) json = json.substring(newline + 1, closing).trim();
-    }
-    const start = json.indexOf('{');
-    const end = json.lastIndexOf('}');
-    if (start >= 0 && end > start) json = json.substring(start, end + 1);
-    return JSON.parse(json) as ReviewResult;
-}
-
 function stringOrUndef(v: unknown): string | undefined {
     return typeof v === 'string' ? v : undefined;
 }
@@ -102,21 +90,95 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, ope
 
 // ── Runtime management ────────────────────────────────────────────────────────
 
+function buildRuntimeEnv(): NodeJS.ProcessEnv {
+    return {
+        ...process.env,
+        HOME: process.env.HOME || os.homedir(),
+        PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH ?? ''}`,
+    };
+}
+
 interface ActiveRun {
     client: CopilotClient;
     session?: CopilotSession;
     cancelled: boolean;
 }
 
-let activeRun: ActiveRun | null = null;
+let activeRuns = new Set<ActiveRun>();
 
 export function cancelCurrentRequest(): void {
-    const run = activeRun;
-    activeRun = null;
-    if (!run) return;
-    run.cancelled = true;
-    void run.session?.abort().catch(() => undefined);
-    void run.client.forceStop().catch(() => undefined);
+    const runs = activeRuns;
+    activeRuns = new Set<ActiveRun>();
+    for (const run of runs) {
+        run.cancelled = true;
+        void run.session?.abort().catch(() => undefined);
+        void run.client.forceStop().catch(() => undefined);
+    }
+}
+
+// ── Model discovery ───────────────────────────────────────────────────────────
+
+/**
+ * Cached list of Copilot model IDs. `null` means "not probed yet"; an empty array means a probe
+ * ran but found nothing (binary missing, policy-blocked account, schema drift) — callers fall back
+ * to their own hardcoded suggestions. Mirrors CopilotModelDiscovery's AtomicReference semantics.
+ */
+let modelCache: string[] | null = null;
+
+/** Drops the cached model list so the next {@link listModels} call re-probes. */
+export function invalidateModelCache(): void {
+    modelCache = null;
+}
+
+interface ModelInfoLike {
+    id?: unknown;
+    policy?: { state?: unknown } | null;
+}
+
+/**
+ * Extracts usable model IDs from `client.listModels()` output: drops policy-`disabled` models and
+ * blank IDs, then de-dupes while preserving the SDK's ordering. Pure (no I/O) so it can be tested
+ * without spawning the CLI — mirrors the role of CopilotModelDiscovery.parseModelsFromHelp.
+ */
+export function filterModelIds(models: ModelInfoLike[]): string[] {
+    const ids = models
+        .filter((m) => m.policy?.state !== 'disabled')
+        .map((m) => m.id)
+        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+    return Array.from(new Set(ids));
+}
+
+/**
+ * Returns the Copilot model IDs available to the current account, querying the SDK's
+ * `client.listModels()` once and caching the result. Only models whose policy is not `disabled`
+ * are returned. On any failure returns an empty array (and caches it) so the caller falls back to
+ * its own suggestion list rather than blocking on a broken probe every call.
+ *
+ * Mirrors CopilotModelDiscovery.listModels (IntelliJ), but uses the SDK directly instead of
+ * shelling out to `copilot help config`.
+ */
+export async function listModels(forceRefresh = false): Promise<string[]> {
+    if (!forceRefresh && modelCache !== null) return modelCache;
+
+    const client = new CopilotClient({
+        connection: RuntimeConnection.forStdio({ path: findCopilotBinary() }),
+        workingDirectory: os.homedir(),
+        env: buildRuntimeEnv(),
+        mode: 'copilot-cli',
+    });
+    try {
+        await withTimeout(client.start(), SDK_BOOT_TIMEOUT_MS, 'runtime startup');
+        const models = await withTimeout(client.listModels(), SDK_BOOT_TIMEOUT_MS, 'model discovery');
+        modelCache = filterModelIds(models);
+        return modelCache;
+    } catch (err) {
+        console.warn('[pr-pilot] Failed to probe copilot models:',
+            err instanceof Error ? err.message : String(err));
+        modelCache = [];
+        return modelCache;
+    } finally {
+        await client.stop().catch(() => undefined);
+    }
 }
 
 interface ProcessCallbacks {
@@ -132,11 +194,7 @@ async function runSession(options: {
     callbacks: ProcessCallbacks;
 }): Promise<string> {
     const { prompt, model, effort, workingDir, callbacks } = options;
-    const runtimeEnv = {
-        ...process.env,
-        HOME: process.env.HOME || os.homedir(),
-        PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH ?? ''}`,
-    };
+    const runtimeEnv = buildRuntimeEnv();
     const client = new CopilotClient({
         connection: RuntimeConnection.forStdio({ path: findCopilotBinary() }),
         workingDirectory: workingDir || os.homedir(),
@@ -144,7 +202,7 @@ async function runSession(options: {
         mode: 'copilot-cli',
     });
     const run: ActiveRun = { client, cancelled: false };
-    activeRun = run;
+    activeRuns.add(run);
 
     let session: CopilotSession | undefined;
     const unsubscribes: Array<() => void> = [];
@@ -199,16 +257,22 @@ async function runSession(options: {
         }
         return raw;
     } catch (err) {
+        // ES2020 target lacks the Error(message, {cause}) overload; attach cause manually so
+        // `preserve-caught-error` is satisfied without bumping the language target.
         if (run.cancelled) {
-            throw new Error('copilot request cancelled');
+            const cancelled: Error & { cause?: unknown } = new Error('copilot request cancelled');
+            cancelled.cause = err;
+            throw cancelled;
         }
         if (err instanceof Error) {
             throw err;
         }
-        throw new Error(String(err));
+        const wrapped: Error & { cause?: unknown } = new Error(String(err));
+        wrapped.cause = err;
+        throw wrapped;
     } finally {
         unsubscribes.forEach((unsubscribe) => unsubscribe());
-        if (activeRun === run) activeRun = null;
+        activeRuns.delete(run);
         await session?.disconnect().catch(() => undefined);
         if (run.cancelled) {
             await client.forceStop().catch(() => undefined);

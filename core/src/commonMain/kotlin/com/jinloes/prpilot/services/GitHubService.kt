@@ -18,6 +18,12 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -199,6 +205,19 @@ class GitHubService(
             return ReviewResult(summary, verdict, comments)
         }
 
+        fun hasUsableEmbeddedComments(body: String): Boolean {
+            val embeddedIdx = body.indexOf(COMMENTS_TAG)
+            if (embeddedIdx < 0) return false
+            val endIdx = body.indexOf(TAG_END, embeddedIdx + COMMENTS_TAG.length)
+            if (endIdx < 0) return false
+            val json = body.substring(embeddedIdx + COMMENTS_TAG.length, endIdx).trim()
+            return try {
+                JSON.parseToJsonElement(json) is JsonArray
+            } catch (_: Exception) {
+                false
+            }
+        }
+
         /** Builds the deduplicated inline-comment [JsonArray] from a [ReviewResult]. */
         fun buildCommentArray(review: ReviewResult): JsonArray =
             buildCommentArray(review, emptyList())
@@ -347,7 +366,7 @@ class GitHubService(
     )
 
     /** Carries a pending review ID together with its decoded [ReviewResult]. */
-    data class PendingReview(val id: String, val result: ReviewResult)
+    data class PendingReview(val id: String, val result: ReviewResult, val importedFromGitHub: Boolean)
 
     /**
      * Result of saving a draft review. [commentsDropped] is true when inline comments were omitted
@@ -601,7 +620,7 @@ class GitHubService(
                 get(token, "$reviewUrl/comments", "application/vnd.github.v3+json")
             )
 
-            PendingReview(id, decodeReview(body, ghComments))
+            PendingReview(id, decodeReview(body, ghComments), !hasUsableEmbeddedComments(body))
         }
 
     /**
@@ -661,8 +680,31 @@ class GitHubService(
             val submitted = reviews.filter { it.state != "PENDING" }
             if (submitted.isEmpty()) return@runBlockingCompat ""
 
+            // Fetch every review's inline comments in parallel (order-preserving) to avoid an
+            // N+1 sequential waterfall on PRs with many prior reviews. Concurrency is bounded to
+            // stay well under GitHub's secondary rate limits on bursts of simultaneous requests.
+            val gate = Semaphore(permits = 5)
+            val commentsPerReview = coroutineScope {
+                submitted.map { r ->
+                    async {
+                        gate.withPermit {
+                            try {
+                                JSON.decodeFromString<List<GhReviewComment>>(
+                                    get(token, "$url/${r.id}/comments", "application/vnd.github.v3+json")
+                                )
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                                // Non-fatal: inline comments are optional context.
+                                emptyList()
+                            }
+                        }
+                    }
+                }.awaitAll()
+            }
+
             val sb = StringBuilder()
-            for (r in submitted) {
+            submitted.forEachIndexed { i, r ->
                 val reviewer = if (r.user != null) "@${r.user.login}" else "unknown"
                 val state = r.state ?: "COMMENTED"
                 val date = if (r.submittedAt != null && r.submittedAt.length >= 10)
@@ -676,21 +718,14 @@ class GitHubService(
                     val oneLine = body.replace("\n", " ")
                     sb.append("  Overall: \"").append(truncate(oneLine, 300)).append("\"\n")
                 }
-                try {
-                    val comments = JSON.decodeFromString<List<GhReviewComment>>(
-                        get(token, "$url/${r.id}/comments", "application/vnd.github.v3+json")
-                    )
-                    for (c in comments) {
-                        val path = c.path ?: ""
-                        val line = c.line ?: c.originalLine ?: 0
-                        val text = c.body?.trim()?.replace("\n", " ") ?: ""
-                        if (text.isBlank()) continue
-                        sb.append("  - ").append(path)
-                        if (line > 0) sb.append(":").append(line)
-                        sb.append(": \"").append(truncate(text, 200)).append("\"\n")
-                    }
-                } catch (_: Exception) {
-                    // Non-fatal: inline comments are optional context.
+                for (c in commentsPerReview[i]) {
+                    val path = c.path ?: ""
+                    val line = c.line ?: c.originalLine ?: 0
+                    val text = c.body?.trim()?.replace("\n", " ") ?: ""
+                    if (text.isBlank()) continue
+                    sb.append("  - ").append(path)
+                    if (line > 0) sb.append(":").append(line)
+                    sb.append(": \"").append(truncate(text, 200)).append("\"\n")
                 }
                 sb.append("\n")
             }

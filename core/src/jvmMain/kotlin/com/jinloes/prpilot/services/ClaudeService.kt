@@ -590,7 +590,7 @@ open class ClaudeService @JvmOverloads constructor(projectDir: String? = null) {
                 .append("\n<pr_metadata>\n")
                 .append("number: ").append(pr.number).append("\n")
                 .append("repo: ").append(pr.owner).append("/").append(pr.repo).append("\n")
-                .append("title: ").append(pr.title).append("\n")
+                .append("title: ").append(escapeClosingTag(pr.title, "pr_metadata")).append("\n")
                 .append("</pr_metadata>\n")
             if (StringUtils.isNotBlank(request.knownPatterns)) {
                 prompt.append("\n<known_patterns>\n")

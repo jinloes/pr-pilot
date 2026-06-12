@@ -93,6 +93,14 @@ tasks.named('jvmTest', Test) {
     useJUnitPlatform()
 }
 
+// The JS target exists only to emit the JS library consumed by vscode-extension
+// (see copyJsToVscodeExtension); tests are run on the JVM via Kotest + JUnit5.
+// commonTest sources compile for JS but no Kotest JS runner is wired up, so the
+// Node test task discovers zero tests. Don't fail the build on that.
+tasks.named('jsNodeTest') {
+    failOnNoDiscoveredTests = false
+}
+
 // Keep Java compilation at Java 17.
 tasks.withType(JavaCompile).configureEach {
     sourceCompatibility = JavaVersion.VERSION_17

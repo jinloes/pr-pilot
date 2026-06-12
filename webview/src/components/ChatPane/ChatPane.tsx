@@ -20,6 +20,11 @@ interface Props {
   pendingMessage?: { q: string; ctx: string; id: number }
   onPendingMessageSent?: () => void
   onResizeStart?: (e: React.MouseEvent) => void
+  contextSummary?: string[]
+}
+
+function prKey(pr: Pick<PR, 'owner' | 'repo' | 'number'>): string {
+  return `${pr.owner}/${pr.repo}#${pr.number}`
 }
 
 export function ChatPane({
@@ -29,6 +34,7 @@ export function ChatPane({
   pendingMessage,
   onPendingMessageSent,
   onResizeStart,
+  contextSummary = [],
 }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [streaming, setStreaming] = useState('')
@@ -45,6 +51,8 @@ export function ChatPane({
 
   useEffect(() => {
     return onHostMessage((msg) => {
+      if ('prKey' in msg && msg.prKey && msg.prKey !== prKey(pr)) return
+
       switch (msg.type) {
         case 'chatChunk':
           setStreaming((s) => s + msg.chunk)
@@ -66,7 +74,7 @@ export function ChatPane({
           break
       }
     })
-  }, [])
+  }, [pr])
 
   useEffect(() => {
     if (!pendingMessage || busy) return
@@ -122,6 +130,11 @@ export function ChatPane({
         <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
           Chat
         </span>
+        {contextSummary.length > 0 && (
+          <span className="min-w-0 flex-1 truncate px-2 text-[11px] text-muted-foreground">
+            Context: {contextSummary.join(', ')}
+          </span>
+        )}
         {hasContent && (
           <Button variant="ghost" size="sm" onClick={handleClear} className="h-6 px-2 text-xs">
             Clear
@@ -227,7 +240,7 @@ export function ChatPane({
         </Button>
       </div>
       <p className="px-3 pb-2 text-[11px] text-muted-foreground/60">
-        Includes PR body, diff, and review as context · right-click selected text to ask about it
+        Uses the active PR context shown above · right-click selected text to ask about it
       </p>
     </div>
   )

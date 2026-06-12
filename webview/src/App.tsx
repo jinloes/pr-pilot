@@ -59,13 +59,19 @@ const DEV_PRS: PR[] = [
 ]
 
 const MIN_LEFT = 180
-const MAX_LEFT = 560
-const DEFAULT_LEFT = 240
+const MAX_LEFT = 420
+const MIN_RIGHT = 360
+const DEFAULT_LEFT = 280
 const STORAGE_KEY = 'claude-reviews:divider-width'
+
+function maxLeftWidth(): number {
+  return Math.max(MIN_LEFT, Math.min(MAX_LEFT, window.innerWidth - MIN_RIGHT))
+}
 
 function loadSavedWidth(): number {
   const saved = Number(localStorage.getItem(STORAGE_KEY))
-  return saved >= MIN_LEFT && saved <= MAX_LEFT ? saved : DEFAULT_LEFT
+  const max = maxLeftWidth()
+  return saved >= MIN_LEFT && saved <= max ? saved : Math.min(DEFAULT_LEFT, max)
 }
 
 function seedDevData() {
@@ -95,7 +101,7 @@ export default function App() {
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!dragging.current) return
     const delta = e.clientX - dragStartX.current
-    const newWidth = Math.max(MIN_LEFT, Math.min(MAX_LEFT, dragStartW.current + delta))
+    const newWidth = Math.max(MIN_LEFT, Math.min(maxLeftWidth(), dragStartW.current + delta))
     currentWidthRef.current = newWidth
     setLeftWidth(newWidth)
   }, [])
@@ -126,7 +132,7 @@ export default function App() {
     <Toaster theme="system" position="bottom-right" richColors />
     <div className="flex h-full overflow-hidden">
       {/* Left column — PR list */}
-      <div style={{ width: leftWidth }} className="shrink-0 flex flex-col overflow-hidden">
+      <div style={{ width: leftWidth, maxWidth: '45vw' }} className="shrink-0 flex flex-col overflow-hidden">
         <PRList onSelect={setSelectedPR} />
       </div>
 
@@ -136,6 +142,20 @@ export default function App() {
         style={{ width: 5 }}
         onMouseDown={handleDividerMouseDown}
         title="Drag to resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize pull request list"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+          e.preventDefault()
+          setLeftWidth((w) => {
+            const next = Math.max(MIN_LEFT, Math.min(maxLeftWidth(), w + (e.key === 'ArrowRight' ? 24 : -24)))
+            currentWidthRef.current = next
+            localStorage.setItem(STORAGE_KEY, String(next))
+            return next
+          })
+        }}
       >
         <div
           className="absolute cursor-col-resize"

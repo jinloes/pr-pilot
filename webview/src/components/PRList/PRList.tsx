@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw, TriangleAlert } from 'lucide-react'
+import { CheckCircle2, Circle, RefreshCw, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { cn } from '@/lib/utils'
-import { onHostMessage, sendToHost, type PR } from '../../bridge/types'
+import { onHostMessage, sendToHost, type PR, type PRListStatus, type PRSearchScope } from '../../bridge/types'
 
 interface Props {
   onSelect?: (pr: PR) => void
@@ -22,16 +22,20 @@ interface Props {
 type StateFilter = 'open' | 'closed' | 'all'
 type SetupReason = 'gh_not_installed' | 'gh_not_authenticated' | 'load_failed'
 
+function prKey(pr: Pick<PR, 'owner' | 'repo' | 'number'>): string {
+  return `${pr.owner}/${pr.repo}#${pr.number}`
+}
+
 export function PRList({ onSelect }: Props) {
   const [prs, setPRs] = useState<PR[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [selected, setSelected] = useState<number | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [repoFilter, setRepoFilter] = useState('all')
   const [stateFilter, setStateFilter] = useState<StateFilter>('open')
-  const [assignedToMe, setAssignedToMe] = useState(false)
-  const [reviewRequested, setReviewRequested] = useState(false)
+  const [searchScope, setSearchScope] = useState<PRSearchScope>('currentRepo')
+  const [listStatus, setListStatus] = useState<PRListStatus | null>(null)
   const [setupRequired, setSetupRequired] = useState<{ reason: SetupReason; detail: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -40,6 +44,10 @@ export function PRList({ onSelect }: Props) {
       if (msg.type === 'prListLoaded') {
         setPRs(msg.prs)
         setRepoFilter(msg.defaultRepo ?? 'all')
+        if (msg.listStatus) {
+          setListStatus(msg.listStatus)
+          setSearchScope(msg.listStatus.searchScope)
+        }
         setLoading(false)
         setRefreshing(false)
         setSetupRequired(null)
@@ -93,37 +101,30 @@ export function PRList({ onSelect }: Props) {
   })
 
   function handleSelect(pr: PR) {
-    setSelected(pr.number)
+    setSelected(prKey(pr))
     onSelect?.(pr)
     sendToHost({ type: 'selectPR', number: pr.number, owner: pr.owner, repo: pr.repo })
   }
 
   function fetchWithFilters(
     s: StateFilter = stateFilter,
-    ami: boolean = assignedToMe,
-    rr: boolean = reviewRequested,
+    scope: PRSearchScope = searchScope,
   ) {
     setRefreshing(true)
-    sendToHost({ type: 'refreshPRs', state: s, assignedToMe: ami, reviewRequested: rr })
+    sendToHost({ type: 'refreshPRs', state: s, searchScope: scope })
   }
 
   function handleStateFilter(val: string) {
     if (!val) return
     const s = val as StateFilter
     setStateFilter(s)
-    fetchWithFilters(s, assignedToMe, reviewRequested)
+    fetchWithFilters(s, searchScope)
   }
 
-  function handleAssignedToMe() {
-    const next = !assignedToMe
-    setAssignedToMe(next)
-    fetchWithFilters(stateFilter, next, reviewRequested)
-  }
-
-  function handleReviewRequested() {
-    const next = !reviewRequested
-    setReviewRequested(next)
-    fetchWithFilters(stateFilter, assignedToMe, next)
+  function handleSearchScope(scope: string) {
+    const next = scope as PRSearchScope
+    setSearchScope(next)
+    fetchWithFilters(stateFilter, next)
   }
 
   useEffect(() => {
@@ -167,10 +168,11 @@ export function PRList({ onSelect }: Props) {
             variant="outline"
             className={cn(
               'text-[10px] px-1.5 py-0 font-mono',
-              prs.length > 0 ? 'text-primary border-primary/40' : 'text-muted-foreground',
+              filtered.length > 0 ? 'text-primary border-primary/40' : 'text-muted-foreground',
             )}
+            title={`${filtered.length} visible of ${prs.length} loaded`}
           >
-            {prs.length}
+            {filtered.length}{filtered.length !== prs.length ? `/${prs.length}` : ''}
           </Badge>
           <Button
             variant="ghost"
@@ -186,7 +188,7 @@ export function PRList({ onSelect }: Props) {
           </Button>
         </div>
 
-        {/* State filter + role filters */}
+        {/* State filter + search scope */}
         <div className="flex items-center gap-2 flex-wrap">
           <ToggleGroup
             type="single"
@@ -207,31 +209,27 @@ export function PRList({ onSelect }: Props) {
 
           <Separator orientation="vertical" className="h-4" />
 
-          <button
-            onClick={handleAssignedToMe}
-            aria-pressed={assignedToMe}
-            className={cn(
-              'h-6 px-2 rounded text-[11px] tracking-wide uppercase border transition-colors',
-              assignedToMe
-                ? 'bg-primary/20 text-primary border-primary/40'
-                : 'text-muted-foreground border-border hover:text-foreground hover:border-border/80',
-            )}
-          >
-            assigned
-          </button>
-          <button
-            onClick={handleReviewRequested}
-            aria-pressed={reviewRequested}
-            className={cn(
-              'h-6 px-2 rounded text-[11px] tracking-wide uppercase border transition-colors',
-              reviewRequested
-                ? 'bg-primary/20 text-primary border-primary/40'
-                : 'text-muted-foreground border-border hover:text-foreground hover:border-border/80',
-            )}
-          >
-            review req
-          </button>
+          <Select value={searchScope} onValueChange={handleSearchScope}>
+            <SelectTrigger className="h-7 min-w-40 flex-1 text-xs border-border bg-background">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="currentRepo" className="text-xs">Current repo</SelectItem>
+              <SelectItem value="reviewRequested" className="text-xs">Review requested</SelectItem>
+              <SelectItem value="assigned" className="text-xs">Assigned to me</SelectItem>
+              <SelectItem value="authored" className="text-xs">Authored by me</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
+
+        {listStatus && (
+          <div className="rounded border border-border bg-muted/25 px-2 py-1 text-[11px] text-muted-foreground leading-relaxed">
+            <span>{scopeDescription(listStatus)}</span>
+            {listStatus.limited && (
+              <span className="text-status-suggestion"> · showing first {listStatus.resultLimit} results</span>
+            )}
+          </div>
+        )}
 
         {/* Repo filter */}
         {repos.length > 0 && (
@@ -300,7 +298,7 @@ export function PRList({ onSelect }: Props) {
                   ? `No results for "${filter}"`
                   : repoFilter !== 'all'
                     ? `No pull requests in ${repoFilter}`
-                    : 'No pull requests'}
+                    : `No pull requests for ${scopeLabel(searchScope).toLowerCase()}`}
               </p>
               {!filter && (
                 <Button
@@ -319,9 +317,9 @@ export function PRList({ onSelect }: Props) {
 
           {filtered.map((pr, i) => (
             <PRItem
-              key={pr.number}
+              key={prKey(pr)}
               pr={pr}
-              selected={selected === pr.number}
+              selected={selected === prKey(pr)}
               index={i}
               onClick={() => handleSelect(pr)}
             />
@@ -401,12 +399,28 @@ interface SetupScreenProps {
 
 function SetupScreen({ reason, detail, refreshing, onRefresh }: SetupScreenProps) {
   const title = reason === 'load_failed' ? 'Could not load pull requests' : 'GitHub not connected'
+  const steps = setupSteps(reason)
   return (
     <div className="flex flex-col h-full items-center justify-center gap-5 px-6 text-center">
       <TriangleAlert className="w-10 h-10 text-status-suggestion shrink-0" />
       <div className="flex flex-col gap-2">
         <p className="text-sm font-semibold text-foreground">{title}</p>
         <p className="text-xs text-muted-foreground leading-relaxed">{detail}</p>
+      </div>
+      <div className="w-full max-w-72 rounded border border-border bg-card text-left">
+        {steps.map((step) => (
+          <div key={step.label} className="flex items-start gap-2 border-b border-border last:border-b-0 px-3 py-2">
+            {step.done ? (
+              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-status-approve shrink-0" />
+            ) : (
+              <Circle className="mt-0.5 h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            )}
+            <div className="min-w-0">
+              <p className="text-xs text-foreground">{step.label}</p>
+              <p className="text-[11px] text-muted-foreground leading-snug">{step.detail}</p>
+            </div>
+          </div>
+        ))}
       </div>
       <Button
         variant="outline"
@@ -420,4 +434,40 @@ function SetupScreen({ reason, detail, refreshing, onRefresh }: SetupScreenProps
       </Button>
     </div>
   )
+}
+
+function scopeLabel(scope: PRSearchScope): string {
+  switch (scope) {
+    case 'currentRepo': return 'Current repo'
+    case 'reviewRequested': return 'Review requested'
+    case 'assigned': return 'Assigned to me'
+    case 'authored': return 'Authored by me'
+  }
+}
+
+function scopeDescription(status: PRListStatus): string {
+  if (status.searchScope === 'currentRepo') {
+    return status.currentRepo ? `Searching ${status.currentRepo}` : 'Current repo was not detected; showing authored PRs'
+  }
+  return `Searching ${scopeLabel(status.searchScope).toLowerCase()} PRs`
+}
+
+function setupSteps(reason: SetupReason): Array<{ label: string; detail: string; done: boolean }> {
+  return [
+    {
+      label: 'Install GitHub CLI',
+      detail: 'PR Pilot uses gh for GitHub authentication and PR access.',
+      done: reason !== 'gh_not_installed',
+    },
+    {
+      label: 'Authenticate GitHub',
+      detail: 'Run gh auth login for github.com or your Enterprise host.',
+      done: reason === 'load_failed',
+    },
+    {
+      label: 'Load pull requests',
+      detail: 'Refresh after setup; choose a search scope if the list is empty.',
+      done: false,
+    },
+  ]
 }

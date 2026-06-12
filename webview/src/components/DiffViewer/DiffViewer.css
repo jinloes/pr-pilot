@@ -141,8 +141,20 @@
   background: hsl(var(--primary) / 0.08);
 }
 
+.diff-gutter--clickable:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
+  background: hsl(var(--primary) / 0.12);
+  color: hsl(var(--primary));
+}
+
 .diff-gutter--clickable:hover::after {
   background: hsl(var(--primary) / 0.12);
+  color: hsl(var(--primary));
+}
+
+.diff-gutter--clickable:focus-visible::after {
+  background: hsl(var(--primary) / 0.16);
   color: hsl(var(--primary));
 }
 

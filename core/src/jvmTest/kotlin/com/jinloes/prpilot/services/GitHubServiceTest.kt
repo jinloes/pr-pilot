@@ -188,6 +188,16 @@ class GitHubServiceTest : FunSpec({
             val decoded = GitHubService.decodeReview(body, emptyList())
             decoded.getVerdict() shouldBe "COMMENT"
         }
+
+        test("hasUsableEmbeddedComments detects valid embedded comment metadata") {
+            val body = "<!-- claude-summary: s --> \n<!-- claude-verdict: COMMENT --> \n<!-- claude-comments: [] -->"
+            GitHubService.hasUsableEmbeddedComments(body).shouldBeTrue()
+        }
+
+        test("hasUsableEmbeddedComments rejects missing or corrupt metadata") {
+            GitHubService.hasUsableEmbeddedComments("plain GitHub review body").shouldBeFalse()
+            GitHubService.hasUsableEmbeddedComments("<!-- claude-comments: NOTJSON -->").shouldBeFalse()
+        }
     }
 
     // ── buildCommentArray ────────────────────────────────────────────────
@@ -241,6 +251,16 @@ class GitHubServiceTest : FunSpec({
             val comments = listOf(
                 LineComment("src/Foo.java", 5, "issue", "first"),
                 LineComment("src/Foo.java", 5, "note", "second"),
+            )
+            GitHubService.buildCommentArray(review("s", "APPROVE", comments)).size shouldBe 2
+        }
+
+        test("distinct comments are not falsely deduped by field-boundary collision") {
+            // Under a space-joined dedup key both collapse to "f 1 2 x"; the NUL delimiter
+            // keeps them distinct so both inline comments survive.
+            val comments = listOf(
+                LineComment("f", 1, "issue", "2 x"),
+                LineComment("f 1", 2, "issue", "x"),
             )
             GitHubService.buildCommentArray(review("s", "APPROVE", comments)).size shouldBe 2
         }

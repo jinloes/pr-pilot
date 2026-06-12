@@ -1,0 +1,36 @@
+{
+  // Build tasks backing the "Run PR Pilot Extension" launch config.
+  // "Build PR Pilot extension" is the default build task and is used as the
+  // preLaunchTask: it first builds the webview, then compiles the extension.
+  // Each task runs `npm install` first so a fresh checkout launches without a
+  // manual setup step (npm no-ops quickly when dependencies are already present).
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build webview",
+      "type": "shell",
+      "command": "npm install --no-audit --no-fund && npm run build",
+      "options": { "cwd": "${workspaceFolder}/webview" },
+      "group": "build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "Build PR Pilot extension",
+      "type": "shell",
+      "command": "npm install --no-audit --no-fund && npm run build",
+      "options": { "cwd": "${workspaceFolder}/vscode-extension" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$tsc"],
+      "dependsOrder": "sequence",
+      "dependsOn": ["Build webview"]
+    },
+    {
+      "label": "Watch PR Pilot extension",
+      "type": "shell",
+      "command": "npm run watch",
+      "options": { "cwd": "${workspaceFolder}/vscode-extension" },
+      "isBackground": true,
+      "problemMatcher": ["$tsc-watch"]
+    }
+  ]
+}

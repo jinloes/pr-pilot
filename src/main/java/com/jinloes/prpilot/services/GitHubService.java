@@ -37,7 +37,11 @@ public class GitHubService {
     private static final Pattern TYPE_PREFIX = Pattern.compile("^\\[([A-Z]+)]\\s*");
 
     /** Carries a pending review ID together with its decoded {@link ReviewResult}. */
-    public record PendingReview(String id, ReviewResult result) {}
+    public record PendingReview(String id, ReviewResult result, boolean importedFromGitHub) {
+        public boolean component3() {
+            return importedFromGitHub;
+        }
+    }
 
     /**
      * Result of saving a draft review. {@code commentsDropped} is {@code true} when inline comments
@@ -271,7 +275,7 @@ public class GitHubService {
                         MAPPER.getTypeFactory()
                                 .constructCollectionType(List.class, GhReviewComment.class));
 
-        return new PendingReview(id, decodeReview(body, ghComments));
+        return new PendingReview(id, decodeReview(body, ghComments), !hasUsableEmbeddedComments(body));
     }
 
     /**
@@ -536,6 +540,19 @@ public class GitHubService {
         }
 
         return new ReviewResult(summary, verdict, comments);
+    }
+
+    static boolean hasUsableEmbeddedComments(String body) {
+        int embeddedIdx = body.indexOf(COMMENTS_TAG);
+        if (embeddedIdx < 0) return false;
+        int endIdx = body.indexOf(TAG_END, embeddedIdx + COMMENTS_TAG.length());
+        if (endIdx < 0) return false;
+        String json = body.substring(embeddedIdx + COMMENTS_TAG.length(), endIdx).strip();
+        try {
+            return MAPPER.readTree(json).isArray();
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     // --- Helpers ---

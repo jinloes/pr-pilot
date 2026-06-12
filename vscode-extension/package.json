@@ -11,6 +11,28 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "pr-pilot.openSettings",
+        "title": "Open Settings",
+        "category": "PR Pilot",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "pr-pilot.selectCopilotModel",
+        "title": "Select Copilot Review Model",
+        "category": "PR Pilot"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "pr-pilot.openSettings",
+          "when": "view == pr-pilot.main",
+          "group": "navigation"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -37,6 +59,27 @@
           "default": "https://github.com",
           "description": "GitHub base URL. Change for GitHub Enterprise (e.g. https://github.mycompany.com)."
         },
+        "pr-pilot.notificationsEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Poll GitHub in the background and notify when new matching pull requests appear. The first poll seeds existing PRs silently."
+        },
+        "pr-pilot.notifyReviewRequested": {
+          "type": "boolean",
+          "default": true,
+          "description": "When notifications are enabled, notify for new open pull requests requesting your review."
+        },
+        "pr-pilot.notifyStarredRepos": {
+          "type": "boolean",
+          "default": false,
+          "description": "When notifications are enabled, also notify for new open pull requests on your starred repositories."
+        },
+        "pr-pilot.notificationPollMinutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "Background pull request notification polling interval in minutes."
+        },
         "pr-pilot.reviewModel": {
           "type": "string",
           "default": "",
@@ -51,7 +94,7 @@
         "pr-pilot.reviewModelCopilot": {
           "type": "string",
           "default": "claude-sonnet-4.6",
-          "description": "Model ID for the GitHub Copilot CLI. Default `claude-sonnet-4.6` balances JSON schema adherence and code-review depth without Opus-tier latency. Empty uses the CLI's default routing. Run `copilot help config` to list supported IDs — the field is freeform because the catalog changes over time.",
+          "description": "Model ID for the GitHub Copilot CLI. Default `claude-sonnet-4.6` balances JSON schema adherence and code-review depth without Opus-tier latency. Empty uses the CLI's default routing. Run the `PR Pilot: Select Copilot Review Model` command (or the gear in the PR Pilot view title) to pick from models discovered via the Copilot SDK — the field is freeform because the catalog changes over time.",
           "examples": [
             "claude-sonnet-4.6",
             "claude-opus-4.7",

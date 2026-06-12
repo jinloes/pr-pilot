@@ -28,8 +28,6 @@ import org.jetbrains.annotations.NotNull;
 @Slf4j
 public class PRToolWindowFactory implements ToolWindowFactory {
 
-    private static final int MAX_REPO_QUALIFIERS = 20;
-
     @Override
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
         ContentFactory factory = ContentFactory.getInstance();
@@ -174,8 +172,7 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                             currentRepo,
                             starred,
                             webviewPanel.getPrStateFilter(),
-                            webviewPanel.isAssignedToMeFilter(),
-                            webviewPanel.isReviewRequestedFilter());
+                            webviewPanel.getSearchScope());
             log.info("Webview PR query: {}", query);
             List<PullRequest> prs = IntellijGitHubService.getInstance().searchPRs(token, query);
             prs.sort(Comparator.comparing(PullRequest::getCreatedAt).reversed());
@@ -186,7 +183,13 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                             : starred.isEmpty() ? null : starred.get(0);
 
             ApplicationManager.getApplication()
-                    .invokeLater(() -> webviewPanel.loadPRs(prs, defaultRepo));
+                    .invokeLater(
+                            () ->
+                                    webviewPanel.loadPRs(
+                                            prs,
+                                            defaultRepo,
+                                            webviewPanel.getSearchScope(),
+                                            currentRepo));
         } catch (Exception e) {
             log.warn("Failed to load PR list for webview: {}", e.getMessage());
             String detail = UserFacingErrors.forGitHub(e, "load pull requests");
@@ -202,21 +205,7 @@ public class PRToolWindowFactory implements ToolWindowFactory {
     }
 
     static String buildQuery(
-            String currentRepo,
-            List<String> starredRepos,
-            String state,
-            boolean assignedToMe,
-            boolean reviewRequested) {
-        List<String> repos = new ArrayList<>();
-        if (StringUtils.isNotBlank(currentRepo)) {
-            repos.add(currentRepo);
-        }
-        for (String r : starredRepos) {
-            if (repos.size() >= MAX_REPO_QUALIFIERS) break;
-            if (!r.equals(currentRepo)) {
-                repos.add(r);
-            }
-        }
+            String currentRepo, List<String> starredRepos, String state, String searchScope) {
         StringBuilder q = new StringBuilder("is:pr");
         if ("closed".equals(state)) {
             q.append(" is:closed");
@@ -224,20 +213,18 @@ public class PRToolWindowFactory implements ToolWindowFactory {
             q.append(" is:open");
         }
         q.append(" draft:false");
-        if (repos.isEmpty()) {
-            if (!assignedToMe && !reviewRequested) {
-                q.append(" author:@me");
+
+        switch (WebviewPanel.normalizeSearchScope(searchScope)) {
+            case "assigned" -> q.append(" assignee:@me");
+            case "reviewRequested" -> q.append(" review-requested:@me");
+            case "authored" -> q.append(" author:@me");
+            default -> {
+                if (StringUtils.isNotBlank(currentRepo)) {
+                    q.append(" repo:").append(currentRepo);
+                } else {
+                    q.append(" author:@me");
+                }
             }
-        } else {
-            for (String r : repos) {
-                q.append(" repo:").append(r);
-            }
-        }
-        if (assignedToMe) {
-            q.append(" assignee:@me");
-        }
-        if (reviewRequested) {
-            q.append(" review-requested:@me");
         }
         return q.toString();
     }

@@ -1,0 +1,21 @@
+{
+  // VS Code equivalent of the IntelliJ "Run IntelliJ Plugin (runIde)" config.
+  // Open the repository root in VS Code and press F5 (or pick this config in the
+  // Run and Debug view) to launch an Extension Development Host with PR Pilot loaded.
+  //
+  // The preLaunchTask builds the webview (../webview/dist, served by the extension)
+  // and the extension itself (vscode-extension/dist/extension.js). It also runs
+  // `npm install` so a fresh checkout works on first launch — analogous to how
+  // `:intellij-plugin:runIde` builds the webview before starting the sandbox IDE.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run PR Pilot Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode-extension"],
+      "outFiles": ["${workspaceFolder}/vscode-extension/dist/**/*.js"],
+      "preLaunchTask": "Build PR Pilot extension"
+    }
+  ]
+}
