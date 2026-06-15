@@ -50,6 +50,26 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
          * without Opus-tier wall-clock. Only applied when {@code reviewProvider} is COPILOT.
          */
         public String reviewEffort = "medium";
+
+        /**
+         * When true, the Copilot review/chat session inherits MCP servers from the Copilot CLI
+         * config ({@code ~/.copilot/mcp-config.json}) and any repo-local {@code .mcp.json} via the
+         * SDK's config discovery. Only applied when {@code reviewProvider} is COPILOT.
+         */
+        public boolean copilotInheritMcp = true;
+
+        /**
+         * Optional override of the Copilot config directory used to discover MCP servers. Empty
+         * uses the CLI default ({@code ~/.copilot}). Only applied when {@code reviewProvider} is
+         * COPILOT.
+         */
+        public String copilotConfigDir = "";
+
+        /** Default focus areas the reviewer should prioritize. Sent as prompt steering context. */
+        public String reviewFocusAreas = "";
+
+        /** Default extra instructions appended to every review prompt. */
+        public String reviewCustomInstructions = "";
     }
 
     private State myState = new State();
@@ -172,6 +192,38 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
     public void setReviewEffort(String effort) {
         myState.reviewEffort = effort != null ? effort : "medium";
+    }
+
+    public boolean isCopilotInheritMcp() {
+        return myState.copilotInheritMcp;
+    }
+
+    public void setCopilotInheritMcp(boolean inherit) {
+        myState.copilotInheritMcp = inherit;
+    }
+
+    public String getCopilotConfigDir() {
+        return myState.copilotConfigDir != null ? myState.copilotConfigDir : "";
+    }
+
+    public void setCopilotConfigDir(String dir) {
+        myState.copilotConfigDir = dir != null ? dir.trim() : "";
+    }
+
+    public String getReviewFocusAreas() {
+        return myState.reviewFocusAreas != null ? myState.reviewFocusAreas : "";
+    }
+
+    public void setReviewFocusAreas(String value) {
+        myState.reviewFocusAreas = value != null ? value.trim() : "";
+    }
+
+    public String getReviewCustomInstructions() {
+        return myState.reviewCustomInstructions != null ? myState.reviewCustomInstructions : "";
+    }
+
+    public void setReviewCustomInstructions(String value) {
+        myState.reviewCustomInstructions = value != null ? value.trim() : "";
     }
 
     /**

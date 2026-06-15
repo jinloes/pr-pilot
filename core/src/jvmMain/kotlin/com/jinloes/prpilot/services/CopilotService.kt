@@ -57,21 +57,23 @@ open class CopilotService @JvmOverloads constructor(
 
     private val activeRun = AtomicReference<ActiveRun?>()
 
+    /**
+     * @param inheritMcp when true, the Copilot session enables config discovery so it inherits
+     *   MCP servers from the Copilot CLI config (`~/.copilot/mcp-config.json`) and any repo-local
+     *   `.mcp.json` in the working directory.
+     * @param configDir optional override of the Copilot config directory; blank uses the CLI
+     *   default (`~/.copilot`).
+     */
+    @JvmOverloads
     @Throws(IOException::class, InterruptedException::class)
     fun reviewPR(
         request: PRReviewRequest,
         model: String,
         effort: String,
         onStatus: Consumer<String>,
-    ): ReviewResult = reviewPR(request, model, effort, onStatus, null)
-
-    @Throws(IOException::class, InterruptedException::class)
-    fun reviewPR(
-        request: PRReviewRequest,
-        model: String,
-        effort: String,
-        onStatus: Consumer<String>,
-        onChunk: BiConsumer<String, String>?,
+        onChunk: BiConsumer<String, String>? = null,
+        inheritMcp: Boolean = true,
+        configDir: String? = null,
     ): ReviewResult {
         val prompt = ClaudeService.buildPrompt(request)
         log.info(
@@ -80,18 +82,20 @@ open class CopilotService @JvmOverloads constructor(
             StringUtils.length(request.diff),
             StringUtils.length(request.knownPatterns),
         )
-        return runReview(prompt, model, effort, onStatus, onChunk)
+        return runReview(prompt, model, effort, inheritMcp, configDir, onStatus, onChunk)
     }
 
     private fun runReview(
         prompt: String,
         model: String,
         effort: String,
+        inheritMcp: Boolean,
+        configDir: String?,
         onStatus: Consumer<String>,
         onChunk: BiConsumer<String, String>?,
     ): ReviewResult {
         onStatus.accept(STATUS_GENERATING)
-        val raw = runSession(prompt, model, effort, onStatus, onChunk)
+        val raw = runSession(prompt, model, effort, inheritMcp, configDir, onStatus, onChunk)
         if (raw.isBlank()) {
             throw IOException("copilot produced no output.")
         }
@@ -107,6 +111,7 @@ open class CopilotService @JvmOverloads constructor(
         }
     }
 
+    @JvmOverloads
     @Throws(IOException::class, InterruptedException::class)
     fun chat(
         prContext: String,
@@ -114,9 +119,11 @@ open class CopilotService @JvmOverloads constructor(
         userMessage: String,
         effort: String,
         onChunk: Consumer<String>,
+        inheritMcp: Boolean = true,
+        configDir: String? = null,
     ): String {
         val prompt = ClaudeService.buildChatPrompt(prContext, history, userMessage)
-        return runSession(prompt, "", effort, { /* ignore status during chat */ }) { _, chunk ->
+        return runSession(prompt, "", effort, inheritMcp, configDir, { /* ignore status during chat */ }) { _, chunk ->
             onChunk.accept(chunk)
         }
     }
@@ -131,6 +138,8 @@ open class CopilotService @JvmOverloads constructor(
         prompt: String,
         model: String,
         effort: String,
+        inheritMcp: Boolean,
+        configDir: String?,
         onStatus: Consumer<String>,
         onChunk: BiConsumer<String, String>?,
     ): String {
@@ -142,7 +151,7 @@ open class CopilotService @JvmOverloads constructor(
             this.activeRun.set(currentRun)
 
             client.start()
-            val session = client.createSession(buildSessionRequest(model, effort))
+            val session = client.createSession(buildSessionRequest(model, effort, inheritMcp, configDir))
             currentRun.attachSession(session)
 
             val deltaBuffer = StringBuilder()
@@ -211,11 +220,18 @@ open class CopilotService @JvmOverloads constructor(
         )
     }
 
-    private fun buildSessionRequest(model: String, effort: String): SessionRequest =
+    private fun buildSessionRequest(
+        model: String,
+        effort: String,
+        inheritMcp: Boolean,
+        configDir: String?,
+    ): SessionRequest =
         SessionRequest(
             model = model,
             effort = normalizeReasoningEffort(effort),
             workingDir = workingDir,
+            enableConfigDiscovery = inheritMcp,
+            configDir = configDir?.trim()?.takeIf { it.isNotEmpty() },
         )
 
     private fun asIOException(ex: Exception): IOException {
@@ -249,6 +265,8 @@ open class CopilotService @JvmOverloads constructor(
         val model: String,
         val effort: String,
         val workingDir: File,
+        val enableConfigDiscovery: Boolean = false,
+        val configDir: String? = null,
     )
 
     internal interface RuntimeFactory {
@@ -306,8 +324,12 @@ open class CopilotService @JvmOverloads constructor(
                 .setStreaming(true)
                 .setWorkingDirectory(request.workingDir.absolutePath)
                 .setReasoningEffort(request.effort)
+                .setEnableConfigDiscovery(request.enableConfigDiscovery)
             if (request.model.isNotBlank()) {
                 config.setModel(request.model)
+            }
+            if (!request.configDir.isNullOrBlank()) {
+                config.setConfigDirectory(request.configDir)
             }
             return SdkRuntimeSession(awaitWithTimeout(client.createSession(config), "session creation"))
         }

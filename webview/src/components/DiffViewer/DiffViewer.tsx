@@ -509,6 +509,19 @@ const COMMENT_BADGE_CLASS: Record<LineComment['type'], string> = {
   note:       'text-status-note border-status-note/50 bg-status-note/10',
 }
 
+const SEVERITY_BADGE_CLASS: Record<NonNullable<LineComment['severity']>, string> = {
+  blocker: 'text-status-issue border-status-issue/60 bg-status-issue/15',
+  major:   'text-status-issue border-status-issue/40 bg-status-issue/10',
+  minor:   'text-status-suggestion border-status-suggestion/40 bg-status-suggestion/10',
+  nit:     'text-status-note border-status-note/40 bg-status-note/10',
+}
+
+const CONFIDENCE_BADGE_CLASS: Record<NonNullable<LineComment['confidence']>, string> = {
+  high:   'text-status-approve border-status-approve/40 bg-status-approve/10',
+  medium: 'text-status-comment border-status-comment/40 bg-status-comment/10',
+  low:    'text-muted-foreground border-border bg-muted/40',
+}
+
 interface InlineCommentRowProps {
   comment: LineComment
   globalIdx: number
@@ -556,6 +569,35 @@ function InlineCommentRow({ comment, globalIdx, focused, onEdit, onDelete, onVer
             >
               {comment.type}
             </Badge>
+            {comment.severity && (
+              <Badge
+                variant="outline"
+                className={cn('text-[9px] font-bold tracking-widest uppercase px-1.5 py-0', SEVERITY_BADGE_CLASS[comment.severity])}
+              >
+                {comment.severity}
+              </Badge>
+            )}
+            {comment.category && (
+              <Badge
+                variant="outline"
+                className="text-[9px] font-medium tracking-wide uppercase px-1.5 py-0 text-muted-foreground border-border bg-muted/40"
+              >
+                {comment.category}
+              </Badge>
+            )}
+            {comment.confidence && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="outline"
+                    className={cn('text-[9px] font-medium tracking-wide px-1.5 py-0', CONFIDENCE_BADGE_CLASS[comment.confidence])}
+                  >
+                    {comment.confidence} conf
+                  </Badge>
+                </TooltipTrigger>
+                {comment.rationale && <TooltipContent side="top" className="max-w-xs">{comment.rationale}</TooltipContent>}
+              </Tooltip>
+            )}
             {(onVerify || onEdit || onDelete) && !editing && (
               <div className="flex items-center gap-1">
                 {onVerify && (

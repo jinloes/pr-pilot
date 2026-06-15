@@ -128,6 +128,33 @@ class GitHubServiceTest : FunSpec({
             got.getBody() shouldBe "extract method"
         }
 
+        test("round-trips severity, category, confidence, and rationale") {
+            val c = LineComment("src/Bar.java", 10, "issue", "fix this").apply {
+                setSeverity("major")
+                setCategory("security")
+                setConfidence("high")
+                setRationale("traced the call site")
+            }
+            val body = GitHubService.encodeBody(review("s", "REQUEST_CHANGES", listOf(c)))
+            val decoded = GitHubService.decodeReview(body, emptyList())
+            val got = decoded.getLineComments()[0]
+            got.getSeverity() shouldBe "major"
+            got.getCategory() shouldBe "security"
+            got.getConfidence() shouldBe "high"
+            got.getRationale() shouldBe "traced the call site"
+        }
+
+        test("omits rich fields from JSON when blank and decodes them as empty") {
+            val c = LineComment("src/Bar.java", 10, "note", "minor")
+            val body = GitHubService.encodeBody(review("s", "COMMENT", listOf(c)))
+            body shouldNotContain "\"s\":"
+            body shouldNotContain "\"cf\":"
+            val got = GitHubService.decodeReview(body, emptyList()).getLineComments()[0]
+            got.getSeverity() shouldBe ""
+            got.getConfidence() shouldBe ""
+            got.getRationale() shouldBe ""
+        }
+
         test("embedded JSON takes precedence over API comments") {
             val embedded = LineComment("src/A.java", 5, "issue", "from embedded")
             val body = GitHubService.encodeBody(review("s", "COMMENT", listOf(embedded)))

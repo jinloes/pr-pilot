@@ -18,6 +18,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import kotlin.jvm.JvmOverloads
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -67,6 +68,8 @@ class GitHubService(
         const val APPROVE_BODY = "Looks good to me!"
         const val REQUEST_CHANGES_BODY = "Requesting changes."
         const val COMMENT_BODY = "Leaving comments."
+        private const val DETACHED_COMMENTS_HEADER =
+            "**Comments not attached inline (invalid diff positions):**"
 
         /**
          * Returns the effective review body, substituting a default for blank submissions.
@@ -109,6 +112,10 @@ class GitHubService(
                         put("l", c.getLine())
                         put("t", c.getType())
                         put("b", c.getBody())
+                        if (c.getSeverity().isNotBlank()) put("s", c.getSeverity())
+                        if (c.getCategory().isNotBlank()) put("c", c.getCategory())
+                        if (c.getConfidence().isNotBlank()) put("cf", c.getConfidence())
+                        if (c.getRationale().isNotBlank()) put("r", c.getRationale())
                     })
                 }
             }
@@ -160,7 +167,14 @@ class GitHubService(
                             val line = obj["l"]?.jsonPrimitive?.intOrNull ?: 0
                             val type = obj["t"]?.jsonPrimitive?.content ?: "note"
                             val text = obj["b"]?.jsonPrimitive?.content ?: ""
-                            comments.add(LineComment(file, line, type, text))
+                            comments.add(
+                                LineComment(file, line, type, text).apply {
+                                    setSeverity(obj["s"]?.jsonPrimitive?.content)
+                                    setCategory(obj["c"]?.jsonPrimitive?.content)
+                                    setConfidence(obj["cf"]?.jsonPrimitive?.content)
+                                    setRationale(obj["r"]?.jsonPrimitive?.content)
+                                },
+                            )
                         }
                         return ReviewResult(summary, verdict, comments)
                     } catch (_: Exception) {
@@ -260,26 +274,28 @@ class GitHubService(
          * orphans before the inline POST.
          */
         fun buildOrphanSection(orphans: List<LineComment>): String {
-            val sb = StringBuilder("**Comments not attached inline (invalid diff positions):**\n")
+            val sb = StringBuilder("$DETACHED_COMMENTS_HEADER\n")
             for (c in orphans) {
-                sb.append("- `").append(c.getFile())
-                if (c.getLine() > 0) sb.append(":").append(c.getLine())
-                sb.append("`: ").append(c.getBody()).append("\n")
+                appendDetachedCommentLine(sb, c.getFile(), c.getLine(), c.getBody())
             }
             return sb.toString().trimEnd()
         }
 
         fun buildDroppedSection(dropped: List<JsonObject>): String {
-            val sb = StringBuilder("**Comments not attached inline (invalid diff positions):**\n")
+            val sb = StringBuilder("$DETACHED_COMMENTS_HEADER\n")
             for (c in dropped) {
                 val path = c["path"]?.jsonPrimitive?.content ?: ""
                 val line = c["line"]?.jsonPrimitive?.intOrNull ?: 0
                 val body = c["body"]?.jsonPrimitive?.content ?: ""
-                sb.append("- `").append(path)
-                if (line > 0) sb.append(":").append(line)
-                sb.append("`: ").append(body).append("\n")
+                appendDetachedCommentLine(sb, path, line, body)
             }
             return sb.toString().trimEnd()
+        }
+
+        private fun appendDetachedCommentLine(sb: StringBuilder, path: String, line: Int, body: String) {
+            sb.append("- `").append(path)
+            if (line > 0) sb.append(":").append(line)
+            sb.append("`: ").append(body).append("\n")
         }
     }
 
@@ -439,10 +455,12 @@ class GitHubService(
 
     /**
      * Searches GitHub for pull requests matching [query]. Blocking — wraps the Ktor suspend call
-     * with [runBlockingCompat] so Java callers can invoke this synchronously.
+     * with [runBlockingCompat] so Java callers can invoke this synchronously. [perPage] controls
+     * the GitHub page size; callers that need to detect truncation can request one extra row.
      */
-    fun searchPRs(token: String, query: String): List<PullRequest> = runBlockingCompat {
-        val url = "$apiBase/search/issues?q=${urlEncode(query)}&per_page=50&sort=updated"
+    @JvmOverloads
+    fun searchPRs(token: String, query: String, perPage: Int = 50): List<PullRequest> = runBlockingCompat {
+        val url = "$apiBase/search/issues?q=${urlEncode(query)}&per_page=$perPage&sort=updated"
         val body = get(token, url, "application/vnd.github.v3+json")
         val result = JSON.decodeFromString<SearchResult>(body)
         result.items.map { el ->

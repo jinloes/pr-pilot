@@ -174,7 +174,15 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                             webviewPanel.getPrStateFilter(),
                             webviewPanel.getSearchScope());
             log.info("Webview PR query: {}", query);
-            List<PullRequest> prs = IntellijGitHubService.getInstance().searchPRs(token, query);
+            // Over-fetch by one so we can distinguish "exactly the limit" from "more exist".
+            List<PullRequest> fetched =
+                    IntellijGitHubService.getInstance()
+                            .searchPRs(token, query, WebviewPanel.PR_SEARCH_LIMIT + 1);
+            boolean limited = fetched.size() > WebviewPanel.PR_SEARCH_LIMIT;
+            List<PullRequest> prs =
+                    limited
+                            ? new ArrayList<>(fetched.subList(0, WebviewPanel.PR_SEARCH_LIMIT))
+                            : fetched;
             prs.sort(Comparator.comparing(PullRequest::getCreatedAt).reversed());
 
             String defaultRepo =
@@ -182,6 +190,7 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                             ? currentRepo
                             : starred.isEmpty() ? null : starred.get(0);
 
+            boolean finalLimited = limited;
             ApplicationManager.getApplication()
                     .invokeLater(
                             () ->
@@ -189,7 +198,8 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                                             prs,
                                             defaultRepo,
                                             webviewPanel.getSearchScope(),
-                                            currentRepo));
+                                            currentRepo,
+                                            finalLimited));
         } catch (Exception e) {
             log.warn("Failed to load PR list for webview: {}", e.getMessage());
             String detail = UserFacingErrors.forGitHub(e, "load pull requests");

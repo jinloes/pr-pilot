@@ -98,6 +98,36 @@ class PluginSettingsTest {
     }
 
     @Test
+    void copilotInheritMcpDefaultsToTrue() {
+        PluginSettings s = new PluginSettings();
+        assertThat(s.isCopilotInheritMcp()).isTrue();
+    }
+
+    @Test
+    void copilotInheritMcpRoundTrips() {
+        PluginSettings s = new PluginSettings();
+        s.setCopilotInheritMcp(false);
+        assertThat(s.isCopilotInheritMcp()).isFalse();
+        s.setCopilotInheritMcp(true);
+        assertThat(s.isCopilotInheritMcp()).isTrue();
+    }
+
+    @Test
+    void copilotConfigDirDefaultsToEmpty() {
+        PluginSettings s = new PluginSettings();
+        assertThat(s.getCopilotConfigDir()).isEmpty();
+    }
+
+    @Test
+    void copilotConfigDirTrimsAndRoundTrips() {
+        PluginSettings s = new PluginSettings();
+        s.setCopilotConfigDir("  /custom/.copilot  ");
+        assertThat(s.getCopilotConfigDir()).isEqualTo("/custom/.copilot");
+        s.setCopilotConfigDir(null);
+        assertThat(s.getCopilotConfigDir()).isEmpty();
+    }
+
+    @Test
     void activeModelReflectsSelectedProvider() {
         PluginSettings s = new PluginSettings();
         s.setReviewModel("claude-opus-4-7");

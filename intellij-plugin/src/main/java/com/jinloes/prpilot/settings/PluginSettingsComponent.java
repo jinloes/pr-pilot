@@ -2,6 +2,8 @@ package com.jinloes.prpilot.settings;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.ui.components.JBScrollPane;
+import com.intellij.ui.components.JBTextArea;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
@@ -51,6 +53,11 @@ public class PluginSettingsComponent {
             new JComboBox<>(CLAUDE_MODELS.stream().map(ModelOption::label).toArray(String[]::new));
     private final JComboBox<String> copilotModelCombo = new JComboBox<>(COPILOT_MODEL_SUGGESTIONS);
     private final JComboBox<String> copilotEffortCombo = new JComboBox<>(COPILOT_EFFORTS);
+    private final JCheckBox copilotInheritMcpBox =
+            new JCheckBox("Inherit MCP servers from the Copilot CLI config");
+    private final JBTextField copilotConfigDirField = new JBTextField();
+    private final JBTextField reviewFocusAreasField = new JBTextField();
+    private final JBTextArea reviewCustomInstructionsArea = new JBTextArea(3, 0);
     private final JComboBox<ReviewProvider> providerCombo =
             new JComboBox<>(ReviewProvider.values());
 
@@ -135,6 +142,14 @@ public class PluginSettingsComponent {
                                 + " Applies only to GitHub Copilot.</small></html>");
         effortRowPanel.add(effortHint);
 
+        JLabel mcpHint =
+                new JBLabel(
+                        "<html><small>When enabled, the Copilot review/chat session inherits MCP"
+                                + " servers from <code>~/.copilot/mcp-config.json</code> and any"
+                                + " repo-local <code>.mcp.json</code>. Applies only to GitHub"
+                                + " Copilot.</small></html>");
+        mcpHint.setBorder(JBUI.Borders.emptyTop(2));
+
         JLabel note =
                 new JBLabel(
                         "<html><small>Authentication is handled by the <b>gh</b> CLI.<br>"
@@ -177,6 +192,29 @@ public class PluginSettingsComponent {
                                 new JBLabel("Review model:"), modelComboPanel, 1, false)
                         .addLabeledComponent(
                                 new JBLabel("Reasoning effort:"), effortRowPanel, 1, false)
+                        .addComponent(copilotInheritMcpBox, 1)
+                        .addLabeledComponent(
+                                new JBLabel("Copilot config dir:"), copilotConfigDirField, 1, false)
+                        .addComponent(mcpHint, 1)
+                        .addSeparator(8)
+                        .addLabeledComponent(
+                                new JBLabel("Review focus areas:"), reviewFocusAreasField, 1, false)
+                        .addComponent(
+                                new JBLabel(
+                                        "<html><small>Comma-separated areas to prioritize (e.g."
+                                                + " security, performance, test coverage)."
+                                                + "</small></html>"),
+                                1)
+                        .addLabeledComponent(
+                                new JBLabel("Custom review instructions:"),
+                                new JBScrollPane(reviewCustomInstructionsArea),
+                                1,
+                                false)
+                        .addComponent(
+                                new JBLabel(
+                                        "<html><small>Extra instructions appended to every review"
+                                                + " prompt (e.g. team conventions).</small></html>"),
+                                1)
                         .addSeparator(8)
                         .addComponent(notificationsEnabledBox, 1)
                         .addComponent(notifSubPanel, 1)
@@ -280,12 +318,46 @@ public class PluginSettingsComponent {
         copilotEffortCombo.setSelectedItem(value);
     }
 
+    public boolean isCopilotInheritMcp() {
+        return copilotInheritMcpBox.isSelected();
+    }
+
+    public void setCopilotInheritMcp(boolean v) {
+        copilotInheritMcpBox.setSelected(v);
+    }
+
+    public String getCopilotConfigDir() {
+        return copilotConfigDirField.getText().trim();
+    }
+
+    public void setCopilotConfigDir(String dir) {
+        copilotConfigDirField.setText(dir != null ? dir : "");
+    }
+
+    public String getReviewFocusAreas() {
+        return reviewFocusAreasField.getText().trim();
+    }
+
+    public void setReviewFocusAreas(String value) {
+        reviewFocusAreasField.setText(value != null ? value : "");
+    }
+
+    public String getReviewCustomInstructions() {
+        return reviewCustomInstructionsArea.getText().trim();
+    }
+
+    public void setReviewCustomInstructions(String value) {
+        reviewCustomInstructionsArea.setText(value != null ? value : "");
+    }
+
     private void updateActiveModelCombo() {
         ReviewProvider active = getReviewProvider();
         ((java.awt.CardLayout) modelComboPanel.getLayout()).show(modelComboPanel, active.getId());
         // Effort only applies to Copilot — disable the combo for Claude so the form doesn't
         // reflow on every provider toggle. The hint label explains why.
         copilotEffortCombo.setEnabled(active == ReviewProvider.COPILOT);
+        copilotInheritMcpBox.setEnabled(active == ReviewProvider.COPILOT);
+        copilotConfigDirField.setEnabled(active == ReviewProvider.COPILOT);
     }
 
     /**

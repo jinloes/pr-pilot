@@ -23,11 +23,16 @@ function readState(): SettingsState {
         reviewModelCopilot: c.get<string>('reviewModelCopilot', ''),
         reviewEffort: c.get<string>('reviewEffort', 'medium'),
         githubBaseUrl: c.get<string>('githubBaseUrl', 'https://github.com'),
+        copilotInheritMcp: c.get<boolean>('copilotInheritMcp', true),
+        copilotConfigDir: c.get<string>('copilotConfigDir', ''),
+        reviewFocusAreas: c.get<string>('reviewFocusAreas', ''),
+        reviewCustomInstructions: c.get<string>('reviewCustomInstructions', ''),
     };
 }
 
 const ALLOWED_KEYS = new Set([
     'reviewProvider', 'reviewModel', 'reviewModelCopilot', 'reviewEffort', 'githubBaseUrl',
+    'copilotInheritMcp', 'copilotConfigDir', 'reviewFocusAreas', 'reviewCustomInstructions',
 ]);
 
 /** Opens (or reveals) the PR Pilot settings webview panel. */
@@ -65,6 +70,21 @@ export function openSettings(context: vscode.ExtensionContext): void {
             case 'update': {
                 const key = typeof msg.key === 'string' ? msg.key : '';
                 if (!ALLOWED_KEYS.has(key)) return;
+                if (key === 'copilotInheritMcp') {
+                    const boolValue = msg.value === true;
+                    try {
+                        await config().update(key, boolValue, vscode.ConfigurationTarget.Global);
+                        current.webview.postMessage({ type: 'saveResult', ok: true, key, message: 'Saved.' });
+                    } catch (err) {
+                        current.webview.postMessage({
+                            type: 'saveResult',
+                            ok: false,
+                            key,
+                            message: err instanceof Error ? err.message : 'Could not save setting.',
+                        });
+                    }
+                    break;
+                }
                 const value = typeof msg.value === 'string' ? msg.value : '';
                 if (key === 'githubBaseUrl' && value && !value.startsWith('https://')) {
                     current.webview.postMessage({

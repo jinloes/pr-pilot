@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
-import { buildPRSearchQuery } from '../src/github';
+import { buildPRSearchQuery, detectCurrentRepo } from '../src/github';
 
 test('buildPRSearchQuery uses current repo when scope is currentRepo', () => {
   assert.equal(
@@ -35,5 +38,49 @@ test('buildPRSearchQuery supports authored scope', () => {
   assert.equal(
     buildPRSearchQuery('all', 'authored'),
     'is:pr draft:false author:@me',
+  );
+});
+
+// ── detectCurrentRepo ───────────────────────────────────────────────────────
+
+function withGitConfig(config: string, fn: (dir: string) => void): void {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-pilot-repo-'));
+  try {
+    fs.mkdirSync(path.join(dir, '.git'));
+    fs.writeFileSync(path.join(dir, '.git', 'config'), config);
+    fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('detectCurrentRepo reads the origin remote (https)', () => {
+  withGitConfig(
+    '[remote "origin"]\n\turl = https://github.com/acme/platform.git\n',
+    (dir) => assert.equal(detectCurrentRepo(dir), 'acme/platform'),
+  );
+});
+
+test('detectCurrentRepo reads the origin remote (scp-style ssh)', () => {
+  withGitConfig(
+    '[remote "origin"]\n\turl = git@github.com:acme/platform.git\n',
+    (dir) => assert.equal(detectCurrentRepo(dir), 'acme/platform'),
+  );
+});
+
+test('detectCurrentRepo picks origin, not the first remote in the file', () => {
+  // Regression: a non-origin remote listed first must not win, or the list would
+  // search the wrong repo and (for a personal fork) show only the user's PRs.
+  withGitConfig(
+    '[remote "upstream"]\n\turl = https://github.com/upstream-org/platform.git\n' +
+      '[remote "origin"]\n\turl = https://github.com/acme/platform.git\n',
+    (dir) => assert.equal(detectCurrentRepo(dir), 'acme/platform'),
+  );
+});
+
+test('detectCurrentRepo returns null when there is no origin remote', () => {
+  withGitConfig(
+    '[remote "upstream"]\n\turl = https://github.com/upstream-org/platform.git\n',
+    (dir) => assert.equal(detectCurrentRepo(dir), null),
   );
 });

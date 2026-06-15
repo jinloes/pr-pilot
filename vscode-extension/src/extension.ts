@@ -6,6 +6,7 @@ import * as claude from './claude';
 import * as copilot from './copilot';
 import * as worktree from './worktree';
 import * as settings from './settings';
+import * as workspace from './workspace';
 import { COPILOT_MODEL_SUGGESTIONS } from './settingsView';
 import { classifySetupAuthError } from './authError';
 import { toUserFacingError } from './userFacingError';
@@ -26,22 +27,26 @@ function cancelActiveProvider(): void {
 
 export function activate(context: vscode.ExtensionContext) {
     const provider = new ClaudeReviewsViewProvider(context.extensionUri);
-    const notificationPoller = new PRNotificationPoller();
+    const notificationPoller = new PRNotificationPoller(context);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider('pr-pilot.main', provider, {
             webviewOptions: { retainContextWhenHidden: true },
         }),
+        vscode.commands.registerCommand('pr-pilot.open', () => provider.openPanel()),
         vscode.commands.registerCommand('pr-pilot.selectCopilotModel', selectCopilotModel),
         vscode.commands.registerCommand('pr-pilot.openSettings', () => settings.openSettings(context)),
         notificationPoller,
     );
     notificationPoller.syncFromSettings();
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
+        // A change to the notification scope (which PRs match) must re-seed silently so existing
+        // PRs are not announced retroactively; an interval-only change keeps the current seed.
         if (event.affectsConfiguration('pr-pilot.notificationsEnabled')
             || event.affectsConfiguration('pr-pilot.notifyReviewRequested')
             || event.affectsConfiguration('pr-pilot.notifyStarredRepos')
-            || event.affectsConfiguration('pr-pilot.notificationPollMinutes')
             || event.affectsConfiguration('pr-pilot.githubBaseUrl')) {
+            notificationPoller.resetAndSync();
+        } else if (event.affectsConfiguration('pr-pilot.notificationPollMinutes')) {
             notificationPoller.syncFromSettings();
         }
     }));
@@ -109,18 +114,43 @@ export function deactivate() {}
 
 // ── Background PR notifications ───────────────────────────────────────────────
 
+/** globalState key for the persisted seen-PR set so notifications survive reloads/restarts. */
+const NOTIFY_STATE_KEY = 'pr-pilot.notifications.seenState';
+
+interface SeenState {
+    seeded: boolean;
+    seen: string[];
+}
+
 class PRNotificationPoller implements vscode.Disposable {
     private timer: NodeJS.Timeout | null = null;
-    private seeded = false;
-    private readonly seen = new Set<string>();
+    private seeded: boolean;
+    private readonly seen: Set<string>;
     private running = false;
 
+    constructor(private readonly context: vscode.ExtensionContext) {
+        // Restore prior seen state so a reload/restart does not silently re-seed and swallow PRs
+        // that appeared while the window was closed.
+        const saved = context.globalState.get<SeenState>(NOTIFY_STATE_KEY);
+        this.seeded = saved?.seeded ?? false;
+        this.seen = new Set(saved?.seen ?? []);
+    }
+
+    /** Starts/restarts the timer for the current interval, preserving the existing seed. */
     syncFromSettings(): void {
         this.stop();
         if (!config().get<boolean>('notificationsEnabled', false)) return;
         const minutes = Math.max(1, config().get<number>('notificationPollMinutes', 5));
         void this.poll();
         this.timer = setInterval(() => void this.poll(), minutes * 60_000);
+    }
+
+    /** Clears the seed and restarts so a scope/host change re-seeds silently instead of flooding. */
+    resetAndSync(): void {
+        this.seeded = false;
+        this.seen.clear();
+        void this.persist();
+        this.syncFromSettings();
     }
 
     dispose(): void {
@@ -130,6 +160,13 @@ class PRNotificationPoller implements vscode.Disposable {
     private stop(): void {
         if (this.timer) clearInterval(this.timer);
         this.timer = null;
+    }
+
+    private persist(): Thenable<void> {
+        return this.context.globalState.update(NOTIFY_STATE_KEY, {
+            seeded: this.seeded,
+            seen: [...this.seen],
+        } satisfies SeenState);
     }
 
     private async poll(): Promise<void> {
@@ -163,6 +200,7 @@ class PRNotificationPoller implements vscode.Disposable {
             if (!this.seeded) {
                 for (const pr of unique) this.seen.add(prNotificationKey(pr));
                 this.seeded = true;
+                await this.persist();
                 return;
             }
 
@@ -182,6 +220,7 @@ class PRNotificationPoller implements vscode.Disposable {
             for (const key of Array.from(this.seen)) {
                 if (!liveKeys.has(key)) this.seen.delete(key);
             }
+            await this.persist();
         } catch (err) {
             console.warn('[pr-pilot] PR notification poll failed:', err instanceof Error ? err.message : String(err));
         } finally {
@@ -217,30 +256,100 @@ interface ActivePR {
 }
 
 /**
- * Provides the Claude Reviews webview view in the activity bar.
- * Serves the pre-built webview/dist/ React app and bridges all messages.
+ * Provides the PR Pilot editor tab plus a small Activity Bar launcher.
+ * Serves the pre-built webview/dist/ React app and bridges all messages in the editor tab.
  */
 class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
+    private readonly distUri: vscode.Uri;
+    private panel: vscode.WebviewPanel | undefined;
 
-    constructor(private readonly extensionUri: vscode.Uri) {}
+    constructor(extensionUri: vscode.Uri) {
+        this.distUri = vscode.Uri.joinPath(extensionUri, '..', 'webview', 'dist');
+    }
+
+    openPanel(): void {
+        if (this.panel) {
+            this.panel.reveal(vscode.ViewColumn.Active);
+            return;
+        }
+
+        const panel = vscode.window.createWebviewPanel(
+            'pr-pilot.main',
+            'PR Pilot',
+            vscode.ViewColumn.Active,
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true,
+                localResourceRoots: [this.distUri],
+            },
+        );
+        this.panel = panel;
+        this.initializeWebview(panel.webview, panel.onDidDispose, () => {
+            if (this.panel === panel) this.panel = undefined;
+        });
+    }
 
     resolveWebviewView(
         webviewView: vscode.WebviewView,
         _context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken,
     ): void {
-        const distUri = vscode.Uri.joinPath(this.extensionUri, '..', 'webview', 'dist');
-
+        this.openPanel();
         webviewView.webview.options = {
-            enableScripts: true,
-            localResourceRoots: [distUri],
+            enableCommandUris: true,
         };
+        webviewView.webview.html = this.getLauncherHtml();
+    }
 
-        webviewView.webview.html = this.getHtmlContent(webviewView.webview, distUri);
+    private getLauncherHtml(): string {
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PR Pilot</title>
+  <style>
+    body {
+      color: var(--vscode-foreground);
+      background: var(--vscode-sideBar-background);
+      font-family: var(--vscode-font-family);
+      padding: 16px;
+    }
+    a.button {
+      color: var(--vscode-button-foreground);
+      background: var(--vscode-button-background);
+      border: 0;
+      border-radius: 2px;
+      cursor: pointer;
+      display: inline-block;
+      padding: 6px 12px;
+      text-decoration: none;
+    }
+    a.button:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+    p {
+      color: var(--vscode-descriptionForeground);
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <p>PR Pilot opens in an editor tab.</p>
+  <a class="button" href="command:pr-pilot.open">Open PR Pilot</a>
+</body>
+</html>`;
+    }
+
+    private initializeWebview(
+        webview: vscode.Webview,
+        onDidDispose: vscode.Event<void>,
+        onDispose?: () => void,
+    ): void {
+        webview.html = this.getHtmlContent(webview);
 
         // Per-view state — each panel gets its own instance of these fields
         const state: ViewState = {
-            webview: webviewView.webview,
+            webview,
             cachedToken: null,
             prStateFilter: 'open',
             searchScope: 'currentRepo',
@@ -258,23 +367,26 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
 
         // Tear down any PR-branch worktree when the view is disposed so we don't leak
         // temp directories or detached worktrees registered against the user's repo.
-        webviewView.onDidDispose(() => clearWorktree(state));
+        onDidDispose(() => {
+            clearWorktree(state);
+            onDispose?.();
+        });
 
         // Trigger initial PR load so the user sees results (or setup guidance) immediately
         // rather than an indefinite loading spinner.
         handleRefreshPRs(state, {}).catch(console.error);
     }
 
-    private getHtmlContent(webview: vscode.Webview, distUri: vscode.Uri): string {
-        const indexPath = path.join(distUri.fsPath, 'index.html');
+    private getHtmlContent(webview: vscode.Webview): string {
+        const indexPath = path.join(this.distUri.fsPath, 'index.html');
         if (!fs.existsSync(indexPath)) {
             return errorHtml('webview/dist/index.html not found. Run "npm run build" inside webview/.');
         }
         let html = fs.readFileSync(indexPath, 'utf8');
         html = html.replace(/(src|href)="\.\/([^"]+)"/g, (_m, attr, p) =>
-            `${attr}="${webview.asWebviewUri(vscode.Uri.joinPath(distUri, p)).toString()}"`);
+            `${attr}="${webview.asWebviewUri(vscode.Uri.joinPath(this.distUri, p)).toString()}"`);
         html = html.replace(/(src|href)="\/([^"]+)"/g, (_m, attr, p) =>
-            `${attr}="${webview.asWebviewUri(vscode.Uri.joinPath(distUri, p)).toString()}"`);
+            `${attr}="${webview.asWebviewUri(vscode.Uri.joinPath(this.distUri, p)).toString()}"`);
         return html;
     }
 
@@ -455,8 +567,74 @@ function reviewEffort(): string {
     return value && value.trim().length > 0 ? value : 'medium';
 }
 
+function copilotInheritMcp(): boolean {
+    return config().get<boolean>('copilotInheritMcp', true);
+}
+
+function copilotConfigDir(): string {
+    return config().get<string>('copilotConfigDir', '').trim();
+}
+
+function reviewFocusAreas(): string {
+    return config().get<string>('reviewFocusAreas', '').trim();
+}
+
+function reviewCustomInstructions(): string {
+    return config().get<string>('reviewCustomInstructions', '').trim();
+}
+
+/** Candidate contributor-doc files, in priority order, scanned for repo review guidelines. */
+const GUIDELINE_FILES = [
+    'AGENTS.md',
+    'CONTRIBUTING.md',
+    '.github/CONTRIBUTING.md',
+    'docs/CONTRIBUTING.md',
+    '.github/pull_request_template.md',
+];
+
+/** Total cap on guideline bytes fed to the prompt so a large doc can't blow up the context. */
+const MAX_GUIDELINES_BYTES = 6_000;
+
+/**
+ * Reads repo contributor docs from the review working directory (the PR-branch worktree or the
+ * open workspace) and concatenates them, capped at {@link MAX_GUIDELINES_BYTES}, so the model can
+ * weight findings against the project's own review conventions. Returns '' when none are found.
+ */
+function readRepoGuidelines(dir: string): string {
+    if (!dir) return '';
+    const parts: string[] = [];
+    let total = 0;
+    for (const rel of GUIDELINE_FILES) {
+        if (total >= MAX_GUIDELINES_BYTES) break;
+        try {
+            const full = path.join(dir, rel);
+            if (!fs.statSync(full).isFile()) continue;
+            let content = fs.readFileSync(full, 'utf8').trim();
+            if (!content) continue;
+            const remaining = MAX_GUIDELINES_BYTES - total;
+            if (content.length > remaining) content = `${content.substring(0, remaining)}\n…(truncated)`;
+            parts.push(`## ${rel}\n${content}`);
+            total += content.length;
+        } catch { /* unreadable or missing — skip */ }
+    }
+    return parts.join('\n\n');
+}
+
+/** Formats a prior generated review as compact context for a re-generation prompt. */
+function formatPriorReview(result: github.ReviewResult | null): string {
+    if (!result) return '';
+    const lines = [`Verdict: ${result.verdict}`];
+    if (result.summary) lines.push(`Summary: ${result.summary}`);
+    for (const c of result.lineComments) {
+        lines.push(`- ${c.file}:${c.line} [${c.type}] ${c.body}`);
+    }
+    return lines.join('\n');
+}
+
 function workingDir(): string {
-    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+    return workspace.resolveWorkspaceDir(
+        vscode.workspace.workspaceFolders?.map(folder => folder.uri.fsPath) ?? [],
+    );
 }
 
 async function getToken(state: ViewState): Promise<string> {
@@ -481,13 +659,16 @@ async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>):
         }
 
         const currentRepo = github.detectCurrentRepo(workingDir() || process.cwd());
-        const prs = await github.searchPRs(
+        const found = await github.searchPRs(
             token,
             githubBaseUrl(),
             state.prStateFilter,
             state.searchScope,
             currentRepo ?? undefined,
         );
+        // searchPRs over-fetches by one to distinguish "exactly the limit" from "more exist".
+        const limited = found.length > github.PR_SEARCH_LIMIT;
+        const prs = limited ? found.slice(0, github.PR_SEARCH_LIMIT) : found;
         prs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         push(state, {
             type: 'prListLoaded',
@@ -496,8 +677,8 @@ async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>):
             listStatus: {
                 searchScope: state.searchScope,
                 currentRepo: currentRepo ?? undefined,
-                resultLimit: 50,
-                limited: prs.length >= 50,
+                resultLimit: github.PR_SEARCH_LIMIT,
+                limited,
             },
         });
     } catch (err) {
@@ -548,7 +729,13 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
 
         if (prKey(state.activePR) !== key) return;
 
-        state.activePR = { number, owner, repo, title, body };
+        state.activePR = {
+            number,
+            owner,
+            repo,
+            title: detail.title ?? title,
+            body: detail.body ?? body,
+        };
         state.activeDiff = diff;
         state.activeReviewResult = draft?.result ?? null;
         state.pendingReviewId = draft?.id ?? null;
@@ -609,9 +796,6 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             body: state.activePR?.body ?? '',
         };
 
-        const prompt = claude.buildPrompt({ pr, existingReviews });
-        const isCopilot = provider() === 'copilot';
-
         const reviewDir = await resolveWorkingDir(
             state,
             { number, owner, repo, title: pr.title, body: pr.body ?? '' },
@@ -620,12 +804,32 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             key,
         );
 
+        // Per-review overrides from the webview take precedence over the saved settings defaults.
+        const focusAreas = typeof msg.focusAreas === 'string' && msg.focusAreas.trim()
+            ? msg.focusAreas.trim()
+            : reviewFocusAreas();
+        const customInstructions = typeof msg.customInstructions === 'string' && msg.customInstructions.trim()
+            ? msg.customInstructions.trim()
+            : reviewCustomInstructions();
+
+        const prompt = claude.buildPrompt({
+            pr,
+            existingReviews,
+            repoGuidelines: readRepoGuidelines(reviewDir),
+            priorReview: formatPriorReview(state.activeReviewResult),
+            focusAreas,
+            customInstructions,
+        });
+        const isCopilot = provider() === 'copilot';
+
         const result = isCopilot
             ? await copilot.reviewPR({
                 prompt,
                 model: reviewModel(),
                 effort: reviewEffort(),
                 workingDir: reviewDir,
+                inheritMcp: copilotInheritMcp(),
+                configDir: copilotConfigDir(),
                 onStatus: (status) => push(state, { type: 'reviewGenerating', prKey: key, message: status }),
                 onChunk: (kind, chunk) => push(state, { type: 'reviewChunk', prKey: key, kind, chunk }),
             })
@@ -752,6 +956,8 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
                 prompt,
                 effort: reviewEffort(),
                 workingDir: chatDir,
+                inheritMcp: copilotInheritMcp(),
+                configDir: copilotConfigDir(),
                 onChunk: (chunk) => push(state, { type: 'chatChunk', prKey: key ?? undefined, chunk }),
             })
             : await claude.chat({
@@ -780,10 +986,12 @@ function buildPrContext(state: ViewState): string {
     if (state.activeReviewResult) {
         const r = state.activeReviewResult;
         lines.push('', `Review verdict: ${r.verdict}`);
-        if (r.summary) lines.push(`Summary: ${r.summary.substring(0, 500)}`);
+        if (r.summary) lines.push(`Summary: ${r.summary}`);
     }
     if (state.activeDiff) {
-        lines.push('', 'Diff (excerpt):', state.activeDiff.substring(0, 4000));
+        // Pass the full diff (already capped at 80 KB by getPRDiff) for parity with the IntelliJ
+        // host, which also sends the complete diff as chat context.
+        lines.push('', 'Diff:', state.activeDiff);
     }
     return lines.join('\n');
 }
@@ -799,7 +1007,7 @@ function isCancellationError(err: unknown): boolean {
 function errorHtml(message: string): string {
     return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Claude Reviews</title></head>
+<head><meta charset="UTF-8"><title>PR Pilot</title></head>
 <body style="color:#e8a030;background:#0a0805;font-family:monospace;padding:16px;">
   <p>${message}</p>
 </body>

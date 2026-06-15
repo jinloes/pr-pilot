@@ -33,7 +33,11 @@ public class PluginSettingsConfigurable implements Configurable {
                 || !component.getReviewModel().equals(s.getReviewModel())
                 || !component.getReviewModelCopilot().equals(s.getReviewModelCopilot())
                 || component.getReviewProvider() != s.getReviewProvider()
-                || !component.getReviewEffort().equals(s.getReviewEffort());
+                || !component.getReviewEffort().equals(s.getReviewEffort())
+                || component.isCopilotInheritMcp() != s.isCopilotInheritMcp()
+                || !component.getCopilotConfigDir().equals(s.getCopilotConfigDir())
+                || !component.getReviewFocusAreas().equals(s.getReviewFocusAreas())
+                || !component.getReviewCustomInstructions().equals(s.getReviewCustomInstructions());
     }
 
     @Override
@@ -48,6 +52,10 @@ public class PluginSettingsConfigurable implements Configurable {
         s.setReviewModelCopilot(component.getReviewModelCopilot());
         s.setReviewProvider(component.getReviewProvider());
         s.setReviewEffort(component.getReviewEffort());
+        s.setCopilotInheritMcp(component.isCopilotInheritMcp());
+        s.setCopilotConfigDir(component.getCopilotConfigDir());
+        s.setReviewFocusAreas(component.getReviewFocusAreas());
+        s.setReviewCustomInstructions(component.getReviewCustomInstructions());
 
         // Restart/stop polling to reflect the new settings immediately
         PRNotificationService svc = PRNotificationService.getInstance();
@@ -70,6 +78,10 @@ public class PluginSettingsConfigurable implements Configurable {
         component.setReviewModelCopilot(s.getReviewModelCopilot());
         component.setReviewProvider(s.getReviewProvider());
         component.setReviewEffort(s.getReviewEffort());
+        component.setCopilotInheritMcp(s.isCopilotInheritMcp());
+        component.setCopilotConfigDir(s.getCopilotConfigDir());
+        component.setReviewFocusAreas(s.getReviewFocusAreas());
+        component.setReviewCustomInstructions(s.getReviewCustomInstructions());
     }
 
     @Override

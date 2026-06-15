@@ -191,9 +191,11 @@ async function runSession(options: {
     model: string;
     effort: string;
     workingDir?: string;
+    inheritMcp?: boolean;
+    configDir?: string;
     callbacks: ProcessCallbacks;
 }): Promise<string> {
-    const { prompt, model, effort, workingDir, callbacks } = options;
+    const { prompt, model, effort, workingDir, inheritMcp, configDir, callbacks } = options;
     const runtimeEnv = buildRuntimeEnv();
     const client = new CopilotClient({
         connection: RuntimeConnection.forStdio({ path: findCopilotBinary() }),
@@ -217,6 +219,11 @@ async function runSession(options: {
             reasoningEffort: normalizeReasoningEffort(effort),
             onPermissionRequest: approveAll,
             streaming: true,
+            // When true, the SDK discovers MCP servers from the Copilot CLI config
+            // (~/.copilot/mcp-config.json) and any repo-local .mcp.json, so the review/chat
+            // session inherits the same tools (captain, workiq, github-mcp, …) as the CLI.
+            enableConfigDiscovery: inheritMcp ?? true,
+            ...(configDir && configDir.trim() ? { configDir: configDir.trim() } : {}),
         }), SDK_BOOT_TIMEOUT_MS, 'session creation');
         run.session = session;
 
@@ -289,16 +296,20 @@ export async function reviewPR(options: {
     model: string;
     effort: string;
     workingDir?: string;
+    inheritMcp?: boolean;
+    configDir?: string;
     onStatus: (status: string) => void;
     onChunk: (kind: 'text' | 'thinking', chunk: string) => void;
 }): Promise<ReviewResult> {
-    const { prompt, model, effort, workingDir, onStatus, onChunk } = options;
+    const { prompt, model, effort, workingDir, inheritMcp, configDir, onStatus, onChunk } = options;
     onStatus('Generating review…');
     const raw = await runSession({
         prompt,
         model,
         effort,
         workingDir,
+        inheritMcp,
+        configDir,
         callbacks: {
             onChunk: (chunk) => onChunk('text', chunk),
             onTool: (name) => onStatus(name),
@@ -327,6 +338,8 @@ export async function chat(options: {
     prompt: string;
     effort: string;
     workingDir?: string;
+    inheritMcp?: boolean;
+    configDir?: string;
     onChunk: (chunk: string) => void;
 }): Promise<string> {
     const result = await runSession({
@@ -334,6 +347,8 @@ export async function chat(options: {
         model: '',
         effort: options.effort,
         workingDir: options.workingDir,
+        inheritMcp: options.inheritMcp,
+        configDir: options.configDir,
         callbacks: { onChunk: options.onChunk },
     });
     return result;

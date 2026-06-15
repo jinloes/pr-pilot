@@ -37,6 +37,10 @@ export interface SettingsState {
     reviewModelCopilot: string;
     reviewEffort: string;
     githubBaseUrl: string;
+    copilotInheritMcp: boolean;
+    copilotConfigDir: string;
+    reviewFocusAreas: string;
+    reviewCustomInstructions: string;
 }
 
 export function normalizeProvider(value: unknown): Provider {
@@ -158,6 +162,13 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
     <div class="hint">Higher = deeper review, slower. Applies only to GitHub Copilot.</div>
   </div>
 
+  <div class="field hidden" id="mcpField">
+    <label><input type="checkbox" id="inheritMcp" style="width:auto;margin-right:6px;">Inherit MCP servers from the Copilot CLI config</label>
+    <div class="hint">Gives the reviewer the same MCP tools as the <code>copilot</code> CLI — discovered from <code>~/.copilot/mcp-config.json</code> and any repo-local <code>.mcp.json</code>.</div>
+    <input type="text" id="copilotConfigDir" placeholder="Config dir override (empty = ~/.copilot)" style="margin-top:8px;">
+    <div class="hint">Optional override of the Copilot config directory used to discover MCP servers.</div>
+  </div>
+
   <div class="field">
     <label for="baseUrl">GitHub base URL</label>
     <div class="row">
@@ -165,6 +176,18 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       <button id="testConnection" class="secondary" title="Verify gh authentication for this host">Test</button>
     </div>
     <div class="hint">Change for GitHub Enterprise (e.g. https://github.mycompany.com).</div>
+  </div>
+
+  <div class="field">
+    <label for="focusAreas">Review focus areas</label>
+    <input type="text" id="focusAreas" placeholder="e.g. security, performance, test coverage">
+    <div class="hint">Comma-separated areas the reviewer should prioritize. Sent to the model as steering context.</div>
+  </div>
+
+  <div class="field">
+    <label for="customInstructions">Custom review instructions</label>
+    <textarea id="customInstructions" rows="3" placeholder="Extra instructions appended to every review prompt (e.g. team conventions to enforce)."></textarea>
+    <div class="hint">Plain text. Follow team conventions or emphasize specific concerns.</div>
   </div>
 
 <script nonce="${nonce}">
@@ -184,6 +207,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
     $('claudeModelField').classList.toggle('hidden', isCopilot);
     $('copilotModelField').classList.toggle('hidden', !isCopilot);
     $('effortField').classList.toggle('hidden', !isCopilot);
+    $('mcpField').classList.toggle('hidden', !isCopilot);
   }
 
   function renderCopilotModels(models, current) {
@@ -237,7 +261,11 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   $('copilotModel').addEventListener('change', () => save('reviewModelCopilot', copilotModelValue()));
   $('copilotModelCustom').addEventListener('change', () => save('reviewModelCopilot', copilotModelValue()));
   $('effort').addEventListener('change', () => save('reviewEffort', $('effort').value));
+  $('inheritMcp').addEventListener('change', () => save('copilotInheritMcp', $('inheritMcp').checked));
+  $('copilotConfigDir').addEventListener('change', () => save('copilotConfigDir', $('copilotConfigDir').value.trim()));
   $('baseUrl').addEventListener('change', () => save('githubBaseUrl', $('baseUrl').value.trim()));
+  $('focusAreas').addEventListener('change', () => save('reviewFocusAreas', $('focusAreas').value.trim()));
+  $('customInstructions').addEventListener('change', () => save('reviewCustomInstructions', $('customInstructions').value.trim()));
   $('refreshModels').addEventListener('click', () => {
     $('refreshModels').textContent = 'Refreshing…';
     setStatus('Refreshing model list…');
@@ -262,6 +290,10 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       $('claudeModel').value = state.reviewModel;
       $('effort').value = state.reviewEffort;
       $('baseUrl').value = state.githubBaseUrl;
+      $('inheritMcp').checked = state.copilotInheritMcp !== false;
+      $('copilotConfigDir').value = state.copilotConfigDir || '';
+      $('focusAreas').value = state.reviewFocusAreas || '';
+      $('customInstructions').value = state.reviewCustomInstructions || '';
       renderCopilotModels(msg.copilotModels || [], state.reviewModelCopilot);
       applyProviderVisibility(state.provider);
     } else if (msg.type === 'models') {

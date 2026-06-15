@@ -71,7 +71,7 @@ webview/                               – Vite + React + TypeScript webview
 
 vscode-extension/                      – VS Code extension host
   src/
-    extension.ts
+    extension.ts                       – VS Code activation plus PR Pilot webview tab/view bridge
     github.ts
     claude.ts
     copilot.ts                         – Copilot SDK service (`@github/copilot-sdk`) with streaming/status forwarding
@@ -80,6 +80,7 @@ vscode-extension/                      – VS Code extension host
     settings.ts                        – Settings webview controller (panel lifecycle + config read/write); mirrors PluginSettingsConfigurable
     settingsView.ts                    – Pure settings-webview view logic (HTML, model-merge, escaping); no vscode import, unit-tested
     userFacingError.ts                 – Maps host/provider errors to user-actionable copy
+    workspace.ts                       – Resolves the VS Code workspace dir, including dev-host target repo override
     core.d.ts
   shared/
     user-facing-errors.yaml            – Shared message templates consumed by both hosts
@@ -118,6 +119,9 @@ Copilot and Claude share prompt builders/parsing (`ClaudeService` companion help
 ### Copilot SDK runtime
 Both hosts use official Copilot SDKs (`com.github:copilot-sdk-java` and `@github/copilot-sdk`) to control local `copilot`. Stream `assistant.message_delta` to text chunks, surface `tool.execution_start` names as status, and parse final `assistant.message` JSON with delta fallback.
 
+### Copilot MCP inheritance
+Copilot review/chat sessions inherit the CLI's MCP servers by setting the SDK session option `enableConfigDiscovery=true` (Java `setEnableConfigDiscovery`). Discovery alone loads `~/.copilot/mcp-config.json` (and repo-local `.mcp.json`) even when the working dir is a worktree; setting `configDir`/`setConfigDirectory` without discovery does **not** load them. The optional `copilotConfigDir` setting maps to `configDir` for non-default Copilot homes. This is Copilot-only — the Claude CLI inherits MCP through its own global config, not these settings.
+
 ### Reasoning effort normalization
 Persisted values are `none|low|medium|high|xhigh|max`; SDK accepts `low|medium|high|xhigh`. Normalize before session creation: `none -> low`, `max -> xhigh`, blank/unknown -> `medium`.
 
@@ -125,11 +129,11 @@ Persisted values are `none|low|medium|high|xhigh|max`; SDK accepts `low|medium|h
 Both hosts discover the available Copilot model list at runtime and cache it for the session, falling back to a short hardcoded suggestion list on probe failure.
 
 - **IntelliJ**: `CopilotModelDiscovery` runs `copilot help config` and parses the `` `model`: `` section; `PluginSettingsComponent` merges the result into the (editable) model combo in Settings → Tools → PR Pilot.
-- **VS Code**: `copilot.ts` `listModels()` queries the SDK's `client.listModels()` directly (no CLI parsing) and `filterModelIds()` drops policy-`disabled`/blank IDs. Surfaced two ways: (1) the **settings webview** (`settings.ts` + `settingsView.ts`) — opened via the gear in the PR Pilot view title or the `pr-pilot.openSettings` command — shows a live model dropdown and hides the non-active provider's model field; (2) the `pr-pilot.selectCopilotModel` quick-pick command (palette). VS Code's declarative settings JSON can't self-populate an enum or conditionally hide fields, which is why a webview is used for the rich settings UI. The underlying settings (`reviewProvider`, `reviewModel`, `reviewModelCopilot`, `reviewEffort`, `githubBaseUrl`) remain editable in native Settings too.
+- **VS Code**: `copilot.ts` `listModels()` queries the SDK's `client.listModels()` directly (no CLI parsing) and `filterModelIds()` drops policy-`disabled`/blank IDs. Surfaced two ways: (1) the **settings webview** (`settings.ts` + `settingsView.ts`) — opened via the gear in the PR Pilot view title or the `pr-pilot.openSettings` command — shows a live model dropdown and hides the non-active provider's model field; (2) the `pr-pilot.selectCopilotModel` quick-pick command (palette). VS Code's declarative settings JSON can't self-populate an enum or conditionally hide fields, which is why a webview is used for the rich settings UI. The underlying settings (`reviewProvider`, `reviewModel`, `reviewModelCopilot`, `reviewEffort`, `githubBaseUrl`, `copilotInheritMcp`, `copilotConfigDir`) remain editable in native Settings too.
   The settings webview validates `githubBaseUrl` before saving, posts per-field saved/error feedback, exposes model-refresh status, and has a `Test` action that verifies `gh` authentication for the configured host.
 
 ### PR discovery scope
-The shared PR list sends an explicit `searchScope` on `refreshPRs`: `currentRepo`, `reviewRequested`, `assigned`, or `authored`. Both hosts build GitHub search queries from that scope and return `listStatus` (`searchScope`, `currentRepo`, `resultLimit`, `limited`) with `prListLoaded` so the webview can explain what was searched and when the 50-result GitHub search page may hide additional PRs. `currentRepo` searches only the detected repository; if no repo is detected it falls back to `author:@me`. Starred repositories are used only by optional notification polling, not by the main list's current-repo scope.
+The shared PR list sends an explicit `searchScope` on `refreshPRs`: `currentRepo`, `reviewRequested`, `assigned`, or `authored`. Both hosts build GitHub search queries from that scope and return `listStatus` (`searchScope`, `currentRepo`, `resultLimit`, `limited`) with `prListLoaded` so the webview can explain what was searched and when additional PRs are hidden. To distinguish "exactly the limit" from "more exist", the search over-fetches one row beyond the display limit (`resultLimit` = 50, fetch 51): `limited` is true only when more than 50 match, and the list is sliced back to 50. `currentRepo` searches only the detected repository; if no repo is detected it falls back to `author:@me`. Starred repositories are used only by optional notification polling, not by the main list's current-repo scope.
 
 ### Binary resolution
 Probe known hard-coded paths for `gh`, `claude`, and `copilot` before falling back to command name, because GUI-launched IntelliJ often has incomplete `PATH`.
@@ -156,7 +160,7 @@ Do not surface raw provider/HTTP exception strings directly to users in review/d
 When startup PR loading fails, hosts push a `setupRequired` bridge message with actionable detail instead of silently failing. Supported reasons are `gh_not_installed`, `gh_not_authenticated`, and `load_failed` (non-auth load errors). `PRList` renders a full-pane setup/error screen with a checklist covering GitHub CLI installation, GitHub authentication, and PR loading, plus a Refresh button when this message is received. IntelliJ maps auth diagnosis to stable reason IDs via `PRToolWindowFactory.setupReason` and also emits `load_failed` for post-auth load exceptions; VS Code classifies setup-worthy auth failures (including 401/403/bad-credentials responses) in `classifySetupAuthError`. The VS Code host also triggers an initial `handleRefreshPRs` call immediately after `resolveWebviewView` so the webview never hangs on its initial loading state.
 
 ### PR chat scope
-Chat is available after PR selection, before and after review generation. Hosts build chat context from the active PR, diff excerpt, and generated review when one exists; the webview displays which context buckets are attached and adds selected text when the user right-clicks or verifies a comment. Chat reuses the PR worktree when available.
+Chat is available after PR selection, before and after review generation. Hosts build chat context from the active PR title/body, the full diff (already capped at 80 KB by the diff fetch), and the generated review when one exists; both hosts send the same full diff so chat answers do not diverge by host. The webview displays which context buckets are attached and adds selected text when the user right-clicks or verifies a comment. Chat reuses the PR worktree when available. The VS Code host sources the active PR's title/body from `getPRDetail` on select (the webview `selectPR` message carries only number/owner/repo), so the review prompt and chat context always include the real PR description.
 
 ### DTO mapping in IntelliJ webview bridge
 `WebviewPanel` model-to-DTO conversion uses MapStruct (`ReviewMapper`) instead of hand-rolled mappers so field drift fails at compile time.
@@ -174,7 +178,7 @@ Inline comment metadata is encoded in review body HTML comment for resilient dra
 GitHub diffs are truncated at 80 KB in both hosts. The webview detects the truncation marker and warns that diff display and chat context are incomplete, while `DiffViewer` still lazily limits rendered changed lines for browser performance.
 
 ### Notification parity
-Background PR notifications are available in both hosts and are off by default. The first poll seeds existing PRs silently. Both hosts support review-requested PR notifications and optional starred-repository PR notifications, using the persisted settings listed below.
+Background PR notifications are available in both hosts and are off by default. The first poll seeds existing PRs silently. Both hosts support review-requested PR notifications and optional starred-repository PR notifications, using the persisted settings listed below. The seen-PR set is persisted across reloads/restarts (IntelliJ via `SeenPRSet`, VS Code via extension `globalState`) so PRs that appear while the editor is closed are still announced on the next poll rather than silently absorbed by a re-seed. Changing the notification scope (enable/disable, review-requested, starred repos, or GitHub base URL) re-seeds silently so existing in-scope PRs are not announced retroactively.
 
 ### Comment anchoring policy
 Client-side validation partitions comments: keep in-hunk, snap within +-3 lines, orphan otherwise. Orphans are excluded from inline POST and appended to review body section.
@@ -183,7 +187,13 @@ Client-side validation partitions comments: keep in-hunk, snap within +-3 lines,
 `githubBaseUrl` must start with `https://` (SSRF guard). No tokens are persisted to disk.
 
 ### Repo detection and webview hosting
-Repo detection walks upward to `.git/config`, handling SCP and `ssh://` remotes correctly. Webview assets are served via loopback `HttpServer` for proper same-origin module loading; path normalization blocks traversal.
+Repo detection walks upward to `.git/config` and reads the `[remote "origin"]` URL specifically (not the first `url=` in the file) so multi-remote/fork setups resolve to origin consistently across hosts, handling SCP and `ssh://` remotes correctly. Webview assets are served via loopback `HttpServer` for proper same-origin module loading; path normalization blocks traversal.
+
+### VS Code webview surfaces
+The VS Code host exposes PR Pilot as an editor-tab `WebviewPanel` opened by `pr-pilot.open`. The Activity Bar webview view (`pr-pilot.main`) is a lightweight launcher that immediately reveals the editor tab and includes an "Open PR Pilot" command link; the full PR loading, review generation, chat, and worktree lifecycle run only in the editor-tab panel.
+
+### VS Code extension development target repo
+The `.vscode/launch.json` config `Run PR Pilot Extension Against Target Repo` prompts for an absolute repository path and passes it as `PR_PILOT_TARGET_REPO` to the Extension Development Host. Use it when the PR Pilot source repo is open in the main VS Code window but PR Pilot should inspect PRs for a different local checkout; `workspace.ts` makes repo detection, worktree creation, and CLI working directories resolve against the target repo instead of whichever folder VS Code opened in the dev host.
 
 ## Settings persistence
 
@@ -203,6 +213,8 @@ Repo detection walks upward to `.git/config`, handling SCP and `ssh://` remotes 
 - `reviewModelCopilot` (default `"claude-sonnet-4.6"`)
 - `reviewProvider` (default `"claude"`; values `claude|copilot`)
 - `reviewEffort` (default `"medium"`; values `none|low|medium|high|xhigh|max`)
+- `copilotInheritMcp` (default `true`) — when set, the Copilot review/chat session enables SDK config discovery so it inherits MCP servers from the Copilot CLI config (`~/.copilot/mcp-config.json`) and any repo-local `.mcp.json`. Copilot-only.
+- `copilotConfigDir` (default `""`) — optional override of the Copilot config directory used to discover MCP servers; empty uses the CLI default (`~/.copilot`). Copilot-only.
 
 No API keys or tokens are written to disk.
 

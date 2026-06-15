@@ -1,7 +1,16 @@
-import type { ReviewResult, LineComment } from './github';
+import type { ReviewResult, LineComment, Severity, Category, Confidence } from './github';
 
 const VERDICTS = ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'] as const;
 const COMMENT_TYPES = ['issue', 'suggestion', 'note'] as const;
+const SEVERITIES = ['blocker', 'major', 'minor', 'nit'] as const;
+const CATEGORIES = ['correctness', 'security', 'performance', 'tests', 'maintainability', 'style'] as const;
+const CONFIDENCES = ['low', 'medium', 'high'] as const;
+
+function optEnum<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
+    return typeof value === 'string' && (allowed as readonly string[]).includes(value.toLowerCase())
+        ? value.toLowerCase() as T
+        : undefined;
+}
 
 function isLineComment(value: unknown): value is LineComment {
     if (typeof value !== 'object' || value === null) return false;
@@ -10,6 +19,20 @@ function isLineComment(value: unknown): value is LineComment {
         && typeof c.line === 'number'
         && typeof c.body === 'string'
         && (COMMENT_TYPES as readonly string[]).includes(c.type as string);
+}
+
+function normalizeComment(value: LineComment): LineComment {
+    const c = value as unknown as Record<string, unknown>;
+    return {
+        file: value.file,
+        line: value.line,
+        type: value.type,
+        body: value.body,
+        severity: optEnum<Severity>(c.severity, SEVERITIES),
+        category: optEnum<Category>(c.category, CATEGORIES),
+        confidence: optEnum<Confidence>(c.confidence, CONFIDENCES),
+        rationale: typeof c.rationale === 'string' ? c.rationale : undefined,
+    };
 }
 
 /**
@@ -47,6 +70,6 @@ export function parseReview(raw: string): ReviewResult {
     return {
         summary: obj.summary,
         verdict: obj.verdict as ReviewResult['verdict'],
-        lineComments: obj.lineComments,
+        lineComments: obj.lineComments.map(normalizeComment),
     };
 }

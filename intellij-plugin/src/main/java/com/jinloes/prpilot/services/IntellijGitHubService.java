@@ -31,6 +31,11 @@ public final class IntellijGitHubService {
         return core().searchPRs(token, query);
     }
 
+    public List<PullRequest> searchPRs(String token, String query, int perPage)
+            throws IOException, InterruptedException {
+        return core().searchPRs(token, query, perPage);
+    }
+
     public List<String> getStarredRepos(String token) throws IOException, InterruptedException {
         return core().getStarredRepos(token);
     }

@@ -50,6 +50,8 @@ public class IntellijClaudeService {
         ReviewProvider provider = settings.getReviewProvider();
         String model = settings.getActiveReviewModel();
         String effort = settings.getReviewEffort();
+        boolean inheritMcp = settings.isCopilotInheritMcp();
+        String configDir = settings.getCopilotConfigDir();
         ApplicationManager.getApplication()
                 .executeOnPooledThread(
                         () -> {
@@ -69,7 +71,9 @@ public class IntellijClaudeService {
                                                         model,
                                                         effort,
                                                         wrappedStatus,
-                                                        wrappedChunk)
+                                                        wrappedChunk,
+                                                        inheritMcp,
+                                                        configDir)
                                                 : claude.reviewPR(
                                                         request,
                                                         model,
@@ -95,6 +99,8 @@ public class IntellijClaudeService {
         PluginSettings settings = PluginSettings.getInstance();
         ReviewProvider provider = settings.getReviewProvider();
         String effort = settings.getReviewEffort();
+        boolean inheritMcp = settings.isCopilotInheritMcp();
+        String configDir = settings.getCopilotConfigDir();
         ApplicationManager.getApplication()
                 .executeOnPooledThread(
                         () -> {
@@ -108,7 +114,9 @@ public class IntellijClaudeService {
                                                         history,
                                                         userMessage,
                                                         effort,
-                                                        wrappedChunk)
+                                                        wrappedChunk,
+                                                        inheritMcp,
+                                                        configDir)
                                                 : claude.chat(
                                                         prContext,
                                                         history,

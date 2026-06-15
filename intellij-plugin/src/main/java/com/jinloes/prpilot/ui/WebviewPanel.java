@@ -38,6 +38,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -67,6 +68,9 @@ import org.cef.handler.CefLoadHandlerAdapter;
  */
 @Slf4j
 public class WebviewPanel implements Disposable {
+
+    /** Maximum PRs shown in the list. The search over-fetches by one to detect truncation. */
+    static final int PR_SEARCH_LIMIT = 50;
 
     // --- Outbound DTO records (Java → JS) ---
     // ReviewResultDto and LineCommentDto live in WebviewDtos.java (package-private);
@@ -797,8 +801,28 @@ public class WebviewPanel implements Disposable {
                                             "reviewGenerating", key, "Sending review request…"));
                             final String finalDiff = diff;
                             final String finalExisting = existingReviews;
+                            java.io.File guidelinesDir =
+                                    activePrWorktreeDir != null
+                                            ? activePrWorktreeDir
+                                            : (project.getBasePath() != null
+                                                    ? new java.io.File(project.getBasePath())
+                                                    : null);
+                            final String finalGuidelines = readRepoGuidelines(guidelinesDir);
+                            final String finalPriorReview = formatPriorReview(lastResult);
+                            final String finalFocusAreas =
+                                    PluginSettings.getInstance().getReviewFocusAreas();
+                            final String finalCustomInstructions =
+                                    PluginSettings.getInstance().getReviewCustomInstructions();
                             finalReviewService.reviewPR(
-                                    new PRReviewRequest(finalPr, "", "", "", finalExisting),
+                                    new PRReviewRequest(
+                                            finalPr,
+                                            "",
+                                            "",
+                                            finalPriorReview,
+                                            finalExisting,
+                                            finalGuidelines,
+                                            finalFocusAreas,
+                                            finalCustomInstructions),
                                     statusMsg ->
                                             pushMessage(
                                                     new ReviewGeneratingMsg(
@@ -1052,6 +1076,80 @@ public class WebviewPanel implements Disposable {
                 && StringUtils.equalsIgnoreCase(left.getRepo(), right.getRepo());
     }
 
+    /** Candidate contributor-doc files, in priority order, scanned for repo review guidelines. */
+    private static final String[] GUIDELINE_FILES = {
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        ".github/CONTRIBUTING.md",
+        "docs/CONTRIBUTING.md",
+        ".github/pull_request_template.md",
+    };
+
+    /** Cap on guideline bytes fed to the prompt so a large doc can't blow up the context. */
+    private static final int MAX_GUIDELINES_BYTES = 6000;
+
+    /**
+     * Reads repo contributor docs from {@code dir} (the PR-branch worktree or project base dir),
+     * concatenated and capped at {@link #MAX_GUIDELINES_BYTES}, so the model can weight findings
+     * against the project's own review conventions. Returns an empty string when none are found.
+     */
+    private static String readRepoGuidelines(java.io.File dir) {
+        if (dir == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        int total = 0;
+        for (String rel : GUIDELINE_FILES) {
+            if (total >= MAX_GUIDELINES_BYTES) {
+                break;
+            }
+            java.io.File f = new java.io.File(dir, rel);
+            if (!f.isFile()) {
+                continue;
+            }
+            try {
+                String content = Files.readString(f.toPath()).trim();
+                if (content.isEmpty()) {
+                    continue;
+                }
+                int remaining = MAX_GUIDELINES_BYTES - total;
+                if (content.length() > remaining) {
+                    content = content.substring(0, remaining) + "\n...(truncated)";
+                }
+                if (sb.length() > 0) {
+                    sb.append("\n\n");
+                }
+                sb.append("## ").append(rel).append("\n").append(content);
+                total += content.length();
+            } catch (IOException e) {
+                // unreadable — skip
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Formats a prior generated review as compact context for a re-generation prompt. */
+    private static String formatPriorReview(ReviewResult result) {
+        if (result == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("Verdict: ").append(result.getVerdict());
+        if (StringUtils.isNotBlank(result.getSummary())) {
+            sb.append("\nSummary: ").append(result.getSummary());
+        }
+        for (LineComment c : result.getLineComments()) {
+            sb.append("\n- ")
+                    .append(c.getFile())
+                    .append(":")
+                    .append(c.getLine())
+                    .append(" [")
+                    .append(c.getType())
+                    .append("] ")
+                    .append(c.getBody());
+        }
+        return sb.toString();
+    }
+
     private synchronized IntellijClaudeService resolvePrClaudeService(
             PullRequest pr, String token, boolean emitStatus) {
         if (pr == null || !isSamePr(activePR, pr)) {
@@ -1197,7 +1295,11 @@ public class WebviewPanel implements Disposable {
 
     /** Pushes the PR list into the webview via the bridge. Call from the EDT. */
     public void loadPRs(
-            List<PullRequest> prs, String defaultRepo, String searchScope, String currentRepo) {
+            List<PullRequest> prs,
+            String defaultRepo,
+            String searchScope,
+            String currentRepo,
+            boolean limited) {
         cachedPRs = prs;
         Set<String> draftKeys =
                 pendingIndex.list().stream()
@@ -1227,7 +1329,7 @@ public class WebviewPanel implements Disposable {
                         "prListLoaded",
                         dtos,
                         defaultRepo,
-                        new PrListStatus(searchScope, currentRepo, 50, prs.size() >= 50)));
+                        new PrListStatus(searchScope, currentRepo, PR_SEARCH_LIMIT, limited)));
     }
 
     public void setOnPRSelected(Consumer<PullRequest> callback) {

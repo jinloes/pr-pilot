@@ -13,6 +13,12 @@
   "contributes": {
     "commands": [
       {
+        "command": "pr-pilot.open",
+        "title": "Open PR Pilot",
+        "category": "PR Pilot",
+        "icon": "$(git-pull-request)"
+      },
+      {
         "command": "pr-pilot.openSettings",
         "title": "Open Settings",
         "category": "PR Pilot",
@@ -26,6 +32,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "pr-pilot.open",
+          "when": "view == pr-pilot.main",
+          "group": "navigation@0"
+        },
         {
           "command": "pr-pilot.openSettings",
           "when": "view == pr-pilot.main",
@@ -117,6 +128,26 @@
           "enum": ["none", "low", "medium", "high", "xhigh", "max"],
           "default": "medium",
           "description": "Reasoning effort passed to `copilot --reasoning-effort`. Higher = deeper review, slower. Only applied when `pr-pilot.reviewProvider` is `copilot`. Default `medium` balances catching real issues against latency."
+        },
+        "pr-pilot.copilotInheritMcp": {
+          "type": "boolean",
+          "default": true,
+          "description": "When enabled, the Copilot review/chat session inherits MCP servers from the Copilot CLI config (`~/.copilot/mcp-config.json`) and any repo-local `.mcp.json`, giving the reviewer the same tools as the `copilot` CLI. Only applied when `pr-pilot.reviewProvider` is `copilot`."
+        },
+        "pr-pilot.copilotConfigDir": {
+          "type": "string",
+          "default": "",
+          "description": "Optional override of the Copilot config directory used to discover MCP servers. Empty uses the CLI default (`~/.copilot`). Only applied when `pr-pilot.reviewProvider` is `copilot`."
+        },
+        "pr-pilot.reviewFocusAreas": {
+          "type": "string",
+          "default": "",
+          "description": "Default focus areas the reviewer should prioritize (e.g. `security, performance, test coverage`). Sent to the model as steering context. A per-review override in the PR Pilot view takes precedence when set."
+        },
+        "pr-pilot.reviewCustomInstructions": {
+          "type": "string",
+          "default": "",
+          "description": "Default extra instructions appended to every review prompt (e.g. team conventions to enforce). A per-review override in the PR Pilot view takes precedence when set."
         }
       }
     }

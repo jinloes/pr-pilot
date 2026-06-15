@@ -38,6 +38,13 @@ class ClaudeServiceTest : FunSpec({
             prompt shouldContain "gh pr diff 99 --repo myorg/myrepo"
         }
 
+        test("invites use of additional context tools / MCP servers") {
+            val p = PullRequest("Fix the bug", "", "myorg", "myrepo", 99, "", "alice", "2024-01-01")
+            val prompt = ClaudeService.buildPrompt(PRReviewRequest(p, "", ""))
+            prompt shouldContain "MCP servers"
+            prompt shouldContain "issue trackers"
+        }
+
         test("fetch diff wrapped in fetch_diff tag — no inline diff tag") {
             val p = PullRequest("Fix the bug", "", "myorg", "myrepo", 99, "", "alice", "2024-01-01")
             val prompt = ClaudeService.buildPrompt(PRReviewRequest(p, "", ""))
@@ -129,6 +136,14 @@ class ClaudeServiceTest : FunSpec({
             prompt shouldContain "Before flagging missing input validation in handler code"
             prompt shouldContain "validateRequest"
             prompt shouldContain "proto"
+        }
+
+        test("proto schema evolution guard present") {
+            val prompt = ClaudeService.buildPrompt(PRReviewRequest(pr(), "", ""))
+            prompt shouldContain "When reviewing .proto changes"
+            prompt shouldContain "renumbered or reused"
+            prompt shouldContain "`reserved`"
+            prompt shouldContain "RPC request/response contract changes"
         }
 
         test("unverifiable issue guard present") {

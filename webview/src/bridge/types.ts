@@ -173,7 +173,15 @@ export interface LineComment {
   line: number
   type: 'issue' | 'suggestion' | 'note'
   body: string
+  severity?: Severity
+  category?: Category
+  confidence?: Confidence
+  rationale?: string
 }
+
+export type Severity = 'blocker' | 'major' | 'minor' | 'nit'
+export type Category = 'correctness' | 'security' | 'performance' | 'tests' | 'maintainability' | 'style'
+export type Confidence = 'low' | 'medium' | 'high'
 
 /**
  * Messages sent FROM the webview TO the host (IntelliJ via JCEF or VS Code).
@@ -200,6 +208,10 @@ export interface GenerateReviewRequest {
   number: number
   owner: string
   repo: string
+  /** Optional per-review override of the focus areas; falls back to the saved setting. */
+  focusAreas?: string
+  /** Optional per-review override of custom instructions; falls back to the saved setting. */
+  customInstructions?: string
 }
 
 export interface AskClaudeRequest {

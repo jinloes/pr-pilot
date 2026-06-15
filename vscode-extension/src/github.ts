@@ -15,6 +15,11 @@ const SUMMARY_TAG = '<!-- claude-summary: ';
 const COMMENTS_TAG = '<!-- claude-comments: ';
 const TAG_END = ' -->';
 const TYPE_PREFIX = /^\[([A-Z]+)]\s*/;
+const DETACHED_COMMENTS_HEADER = '**Comments not attached inline (invalid diff positions):**';
+
+export type Severity = 'blocker' | 'major' | 'minor' | 'nit';
+export type Category = 'correctness' | 'security' | 'performance' | 'tests' | 'maintainability' | 'style';
+export type Confidence = 'low' | 'medium' | 'high';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -34,6 +39,10 @@ export interface LineComment {
     line: number;
     type: 'issue' | 'suggestion' | 'note';
     body: string;
+    severity?: Severity;
+    category?: Category;
+    confidence?: Confidence;
+    rationale?: string;
 }
 
 export interface ReviewResult {
@@ -67,6 +76,8 @@ interface GhSubmittedReview {
 
 interface PrDetail {
     merged: boolean;
+    title: string | null;
+    body: string | null;
     head: {
         sha: string;
         ref: string;
@@ -177,6 +188,9 @@ function ghRequest(token: string, url: string, options: {
 
 // ── PR search ──────────────────────────────────────────────────────────────────
 
+/** Maximum PRs shown in the list. Search over-fetches by one to detect truncation accurately. */
+export const PR_SEARCH_LIMIT = 50;
+
 export async function searchPRs(
     token: string,
     githubBaseUrl: string,
@@ -185,15 +199,17 @@ export async function searchPRs(
     currentRepo?: string,
 ): Promise<PR[]> {
     const q = buildPRSearchQuery(state, searchScope, currentRepo);
-    return searchPRsByQuery(token, githubBaseUrl, q);
+    // Over-fetch by one so the caller can tell "exactly the limit" from "more exist".
+    return searchPRsByQuery(token, githubBaseUrl, q, PR_SEARCH_LIMIT + 1);
 }
 
 export async function searchPRsByQuery(
     token: string,
     githubBaseUrl: string,
     q: string,
+    perPage = PR_SEARCH_LIMIT,
 ): Promise<PR[]> {
-    const url = `${apiBase(githubBaseUrl)}/search/issues?q=${encodeURIComponent(q)}&per_page=50&sort=updated`;
+    const url = `${apiBase(githubBaseUrl)}/search/issues?q=${encodeURIComponent(q)}&per_page=${perPage}&sort=updated`;
     const body = await ghRequest(token, url, {});
     const result: { items?: SearchItem[] } = JSON.parse(body);
     return (result.items ?? []).map(el => {
@@ -371,7 +387,10 @@ function escapeComment(s: string): string {
 }
 
 function encodeBody(review: ReviewResult): string {
-    const comments = review.lineComments.map(c => ({ f: c.file, l: c.line, t: c.type, b: c.body }));
+    const comments = review.lineComments.map(c => ({
+        f: c.file, l: c.line, t: c.type, b: c.body,
+        s: c.severity, c: c.category, cf: c.confidence, r: c.rationale,
+    }));
     let body = `${SUMMARY_TAG}${escapeComment(review.summary)}${TAG_END}`;
     body += `\n${VERDICT_TAG}${escapeComment(review.verdict)}${TAG_END}`;
     body += `\n${COMMENTS_TAG}${JSON.stringify(comments).replace(/-->/g, '-- >')}${TAG_END}`;
@@ -404,13 +423,20 @@ function decodeReview(body: string, apiComments: GhReviewComment[]): ReviewResul
         if (endIdx >= 0) {
             const json = body.substring(embeddedIdx + COMMENTS_TAG.length, endIdx).trim();
             try {
-                const arr: Array<{ f: string; l: number; t: string; b: string }> = JSON.parse(json);
+                const arr: Array<{
+                    f: string; l: number; t: string; b: string;
+                    s?: string; c?: string; cf?: string; r?: string;
+                }> = JSON.parse(json);
                 return {
                     summary, verdict,
                     lineComments: arr.map(e => ({
                         file: e.f, line: e.l,
                         type: e.t as LineComment['type'],
                         body: e.b,
+                        severity: e.s as Severity | undefined,
+                        category: e.c as Category | undefined,
+                        confidence: e.cf as Confidence | undefined,
+                        rationale: e.r,
                     })),
                 };
             } catch { /* fall through to API comments */ }
@@ -448,25 +474,29 @@ function buildCommentArray(review: ReviewResult, orphans: LineComment[] = []): o
 }
 
 function buildOrphanSection(orphans: LineComment[]): string {
-    let s = '**Comments not attached inline (invalid diff positions):**\n';
+    let s = `${DETACHED_COMMENTS_HEADER}\n`;
     for (const c of orphans) {
         const path = c.file ?? '';
         const line = c.line ?? 0;
         const body = c.body ?? '';
-        s += `- \`${path}${line > 0 ? `:${line}` : ''}\`: ${body}\n`;
+        s += formatDetachedCommentLine(path, line, body);
     }
     return s.trimEnd();
 }
 
 function buildDroppedSection(dropped: Array<Record<string, unknown>>): string {
-    let s = '**Comments not attached inline (invalid diff positions):**\n';
+    let s = `${DETACHED_COMMENTS_HEADER}\n`;
     for (const c of dropped) {
         const path = typeof c['path'] === 'string' ? c['path'] : '';
         const line = typeof c['line'] === 'number' ? c['line'] : 0;
         const body = typeof c['body'] === 'string' ? c['body'] : '';
-        s += `- \`${path}${line > 0 ? `:${line}` : ''}\`: ${body}\n`;
+        s += formatDetachedCommentLine(path, line, body);
     }
     return s.trimEnd();
+}
+
+function formatDetachedCommentLine(path: string, line: number, body: string): string {
+    return `- \`${path}${line > 0 ? `:${line}` : ''}\`: ${body}\n`;
 }
 
 // Removed: tryCommentsIndividually — the probe-review approach created orphaned pending reviews
@@ -613,10 +643,9 @@ function findGitConfig(dir: string): string | null {
     }
 }
 
-function parseOwnerRepo(gitConfigText: string): string | null {
-    const m = /url\s*=\s*(.+)/i.exec(gitConfigText);
-    if (!m) return null;
-    const raw = m[1].trim();
+function parseOwnerRepo(remoteUrl: string): string | null {
+    const raw = remoteUrl.trim();
+    if (!raw) return null;
     // scp-style: git@github.com:owner/repo.git
     const scp = /^[^@]+@[^:]+:([^/]+\/[^/]+?)(?:\.git)?$/.exec(raw);
     if (scp) return scp[1];
@@ -624,8 +653,29 @@ function parseOwnerRepo(gitConfigText: string): string | null {
     try {
         const u = new URL(raw);
         const parts = u.pathname.replace(/^\//, '').replace(/\.git$/, '').split('/');
-        if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
+        if (parts.length >= 2 && parts[0] && parts[1]) return `${parts[0]}/${parts[1]}`;
     } catch { /* not a URL */ }
+    return null;
+}
+
+/**
+ * Extracts the `url` of the `[remote "origin"]` section from git config text. Scoping to origin
+ * (rather than the first `url=` in the file) matches IntelliJ's `RepoDetector` and avoids picking
+ * an unrelated remote (e.g. `upstream`) in multi-remote/fork setups. Returns null if origin has no
+ * url.
+ */
+function extractOriginUrl(gitConfigText: string): string | null {
+    let inOrigin = false;
+    for (const line of gitConfigText.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed === '[remote "origin"]') {
+            inOrigin = true;
+        } else if (inOrigin && trimmed.startsWith('[')) {
+            break;
+        } else if (inOrigin && /^url\s*=/.test(trimmed)) {
+            return trimmed.substring(trimmed.indexOf('=') + 1).trim();
+        }
+    }
     return null;
 }
 
@@ -633,7 +683,8 @@ export function detectCurrentRepo(workspaceFolder: string): string | null {
     try {
         const configPath = findGitConfig(workspaceFolder);
         if (!configPath) return null;
-        return parseOwnerRepo(fs.readFileSync(configPath, 'utf8'));
+        const originUrl = extractOriginUrl(fs.readFileSync(configPath, 'utf8'));
+        return originUrl ? parseOwnerRepo(originUrl) : null;
     } catch {
         return null;
     }

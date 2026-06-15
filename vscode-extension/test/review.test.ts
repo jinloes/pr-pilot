@@ -81,3 +81,46 @@ test('parseReview rejects lineComment with invalid type', () => {
 test('parseReview throws on non-JSON input', () => {
   assert.throws(() => parseReview('not json at all'));
 });
+
+test('parseReview keeps valid severity, category, confidence, and rationale', () => {
+  const r = parseReview(JSON.stringify({
+    summary: 's',
+    verdict: 'REQUEST_CHANGES',
+    lineComments: [{
+      file: 'a.ts', line: 5, type: 'issue', body: 'b',
+      severity: 'major', category: 'security', confidence: 'high', rationale: 'read the schema',
+    }],
+  }));
+  const c = r.lineComments[0];
+  assert.equal(c.severity, 'major');
+  assert.equal(c.category, 'security');
+  assert.equal(c.confidence, 'high');
+  assert.equal(c.rationale, 'read the schema');
+});
+
+test('parseReview drops invalid enum values for the richer fields', () => {
+  const r = parseReview(JSON.stringify({
+    summary: 's',
+    verdict: 'COMMENT',
+    lineComments: [{
+      file: 'a.ts', line: 5, type: 'note', body: 'b',
+      severity: 'catastrophic', category: 'vibes', confidence: 'certain',
+    }],
+  }));
+  const c = r.lineComments[0];
+  assert.equal(c.severity, undefined);
+  assert.equal(c.category, undefined);
+  assert.equal(c.confidence, undefined);
+});
+
+test('parseReview normalizes mixed-case enums and omits absent rich fields', () => {
+  const r = parseReview(JSON.stringify({
+    summary: 's',
+    verdict: 'COMMENT',
+    lineComments: [{ file: 'a.ts', line: 5, type: 'note', body: 'b', severity: 'NIT' }],
+  }));
+  const c = r.lineComments[0];
+  assert.equal(c.severity, 'nit');
+  assert.equal(c.category, undefined);
+  assert.equal(c.rationale, undefined);
+});

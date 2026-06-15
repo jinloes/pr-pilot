@@ -210,12 +210,42 @@ class CopilotServiceTest : FunSpec({
                 model shouldBe "claude-sonnet-4.6"
                 effort shouldBe "high"
                 workingDir shouldBe File("/tmp/pr-pilot-repo")
+                enableConfigDiscovery shouldBe true
+                configDir shouldBe null
             }
             client.lastSession.shouldNotBeNull().apply {
                 lastPrompt.shouldNotBeNull().shouldContain("<fetch_diff>")
                 lastTimeoutMs shouldBe 30L * 60L * 1000L
                 closeCount shouldBe 1
             }
+        }
+
+        test("threads MCP inheritance flag and config dir override into the session request") {
+            val factory = FakeRuntimeFactory {
+                FakeRuntimeClient { FakeRuntimeSession().apply { sendAction = { emitMessage(reviewJson("APPROVE")) } } }
+            }
+            val svc = CopilotService(runtimeFactory = factory)
+
+            svc.reviewPR(
+                fakeRequest(), "", "medium", Consumer {},
+                inheritMcp = false, configDir = "  /custom/.copilot  ",
+            )
+
+            factory.lastClient.shouldNotBeNull().lastSessionRequest.shouldNotBeNull().apply {
+                enableConfigDiscovery shouldBe false
+                configDir shouldBe "/custom/.copilot"
+            }
+        }
+
+        test("blank config dir override resolves to null") {
+            val factory = FakeRuntimeFactory {
+                FakeRuntimeClient { FakeRuntimeSession().apply { sendAction = { emitMessage(reviewJson("APPROVE")) } } }
+            }
+            val svc = CopilotService(runtimeFactory = factory)
+
+            svc.reviewPR(fakeRequest(), "", "medium", Consumer {}, configDir = "   ")
+
+            factory.lastClient.shouldNotBeNull().lastSessionRequest.shouldNotBeNull().configDir shouldBe null
         }
 
         test("streams text deltas as chunks, tool names as statuses, and parses final assistant message") {

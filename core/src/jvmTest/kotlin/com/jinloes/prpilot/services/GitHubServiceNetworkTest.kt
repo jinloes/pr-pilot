@@ -114,6 +114,36 @@ class GitHubServiceNetworkTest : FunSpec({
             val svc = mockServiceResponses("""{"items":[]}""")
             svc.searchPRs("token", "is:open").shouldBeEmpty()
         }
+
+        test("defaults to per_page 50") {
+            var capturedPerPage: String? = null
+            val engine = MockEngine { request ->
+                capturedPerPage = request.url.parameters["per_page"]
+                respond(
+                    content = """{"items":[]}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf("Content-Type", ContentType.Application.Json.toString()),
+                )
+            }
+            val client = HttpClient(engine) { install(ContentNegotiation) { json(MOCK_JSON) } }
+            GitHubService("https://api.github.com", client).searchPRs("token", "is:open")
+            capturedPerPage shouldBe "50"
+        }
+
+        test("forwards an explicit perPage to the request URL") {
+            var capturedPerPage: String? = null
+            val engine = MockEngine { request ->
+                capturedPerPage = request.url.parameters["per_page"]
+                respond(
+                    content = """{"items":[]}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf("Content-Type", ContentType.Application.Json.toString()),
+                )
+            }
+            val client = HttpClient(engine) { install(ContentNegotiation) { json(MOCK_JSON) } }
+            GitHubService("https://api.github.com", client).searchPRs("token", "is:open", 51)
+            capturedPerPage shouldBe "51"
+        }
     }
 
     context("getPRDiff") {

@@ -78,6 +78,15 @@ test('buildSettingsHtml renders both provider-specific model fields and the effo
     assert.match(html, /id="testConnection"/);
 });
 
+test('buildSettingsHtml renders the Copilot MCP inheritance controls', () => {
+    const html = buildSettingsHtml('csp', 'n');
+    assert.match(html, /id="mcpField"/);
+    assert.match(html, /id="inheritMcp"/);
+    assert.match(html, /id="copilotConfigDir"/);
+    assert.match(html, /save\('copilotInheritMcp', \$\('inheritMcp'\)\.checked\)/);
+    assert.match(html, /save\('copilotConfigDir'/);
+});
+
 test('buildSettingsHtml lists the Claude model presets and effort levels', () => {
     const html = buildSettingsHtml('csp', 'n');
     assert.match(html, /claude-sonnet-4-6/);

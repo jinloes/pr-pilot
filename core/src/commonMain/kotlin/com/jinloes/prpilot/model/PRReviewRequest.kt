@@ -15,6 +15,9 @@ data class PRReviewRequest(
     val knownPatterns: String,
     val priorReview: String? = null,
     val existingReviews: String? = null,
+    val repoGuidelines: String? = null,
+    val focusAreas: String? = null,
+    val customInstructions: String? = null,
 ) {
     /** Convenience constructor with no prior review or existing reviews. */
     constructor(pr: PullRequest, diff: String, knownPatterns: String) :
