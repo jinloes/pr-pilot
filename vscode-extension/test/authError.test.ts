@@ -22,7 +22,7 @@ test('classifies GitHub API 403 as gh_not_authenticated', () => {
   assert.equal(reason, 'gh_not_authenticated');
 });
 
-test('returns null for non-auth failures', () => {
+test('classifies non-auth failures as load_failed', () => {
   const reason = classifySetupAuthError(new Error('request timed out while loading pull requests'));
-  assert.equal(reason, null);
+  assert.equal(reason, 'load_failed');
 });

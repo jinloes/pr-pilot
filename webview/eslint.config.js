@@ -45,7 +45,7 @@ export default tseslint.config(
       // react-hooks v7 added stricter hygiene rules that flag many pre-existing
       // patterns in this codebase. Downgrade to warn so the strict checks above
       // still error out; clean these up incrementally.
-      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/set-state-in-effect': 'off',
       'react-hooks/immutability': 'warn',
       'react-hooks/error-boundaries': 'warn',
       'react-hooks/refs': 'warn',

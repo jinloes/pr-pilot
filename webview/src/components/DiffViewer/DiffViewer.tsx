@@ -419,7 +419,6 @@ function HunkRows({
 }: HunkRowsProps) {
   const highlighted = useMemo(
     () => hunk.changes.map((c) => syntaxHighlight(c.content, filePath)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [hunk, filePath],
   )
 

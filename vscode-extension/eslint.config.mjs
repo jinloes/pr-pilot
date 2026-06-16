@@ -2,6 +2,10 @@ import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 import globals from 'globals'
 
+if (typeof globalThis.structuredClone !== 'function') {
+  globalThis.structuredClone = (value) => JSON.parse(JSON.stringify(value))
+}
+
 export default tseslint.config(
   { ignores: ['dist', 'node_modules', 'eslint.config.mjs'] },
   {

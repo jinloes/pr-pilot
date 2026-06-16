@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { buildPRSearchQuery, detectCurrentRepo } from '../src/github';
+import { apiBase, buildPRSearchQuery, detectCurrentRepo, normalizeGithubBaseUrl } from '../src/github';
 
 test('buildPRSearchQuery uses current repo when scope is currentRepo', () => {
   assert.equal(
@@ -39,6 +39,18 @@ test('buildPRSearchQuery supports authored scope', () => {
     buildPRSearchQuery('all', 'authored'),
     'is:pr draft:false author:@me',
   );
+});
+
+test('apiBase rejects non-https base URLs', () => {
+  assert.throws(
+    () => apiBase('http://github.example.com'),
+    /must start with https:\/\//,
+  );
+});
+
+test('normalizeGithubBaseUrl defaults to github.com and trims trailing slash', () => {
+  assert.equal(normalizeGithubBaseUrl(''), 'https://github.com');
+  assert.equal(normalizeGithubBaseUrl('https://github.example.com/'), 'https://github.example.com');
 });
 
 // ── detectCurrentRepo ───────────────────────────────────────────────────────

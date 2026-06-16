@@ -1,10 +1,10 @@
-export type SetupReason = 'gh_not_installed' | 'gh_not_authenticated';
+export type SetupReason = 'gh_not_installed' | 'gh_not_authenticated' | 'load_failed';
 
 /**
  * Classifies startup/refresh failures that should route users to the setup screen.
- * Returns null when the error is not auth/install related.
+ * Returns "load_failed" when the error is not auth/install related.
  */
-export function classifySetupAuthError(err: unknown): SetupReason | null {
+export function classifySetupAuthError(err: unknown): SetupReason {
     const errMsg = (err instanceof Error ? err.message : String(err)).toLowerCase();
 
     const notInstalled =
@@ -23,5 +23,5 @@ export function classifySetupAuthError(err: unknown): SetupReason | null {
         || errMsg.includes(' 401')
         || errMsg.includes(' 403');
 
-    return authRelated ? 'gh_not_authenticated' : null;
+    return authRelated ? 'gh_not_authenticated' : 'load_failed';
 }

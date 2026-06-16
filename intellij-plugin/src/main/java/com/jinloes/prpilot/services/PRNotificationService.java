@@ -36,6 +36,7 @@ public final class PRNotificationService implements Disposable {
 
     static final String NOTIFICATION_GROUP = "PR Pilot";
     static final String AUTH_MISSING_ERROR = "Not signed in — run 'gh auth login'.";
+    static final String REVIEW_REQUESTED_QUERY = "is:open is:pr draft:false review-requested:@me";
 
     private record PollStatus(long epochMs, String error) {}
 
@@ -118,7 +119,7 @@ public final class PRNotificationService implements Disposable {
 
         if (settings.isNotifyReviewRequested()) {
             try {
-                found.addAll(githubService.searchPRs(token, "is:open is:pr review-requested:@me"));
+                found.addAll(githubService.searchPRs(token, REVIEW_REQUESTED_QUERY));
             } catch (Exception e) {
                 log.warn("PR notification poll failed", e);
                 pollError = sanitizeError(e);
@@ -133,7 +134,7 @@ public final class PRNotificationService implements Disposable {
                 if (!slice.isEmpty()) {
                     String repoQ =
                             slice.stream().map(r -> "repo:" + r).collect(Collectors.joining(" "));
-                    found.addAll(githubService.searchPRs(token, "is:open is:pr " + repoQ));
+                    found.addAll(githubService.searchPRs(token, buildStarredReposQuery(repoQ)));
                 }
             } catch (Exception e) {
                 log.warn("PR notification poll failed", e);
@@ -160,11 +161,14 @@ public final class PRNotificationService implements Disposable {
                 }
             }
         }
-        // Drop entries for PRs no longer in live results (closed, merged, review fulfilled),
-        // then cap size to guard against unbounded growth.
-        seenSet.retain(found);
+        // Keep previously seen keys so limited result windows don't cause duplicate notifications
+        // when older open PRs fall in/out of the top-N search page.
         seenSet.trim();
         seenSet.save();
+    }
+
+    static String buildStarredReposQuery(String repoQ) {
+        return "is:open is:pr draft:false " + repoQ;
     }
 
     private void fireNotification(PullRequest pr) {

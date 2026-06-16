@@ -9,6 +9,22 @@ import org.junit.jupiter.api.Test;
 class PRNotificationServiceTest {
 
     @Nested
+    class QueryBuilders {
+
+        @Test
+        void reviewRequestedQueryExcludesDrafts() {
+            assertThat(PRNotificationService.REVIEW_REQUESTED_QUERY)
+                    .isEqualTo("is:open is:pr draft:false review-requested:@me");
+        }
+
+        @Test
+        void starredReposQueryExcludesDrafts() {
+            assertThat(PRNotificationService.buildStarredReposQuery("repo:acme/foo repo:acme/bar"))
+                    .isEqualTo("is:open is:pr draft:false repo:acme/foo repo:acme/bar");
+        }
+    }
+
+    @Nested
     class FormatPollStatus {
 
         @Test

@@ -116,6 +116,7 @@ export function deactivate() {}
 
 /** globalState key for the persisted seen-PR set so notifications survive reloads/restarts. */
 const NOTIFY_STATE_KEY = 'pr-pilot.notifications.seenState';
+const MAX_SEEN_NOTIFICATION_PRS = 500;
 
 interface SeenState {
     seeded: boolean;
@@ -215,11 +216,7 @@ class PRNotificationPoller implements vscode.Disposable {
                     if (choice === 'Open PR') void vscode.env.openExternal(vscode.Uri.parse(pr.htmlUrl));
                 });
             }
-
-            const liveKeys = new Set(unique.map(prNotificationKey));
-            for (const key of Array.from(this.seen)) {
-                if (!liveKeys.has(key)) this.seen.delete(key);
-            }
+            trimSeenSet(this.seen, MAX_SEEN_NOTIFICATION_PRS);
             await this.persist();
         } catch (err) {
             console.warn('[pr-pilot] PR notification poll failed:', err instanceof Error ? err.message : String(err));
@@ -243,6 +240,15 @@ function dedupePRs(prs: github.PR[]): github.PR[] {
         result.push(pr);
     }
     return result;
+}
+
+function trimSeenSet(seen: Set<string>, maxSize: number): void {
+    if (seen.size <= maxSize) return;
+    while (seen.size > maxSize) {
+        const first = seen.values().next().value;
+        if (!first) break;
+        seen.delete(first);
+    }
 }
 
 // ── State per webview view ─────────────────────────────────────────────────────
@@ -684,16 +690,12 @@ async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>):
     } catch (err) {
         state.cachedToken = null;
         const reason = classifySetupAuthError(err);
-        if (reason) {
-            const detail = reason === 'gh_not_installed'
-                ? "The 'gh' CLI was not found. Install it from https://cli.github.com, then run 'gh auth login' in a terminal and click Refresh."
-                : "Run 'gh auth login' in a terminal to authenticate, then click Refresh.";
-            push(state, { type: 'setupRequired', reason, detail });
-        } else {
-            const message = toUserFacingError(err, 'load pull requests');
-            vscode.window.showErrorMessage(`PR Pilot: ${message}`);
-            push(state, { type: 'prListLoaded', prs: [] });
-        }
+        const detail = reason === 'gh_not_installed'
+            ? "The 'gh' CLI was not found. Install it from https://cli.github.com, then run 'gh auth login' in a terminal and click Refresh."
+            : reason === 'gh_not_authenticated'
+                ? "Run 'gh auth login' in a terminal to authenticate, then click Refresh."
+                : toUserFacingError(err, 'load pull requests');
+        push(state, { type: 'setupRequired', reason, detail });
     }
 }
 

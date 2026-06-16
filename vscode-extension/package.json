@@ -68,6 +68,7 @@
         "pr-pilot.githubBaseUrl": {
           "type": "string",
           "default": "https://github.com",
+          "pattern": "^https://.+",
           "description": "GitHub base URL. Change for GitHub Enterprise (e.g. https://github.mycompany.com)."
         },
         "pr-pilot.notificationsEnabled": {

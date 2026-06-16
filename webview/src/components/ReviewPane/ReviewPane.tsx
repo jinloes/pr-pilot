@@ -179,7 +179,7 @@ export function ReviewPane({ pr }: Props) {
     setFocusedCommentIdx(0)
     setChatVisible(false)
     setSelectedContext('')
-  }, [pr?.number, pr?.owner, pr?.repo])
+  }, [pr])
 
   useEffect(() => {
     const cleanup = onHostMessage((msg) => {
@@ -351,14 +351,14 @@ export function ReviewPane({ pr }: Props) {
     setChatHeight(newHeight)
   }, [])
 
-  const handleChatResizeUp = useCallback(() => {
+  function handleChatResizeUp() {
     chatDragRef.current = null
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
     localStorage.setItem(CHAT_HEIGHT_KEY, String(chatHeightRef.current))
     document.removeEventListener('mousemove', handleChatResizeMove)
     document.removeEventListener('mouseup', handleChatResizeUp)
-  }, [handleChatResizeMove])
+  }
 
   // Hooks must run in the same order on every render — keep all hooks above the early return.
   const result = resultOf(state)

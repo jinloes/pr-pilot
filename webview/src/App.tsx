@@ -106,7 +106,7 @@ export default function App() {
     setLeftWidth(newWidth)
   }, [])
 
-  const handleMouseUp = useCallback(() => {
+  function handleMouseUp() {
     if (!dragging.current) return
     dragging.current = false
     document.body.style.cursor = ''
@@ -114,7 +114,7 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, String(currentWidthRef.current))
     document.removeEventListener('mousemove', handleMouseMove)
     document.removeEventListener('mouseup', handleMouseUp)
-  }, [handleMouseMove])
+  }
 
   function handleDividerMouseDown(e: React.MouseEvent) {
     dragging.current = true

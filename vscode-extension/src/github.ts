@@ -103,9 +103,17 @@ interface StarredRepo {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 export function apiBase(githubBaseUrl: string): string {
-    const url = (githubBaseUrl || 'https://github.com').replace(/\/$/, '');
+    const url = normalizeGithubBaseUrl(githubBaseUrl);
     if (url === 'https://github.com') return 'https://api.github.com';
     return `${url}/api/v3`;
+}
+
+export function normalizeGithubBaseUrl(githubBaseUrl: string): string {
+    const url = (githubBaseUrl || 'https://github.com').trim().replace(/\/$/, '');
+    if (!url.startsWith('https://')) {
+        throw new Error('GitHub base URL must start with https://');
+    }
+    return url;
 }
 
 function findGhBinary(): string {
@@ -125,7 +133,7 @@ function findGhBinary(): string {
 
 export async function resolveToken(githubBaseUrl: string): Promise<string> {
     const args = ['auth', 'token'];
-    const base = (githubBaseUrl || '').replace(/\/$/, '');
+    const base = normalizeGithubBaseUrl(githubBaseUrl);
     if (base && base !== 'https://github.com') {
         try {
             const hostname = new URL(base).hostname;
