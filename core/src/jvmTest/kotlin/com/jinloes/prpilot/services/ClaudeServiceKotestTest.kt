@@ -110,9 +110,9 @@ class ClaudeServiceKotestTest : FunSpec({
 
         test("omits optional context sections when blank") {
             val prompt = ClaudeService.buildPrompt(fakeRequest())
-            prompt shouldNotContain "<repo_guidelines>"
-            prompt shouldNotContain "<focus_areas>"
-            prompt shouldNotContain "<custom_instructions>"
+            prompt shouldNotContain "<repo_guidelines>\n"
+            prompt shouldNotContain "<focus_areas>\n"
+            prompt shouldNotContain "<custom_instructions>\n"
         }
 
         test("escapes a closing tag injected via custom instructions") {

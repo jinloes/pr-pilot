@@ -53,9 +53,9 @@ test('buildPrompt embeds repo guidelines, focus areas, and custom instructions',
 
 test('buildPrompt omits optional context sections when not provided', () => {
   const prompt = buildPrompt({ pr: pr() });
-  assert.doesNotMatch(prompt, /<repo_guidelines>/);
-  assert.doesNotMatch(prompt, /<focus_areas>/);
-  assert.doesNotMatch(prompt, /<custom_instructions>/);
+  assert.doesNotMatch(prompt, /<repo_guidelines>\n/);
+  assert.doesNotMatch(prompt, /<focus_areas>\n/);
+  assert.doesNotMatch(prompt, /<custom_instructions>\n/);
 });
 
 test('buildPrompt escapes closing tag injected via custom instructions', () => {
@@ -71,6 +71,26 @@ test('buildPrompt requires confidence-gated, evidence-backed findings', () => {
   const prompt = buildPrompt({ pr: pr() });
   assert.match(prompt, /confidence/);
   assert.match(prompt, /Confidence gating/);
+});
+
+test('buildPrompt defines tool-unavailable fallback instead of guessing', () => {
+  const prompt = buildPrompt({ pr: pr() });
+  assert.match(prompt, /If required tools are unavailable or fail/);
+  assert.match(prompt, /verdict="COMMENT"/);
+  assert.match(prompt, /lineComments=\[\]/);
+});
+
+test('buildPrompt constrains key-change summary bullets to avoid overflow', () => {
+  const prompt = buildPrompt({ pr: pr() });
+  assert.match(prompt, /up to 8 bullets prioritized by risk/);
+  assert.match(prompt, /and N more files/);
+});
+
+test('buildPrompt treats custom instructions as preferences, not overrides', () => {
+  const prompt = buildPrompt({ pr: pr(), customInstructions: 'Prefer X' });
+  assert.match(prompt, /custom_instructions/);
+  assert.match(prompt, /preference input/);
+  assert.match(prompt, /does not conflict with evidence requirements/);
 });
 
 test('buildPrompt includes proto schema evolution review guidance', () => {

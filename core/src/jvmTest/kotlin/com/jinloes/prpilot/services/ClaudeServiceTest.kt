@@ -169,6 +169,27 @@ class ClaudeServiceTest : FunSpec({
             prompt shouldContain "at most 12 comments"
         }
 
+        test("tool-unavailable fallback is explicit") {
+            val prompt = ClaudeService.buildPrompt(PRReviewRequest(pr(), "", ""))
+            prompt shouldContain "If required tools are unavailable or fail"
+            prompt shouldContain "verdict=\"COMMENT\""
+            prompt shouldContain "lineComments=[]"
+        }
+
+        test("summary key changes are bounded for large PRs") {
+            val prompt = ClaudeService.buildPrompt(PRReviewRequest(pr(), "", ""))
+            prompt shouldContain "up to 8 bullets prioritized by risk"
+            prompt shouldContain "and N more files"
+        }
+
+        test("custom instructions are treated as preferences, not hard overrides") {
+            val prompt = ClaudeService.buildPrompt(
+                PRReviewRequest(pr(), "", "", customInstructions = "Prefer X")
+            )
+            prompt shouldContain "preference input"
+            prompt shouldContain "does not conflict with evidence requirements"
+        }
+
         test("test coverage rule is scoped") {
             val prompt = ClaudeService.buildPrompt(PRReviewRequest(pr(), "", ""))
             prompt shouldContain "flag as \"issue\" only if"
