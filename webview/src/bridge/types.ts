@@ -259,6 +259,10 @@ export interface OpenUrlRequest {
   url: string
 }
 
+export interface OpenSettingsRequest {
+  type: 'openSettings'
+}
+
 export interface ClearChatRequest {
   type: 'clearChat'
 }
@@ -273,6 +277,7 @@ export type OutgoingMessage =
   | DeleteDraftRequest
   | CancelReviewRequest
   | OpenUrlRequest
+  | OpenSettingsRequest
   | ClearChatRequest
 
 // VS Code injects acquireVsCodeApi() into the webview's global scope.

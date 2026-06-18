@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.module.kotlin.KotlinModule;
 import com.intellij.ide.BrowserUtil;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.jcef.JBCefBrowser;
@@ -403,7 +404,20 @@ public class WebviewPanel implements Disposable {
                         getApplication().invokeLater(() -> BrowserUtil.browse(url));
                     }
                 }
-                case "generateReview" -> handleGenerateReview(number, owner, repo);
+                case "openSettings" ->
+                        getApplication()
+                                .invokeLater(
+                                        () ->
+                                                ShowSettingsUtil.getInstance()
+                                                        .showSettingsDialog(
+                                                                project, "Claude PR Reviews"));
+                case "generateReview" ->
+                        handleGenerateReview(
+                                number,
+                                owner,
+                                repo,
+                                node.path("focusAreas").asText(""),
+                                node.path("customInstructions").asText(""));
                 case "cancelReview" -> activeReviewService.cancelCurrentRequest();
                 case "saveDraft" -> {
                     ReviewResult bridgeResult = null;
@@ -686,7 +700,12 @@ public class WebviewPanel implements Disposable {
 
     // --- generateReview ---
 
-    private void handleGenerateReview(int number, String owner, String repo) {
+    private void handleGenerateReview(
+            int number,
+            String owner,
+            String repo,
+            String overrideFocusAreas,
+            String overrideCustomInstructions) {
         String key = bridgePrKey(number, owner, repo);
         PullRequest pr =
                 cachedPRs.stream()
@@ -810,9 +829,14 @@ public class WebviewPanel implements Disposable {
                             final String finalGuidelines = readRepoGuidelines(guidelinesDir);
                             final String finalPriorReview = formatPriorReview(lastResult);
                             final String finalFocusAreas =
-                                    PluginSettings.getInstance().getReviewFocusAreas();
+                                    StringUtils.isNotBlank(overrideFocusAreas)
+                                            ? overrideFocusAreas
+                                            : PluginSettings.getInstance().getReviewFocusAreas();
                             final String finalCustomInstructions =
-                                    PluginSettings.getInstance().getReviewCustomInstructions();
+                                    StringUtils.isNotBlank(overrideCustomInstructions)
+                                            ? overrideCustomInstructions
+                                            : PluginSettings.getInstance()
+                                                    .getReviewCustomInstructions();
                             finalReviewService.reviewPR(
                                     new PRReviewRequest(
                                             finalPr,

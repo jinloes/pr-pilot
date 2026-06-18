@@ -7,7 +7,6 @@ import * as copilot from './copilot';
 import * as worktree from './worktree';
 import * as settings from './settings';
 import * as workspace from './workspace';
-import { COPILOT_MODEL_SUGGESTIONS } from './settingsView';
 import { classifySetupAuthError } from './authError';
 import { toUserFacingError } from './userFacingError';
 
@@ -52,62 +51,9 @@ export function activate(context: vscode.ExtensionContext) {
     }));
 }
 
-/**
- * Recent Copilot CLI model IDs offered when discovery is unavailable. Intentionally short; the
- * SDK probe is the source of truth. Shared with the settings webview (see settingsView.ts).
- */
-
-/**
- * Quick-pick command to set `pr-pilot.reviewModelCopilot`. VS Code settings are declarative JSON
- * and cannot self-populate an enum from a runtime probe, so model discovery is surfaced as a
- * command instead. Probes the SDK for available models, falls back to hardcoded suggestions, and
- * always offers a freeform entry plus a "CLI default" option. Mirrors the IntelliJ settings combo.
- */
+/** Kept for backwards compatibility; model selection now lives in PR Pilot Settings. */
 async function selectCopilotModel(): Promise<void> {
-    const current = config().get<string>('reviewModelCopilot', '');
-
-    const discovered = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: 'PR Pilot: discovering Copilot models…' },
-        () => copilot.listModels(true),
-    );
-    const modelIds = discovered.length > 0 ? discovered : COPILOT_MODEL_SUGGESTIONS;
-
-    interface ModelPick extends vscode.QuickPickItem { value?: string; custom?: boolean }
-    const items: ModelPick[] = [
-        { label: 'CLI default', description: "Empty — use the Copilot CLI's own routing", value: '' },
-        ...modelIds.map((id): ModelPick => ({
-            label: id,
-            description: id === current ? '$(check) current' : undefined,
-            value: id,
-        })),
-        { label: '$(pencil) Enter a model ID…', custom: true },
-    ];
-
-    const picked = await vscode.window.showQuickPick(items, {
-        title: discovered.length > 0
-            ? 'Select Copilot review model'
-            : 'Select Copilot review model (discovery unavailable — showing suggestions)',
-        placeHolder: current ? `Current: ${current}` : 'Current: CLI default',
-    });
-    if (!picked) return;
-
-    let value: string;
-    if (picked.custom) {
-        const entered = await vscode.window.showInputBox({
-            title: 'Copilot model ID',
-            value: current,
-            prompt: 'Run `copilot help config` to list supported IDs. Leave empty for the CLI default.',
-        });
-        if (entered === undefined) return;
-        value = entered.trim();
-    } else {
-        value = picked.value ?? '';
-    }
-
-    await config().update('reviewModelCopilot', value, vscode.ConfigurationTarget.Global);
-    vscode.window.showInformationMessage(
-        value ? `PR Pilot: Copilot review model set to ${value}` : 'PR Pilot: Copilot review model set to CLI default',
-    );
+    await vscode.commands.executeCommand('pr-pilot.openSettings');
 }
 
 export function deactivate() {}
@@ -433,6 +379,9 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
                     if (typeof msg.url === 'string' && msg.url.startsWith('https://')) {
                         void vscode.env.openExternal(vscode.Uri.parse(msg.url));
                     }
+                    break;
+                case 'openSettings':
+                    await vscode.commands.executeCommand('pr-pilot.openSettings');
                     break;
                 default:
                     console.warn('[pr-pilot] unknown message type:', msg.type);

@@ -63,6 +63,9 @@ public class PluginSettingsComponent {
 
     private final JPanel modelComboPanel = new JPanel(new java.awt.CardLayout());
     private final JPanel copilotModelCard = new JPanel();
+    private final JCheckBox showAdvancedCopilotBox =
+            new JCheckBox("Show advanced Copilot settings");
+    private final JPanel advancedCopilotPanel = new JPanel();
     private JPanel effortRowPanel;
 
     private final JLabel statusLabel = new JBLabel("Checking…");
@@ -149,6 +152,17 @@ public class PluginSettingsComponent {
                                 + " repo-local <code>.mcp.json</code>. Applies only to GitHub"
                                 + " Copilot.</small></html>");
         mcpHint.setBorder(JBUI.Borders.emptyTop(2));
+        advancedCopilotPanel.setLayout(new BoxLayout(advancedCopilotPanel, BoxLayout.Y_AXIS));
+        advancedCopilotPanel.add(
+                FormBuilder.createFormBuilder()
+                        .addLabeledComponent(
+                                new JBLabel("Reasoning effort:"), effortRowPanel, 1, false)
+                        .addComponent(copilotInheritMcpBox, 1)
+                        .addLabeledComponent(
+                                new JBLabel("Copilot config dir:"), copilotConfigDirField, 1, false)
+                        .addComponent(mcpHint, 1)
+                        .getPanel());
+        showAdvancedCopilotBox.addActionListener(e -> updateAdvancedCopilotOptionsVisibility());
 
         JLabel note =
                 new JBLabel(
@@ -190,12 +204,8 @@ public class PluginSettingsComponent {
                                 new JBLabel("Review provider:"), providerCombo, 1, false)
                         .addLabeledComponent(
                                 new JBLabel("Review model:"), modelComboPanel, 1, false)
-                        .addLabeledComponent(
-                                new JBLabel("Reasoning effort:"), effortRowPanel, 1, false)
-                        .addComponent(copilotInheritMcpBox, 1)
-                        .addLabeledComponent(
-                                new JBLabel("Copilot config dir:"), copilotConfigDirField, 1, false)
-                        .addComponent(mcpHint, 1)
+                        .addComponent(showAdvancedCopilotBox, 1)
+                        .addComponent(advancedCopilotPanel, 1)
                         .addSeparator(8)
                         .addLabeledComponent(
                                 new JBLabel("Review focus areas:"), reviewFocusAreasField, 1, false)
@@ -223,6 +233,7 @@ public class PluginSettingsComponent {
 
         refreshPollStatus();
         refreshAuthStatus();
+        updateAdvancedCopilotOptionsVisibility();
     }
 
     private void updateNotificationSubOptions() {
@@ -353,11 +364,17 @@ public class PluginSettingsComponent {
     private void updateActiveModelCombo() {
         ReviewProvider active = getReviewProvider();
         ((java.awt.CardLayout) modelComboPanel.getLayout()).show(modelComboPanel, active.getId());
-        // Effort only applies to Copilot — disable the combo for Claude so the form doesn't
-        // reflow on every provider toggle. The hint label explains why.
-        copilotEffortCombo.setEnabled(active == ReviewProvider.COPILOT);
-        copilotInheritMcpBox.setEnabled(active == ReviewProvider.COPILOT);
-        copilotConfigDirField.setEnabled(active == ReviewProvider.COPILOT);
+        updateAdvancedCopilotOptionsVisibility();
+    }
+
+    private void updateAdvancedCopilotOptionsVisibility() {
+        boolean copilotProvider = getReviewProvider() == ReviewProvider.COPILOT;
+        boolean showAdvanced = showAdvancedCopilotBox.isSelected();
+        showAdvancedCopilotBox.setVisible(copilotProvider);
+        advancedCopilotPanel.setVisible(copilotProvider && showAdvanced);
+        copilotEffortCombo.setEnabled(copilotProvider);
+        copilotInheritMcpBox.setEnabled(copilotProvider);
+        copilotConfigDirField.setEnabled(copilotProvider);
     }
 
     /**

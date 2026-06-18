@@ -106,7 +106,7 @@
         "pr-pilot.reviewModelCopilot": {
           "type": "string",
           "default": "claude-sonnet-4.6",
-          "description": "Model ID for the GitHub Copilot CLI. Default `claude-sonnet-4.6` balances JSON schema adherence and code-review depth without Opus-tier latency. Empty uses the CLI's default routing. Run the `PR Pilot: Select Copilot Review Model` command (or the gear in the PR Pilot view title) to pick from models discovered via the Copilot SDK — the field is freeform because the catalog changes over time.",
+          "description": "Model ID for the GitHub Copilot CLI. Default `claude-sonnet-4.6` balances JSON schema adherence and code-review depth without Opus-tier latency. Empty uses the CLI's default routing. Use `PR Pilot: Open Settings` (or the gear in the PR Pilot view title) to pick from models discovered via the Copilot SDK.",
           "examples": [
             "claude-sonnet-4.6",
             "claude-opus-4.7",

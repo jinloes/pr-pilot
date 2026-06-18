@@ -153,6 +153,8 @@ function prKey(pr: Pick<PR, 'owner' | 'repo' | 'number'>): string {
 
 export function ReviewPane({ pr }: Props) {
   const [state, setState] = useState<PaneState>({ kind: 'idle' })
+  const [focusAreasOverride, setFocusAreasOverride] = useState('')
+  const [customInstructionsOverride, setCustomInstructionsOverride] = useState('')
   const [saving, setSaving] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -172,6 +174,8 @@ export function ReviewPane({ pr }: Props) {
 
   useEffect(() => {
     setState({ kind: pr ? 'draftLoading' : 'idle' })
+    setFocusAreasOverride('')
+    setCustomInstructionsOverride('')
     pendingSubmit.current = null
     setSaving(false)
     setSubmitting(false)
@@ -379,8 +383,17 @@ export function ReviewPane({ pr }: Props) {
   const currentPr = pr
 
   function handleGenerate() {
+    const focusAreas = focusAreasOverride.trim()
+    const customInstructions = customInstructionsOverride.trim()
     setState({ kind: 'generating', messages: ['Starting review…'], chunks: [], startedAtMs: Date.now() })
-    sendToHost({ type: 'generateReview', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo })
+    sendToHost({
+      type: 'generateReview',
+      number: currentPr.number,
+      owner: currentPr.owner,
+      repo: currentPr.repo,
+      focusAreas: focusAreas || undefined,
+      customInstructions: customInstructions || undefined,
+    })
   }
 
   function handleCancel() {
@@ -447,6 +460,7 @@ export function ReviewPane({ pr }: Props) {
   const totalCount = commentCount + orphanCount
   const hasReview = state.kind === 'draftPresent' || state.kind === 'reviewUnsaved'
   const contextSummary = chatContextSummary(pr, diff, result, selectedContext)
+  const showReviewOverrides = state.kind !== 'draftLoading' && state.kind !== 'generating' && state.kind !== 'merged'
 
   // DiffViewer indexes comments by position in the array we pass it (`inlineComments`),
   // but our mutators operate on positions in the canonical `result.lineComments`. The
@@ -620,6 +634,14 @@ export function ReviewPane({ pr }: Props) {
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <div className="flex-1 overflow-y-auto min-h-0">
+              {showReviewOverrides && (
+                <ReviewOverrides
+                  focusAreas={focusAreasOverride}
+                  customInstructions={customInstructionsOverride}
+                  onFocusAreasChange={setFocusAreasOverride}
+                  onCustomInstructionsChange={setCustomInstructionsOverride}
+                />
+              )}
               <PaneContent
                 state={state}
                 focusedCommentIdx={focusedCommentIdx}
@@ -706,6 +728,60 @@ export function ReviewPane({ pr }: Props) {
         />
       </div>
     </TooltipProvider>
+  )
+}
+
+interface ReviewOverridesProps {
+  focusAreas: string
+  customInstructions: string
+  onFocusAreasChange: (value: string) => void
+  onCustomInstructionsChange: (value: string) => void
+}
+
+function ReviewOverrides({
+  focusAreas,
+  customInstructions,
+  onFocusAreasChange,
+  onCustomInstructionsChange,
+}: ReviewOverridesProps) {
+  const hasOverrides = focusAreas.trim().length > 0 || customInstructions.trim().length > 0
+  return (
+    <div className="px-4 pt-3">
+      <div className="rounded border border-border bg-muted/20 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-medium text-foreground">Per-review instructions (optional)</p>
+          {hasOverrides && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => {
+                onFocusAreasChange('')
+                onCustomInstructionsChange('')
+              }}
+            >
+              Clear
+            </Button>
+          )}
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Leave blank to use defaults from Settings.
+        </p>
+        <input
+          className="mt-2 w-full rounded border border-border bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+          placeholder="Focus areas (e.g. security, performance, tests)"
+          value={focusAreas}
+          onChange={(e) => onFocusAreasChange(e.target.value)}
+        />
+        <textarea
+          className="mt-2 w-full rounded border border-border bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring resize-y"
+          rows={2}
+          placeholder="Custom instructions for this review only"
+          value={customInstructions}
+          onChange={(e) => onCustomInstructionsChange(e.target.value)}
+        />
+      </div>
+    </div>
   )
 }
 

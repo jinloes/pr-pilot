@@ -107,7 +107,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   .status { min-height: 18px; margin: 0 0 14px; font-size: 12px; color: var(--vscode-descriptionForeground); }
   .status.ok { color: var(--vscode-testing-iconPassed); }
   .status.error { color: var(--vscode-errorForeground); }
-  select, input[type=text] {
+  select, input[type=text], textarea {
     width: 100%; box-sizing: border-box; padding: 5px 8px; font-size: 13px;
     color: var(--vscode-input-foreground); background: var(--vscode-input-background);
     border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px;
@@ -124,6 +124,22 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   }
   button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
   .hidden { display: none; }
+  details.advanced {
+    margin: 0 0 18px;
+    max-width: 560px;
+    border: 1px solid var(--vscode-panel-border, var(--vscode-input-border, transparent));
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+  details.advanced > summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  details.advanced > summary::marker {
+    color: var(--vscode-descriptionForeground);
+  }
+  .advanced-fields { margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -152,22 +168,26 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       <select id="copilotModel"></select>
       <button id="refreshModels" class="secondary" title="Re-probe available models">Refresh</button>
     </div>
-    <input type="text" id="copilotModelCustom" placeholder="…or type a model ID (leave empty for CLI default)" style="margin-top:6px;">
-    <div class="hint">Pick a discovered model or type any ID. Empty uses the CLI's default routing.</div>
+    <div class="hint">Pick a discovered model. Choose "CLI default" to use the Copilot CLI's own routing.</div>
   </div>
 
-  <div class="field hidden" id="effortField">
-    <label for="effort">Reasoning effort (Copilot)</label>
-    <select id="effort">${effortOptions}</select>
-    <div class="hint">Higher = deeper review, slower. Applies only to GitHub Copilot.</div>
-  </div>
+  <details id="advancedCopilot" class="advanced hidden">
+    <summary>Advanced Copilot settings</summary>
+    <div class="advanced-fields">
+      <div class="field" id="effortField">
+        <label for="effort">Reasoning effort (Copilot)</label>
+        <select id="effort">${effortOptions}</select>
+        <div class="hint">Higher = deeper review, slower. Applies only to GitHub Copilot.</div>
+      </div>
 
-  <div class="field hidden" id="mcpField">
-    <label><input type="checkbox" id="inheritMcp" style="width:auto;margin-right:6px;">Inherit MCP servers from the Copilot CLI config</label>
-    <div class="hint">Gives the reviewer the same MCP tools as the <code>copilot</code> CLI — discovered from <code>~/.copilot/mcp-config.json</code> and any repo-local <code>.mcp.json</code>.</div>
-    <input type="text" id="copilotConfigDir" placeholder="Config dir override (empty = ~/.copilot)" style="margin-top:8px;">
-    <div class="hint">Optional override of the Copilot config directory used to discover MCP servers.</div>
-  </div>
+      <div class="field" id="mcpField">
+        <label><input type="checkbox" id="inheritMcp" style="width:auto;margin-right:6px;">Inherit MCP servers from the Copilot CLI config</label>
+        <div class="hint">Gives the reviewer the same MCP tools as the <code>copilot</code> CLI — discovered from <code>~/.copilot/mcp-config.json</code> and any repo-local <code>.mcp.json</code>.</div>
+        <input type="text" id="copilotConfigDir" placeholder="Config dir override (empty = ~/.copilot)" style="margin-top:8px;">
+        <div class="hint">Optional override of the Copilot config directory used to discover MCP servers.</div>
+      </div>
+    </div>
+  </details>
 
   <div class="field">
     <label for="baseUrl">GitHub base URL</label>
@@ -206,8 +226,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
     const isCopilot = provider === 'copilot';
     $('claudeModelField').classList.toggle('hidden', isCopilot);
     $('copilotModelField').classList.toggle('hidden', !isCopilot);
-    $('effortField').classList.toggle('hidden', !isCopilot);
-    $('mcpField').classList.toggle('hidden', !isCopilot);
+    $('advancedCopilot').classList.toggle('hidden', !isCopilot);
   }
 
   function renderCopilotModels(models, current) {
@@ -223,22 +242,11 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       o.textContent = id;
       sel.appendChild(o);
     }
-    // Select the saved value if it's in the list; otherwise show it in the freeform box.
-    if (!current) {
-      sel.value = CLI_DEFAULT;
-      $('copilotModelCustom').value = '';
-    } else if (models.includes(current)) {
-      sel.value = current;
-      $('copilotModelCustom').value = '';
-    } else {
-      sel.value = CLI_DEFAULT;
-      $('copilotModelCustom').value = current;
-    }
+    // The host appends the currently saved ID to the option list when needed.
+    sel.value = current || CLI_DEFAULT;
   }
 
   function copilotModelValue() {
-    const custom = $('copilotModelCustom').value.trim();
-    if (custom) return custom;
     const sel = $('copilotModel').value;
     return sel === CLI_DEFAULT ? '' : sel;
   }
@@ -259,7 +267,6 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   });
   $('claudeModel').addEventListener('change', () => save('reviewModel', $('claudeModel').value));
   $('copilotModel').addEventListener('change', () => save('reviewModelCopilot', copilotModelValue()));
-  $('copilotModelCustom').addEventListener('change', () => save('reviewModelCopilot', copilotModelValue()));
   $('effort').addEventListener('change', () => save('reviewEffort', $('effort').value));
   $('inheritMcp').addEventListener('change', () => save('copilotInheritMcp', $('inheritMcp').checked));
   $('copilotConfigDir').addEventListener('change', () => save('copilotConfigDir', $('copilotConfigDir').value.trim()));

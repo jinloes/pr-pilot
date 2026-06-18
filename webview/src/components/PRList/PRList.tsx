@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, Circle, RefreshCw, TriangleAlert } from 'lucide-react'
+import { CheckCircle2, Circle, Copy, ExternalLink, RefreshCw, Settings2, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -177,9 +177,20 @@ export function PRList({ onSelect }: Props) {
           <Button
             variant="ghost"
             size="sm"
+            onClick={() => sendToHost({ type: 'openSettings' })}
+            className="ml-auto h-6 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5"
+            title="Open PR Pilot settings"
+            aria-label="Open PR Pilot settings"
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            Settings
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => fetchWithFilters()}
             disabled={refreshing}
-            className="ml-auto h-6 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5"
+            className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5"
             title="Refresh pull requests"
             aria-label="Refresh pull requests"
           >
@@ -400,6 +411,19 @@ interface SetupScreenProps {
 function SetupScreen({ reason, detail, refreshing, onRefresh }: SetupScreenProps) {
   const title = reason === 'load_failed' ? 'Could not load pull requests' : 'GitHub not connected'
   const steps = setupSteps(reason)
+  const [copyLabel, setCopyLabel] = useState<'copy' | 'copied' | 'failed'>('copy')
+
+  async function handleCopyAuthCommand() {
+    try {
+      await navigator.clipboard.writeText('gh auth login')
+      setCopyLabel('copied')
+      window.setTimeout(() => setCopyLabel('copy'), 1200)
+    } catch {
+      setCopyLabel('failed')
+      window.setTimeout(() => setCopyLabel('copy'), 1200)
+    }
+  }
+
   return (
     <div className="flex flex-col h-full items-center justify-center gap-5 px-6 text-center">
       <TriangleAlert className="w-10 h-10 text-status-suggestion shrink-0" />
@@ -422,16 +446,53 @@ function SetupScreen({ reason, detail, refreshing, onRefresh }: SetupScreenProps
           </div>
         ))}
       </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="gap-1.5 text-xs"
-        onClick={onRefresh}
-        disabled={refreshing}
-      >
-        <RefreshCw className={cn('w-3 h-3', refreshing && 'animate-spin')} />
-        Refresh
-      </Button>
+      <div className="w-full max-w-72 rounded border border-border bg-muted/20 px-3 py-2.5 text-left">
+        <p className="text-[11px] font-mono text-foreground">gh auth login</p>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Run in a terminal if CLI auth is missing.
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-2 h-6 px-2 text-[11px] gap-1.5"
+          onClick={() => {
+            void handleCopyAuthCommand()
+          }}
+        >
+          <Copy className="w-3 h-3" />
+          {copyLabel === 'copied' ? 'Copied' : copyLabel === 'failed' ? 'Copy failed' : 'Copy command'}
+        </Button>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 text-xs"
+          onClick={() => sendToHost({ type: 'openSettings' })}
+        >
+          <Settings2 className="w-3.5 h-3.5" />
+          Open Settings
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 text-xs"
+          onClick={() => sendToHost({ type: 'openUrl', url: 'https://cli.github.com/manual/gh_auth_login' })}
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+          Auth Guide
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 text-xs"
+          onClick={onRefresh}
+          disabled={refreshing}
+        >
+          <RefreshCw className={cn('w-3 h-3', refreshing && 'animate-spin')} />
+          Refresh
+        </Button>
+      </div>
     </div>
   )
 }
