@@ -31,6 +31,7 @@ export interface DraftLoadedMessage {
   reviewId?: string
   result?: ReviewResult
   diff?: string
+  validationDiff?: string
   staleCommits?: boolean
   importedFromGitHub?: boolean
   status?: string
@@ -54,6 +55,7 @@ export interface ReviewResultMessage {
   prKey?: string
   result: ReviewResult
   diff: string
+  validationDiff?: string
 }
 
 export interface ReviewErrorMessage {

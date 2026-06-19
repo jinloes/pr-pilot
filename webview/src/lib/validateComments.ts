@@ -55,9 +55,11 @@ function buildLineIndex(files: FileData[]): Map<string, Set<number>> {
 
 function findValidLinesForFile(idx: Map<string, Set<number>>, file: string): Set<number> | null {
   if (idx.has(file)) return idx.get(file)!
+  const matches: Set<number>[] = []
   for (const [key, val] of idx) {
-    if (file.endsWith(key) || key.endsWith(file)) return val
+    if (file.endsWith(key) || key.endsWith(file)) matches.push(val)
   }
+  if (matches.length === 1) return matches[0]
   return null
 }
 
@@ -91,7 +93,13 @@ function nearestLine(target: number, lines: Set<number>): { line: number; distan
 export function validateComments(diff: string, comments: LineComment[]): ValidationResult {
   const files = safeParse(diff)
   if (files.length === 0) {
-    return { adjusted: [...comments], orphans: [], snappedCount: 0 }
+    const adjusted: LineComment[] = []
+    const orphans: LineComment[] = []
+    for (const c of comments) {
+      if (!c.file || c.line <= 0 || !c.body) adjusted.push(c)
+      else orphans.push(c)
+    }
+    return { adjusted, orphans, snappedCount: 0 }
   }
   const index = buildLineIndex(files)
   const adjusted: LineComment[] = []

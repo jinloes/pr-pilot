@@ -299,6 +299,17 @@ export async function getPRDiff(
         : diff;
 }
 
+export async function getPRDiffFull(
+    token: string,
+    githubBaseUrl: string,
+    owner: string,
+    repo: string,
+    prNumber: number,
+): Promise<string> {
+    const url = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${prNumber}`;
+    return ghRequest(token, url, { accept: 'application/vnd.github.v3.diff' });
+}
+
 export async function getPRDetail(
     token: string,
     githubBaseUrl: string,

@@ -22,7 +22,7 @@
         "command": "pr-pilot.openSettings",
         "title": "Open Settings",
         "category": "PR Pilot",
-        "icon": "$(settings-gear)"
+        "icon": "$(gear)"
       },
       {
         "command": "pr-pilot.selectCopilotModel",
@@ -49,7 +49,7 @@
         {
           "id": "pr-pilot",
           "title": "PR Pilot",
-          "icon": "$(git-pull-request)"
+          "icon": "./media/pr-pilot.svg"
         }
       ]
     },

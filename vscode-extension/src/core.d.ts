@@ -103,6 +103,7 @@ declare module 'core' {
         searchPRs(token: string, query: string): PullRequest[];
         getStarredRepos(token: string): string[];
         getPRDiff(token: string, owner: string, repo: string, prNumber: number): string;
+        getPRDiffFull(token: string, owner: string, repo: string, prNumber: number): string;
         getPendingReviewId(token: string, owner: string, repo: string, number: number): string | null;
         saveDraftReview(
             token: string,

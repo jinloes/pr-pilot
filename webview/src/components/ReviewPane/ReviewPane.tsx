@@ -79,19 +79,28 @@ type PaneState =
   | { kind: 'draftLoading' }
   | { kind: 'noDraft' }
   | { kind: 'authError'; message: string }
-  | { kind: 'draftPresent'; result: ReviewResult; reviewId: string; staleCommits: boolean; importedFromGitHub: boolean; diff?: string; generationElapsedSec?: number }
+  | {
+      kind: 'draftPresent'
+      result: ReviewResult
+      reviewId: string
+      staleCommits: boolean
+      importedFromGitHub: boolean
+      diff?: string
+      validationDiff?: string
+      generationElapsedSec?: number
+    }
   | {
       kind: 'generating'
       messages: string[]
       chunks: Array<{ kind: 'text' | 'thinking'; content: string }>
       startedAtMs: number
     }
-  | { kind: 'reviewUnsaved'; result: ReviewResult; diff: string; generationElapsedSec?: number }
+  | { kind: 'reviewUnsaved'; result: ReviewResult; diff: string; validationDiff: string; generationElapsedSec?: number }
   | { kind: 'merged'; status?: string }
   | { kind: 'submitted' }
   | { kind: 'error'; message: string }
-  | { kind: 'saveError'; message: string; result: ReviewResult | null; diff: string }
-  | { kind: 'submitError'; message: string; result: ReviewResult | null; diff: string }
+  | { kind: 'saveError'; message: string; result: ReviewResult | null; diff: string; validationDiff: string }
+  | { kind: 'submitError'; message: string; result: ReviewResult | null; diff: string; validationDiff: string }
 
 function sortedComments(comments: LineComment[]): LineComment[] {
   return [...comments].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
@@ -116,6 +125,13 @@ function diffOf(state: PaneState): string {
   if (state.kind === 'draftPresent') return state.diff ?? ''
   if (state.kind === 'saveError' || state.kind === 'submitError') return state.diff
   return ''
+}
+
+function validationDiffOf(state: PaneState): string {
+  if (state.kind === 'reviewUnsaved') return state.validationDiff
+  if (state.kind === 'draftPresent') return state.validationDiff ?? state.diff ?? ''
+  if (state.kind === 'saveError' || state.kind === 'submitError') return state.validationDiff
+  return diffOf(state)
 }
 
 function resultOf(state: PaneState): ReviewResult | null {
@@ -200,7 +216,8 @@ export function ReviewPane({ pr }: Props) {
             setState({ kind: 'merged', status: msg.status })
           } else if (msg.prState === 'DRAFT_PRESENT' && msg.result) {
             const diff = msg.diff ?? ''
-            const result = withSortedComments(withValidatedComments(msg.result, diff))
+            const validationDiff = msg.validationDiff ?? diff
+            const result = withSortedComments(withValidatedComments(msg.result, validationDiff))
             setFocusedCommentIdx(0)
             setState({
               kind: 'draftPresent',
@@ -209,6 +226,7 @@ export function ReviewPane({ pr }: Props) {
               staleCommits: msg.staleCommits ?? false,
               importedFromGitHub: msg.importedFromGitHub ?? false,
               diff,
+              validationDiff,
             })
           } else {
             const status = msg.status ?? ''
@@ -234,14 +252,15 @@ export function ReviewPane({ pr }: Props) {
 
         case 'reviewResult': {
           const diff = msg.diff ?? ''
-          const result = withSortedComments(withValidatedComments(msg.result, diff))
+          const validationDiff = msg.validationDiff ?? diff
+          const result = withSortedComments(withValidatedComments(msg.result, validationDiff))
           setFocusedCommentIdx(0)
           setState((prev) => {
             const elapsedSec =
               prev.kind === 'generating'
                 ? Math.max(0, Math.round((Date.now() - prev.startedAtMs) / 1000))
                 : undefined
-            return { kind: 'reviewUnsaved', result, diff, generationElapsedSec: elapsedSec }
+            return { kind: 'reviewUnsaved', result, diff, validationDiff, generationElapsedSec: elapsedSec }
           })
           break
         }
@@ -294,6 +313,12 @@ export function ReviewPane({ pr }: Props) {
             message: msg.message,
             result: prev.kind === 'reviewUnsaved' || prev.kind === 'draftPresent' ? prev.result : null,
             diff: prev.kind === 'reviewUnsaved' ? prev.diff : prev.kind === 'draftPresent' ? (prev.diff ?? '') : '',
+            validationDiff:
+              prev.kind === 'reviewUnsaved'
+                ? prev.validationDiff
+                : prev.kind === 'draftPresent'
+                  ? (prev.validationDiff ?? prev.diff ?? '')
+                  : '',
           }))
           break
 
@@ -309,6 +334,12 @@ export function ReviewPane({ pr }: Props) {
             message: msg.message,
             result: prev.kind === 'draftPresent' || prev.kind === 'reviewUnsaved' ? prev.result : null,
             diff: prev.kind === 'draftPresent' ? (prev.diff ?? '') : prev.kind === 'reviewUnsaved' ? prev.diff : '',
+            validationDiff:
+              prev.kind === 'draftPresent'
+                ? (prev.validationDiff ?? prev.diff ?? '')
+                : prev.kind === 'reviewUnsaved'
+                  ? prev.validationDiff
+                  : '',
           }))
           break
 
@@ -367,9 +398,10 @@ export function ReviewPane({ pr }: Props) {
   // Hooks must run in the same order on every render — keep all hooks above the early return.
   const result = resultOf(state)
   const diff = diffOf(state)
+  const validationDiff = validationDiffOf(state)
   const partition = useMemo(
-    () => validateComments(diff, result?.lineComments ?? []),
-    [diff, result?.lineComments],
+    () => validateComments(validationDiff, result?.lineComments ?? []),
+    [validationDiff, result?.lineComments],
   )
 
   if (!pr) {

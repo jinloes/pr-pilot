@@ -12,6 +12,7 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -160,6 +161,14 @@ class GitHubServiceNetworkTest : FunSpec({
             val diff = svc.getPRDiff("token", "owner", "repo", 1)
             diff shouldContain "[... diff truncated at 80 KB ...]"
             (diff.length < 90_000).shouldBeTrue()
+        }
+
+        test("returns the full diff for validation") {
+            val bigDiff = "x".repeat(90_000)
+            val svc = mockServiceResponses(bigDiff)
+            val diff = svc.getPRDiffFull("token", "owner", "repo", 1)
+            diff.length shouldBe 90_000
+            diff shouldNotContain "[... diff truncated at 80 KB ...]"
         }
     }
 

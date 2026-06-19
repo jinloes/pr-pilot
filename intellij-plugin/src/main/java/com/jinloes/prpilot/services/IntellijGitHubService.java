@@ -45,6 +45,11 @@ public final class IntellijGitHubService {
         return core().getPRDiff(token, owner, repo, prNumber);
     }
 
+    public String getPRDiffFull(String token, String owner, String repo, int prNumber)
+            throws IOException, InterruptedException {
+        return core().getPRDiffFull(token, owner, repo, prNumber);
+    }
+
     public String getPendingReviewId(String token, String owner, String repo, int number)
             throws IOException, InterruptedException {
         return core().getPendingReviewId(token, owner, repo, number);

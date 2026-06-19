@@ -105,6 +105,7 @@ public class WebviewPanel implements Disposable {
             @JsonProperty("reviewId") String reviewId,
             @JsonProperty("result") ReviewResultDto result,
             String diff,
+            @JsonProperty("validationDiff") String validationDiff,
             boolean staleCommits,
             boolean importedFromGitHub,
             String status) {}
@@ -119,7 +120,8 @@ public class WebviewPanel implements Disposable {
             String type,
             @JsonProperty("prKey") String prKey,
             ReviewResultDto result,
-            String diff) {}
+            String diff,
+            @JsonProperty("validationDiff") String validationDiff) {}
 
     private record ErrorMsg(String type, @JsonProperty("prKey") String prKey, String message) {}
 
@@ -172,6 +174,7 @@ public class WebviewPanel implements Disposable {
     private volatile ReviewResult lastResult = null;
     private volatile String pendingReviewId = null;
     private volatile String prefetchedDiff = null;
+    private volatile String prefetchedValidationDiff = null;
     private volatile String prefetchedExistingReviews = null;
     private volatile List<ChatMessage> chatHistory = List.of();
     private volatile IntellijClaudeService activePrClaudeService = null;
@@ -505,6 +508,7 @@ public class WebviewPanel implements Disposable {
             lastResult = null;
             pendingReviewId = null;
             prefetchedDiff = null;
+            prefetchedValidationDiff = null;
             prefetchedExistingReviews = null;
             chatHistory = List.of();
         }
@@ -522,6 +526,7 @@ public class WebviewPanel implements Disposable {
                                                 "draftLoaded",
                                                 key,
                                                 "NO_DRAFT",
+                                                null,
                                                 null,
                                                 null,
                                                 null,
@@ -606,6 +611,20 @@ public class WebviewPanel implements Disposable {
                                                 }
                                             });
 
+                            CompletableFuture<String> validationDiffFuture =
+                                    CompletableFuture.supplyAsync(
+                                            () -> {
+                                                try {
+                                                    return ghSvc.getPRDiffFull(
+                                                            token, owner, repo, number);
+                                                } catch (Exception e) {
+                                                    log.warn(
+                                                            "getPRDiffFull prefetch failed: {}",
+                                                            e.getMessage());
+                                                    return null;
+                                                }
+                                            });
+
                             CompletableFuture<String> reviewsFuture =
                                     CompletableFuture.supplyAsync(
                                             () -> {
@@ -624,14 +643,20 @@ public class WebviewPanel implements Disposable {
                             boolean merged = mergedFuture.join();
                             GitHubService.PendingReview pending = pendingFuture.join();
                             String fetchedDiff = diffFuture.join();
+                            String fetchedValidationDiff = validationDiffFuture.join();
                             String fetchedReviews = reviewsFuture.join();
                             String currentHeadSha = headShaFuture.join();
+                            String effectiveValidationDiff =
+                                    StringUtils.isNotBlank(fetchedValidationDiff)
+                                            ? fetchedValidationDiff
+                                            : fetchedDiff;
 
                             // Write prefetched data only if the same PR is still active to
                             // avoid clobbering state for a PR the user already switched away from.
                             synchronized (WebviewPanel.this) {
                                 if (activePR == pr) {
                                     prefetchedDiff = fetchedDiff;
+                                    prefetchedValidationDiff = effectiveValidationDiff;
                                     prefetchedExistingReviews = fetchedReviews;
                                 }
                             }
@@ -656,6 +681,7 @@ public class WebviewPanel implements Disposable {
                                                 null,
                                                 null,
                                                 null,
+                                                effectiveValidationDiff,
                                                 false,
                                                 false,
                                                 "PR is merged."));
@@ -676,6 +702,7 @@ public class WebviewPanel implements Disposable {
                                                 pending.getId(),
                                                 dto,
                                                 prefetchedDiff,
+                                                effectiveValidationDiff,
                                                 stale,
                                                 pending.component3(),
                                                 "Loaded pending draft review."));
@@ -692,6 +719,7 @@ public class WebviewPanel implements Disposable {
                                             null,
                                             null,
                                             null,
+                                            effectiveValidationDiff,
                                             false,
                                             false,
                                             ""));
@@ -753,10 +781,12 @@ public class WebviewPanel implements Disposable {
                             // Atomically snapshot prefetched data to prevent check-then-act
                             // races with a concurrent handleSelectPR on the JCEF bridge thread.
                             String snapshotDiff;
+                            String snapshotValidationDiff;
                             String snapshotReviews;
                             synchronized (WebviewPanel.this) {
                                 boolean samepr = activePR == finalPr;
                                 snapshotDiff = samepr ? prefetchedDiff : null;
+                                snapshotValidationDiff = samepr ? prefetchedValidationDiff : null;
                                 snapshotReviews = samepr ? prefetchedExistingReviews : null;
                             }
 
@@ -778,6 +808,21 @@ public class WebviewPanel implements Disposable {
                                                     UserFacingErrors.forGitHub(
                                                             e, "load the PR diff")));
                                     return;
+                                }
+                            }
+
+                            String validationDiff;
+                            if (StringUtils.isNotBlank(snapshotValidationDiff)) {
+                                validationDiff = snapshotValidationDiff;
+                            } else {
+                                try {
+                                    validationDiff =
+                                            ghSvc.getPRDiffFull(finalToken, owner, repo, number);
+                                } catch (Exception e) {
+                                    log.warn(
+                                            "getPRDiffFull failed; falling back to truncated diff: {}",
+                                            e.getMessage());
+                                    validationDiff = diff;
                                 }
                             }
 
@@ -819,6 +864,7 @@ public class WebviewPanel implements Disposable {
                                     new ReviewGeneratingMsg(
                                             "reviewGenerating", key, "Sending review request…"));
                             final String finalDiff = diff;
+                            final String finalValidationDiff = validationDiff;
                             final String finalExisting = existingReviews;
                             java.io.File guidelinesDir =
                                     activePrWorktreeDir != null
@@ -864,7 +910,8 @@ public class WebviewPanel implements Disposable {
                                                         "reviewResult",
                                                         key,
                                                         ReviewMapper.INSTANCE.toDto(result),
-                                                        finalDiff));
+                                                        finalDiff,
+                                                        finalValidationDiff));
                                     },
                                     err -> {
                                         activeReviewService = claudeService;

@@ -307,6 +307,7 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
             searchScope: 'currentRepo',
             activePR: null,
             activeDiff: '',
+            activeValidationDiff: '',
             activeReviewResult: null,
             pendingReviewId: null,
             chatHistory: new Map(),
@@ -399,6 +400,7 @@ interface ViewState {
     searchScope: github.PRSearchScope;
     activePR: ActivePR | null;
     activeDiff: string;
+    activeValidationDiff: string;
     activeReviewResult: github.ReviewResult | null;
     pendingReviewId: string | null;
     chatHistory: Map<string, claude.ChatMessage[]>;
@@ -665,6 +667,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
     clearWorktree(state);
     state.activePR = { number, owner, repo, title, body };
     state.activeDiff = '';
+    state.activeValidationDiff = '';
     state.activeReviewResult = null;
     state.pendingReviewId = null;
     push(state, { type: 'draftLoading', prKey: key });
@@ -672,11 +675,13 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         const token = await getToken(state);
         const base = githubBaseUrl();
 
-        const [diff, detail, draft] = await Promise.all([
+        const [diff, validationDiffRaw, detail, draft] = await Promise.all([
             github.getPRDiff(token, base, owner, repo, number),
+            github.getPRDiffFull(token, base, owner, repo, number).catch(() => ''),
             github.getPRDetail(token, base, owner, repo, number),
             github.loadDraftReview(token, base, owner, repo, number),
         ]);
+        const validationDiff = validationDiffRaw || diff;
 
         if (prKey(state.activePR) !== key) return;
 
@@ -688,11 +693,12 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
             body: detail.body ?? body,
         };
         state.activeDiff = diff;
+        state.activeValidationDiff = validationDiff;
         state.activeReviewResult = draft?.result ?? null;
         state.pendingReviewId = draft?.id ?? null;
 
         if (detail.merged) {
-            push(state, { type: 'draftLoaded', prKey: key, prState: 'MERGED', diff });
+            push(state, { type: 'draftLoaded', prKey: key, prState: 'MERGED', diff, validationDiff });
         } else if (draft) {
             push(state, {
                 type: 'draftLoaded',
@@ -701,11 +707,12 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
                 reviewId: draft.id,
                 result: draft.result,
                 diff,
+                validationDiff,
                 staleCommits: false,
                 importedFromGitHub: draft.importedFromGitHub,
             });
         } else {
-            push(state, { type: 'draftLoaded', prKey: key, prState: 'NO_DRAFT', diff });
+            push(state, { type: 'draftLoaded', prKey: key, prState: 'NO_DRAFT', diff, validationDiff });
         }
     } catch (err) {
         state.cachedToken = null;
@@ -732,9 +739,14 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         const base = githubBaseUrl();
 
         let diff = state.activeDiff;
+        let validationDiff = state.activeValidationDiff;
         if (!diff || state.activePR?.number !== number) {
             diff = await github.getPRDiff(token, base, owner, repo, number);
             state.activeDiff = diff;
+        }
+        if (!validationDiff || state.activePR?.number !== number) {
+            validationDiff = await github.getPRDiffFull(token, base, owner, repo, number).catch(() => diff);
+            state.activeValidationDiff = validationDiff;
         }
 
         const existingReviews = await github.getExistingReviewsSummary(token, base, owner, repo, number).catch(() => '');
@@ -794,7 +806,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
 
         if (prKey(state.activePR) !== key) return;
         state.activeReviewResult = result;
-        push(state, { type: 'reviewResult', prKey: key, result, diff });
+        push(state, { type: 'reviewResult', prKey: key, result, diff, validationDiff });
     } catch (err) {
         if (isCancellationError(err)) return;
         push(state, { type: 'reviewError', prKey: key, message: toUserFacingError(err, 'generate review') });

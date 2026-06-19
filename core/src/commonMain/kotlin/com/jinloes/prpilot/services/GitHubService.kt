@@ -451,6 +451,11 @@ class GitHubService(
         }
     }
 
+    private suspend fun getPRDiffRaw(token: String, owner: String, repo: String, prNumber: Int): String {
+        val url = "$apiBase/repos/$owner/$repo/pulls/$prNumber"
+        return get(token, url, "application/vnd.github.v3.diff")
+    }
+
     // --- PR search ---
 
     /**
@@ -502,15 +507,19 @@ class GitHubService(
     // --- PR diff ---
 
     /** Returns the unified diff for the given PR, truncated at 80 KB. Blocking. */
-    fun getPRDiff(token: String, owner: String, repo: String, prNumber: Int): String = runBlockingCompat {
-        val url = "$apiBase/repos/$owner/$repo/pulls/$prNumber"
-        val diff = get(token, url, "application/vnd.github.v3.diff")
-        if (diff.length > MAX_DIFF_BYTES) {
-            diff.substring(0, MAX_DIFF_BYTES) + "\n\n[... diff truncated at 80 KB ...]"
-        } else {
-            diff
+    fun getPRDiff(token: String, owner: String, repo: String, prNumber: Int): String =
+        runBlockingCompat {
+            val diff = getPRDiffRaw(token, owner, repo, prNumber)
+            if (diff.length > MAX_DIFF_BYTES) {
+                diff.substring(0, MAX_DIFF_BYTES) + "\n\n[... diff truncated at 80 KB ...]"
+            } else {
+                diff
+            }
         }
-    }
+
+    /** Returns the full unified diff for the given PR without truncation. Blocking. */
+    fun getPRDiffFull(token: String, owner: String, repo: String, prNumber: Int): String =
+        runBlockingCompat { getPRDiffRaw(token, owner, repo, prNumber) }
 
     // --- Draft review API ---
 
