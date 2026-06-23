@@ -5,6 +5,8 @@ import com.jinloes.prpilot.model.PullRequest
 import com.jinloes.prpilot.model.ReviewResult
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.plugins.HttpRequestRetry
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
@@ -59,6 +61,7 @@ class GitHubService(
 
     companion object {
         private const val MAX_DIFF_BYTES = 80_000
+        private const val REQUEST_TIMEOUT_MILLIS = 15_000L
 
         const val VERDICT_TAG = "<!-- claude-verdict: "
         const val SUMMARY_TAG = "<!-- claude-summary: "
@@ -92,6 +95,17 @@ class GitHubService(
          * A single instance reuses the connection pool across all [GitHubService] instances.
          */
         val HTTP_CLIENT: HttpClient = HttpClient {
+            install(HttpTimeout) {
+                requestTimeoutMillis = REQUEST_TIMEOUT_MILLIS
+                connectTimeoutMillis = REQUEST_TIMEOUT_MILLIS
+                socketTimeoutMillis = REQUEST_TIMEOUT_MILLIS
+            }
+            install(HttpRequestRetry) {
+                maxRetries = 2
+                retryOnServerErrors(maxRetries = 2)
+                retryIf(maxRetries = 2) { _, response -> response.status == HttpStatusCode.TooManyRequests }
+                exponentialDelay()
+            }
             install(ContentNegotiation) { json(JSON) }
         }
 

@@ -2,11 +2,14 @@ package com.jinloes.prpilot.ui;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.model.PullRequest;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class WebviewPanelTest {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Nested
     class WorktreeKey {
@@ -98,6 +101,34 @@ class WebviewPanelTest {
         @Test
         void multipleParentSegmentsRejected() {
             assertThat(WebviewPanel.resolveResourcePath("/../../foo")).isNull();
+        }
+    }
+
+    @Nested
+    class IncomingMessageValidation {
+
+        @Test
+        void acceptsKnownMessageWithValidPrIdentity() throws Exception {
+            var node =
+                    MAPPER.readTree(
+                            "{\"type\":\"generateReview\",\"number\":7,\"owner\":\"acme\",\"repo\":\"platform\"}");
+
+            assertThat(WebviewPanel.isValidIncomingMessage(node)).isTrue();
+        }
+
+        @Test
+        void rejectsPrMessageWithoutOwnerRepoOrNumber() throws Exception {
+            var node =
+                    MAPPER.readTree("{\"type\":\"selectPR\",\"number\":0,\"owner\":\"\",\"repo\":\"\"}");
+
+            assertThat(WebviewPanel.isValidIncomingMessage(node)).isFalse();
+        }
+
+        @Test
+        void rejectsUnknownMessageType() throws Exception {
+            var node = MAPPER.readTree("{\"type\":\"surprise\"}");
+
+            assertThat(WebviewPanel.isValidIncomingMessage(node)).isFalse();
         }
     }
 }

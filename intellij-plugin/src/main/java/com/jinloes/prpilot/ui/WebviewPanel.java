@@ -4,6 +4,7 @@ import static com.intellij.openapi.application.ApplicationManager.getApplication
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.module.kotlin.KotlinModule;
@@ -381,6 +382,10 @@ public class WebviewPanel implements Disposable {
     private void handleIncoming(String json) {
         try {
             var node = mapper.readTree(json);
+            if (!isValidIncomingMessage(node)) {
+                log.warn("Invalid bridge message payload: {}", json);
+                return;
+            }
             String type = node.path("type").asText();
             int number = node.path("number").asInt();
             String owner = node.path("owner").asText();
@@ -480,6 +485,27 @@ public class WebviewPanel implements Disposable {
         } catch (Exception e) {
             log.warn("Bridge message error: {}", e.getMessage());
         }
+    }
+
+    static boolean isValidIncomingMessage(JsonNode node) {
+        if (node == null || !node.hasNonNull("type")) {
+            return false;
+        }
+        String type = node.path("type").asText();
+        return switch (type) {
+            case "refreshPRs", "cancelReview", "openSettings", "clearChat" -> true;
+            case "openUrl" -> node.path("url").isTextual();
+            case "askClaude" -> node.path("question").isTextual();
+            case "selectPR", "generateReview", "saveDraft", "submitReview", "deleteDraft" ->
+                    hasValidPrIdentity(node);
+            default -> false;
+        };
+    }
+
+    private static boolean hasValidPrIdentity(JsonNode node) {
+        return node.path("number").asInt(0) > 0
+                && StringUtils.isNotBlank(node.path("owner").asText(null))
+                && StringUtils.isNotBlank(node.path("repo").asText(null));
     }
 
     // --- selectPR ---

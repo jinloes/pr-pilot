@@ -7,6 +7,8 @@ import * as copilot from './copilot';
 import * as worktree from './worktree';
 import * as settings from './settings';
 import * as workspace from './workspace';
+import { hasStaleCommits } from './draftState';
+import { isValidBridgeRequest } from './bridgeValidation';
 import { classifySetupAuthError } from './authError';
 import { toUserFacingError } from './userFacingError';
 
@@ -345,7 +347,10 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
 
     private setupMessageBridge(state: ViewState): void {
         state.webview.onDidReceiveMessage(async (msg: { type?: string } & Record<string, unknown>) => {
-            if (!msg || typeof msg.type !== 'string') return;
+            if (!isValidBridgeRequest(msg)) {
+                console.warn('[pr-pilot] invalid bridge payload:', msg);
+                return;
+            }
             switch (msg.type) {
                 case 'refreshPRs':
                     await handleRefreshPRs(state, msg);
@@ -700,6 +705,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         if (detail.merged) {
             push(state, { type: 'draftLoaded', prKey: key, prState: 'MERGED', diff, validationDiff });
         } else if (draft) {
+            const staleCommits = hasStaleCommits(draft.commitId, detail.head?.sha ?? '');
             push(state, {
                 type: 'draftLoaded',
                 prKey: key,
@@ -708,7 +714,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
                 result: draft.result,
                 diff,
                 validationDiff,
-                staleCommits: false,
+                staleCommits,
                 importedFromGitHub: draft.importedFromGitHub,
             });
         } else {

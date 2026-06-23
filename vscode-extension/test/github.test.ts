@@ -4,7 +4,14 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { apiBase, buildPRSearchQuery, detectCurrentRepo, normalizeGithubBaseUrl } from '../src/github';
+import {
+  apiBase,
+  buildPRSearchQuery,
+  detectCurrentRepo,
+  isRetriableNetworkError,
+  isRetriableStatus,
+  normalizeGithubBaseUrl,
+} from '../src/github';
 
 test('buildPRSearchQuery uses current repo when scope is currentRepo', () => {
   assert.equal(
@@ -46,6 +53,21 @@ test('apiBase rejects non-https base URLs', () => {
     () => apiBase('http://github.example.com'),
     /must start with https:\/\//,
   );
+});
+
+test('isRetriableStatus retries on 429 and 5xx only', () => {
+  assert.equal(isRetriableStatus(429), true);
+  assert.equal(isRetriableStatus(500), true);
+  assert.equal(isRetriableStatus(503), true);
+  assert.equal(isRetriableStatus(404), false);
+  assert.equal(isRetriableStatus(422), false);
+});
+
+test('isRetriableNetworkError recognizes transient network failures', () => {
+  assert.equal(isRetriableNetworkError(new Error('ETIMEDOUT while connecting')), true);
+  assert.equal(isRetriableNetworkError(new Error('socket hang up')), true);
+  assert.equal(isRetriableNetworkError(new Error('request timeout')), true);
+  assert.equal(isRetriableNetworkError(new Error('bad credentials')), false);
 });
 
 test('normalizeGithubBaseUrl defaults to github.com and trims trailing slash', () => {

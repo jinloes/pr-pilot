@@ -9,6 +9,9 @@ import { promisify } from 'util';
 const execFileAsync = promisify(execFile);
 
 export const MAX_DIFF_BYTES = 80_000;
+const REQUEST_TIMEOUT_MS = 15_000;
+const MAX_REQUEST_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 250;
 
 const VERDICT_TAG = '<!-- claude-verdict: ';
 const SUMMARY_TAG = '<!-- claude-summary: ';
@@ -64,6 +67,7 @@ interface GhReview {
     id: number;
     state: string | null;
     body: string | null;
+    commit_id?: string | null;
 }
 
 interface GhSubmittedReview {
@@ -182,16 +186,65 @@ function ghRequest(token: string, url: string, options: {
                 const responseBody = Buffer.concat(chunks).toString('utf8');
                 const status = res.statusCode ?? 0;
                 if (status < 200 || status >= 300) {
-                    reject(new Error(`GitHub API ${method} ${status}: ${responseBody.substring(0, 300)}`));
+                    const err = new Error(`GitHub API ${method} ${status}: ${responseBody.substring(0, 300)}`) as Error & { status?: number };
+                    err.status = status;
+                    reject(err);
                 } else {
                     resolve(responseBody);
                 }
             });
         });
         req.on('error', reject);
+        req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+            req.destroy(new Error(`GitHub API ${method} timeout after ${REQUEST_TIMEOUT_MS}ms`));
+        });
         if (body) req.write(body);
         req.end();
     });
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function isRetriableStatus(status: number): boolean {
+    return status === 429 || (status >= 500 && status <= 599);
+}
+
+export function isRetriableNetworkError(err: unknown): boolean {
+    if (!(err instanceof Error)) {
+        return false;
+    }
+    const text = err.message.toLowerCase();
+    return text.includes('timeout')
+        || text.includes('econnreset')
+        || text.includes('etimedout')
+        || text.includes('eai_again')
+        || text.includes('socket hang up');
+}
+
+async function ghRequestWithRetry(
+    token: string,
+    url: string,
+    options: { method?: string; accept?: string; body?: string },
+): Promise<string> {
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= MAX_REQUEST_ATTEMPTS; attempt++) {
+        try {
+            return await ghRequest(token, url, options);
+        } catch (err) {
+            lastError = err;
+            const status = typeof err === 'object' && err !== null && 'status' in err
+                ? Number((err as { status?: unknown }).status)
+                : 0;
+            const retryable = isRetriableStatus(status) || isRetriableNetworkError(err);
+            if (!retryable || attempt === MAX_REQUEST_ATTEMPTS) {
+                throw err;
+            }
+            await sleep(RETRY_BASE_DELAY_MS * attempt);
+        }
+    }
+    throw lastError;
 }
 
 // ── PR search ──────────────────────────────────────────────────────────────────
@@ -218,7 +271,7 @@ export async function searchPRsByQuery(
     perPage = PR_SEARCH_LIMIT,
 ): Promise<PR[]> {
     const url = `${apiBase(githubBaseUrl)}/search/issues?q=${encodeURIComponent(q)}&per_page=${perPage}&sort=updated`;
-    const body = await ghRequest(token, url, {});
+    const body = await ghRequestWithRetry(token, url, {});
     const result: { items?: SearchItem[] } = JSON.parse(body);
     return (result.items ?? []).map(el => {
         const parts = (el.repository_url ?? '').split('/');
@@ -272,7 +325,7 @@ export async function getStarredRepos(
     const repos: string[] = [];
     for (let page = 1; repos.length < 200; page++) {
         const url = `${apiBase(githubBaseUrl)}/user/starred?per_page=100&sort=updated&page=${page}`;
-        const body = await ghRequest(token, url, {});
+        const body = await ghRequestWithRetry(token, url, {});
         const items = JSON.parse(body) as StarredRepo[];
         if (items.length === 0) break;
         for (const item of items) {
@@ -293,7 +346,7 @@ export async function getPRDiff(
     prNumber: number,
 ): Promise<string> {
     const url = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${prNumber}`;
-    const diff = await ghRequest(token, url, { accept: 'application/vnd.github.v3.diff' });
+    const diff = await ghRequestWithRetry(token, url, { accept: 'application/vnd.github.v3.diff' });
     return diff.length > MAX_DIFF_BYTES
         ? diff.substring(0, MAX_DIFF_BYTES) + '\n\n[... diff truncated at 80 KB ...]'
         : diff;
@@ -307,7 +360,7 @@ export async function getPRDiffFull(
     prNumber: number,
 ): Promise<string> {
     const url = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${prNumber}`;
-    return ghRequest(token, url, { accept: 'application/vnd.github.v3.diff' });
+    return ghRequestWithRetry(token, url, { accept: 'application/vnd.github.v3.diff' });
 }
 
 export async function getPRDetail(
@@ -318,7 +371,7 @@ export async function getPRDetail(
     prNumber: number,
 ): Promise<PrDetail> {
     const url = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${prNumber}`;
-    return JSON.parse(await ghRequest(token, url, {})) as PrDetail;
+    return JSON.parse(await ghRequestWithRetry(token, url, {})) as PrDetail;
 }
 
 /** Fetches the head branch name and fork status for a PR. Mirrors GitHubService.getPRHeadInfo. */
@@ -345,7 +398,7 @@ export async function getExistingReviewsSummary(
     number: number,
 ): Promise<string> {
     const url = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${number}/reviews`;
-    const reviews: GhSubmittedReview[] = JSON.parse(await ghRequest(token, url, {}));
+    const reviews: GhSubmittedReview[] = JSON.parse(await ghRequestWithRetry(token, url, {}));
     const submitted = reviews.filter(r => r.state !== 'PENDING');
     if (submitted.length === 0) return '';
 
@@ -357,7 +410,7 @@ export async function getExistingReviewsSummary(
     for (let i = 0; i < submitted.length; i += CONCURRENCY) {
         const chunk = await Promise.all(
             submitted.slice(i, i + CONCURRENCY).map(r =>
-                ghRequest(token, `${url}/${r.id}/comments`, {})
+                ghRequestWithRetry(token, `${url}/${r.id}/comments`, {})
                     .then(body => JSON.parse(body) as GhReviewComment[])
                     .catch(() => [] as GhReviewComment[]),
             ),
@@ -396,7 +449,7 @@ async function getPendingReviewId(
     number: number,
 ): Promise<string | null> {
     const url = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${number}/reviews`;
-    const reviews: GhReview[] = JSON.parse(await ghRequest(token, url, {}));
+    const reviews: GhReview[] = JSON.parse(await ghRequestWithRetry(token, url, {}));
     const pending = reviews.find(r => r.state === 'PENDING');
     return pending ? String(pending.id) : null;
 }
@@ -527,18 +580,23 @@ export async function loadDraftReview(
     owner: string,
     repo: string,
     number: number,
-): Promise<{ id: string; result: ReviewResult; importedFromGitHub: boolean } | null> {
+): Promise<{ id: string; result: ReviewResult; importedFromGitHub: boolean; commitId: string } | null> {
     const id = await getPendingReviewId(token, githubBaseUrl, owner, repo, number);
     if (!id) return null;
     const reviewUrl = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${number}/reviews/${id}`;
     const [reviewBody, commentsBody] = await Promise.all([
-        ghRequest(token, reviewUrl, {}),
-        ghRequest(token, `${reviewUrl}/comments`, {}),
+        ghRequestWithRetry(token, reviewUrl, {}),
+        ghRequestWithRetry(token, `${reviewUrl}/comments`, {}),
     ]);
     const review: GhReview = JSON.parse(reviewBody);
     const ghComments: GhReviewComment[] = JSON.parse(commentsBody);
     const body = review.body ?? '';
-    return { id, result: decodeReview(body, ghComments), importedFromGitHub: !hasUsableEmbeddedComments(body) };
+    return {
+        id,
+        result: decodeReview(body, ghComments),
+        importedFromGitHub: !hasUsableEmbeddedComments(body),
+        commitId: review.commit_id?.trim() ?? '',
+    };
 }
 
 function hasUsableEmbeddedComments(body: string): boolean {
@@ -566,7 +624,9 @@ export async function saveDraftReview(
     const base = apiBase(githubBaseUrl);
     const existing = await getPendingReviewId(token, githubBaseUrl, owner, repo, number);
     if (existing) {
-        try { await ghRequest(token, `${base}/repos/${owner}/${repo}/pulls/${number}/reviews/${existing}`, { method: 'DELETE' }); }
+        try {
+            await ghRequestWithRetry(token, `${base}/repos/${owner}/${repo}/pulls/${number}/reviews/${existing}`, { method: 'DELETE' });
+        }
         catch { /* non-fatal */ }
     }
 
@@ -581,20 +641,20 @@ export async function saveDraftReview(
     let commentsDropped = false;
 
     try {
-        const resp = await ghRequest(token, url, { method: 'POST', body: JSON.stringify(payload) });
+        const resp = await ghRequestWithRetry(token, url, { method: 'POST', body: JSON.stringify(payload) });
         return { reviewId: (JSON.parse(resp) as { id?: number })?.id?.toString() ?? '', commentsDropped };
     } catch (ex: unknown) {
         if (ex instanceof Error && ex.message.includes('422')) {
             // One or more inline comments reference an invalid path or line. Create the review
             // body-only first (guaranteed to succeed), then add each comment individually so
             // only the bad ones are dropped. This avoids creating orphaned probe reviews.
-            const bodyResp = await ghRequest(token, url, { method: 'POST', body: JSON.stringify({ ...payload, comments: [] }) });
+            const bodyResp = await ghRequestWithRetry(token, url, { method: 'POST', body: JSON.stringify({ ...payload, comments: [] }) });
             const reviewId = (JSON.parse(bodyResp) as { id?: number })?.id?.toString() ?? '';
             const commentsUrl = `${url}/${reviewId}/comments`;
             const droppedComments: Array<Record<string, unknown>> = [];
             for (const c of comments) {
                 try {
-                    await ghRequest(token, commentsUrl, { method: 'POST', body: JSON.stringify(c) });
+                    await ghRequestWithRetry(token, commentsUrl, { method: 'POST', body: JSON.stringify(c) });
                 } catch { droppedComments.push(c as Record<string, unknown>); }
             }
             if (droppedComments.length > 0) {
@@ -603,7 +663,7 @@ export async function saveDraftReview(
                 // aren't lost when we PUT the updated body.
                 const updatedBody = `${bodyWithOrphans}\n\n${section}`;
                 try {
-                    await ghRequest(token, `${url}/${reviewId}`, { method: 'PUT', body: JSON.stringify({ body: updatedBody }) });
+                    await ghRequestWithRetry(token, `${url}/${reviewId}`, { method: 'PUT', body: JSON.stringify({ body: updatedBody }) });
                 } catch { commentsDropped = true; }
             }
             return { reviewId, commentsDropped };
@@ -623,7 +683,7 @@ export async function submitReview(
     body: string,
 ): Promise<void> {
     const url = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${number}/reviews/${reviewId}/events`;
-    await ghRequest(token, url, { method: 'POST', body: JSON.stringify({ event, body: effectiveBody(event, body) }) });
+    await ghRequestWithRetry(token, url, { method: 'POST', body: JSON.stringify({ event, body: effectiveBody(event, body) }) });
 }
 
 // GitHub rejects REQUEST_CHANGES/COMMENT submissions with an empty body
@@ -646,7 +706,7 @@ export async function deleteDraftReview(
     reviewId: string,
 ): Promise<void> {
     const url = `${apiBase(githubBaseUrl)}/repos/${owner}/${repo}/pulls/${number}/reviews/${reviewId}`;
-    await ghRequest(token, url, { method: 'DELETE' });
+    await ghRequestWithRetry(token, url, { method: 'DELETE' });
 }
 
 // ── Repo auto-detection ────────────────────────────────────────────────────────
