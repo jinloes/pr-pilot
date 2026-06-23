@@ -285,6 +285,7 @@ export function ReviewPane({ pr }: Props) {
               staleCommits: false,
               importedFromGitHub: false,
               diff: prev.diff,
+              validationDiff: prev.validationDiff,
               generationElapsedSec: prev.generationElapsedSec,
             }
           })
@@ -1582,15 +1583,35 @@ function OrphanRow({
             >
               Edit
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive"
-              onClick={onDelete}
-              aria-label="Delete unanchored comment"
-            >
-              Delete
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive"
+                  aria-label="Delete unanchored comment"
+                >
+                  Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this comment?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This comment will be removed. Save the draft to persist the change.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={onDelete}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         )}
       </div>

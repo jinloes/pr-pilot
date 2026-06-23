@@ -115,6 +115,8 @@ export function PRList({ onSelect }: Props) {
   }
 
   function handleStateFilter(val: string) {
+    // ToggleGroup fires onValueChange('') when the active item is clicked again;
+    // keep the current filter rather than leaving nothing selected.
     if (!val) return
     const s = val as StateFilter
     setStateFilter(s)
@@ -204,7 +206,10 @@ export function PRList({ onSelect }: Props) {
           <ToggleGroup
             type="single"
             value={stateFilter}
-            onValueChange={handleStateFilter}
+            onValueChange={(val) => {
+              // Prevent visual deselection when clicking the already-active filter
+              if (val) handleStateFilter(val)
+            }}
             className="gap-1"
           >
             {(['open', 'closed', 'all'] as StateFilter[]).map((s) => (
@@ -271,6 +276,7 @@ export function PRList({ onSelect }: Props) {
             ref={searchRef}
             className="flex-1 bg-transparent text-sm py-1.5 outline-none placeholder:text-muted-foreground placeholder:italic caret-primary"
             placeholder="filter by title, author, #number…"
+            aria-label="Filter pull requests"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             spellCheck={false}
@@ -326,12 +332,11 @@ export function PRList({ onSelect }: Props) {
             </div>
           )}
 
-          {filtered.map((pr, i) => (
+          {filtered.map((pr) => (
             <PRItem
               key={prKey(pr)}
               pr={pr}
               selected={selected === prKey(pr)}
-              index={i}
               onClick={() => handleSelect(pr)}
             />
           ))}
@@ -347,11 +352,10 @@ export function PRList({ onSelect }: Props) {
 interface ItemProps {
   pr: PR
   selected: boolean
-  index: number
   onClick: () => void
 }
 
-function PRItem({ pr, selected, index, onClick }: ItemProps) {
+function PRItem({ pr, selected, onClick }: ItemProps) {
   const date = pr.createdAt?.substring(0, 10) ?? ''
 
   return (
@@ -361,7 +365,6 @@ function PRItem({ pr, selected, index, onClick }: ItemProps) {
         'hover:bg-accent/50 focus-visible:outline-none focus-visible:bg-accent/50',
         selected && 'bg-accent/40 border-l-2 border-l-primary',
       )}
-      style={{ animationDelay: `${Math.min(index * 28, 140)}ms` }}
       onClick={onClick}
       aria-pressed={selected}
     >
@@ -371,7 +374,7 @@ function PRItem({ pr, selected, index, onClick }: ItemProps) {
           #{pr.number}
         </span>
         {pr.hasDraft && (
-          <span className="text-[8px] font-bold tracking-wider text-sky-400 leading-none">
+          <span className="text-[8px] font-bold tracking-wider text-[hsl(var(--status-comment))] leading-none">
             DRAFT
           </span>
         )}
@@ -382,15 +385,15 @@ function PRItem({ pr, selected, index, onClick }: ItemProps) {
         <div className="flex items-baseline gap-1.5 min-w-0">
           <span className="text-sm text-foreground truncate flex-1 leading-snug">{pr.title}</span>
         </div>
-        <span className="font-mono truncate text-[11px] text-sky-400/80">
+        <span className="font-mono truncate text-[11px] text-muted-foreground/80">
           {pr.owner}/{pr.repo}
         </span>
         <div className="flex items-center gap-1 text-[11px]">
-          <span className="text-emerald-400">@{pr.author}</span>
+          <span className="text-[hsl(var(--status-approve))]">@{pr.author}</span>
           {date && (
             <>
               <span className="text-muted-foreground">·</span>
-              <span className="text-slate-400">{date}</span>
+              <span className="text-muted-foreground/70">{date}</span>
             </>
           )}
         </div>
