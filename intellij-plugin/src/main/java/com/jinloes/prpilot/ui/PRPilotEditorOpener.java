@@ -17,9 +17,13 @@ final class PRPilotEditorOpener {
     static void openInEditor(Project project) {
         ApplicationManager.getApplication()
                 .invokeLater(
-                        () ->
-                                FileEditorManager.getInstance(project)
-                                        .openFile(getOrCreateVirtualFile(project), true, true));
+                        () -> {
+                            if (project.isDisposed()) {
+                                return;
+                            }
+                            FileEditorManager.getInstance(project)
+                                    .openFile(getOrCreateVirtualFile(project), true, true);
+                        });
     }
 
     static PRPilotVirtualFile getOrCreateVirtualFile(UserDataHolder holder) {

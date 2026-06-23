@@ -21,10 +21,17 @@ final class PRPilotFileEditor extends UserDataHolderBase implements FileEditor {
     private final WebviewPanel webviewPanel;
     private final JComponent component;
     private final PRPilotVirtualFile virtualFile;
+    private final Runnable onDispose;
+    private boolean disposed;
 
-    PRPilotFileEditor(Project project, WebviewPanel webviewPanel, PRPilotVirtualFile virtualFile) {
+    PRPilotFileEditor(
+            Project project,
+            WebviewPanel webviewPanel,
+            PRPilotVirtualFile virtualFile,
+            Runnable onDispose) {
         this.webviewPanel = webviewPanel;
         this.virtualFile = virtualFile;
+        this.onDispose = onDispose;
         this.component = buildComponent(project, webviewPanel);
     }
 
@@ -94,7 +101,15 @@ final class PRPilotFileEditor extends UserDataHolderBase implements FileEditor {
 
     @Override
     public void dispose() {
-        Disposer.dispose(webviewPanel);
+        if (disposed) {
+            return;
+        }
+        disposed = true;
+        try {
+            Disposer.dispose(webviewPanel);
+        } finally {
+            onDispose.run();
+        }
     }
 }
 
