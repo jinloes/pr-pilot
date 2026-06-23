@@ -5,7 +5,6 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
 import com.intellij.openapi.wm.ToolWindowType;
@@ -16,9 +15,12 @@ import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.services.UserFacingErrors;
 import com.jinloes.prpilot.settings.PluginSettings;
+import java.awt.BorderLayout;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import javax.swing.JButton;
+import javax.swing.JPanel;
 import javax.swing.JLabel;
 import javax.swing.SwingConstants;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +29,8 @@ import org.jetbrains.annotations.NotNull;
 
 @Slf4j
 public class PRToolWindowFactory implements ToolWindowFactory {
+
+    static final String TOOL_WINDOW_ID = "PR Pilot";
 
     @Override
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
@@ -44,30 +48,45 @@ public class PRToolWindowFactory implements ToolWindowFactory {
             return;
         }
 
-        WebviewPanel webviewPanel = new WebviewPanel(project);
-        Disposer.register(toolWindow.getDisposable(), webviewPanel);
-        wireWebviewLoading(project, webviewPanel);
-        Content webContent = factory.createContent(webviewPanel.getComponent(), "Review", false);
-        toolWindow.getContentManager().addContent(webContent);
+        Content launcherContent =
+                factory.createContent(createLauncherPanel(project), "Launcher", false);
+        toolWindow.getContentManager().addContent(launcherContent);
+        PRPilotEditorOpener.openInEditor(project);
 
         List<AnAction> titleActions = new ArrayList<>();
+        titleActions.add(new OpenInEditorAction(project));
         titleActions.add(new PopOutAction(toolWindow));
-        titleActions.add(new ReloadWebviewAction(webviewPanel));
         titleActions.add(new SettingsAction(project));
         toolWindow.setTitleActions(titleActions);
     }
 
-    private static final class ReloadWebviewAction extends AnAction {
-        private final WebviewPanel webviewPanel;
+    private JPanel createLauncherPanel(Project project) {
+        JPanel panel = new JPanel(new BorderLayout());
+        JLabel text =
+                new JLabel(
+                        "<html><center>PR Pilot runs in the editor area.<br>"
+                                + "Use <b>Back to Editor</b> to focus it.</center></html>",
+                        SwingConstants.CENTER);
+        JPanel buttonRow = new JPanel();
+        JButton openButton = new JButton("Back to Editor");
+        openButton.addActionListener(event -> PRPilotEditorOpener.openInEditor(project));
+        buttonRow.add(openButton);
+        panel.add(text, BorderLayout.CENTER);
+        panel.add(buttonRow, BorderLayout.SOUTH);
+        return panel;
+    }
 
-        ReloadWebviewAction(WebviewPanel webviewPanel) {
-            super("Reload WebView", "Reload the webview", AllIcons.Actions.Refresh);
-            this.webviewPanel = webviewPanel;
+    private static final class OpenInEditorAction extends AnAction {
+        private final Project project;
+
+        OpenInEditorAction(Project project) {
+            super("Back to Editor", "Focus the PR Pilot editor tab", AllIcons.Actions.Back);
+            this.project = project;
         }
 
         @Override
         public void actionPerformed(@NotNull AnActionEvent e) {
-            webviewPanel.reload();
+            PRPilotEditorOpener.openInEditor(project);
         }
     }
 
@@ -110,7 +129,7 @@ public class PRToolWindowFactory implements ToolWindowFactory {
         }
     }
 
-    private void wireWebviewLoading(Project project, WebviewPanel webviewPanel) {
+    static void wireWebviewLoading(Project project, WebviewPanel webviewPanel) {
         webviewPanel.setOnPageReady(
                 () ->
                         ApplicationManager.getApplication()
@@ -141,7 +160,7 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                                         }));
     }
 
-    private void loadAndPushPRs(Project project, WebviewPanel webviewPanel) throws Exception {
+    private static void loadAndPushPRs(Project project, WebviewPanel webviewPanel) throws Exception {
         String token = PluginSettings.getInstance().getGithubToken();
         if (token == null) {
             PluginSettings.AuthDiagnosis diagnosis = PluginSettings.getInstance().diagnoseAuth();

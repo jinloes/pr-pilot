@@ -57,6 +57,10 @@ intellij-plugin/                       – IntelliJ plugin host; depends on :cor
       PluginSettingsConfigurable.java
     ui/
       PRToolWindowFactory.java
+      PRPilotFileEditorProvider.java      – Registers PR Pilot as a center editor-tab file editor
+      PRPilotFileEditor.java              – FileEditor wrapper hosting WebviewPanel in editor tab
+      PRPilotEditorOpener.java            – Opens/reveals singleton editor-tab virtual file per project
+      PRPilotVirtualFile.java             – Marker LightVirtualFile for PR Pilot editor tab
       WebviewPanel.java
       ReviewMapper.java              – MapStruct mapper (core model -> webview DTOs)
       WebviewDtos.java               – package-private DTO records serialized to webview bridge
@@ -191,6 +195,9 @@ Repo detection walks upward to `.git/config` and reads the `[remote "origin"]` U
 
 ### VS Code webview surfaces
 The VS Code host exposes PR Pilot as an editor-tab `WebviewPanel` opened by `pr-pilot.open`. The Activity Bar webview view (`pr-pilot.main`) is a lightweight launcher that immediately reveals the editor tab and includes an "Open PR Pilot" command link; the full PR loading, review generation, chat, and worktree lifecycle run only in the editor-tab panel.
+
+### IntelliJ webview surfaces
+The IntelliJ host now mirrors VS Code's split: the `PR Pilot` tool window is a lightweight launcher with an "Open PR Pilot" action/link, and the full interactive UI runs in a center editor tab backed by a singleton `PRPilotVirtualFile` per project. PR loading/review/chat behavior remains in `WebviewPanel`; `PRToolWindowFactory` and `PRPilotFileEditorProvider` both wire the same load pipeline so both surfaces behave consistently.
 
 ### VS Code extension development target repo
 The `.vscode/launch.json` config `Run PR Pilot Extension Against Target Repo` prompts for an absolute repository path and passes it as `PR_PILOT_TARGET_REPO` to the Extension Development Host. Use it when the PR Pilot source repo is open in the main VS Code window but PR Pilot should inspect PRs for a different local checkout; `workspace.ts` makes repo detection, worktree creation, and CLI working directories resolve against the target repo instead of whichever folder VS Code opened in the dev host.

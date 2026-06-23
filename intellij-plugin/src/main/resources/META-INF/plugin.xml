@@ -16,6 +16,8 @@
                     anchor="right"
                     factoryClass="com.jinloes.prpilot.ui.PRToolWindowFactory"/>
 
+        <fileEditorProvider implementation="com.jinloes.prpilot.ui.PRPilotFileEditorProvider"/>
+
         <applicationService
             serviceImplementation="com.jinloes.prpilot.settings.PluginSettings"/>
 
