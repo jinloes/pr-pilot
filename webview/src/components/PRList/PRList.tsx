@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, Circle, Copy, ExternalLink, RefreshCw, Settings2, TriangleAlert } from 'lucide-react'
+import { CheckCircle2, Circle, Copy, ExternalLink, RefreshCw, Settings2, Terminal, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -24,6 +24,20 @@ type SetupReason = 'gh_not_installed' | 'gh_not_authenticated' | 'load_failed'
 
 function prKey(pr: Pick<PR, 'owner' | 'repo' | 'number'>): string {
   return `${pr.owner}/${pr.repo}#${pr.number}`
+}
+
+function formatCreatedAt(createdAt?: string): string {
+  if (!createdAt) return ''
+  const date = new Date(createdAt)
+  if (Number.isNaN(date.getTime())) return createdAt.slice(0, 10)
+  const deltaMs = Date.now() - date.getTime()
+  const deltaDays = Math.floor(deltaMs / (24 * 60 * 60 * 1000))
+  if (deltaDays >= 0 && deltaDays < 7) {
+    if (deltaDays === 0) return 'today'
+    if (deltaDays === 1) return '1 day ago'
+    return `${deltaDays} days ago`
+  }
+  return date.toLocaleDateString()
 }
 
 export function PRList({ onSelect }: Props) {
@@ -391,7 +405,7 @@ interface ItemProps {
 }
 
 function PRItem({ pr, selected, onClick }: ItemProps) {
-  const date = pr.createdAt?.substring(0, 10) ?? ''
+  const date = formatCreatedAt(pr.createdAt)
 
   return (
     <button
@@ -409,7 +423,7 @@ function PRItem({ pr, selected, onClick }: ItemProps) {
           #{pr.number}
         </span>
         {pr.hasDraft && (
-          <span className="text-[8px] font-bold tracking-wider text-[hsl(var(--status-comment))] leading-none">
+          <span className="text-[9px] font-bold tracking-wider text-[hsl(var(--status-comment))] leading-none">
             DRAFT
           </span>
         )}
@@ -517,7 +531,7 @@ function SetupScreen({ reason, detail, refreshing, onRefresh }: SetupScreenProps
             className="h-6 px-2 text-[11px] gap-1.5"
             onClick={runAuthFlow}
           >
-            <Copy className="w-3 h-3" />
+            {host === 'VS Code' ? <Terminal className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
             {host === 'VS Code' ? 'Run in terminal' : copyLabel === 'copied' ? 'Copied' : copyLabel === 'failed' ? 'Copy failed' : 'Copy command'}
           </Button>
           <Button

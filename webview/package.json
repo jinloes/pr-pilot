@@ -36,6 +36,7 @@
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "@axe-core/react": "^4.10.2",
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.6.0",
     "@types/react": "^18.3.1",

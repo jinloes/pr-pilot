@@ -210,7 +210,13 @@ export function ChatPane({
       {selectedContext && (
         <div className="mx-3 mb-1 flex items-center gap-2 rounded border border-border bg-muted/50 px-2 py-1">
           <span className="flex-1 truncate text-xs text-muted-foreground">{selectedContext}</span>
-          <Button variant="ghost" size="sm" onClick={onContextUsed} className="h-5 w-5 p-0 shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onContextUsed}
+            className="h-5 w-5 p-0 shrink-0"
+            aria-label="Clear selected context"
+          >
             <X className="w-3 h-3" />
           </Button>
         </div>

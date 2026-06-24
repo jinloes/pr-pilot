@@ -127,6 +127,11 @@ interface ChunkedProgress {
   }>
 }
 
+interface DiffPreflight {
+  fileCount: number
+  changedLines: number
+}
+
 interface ChunkSession {
   prKey: string
   startedAtMs: number
@@ -221,6 +226,42 @@ function chunkInstructions(batch: DiffBatch, index: number, total: number): stri
     ...batch.files.map((file) => `- ${file}`),
     'If a potential finding is outside this file set, ignore it for this batch.',
   ].join('\n')
+}
+
+function summarizeDiffPreflight(diff: string): DiffPreflight | null {
+  if (!diff.trim()) return null
+  const rows = diff.split(/\r?\n/)
+  const files = new Set<string>()
+  let changedLines = 0
+  for (const row of rows) {
+    if (row.startsWith('+++ b/')) {
+      files.add(row.slice('+++ b/'.length).trim())
+      continue
+    }
+    if ((row.startsWith('+') && !row.startsWith('+++')) || (row.startsWith('-') && !row.startsWith('---'))) {
+      changedLines += 1
+    }
+  }
+  return { fileCount: files.size, changedLines }
+}
+
+function chunkRecommendation(preflight: DiffPreflight | null, truncated: boolean): {
+  recommendChunked: boolean
+  reason: string
+} {
+  if (truncated) {
+    return { recommendChunked: true, reason: 'Diff context is truncated.' }
+  }
+  if (!preflight) {
+    return { recommendChunked: false, reason: 'Recommendation appears once the diff is loaded.' }
+  }
+  if (preflight.fileCount >= 8) {
+    return { recommendChunked: true, reason: 'Many changed files.' }
+  }
+  if (preflight.changedLines >= 300) {
+    return { recommendChunked: true, reason: 'Large changed-line count.' }
+  }
+  return { recommendChunked: false, reason: 'Single-pass review is likely sufficient.' }
 }
 
 function mergeChunkResults(results: ReviewResult[]): ReviewResult {
@@ -632,6 +673,11 @@ export function ReviewPane({ pr, onDirtyStateChange }: Props) {
     () => (result ? runReviewQualityCheck(result, validationDiff) : null),
     [result, validationDiff],
   )
+  const preflight = useMemo(() => summarizeDiffPreflight(validationDiff), [validationDiff])
+  const recommendation = useMemo(
+    () => chunkRecommendation(preflight, isDiffTruncated(validationDiff) || isDiffTruncated(diff)),
+    [preflight, validationDiff, diff],
+  )
 
   function handleRunQualityCheck() {
     setQualityCheckedAt(Date.now())
@@ -985,10 +1031,17 @@ export function ReviewPane({ pr, onDirtyStateChange }: Props) {
                   focusAreas={focusAreasOverride}
                   customInstructions={customInstructionsOverride}
                   chunkedMode={chunkedMode}
+                  preflight={preflight}
+                  recommendation={recommendation}
                   onFocusAreasChange={setFocusAreasOverride}
                   onCustomInstructionsChange={setCustomInstructionsOverride}
                   onChunkedModeChange={setChunkedMode}
                 />
+              )}
+              {result && !qualityCheckedAt && (
+                <div className="px-4 pt-3">
+                  <QualityCheckHintCard onRunQualityCheck={handleRunQualityCheck} />
+                </div>
               )}
               {result && qualityCheckedAt && qualityReport && (
                 <div className="px-4 pt-3">
@@ -1101,6 +1154,8 @@ interface ReviewOverridesProps {
   focusAreas: string
   customInstructions: string
   chunkedMode: boolean
+  preflight: DiffPreflight | null
+  recommendation: { recommendChunked: boolean; reason: string }
   onFocusAreasChange: (value: string) => void
   onCustomInstructionsChange: (value: string) => void
   onChunkedModeChange: (value: boolean) => void
@@ -1110,6 +1165,8 @@ function ReviewOverrides({
   focusAreas,
   customInstructions,
   chunkedMode,
+  preflight,
+  recommendation,
   onFocusAreasChange,
   onCustomInstructionsChange,
   onChunkedModeChange,
@@ -1158,10 +1215,40 @@ function ReviewOverrides({
           />
           Use chunked review mode (file batches with per-batch confidence)
         </label>
+        <div className="mt-1 pl-6 text-[11px] text-muted-foreground">
+          {preflight
+            ? `PR size: ${preflight.fileCount} file${preflight.fileCount === 1 ? '' : 's'}, ${preflight.changedLines} changed lines.`
+            : 'PR size: loading diff metadata…'}
+        </div>
+        <div className="mt-1 pl-6 text-[11px]">
+          <span className={cn('font-medium', recommendation.recommendChunked ? 'text-status-suggestion' : 'text-status-approve')}>
+            {recommendation.recommendChunked ? 'Recommended: Chunked mode.' : 'Recommended: Single-pass mode.'}
+          </span>
+          <span className="text-muted-foreground"> {recommendation.reason}</span>
+        </div>
         <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
           Best for large or high-risk PRs (many files, truncated diff context). Leave off for smaller PRs when you
           want the fastest single-pass review.
         </p>
+      </div>
+    </div>
+  )
+}
+
+function QualityCheckHintCard({ onRunQualityCheck }: { onRunQualityCheck: () => void }) {
+  return (
+    <div className="rounded border border-border bg-muted/20 px-3 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-foreground">Quality Check not run yet</p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Scans for outdated anchors, low-evidence high-severity comments, and missing rationale before submit.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={onRunQualityCheck}>
+          <Check className="w-3.5 h-3.5" />
+          Run Quality Check
+        </Button>
       </div>
     </div>
   )
@@ -1243,9 +1330,14 @@ function ChunkedProgressCard({ progress }: { progress: ChunkedProgress }) {
             <li key={item.label} className="text-[11px] text-muted-foreground">
               {item.label} · confidence {(item.confidence * 100).toFixed(0)}% · {item.comments} comments
               {item.fileConfidence.length > 0 && (
-                <div className="mt-0.5 text-[10px] text-muted-foreground/80">
-                  {item.fileConfidence.map((file) => `${file.file}: ${(file.confidence * 100).toFixed(0)}%`).join(' · ')}
-                </div>
+                <ul className="mt-1 space-y-0.5 text-[10px] text-muted-foreground/80">
+                  {item.fileConfidence.map((file) => (
+                    <li key={file.file} className="flex items-center gap-1.5" title={file.file}>
+                      <span className="truncate max-w-[36rem]">{file.file}</span>
+                      <span className="font-mono">{(file.confidence * 100).toFixed(0)}%</span>
+                    </li>
+                  ))}
+                </ul>
               )}
             </li>
           ))}

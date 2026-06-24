@@ -103,6 +103,9 @@ Only decisions that encode active constraints future code must respect and are n
 ### Webview styling
 All webview UI uses shadcn/ui + Tailwind CSS v3. Avoid ad-hoc CSS modules/inline layout styles. `DiffViewer.css` is the only hand-crafted CSS exception for diff-table specifics. Use semantic status tokens (`text-status-*`, `bg-status-*/10`, `border-status-*/50`) rather than hardcoded palette classes.
 
+### Webview accessibility tooling
+Webview development runs dev-only runtime accessibility scans via `@axe-core/react` in `main.tsx` so missing labels/roles and semantic issues surface early in local runs.
+
 ### Module boundaries
 `core` is KMP and has zero IntelliJ dependencies. `intellij-plugin` depends on JVM variant of `core`. Keep Java sources in `core/src/main/java` and `core/src/test/java` (do not move to `src/jvmMain/java`).
 

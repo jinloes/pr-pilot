@@ -178,7 +178,7 @@ export default function App() {
       >
         <div
           className="absolute cursor-col-resize"
-          style={{ inset: '0 -3px' }}
+          style={{ inset: '0 -10px' }}
           onMouseDown={handleDividerMouseDown}
         />
       </div>
