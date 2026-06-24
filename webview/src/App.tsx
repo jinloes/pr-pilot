@@ -86,6 +86,7 @@ function seedDevData() {
 
 export default function App() {
   const [selectedPR, setSelectedPR] = useState<PR | null>(null)
+  const [hasUnsavedReview, setHasUnsavedReview] = useState(false)
   const [leftWidth, setLeftWidth] = useState(loadSavedWidth)
   const dragging = useRef(false)
   const dragStartX = useRef(0)
@@ -127,13 +128,31 @@ export default function App() {
     e.preventDefault()
   }
 
+  function nextPrSelectionAllowed(nextPr: PR): boolean {
+    if (!selectedPR) return true
+    const samePr =
+      selectedPR.number === nextPr.number
+      && selectedPR.owner === nextPr.owner
+      && selectedPR.repo === nextPr.repo
+    if (samePr || !hasUnsavedReview) return true
+    return window.confirm(
+      'You have unsaved review changes for the currently selected PR. Switch anyway and discard in-memory edits?',
+    )
+  }
+
   return (
     <>
     <Toaster theme="system" position="bottom-right" richColors />
     <div className="flex h-full overflow-hidden">
       {/* Left column — PR list */}
       <div style={{ width: leftWidth, maxWidth: '45vw' }} className="shrink-0 flex flex-col overflow-hidden">
-        <PRList onSelect={setSelectedPR} />
+        <PRList
+          onSelect={(nextPr) => {
+            if (!nextPrSelectionAllowed(nextPr)) return false
+            setSelectedPR(nextPr)
+            return true
+          }}
+        />
       </div>
 
       {/* Draggable divider */}
@@ -166,7 +185,7 @@ export default function App() {
 
       {/* Right column — review pane */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <ReviewPane pr={selectedPR} />
+        <ReviewPane pr={selectedPR} onDirtyStateChange={setHasUnsavedReview} />
       </div>
     </div>
     </>

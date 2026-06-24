@@ -70,6 +70,7 @@ webview/                               – Vite + React + TypeScript webview
   src/
     bridge/types.ts
     lib/validateComments.ts
+    lib/reviewQuality.ts            – Review Quality Check heuristics, repair helpers, and diff chunk planning
     components/...
     App.tsx
 
@@ -169,6 +170,8 @@ Both hosts apply a transient-failure policy on GitHub REST calls: 15s request/co
 ### First-run onboarding path
 When startup PR loading fails, hosts push a `setupRequired` bridge message with actionable detail instead of silently failing. Supported reasons are `gh_not_installed`, `gh_not_authenticated`, and `load_failed` (non-auth load errors). `PRList` renders a full-pane setup/error screen with a checklist covering GitHub CLI installation, GitHub authentication, and PR loading, plus a Refresh button when this message is received. IntelliJ maps auth diagnosis to stable reason IDs via `PRToolWindowFactory.setupReason` and also emits `load_failed` for post-auth load exceptions; VS Code classifies setup-worthy auth failures (including 401/403/bad-credentials responses) in `classifySetupAuthError`. The VS Code host also triggers an initial `handleRefreshPRs` call immediately after `resolveWebviewView` so the webview never hangs on its initial loading state.
 
+The setup screen is a guided in-app wizard with host detection. Both hosts expose status re-check, settings, and auth-guide actions; VS Code additionally supports one-click `gh auth login` automation via a `runAuthLogin` bridge action that opens an integrated terminal and runs the command.
+
 ### PR chat scope
 Chat is available after PR selection, before and after review generation. Hosts build chat context from the active PR title/body, the full diff (already capped at 80 KB by the diff fetch), and the generated review when one exists; both hosts send the same full diff so chat answers do not diverge by host. The webview displays which context buckets are attached and adds selected text when the user right-clicks or verifies a comment. Chat reuses the PR worktree when available. The VS Code host sources the active PR's title/body from `getPRDetail` on select (the webview `selectPR` message carries only number/owner/repo), so the review prompt and chat context always include the real PR description.
 
@@ -186,6 +189,11 @@ Inline comment metadata is encoded in review body HTML comment for resilient dra
 
 ### Large diff visibility
 GitHub diffs are truncated at 80 KB in both hosts. The webview detects the truncation marker and warns that diff display and chat context are incomplete, while `DiffViewer` still lazily limits rendered changed lines for browser performance.
+
+### Review quality gate and chunked review mode
+The webview supports a pre-submit `Review Quality Check` pass that runs local heuristics over the current draft and validation diff to flag trust risks (unanchored comments, low-evidence high-severity findings, and missing rationale metadata). The pass provides one-click in-memory repairs (`remove unanchored`, `add rationale placeholders`, `downgrade high-risk issues`) before save/submit.
+
+For larger PRs, reviewers can enable chunked mode in per-review overrides. The webview splits the changed files into risk-priority batches, runs one model pass per batch with batch-scoped file instructions, then merges batch outputs into a single draft and shows explicit batch progress with per-file confidence summaries.
 
 ### Notification parity
 Background PR notifications are available in both hosts and are off by default. The first poll seeds existing PRs silently. Both hosts support review-requested PR notifications and optional starred-repository PR notifications, using the persisted settings listed below. The seen-PR set is persisted across reloads/restarts (IntelliJ via `SeenPRSet`, VS Code via extension `globalState`) so PRs that appear while the editor is closed are still announced on the next poll rather than silently absorbed by a re-seed. Changing the notification scope (enable/disable, review-requested, starred repos, or GitHub base URL) re-seeds silently so existing in-scope PRs are not announced retroactively.

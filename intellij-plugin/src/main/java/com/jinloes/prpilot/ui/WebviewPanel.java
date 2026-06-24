@@ -419,6 +419,12 @@ public class WebviewPanel implements Disposable {
                                                 ShowSettingsUtil.getInstance()
                                                         .showSettingsDialog(
                                                                 project, "Claude PR Reviews"));
+                case "runAuthLogin" ->
+                        getApplication()
+                                .invokeLater(
+                                        () ->
+                                                BrowserUtil.browse(
+                                                        "https://cli.github.com/manual/gh_auth_login"));
                 case "generateReview" ->
                         handleGenerateReview(
                                 number,
@@ -493,7 +499,7 @@ public class WebviewPanel implements Disposable {
         }
         String type = node.path("type").asText();
         return switch (type) {
-            case "refreshPRs", "cancelReview", "openSettings", "clearChat" -> true;
+            case "refreshPRs", "cancelReview", "openSettings", "clearChat", "runAuthLogin" -> true;
             case "openUrl" -> node.path("url").isTextual();
             case "askClaude" -> node.path("question").isTextual();
             case "selectPR", "generateReview", "saveDraft", "submitReview", "deleteDraft" ->

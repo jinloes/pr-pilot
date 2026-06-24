@@ -8,6 +8,15 @@ import {
 } from '../../bridge/types'
 import { validateComments } from '@/lib/validateComments'
 import {
+  applyReviewQualityRepairs,
+  buildDiffBatches,
+  estimateFileConfidence,
+  runReviewQualityCheck,
+  type DiffBatch,
+  type ReviewQualityAction,
+  type ReviewQualityReport,
+} from '@/lib/reviewQuality'
+import {
   AlertTriangle,
   Check,
   CheckCircle2,
@@ -18,7 +27,9 @@ import {
   GitMerge,
   Loader2,
   MessageSquare,
+  RefreshCw,
   RotateCcw,
+  Settings2,
   Trash2,
   X,
   XCircle,
@@ -70,6 +81,7 @@ function loadChatHeight(): number {
 
 interface Props {
   pr: PR | null
+  onDirtyStateChange?: (dirty: boolean) => void
 }
 
 type Verdict = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
@@ -77,8 +89,8 @@ type Verdict = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
 type PaneState =
   | { kind: 'idle' }
   | { kind: 'draftLoading' }
-  | { kind: 'noDraft' }
-  | { kind: 'authError'; message: string }
+  | { kind: 'noDraft'; diff?: string; validationDiff?: string }
+  | { kind: 'authError'; message: string; diff?: string; validationDiff?: string }
   | {
       kind: 'draftPresent'
       result: ReviewResult
@@ -102,6 +114,37 @@ type PaneState =
   | { kind: 'saveError'; message: string; result: ReviewResult | null; diff: string; validationDiff: string }
   | { kind: 'submitError'; message: string; result: ReviewResult | null; diff: string; validationDiff: string }
 
+interface ChunkedProgress {
+  running: boolean
+  currentBatch: number
+  totalBatches: number
+  activeLabel: string
+  completed: Array<{
+    label: string
+    confidence: number
+    comments: number
+    fileConfidence: Array<{ file: string; confidence: number }>
+  }>
+}
+
+interface ChunkSession {
+  prKey: string
+  startedAtMs: number
+  batches: DiffBatch[]
+  nextBatchIndex: number
+  aggregated: Array<{ result: ReviewResult; files: string[] }>
+  completed: Array<{
+    label: string
+    confidence: number
+    comments: number
+    fileConfidence: Array<{ file: string; confidence: number }>
+  }>
+  diff: string
+  validationDiff: string
+  focusAreas: string
+  customInstructions: string
+}
+
 function sortedComments(comments: LineComment[]): LineComment[] {
   return [...comments].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
 }
@@ -123,6 +166,7 @@ function withValidatedComments(result: ReviewResult, diff: string): ReviewResult
 function diffOf(state: PaneState): string {
   if (state.kind === 'reviewUnsaved') return state.diff
   if (state.kind === 'draftPresent') return state.diff ?? ''
+  if (state.kind === 'noDraft' || state.kind === 'authError') return state.diff ?? ''
   if (state.kind === 'saveError' || state.kind === 'submitError') return state.diff
   return ''
 }
@@ -130,6 +174,9 @@ function diffOf(state: PaneState): string {
 function validationDiffOf(state: PaneState): string {
   if (state.kind === 'reviewUnsaved') return state.validationDiff
   if (state.kind === 'draftPresent') return state.validationDiff ?? state.diff ?? ''
+  if (state.kind === 'noDraft' || state.kind === 'authError') {
+    return state.validationDiff ?? state.diff ?? ''
+  }
   if (state.kind === 'saveError' || state.kind === 'submitError') return state.validationDiff
   return diffOf(state)
 }
@@ -167,7 +214,43 @@ function prKey(pr: Pick<PR, 'owner' | 'repo' | 'number'>): string {
   return `${pr.owner}/${pr.repo}#${pr.number}`
 }
 
-export function ReviewPane({ pr }: Props) {
+function chunkInstructions(batch: DiffBatch, index: number, total: number): string {
+  return [
+    `Chunked review mode is enabled: process batch ${index + 1}/${total}.`,
+    'Only emit findings for the following files in this batch:',
+    ...batch.files.map((file) => `- ${file}`),
+    'If a potential finding is outside this file set, ignore it for this batch.',
+  ].join('\n')
+}
+
+function mergeChunkResults(results: ReviewResult[]): ReviewResult {
+  const lineCommentSeen = new Set<string>()
+  const lineComments: LineComment[] = []
+  const summaryParts: string[] = []
+  let verdict: ReviewResult['verdict'] = 'APPROVE'
+
+  for (const result of results) {
+    if (result.verdict === 'REQUEST_CHANGES') verdict = 'REQUEST_CHANGES'
+    else if (verdict === 'APPROVE' && result.verdict === 'COMMENT') verdict = 'COMMENT'
+
+    if (result.summary.trim()) summaryParts.push(result.summary.trim())
+
+    for (const comment of result.lineComments) {
+      const key = `${comment.file}|${comment.line}|${comment.type}|${comment.body}`
+      if (lineCommentSeen.has(key)) continue
+      lineCommentSeen.add(key)
+      lineComments.push(comment)
+    }
+  }
+
+  const combinedSummary = summaryParts.length > 0
+    ? `## Overview\nChunked review completed across ${results.length} batch${results.length === 1 ? '' : 'es'}.\n\n${summaryParts.join('\n\n')}`.slice(0, 790)
+    : '## Overview\nChunked review completed.'
+
+  return { summary: combinedSummary, lineComments, verdict }
+}
+
+export function ReviewPane({ pr, onDirtyStateChange }: Props) {
   const [state, setState] = useState<PaneState>({ kind: 'idle' })
   const [focusAreasOverride, setFocusAreasOverride] = useState('')
   const [customInstructionsOverride, setCustomInstructionsOverride] = useState('')
@@ -178,11 +261,15 @@ export function ReviewPane({ pr }: Props) {
   const [chatVisible, setChatVisible] = useState(false)
   const [selectedContext, setSelectedContext] = useState('')
   const [pendingChatMessage, setPendingChatMessage] = useState<{ q: string; ctx: string; id: number } | null>(null)
+  const [chunkedMode, setChunkedMode] = useState(false)
+  const [chunkedProgress, setChunkedProgress] = useState<ChunkedProgress | null>(null)
+  const [qualityCheckedAt, setQualityCheckedAt] = useState<number | null>(null)
   const [chatHeight, setChatHeight] = useState(loadChatHeight)
   const chatHeightRef = useRef(chatHeight)
   const chatDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
   const pendingSubmit = useRef<{ verdict: Verdict; comment: string } | null>(null)
   const currentPrRef = useRef(pr)
+  const chunkSessionRef = useRef<ChunkSession | null>(null)
 
   useEffect(() => {
     currentPrRef.current = pr
@@ -199,7 +286,15 @@ export function ReviewPane({ pr }: Props) {
     setFocusedCommentIdx(0)
     setChatVisible(false)
     setSelectedContext('')
+    setQualityCheckedAt(null)
+    setChunkedProgress(null)
+    chunkSessionRef.current = null
   }, [pr])
+
+  useEffect(() => {
+    const dirty = state.kind === 'reviewUnsaved' || state.kind === 'saveError'
+    onDirtyStateChange?.(dirty)
+  }, [state, onDirtyStateChange])
 
   useEffect(() => {
     const cleanup = onHostMessage((msg) => {
@@ -215,7 +310,7 @@ export function ReviewPane({ pr }: Props) {
           if (msg.prState === 'MERGED') {
             setState({ kind: 'merged', status: msg.status })
           } else if (msg.prState === 'DRAFT_PRESENT' && msg.result) {
-            const diff = msg.diff ?? ''
+            const diff = msg.diff ?? msg.validationDiff ?? ''
             const validationDiff = msg.validationDiff ?? diff
             const result = withSortedComments(withValidatedComments(msg.result, validationDiff))
             setFocusedCommentIdx(0)
@@ -230,11 +325,26 @@ export function ReviewPane({ pr }: Props) {
             })
           } else {
             const status = msg.status ?? ''
-            setState(status ? { kind: 'authError', message: status } : { kind: 'noDraft' })
+            const diff = msg.diff ?? msg.validationDiff ?? ''
+            const validationDiff = msg.validationDiff ?? diff
+            setState(
+              status
+                ? { kind: 'authError', message: status, diff, validationDiff }
+                : { kind: 'noDraft', diff, validationDiff },
+            )
           }
           break
 
         case 'reviewGenerating':
+          if (chunkSessionRef.current) {
+            setState((prev) => ({
+              kind: 'generating',
+              messages: prev.kind === 'generating' ? [...prev.messages, msg.message] : [msg.message],
+              chunks: prev.kind === 'generating' ? prev.chunks : [],
+              startedAtMs: prev.kind === 'generating' ? prev.startedAtMs : Date.now(),
+            }))
+            break
+          }
           setState((prev) => ({
             kind: 'generating',
             messages: prev.kind === 'generating' ? [...prev.messages, msg.message] : [msg.message],
@@ -244,6 +354,13 @@ export function ReviewPane({ pr }: Props) {
           break
 
         case 'reviewChunk':
+          if (chunkSessionRef.current) {
+            setState((prev) => {
+              if (prev.kind !== 'generating') return prev
+              return { ...prev, chunks: [...prev.chunks, { kind: msg.kind, content: msg.chunk }] }
+            })
+            break
+          }
           setState((prev) => {
             if (prev.kind !== 'generating') return prev
             return { ...prev, chunks: [...prev.chunks, { kind: msg.kind, content: msg.chunk }] }
@@ -251,21 +368,128 @@ export function ReviewPane({ pr }: Props) {
           break
 
         case 'reviewResult': {
-          const diff = msg.diff ?? ''
+          const diff = msg.diff ?? msg.validationDiff ?? ''
           const validationDiff = msg.validationDiff ?? diff
           const result = withSortedComments(withValidatedComments(msg.result, validationDiff))
+
+          const chunkSession = chunkSessionRef.current
+          if (chunkSession) {
+            const batchIdx = chunkSession.nextBatchIndex
+            const batch = chunkSession.batches[batchIdx]
+            if (!batch) {
+              chunkSessionRef.current = null
+              break
+            }
+
+            chunkSession.aggregated.push({ result, files: batch.files })
+            const confidence = estimateFileConfidence(result.lineComments, batch.files)
+            const fileConfidence = batch.files.map((file) => ({
+              file,
+              confidence: estimateFileConfidence(result.lineComments, [file]),
+            }))
+            const completed = [
+              ...chunkSession.completed,
+              { label: batch.label, confidence, comments: result.lineComments.length, fileConfidence },
+            ]
+            chunkSession.completed = completed
+
+            chunkSession.nextBatchIndex += 1
+            if (chunkSession.nextBatchIndex < chunkSession.batches.length) {
+              const nextBatch = chunkSession.batches[chunkSession.nextBatchIndex]
+              setChunkedProgress({
+                running: true,
+                currentBatch: chunkSession.nextBatchIndex + 1,
+                totalBatches: chunkSession.batches.length,
+                activeLabel: nextBatch.label,
+                completed,
+              })
+              setState({
+                kind: 'generating',
+                messages: [`Starting ${nextBatch.label}…`],
+                chunks: [],
+                startedAtMs: chunkSession.startedAtMs,
+              })
+              const activePr = currentPrRef.current
+              if (!activePr || prKey(activePr) !== chunkSession.prKey) {
+                chunkSessionRef.current = null
+                setState({ kind: 'error', message: 'Chunked review cancelled because the selected PR changed.' })
+                break
+              }
+              sendToHost({
+                type: 'generateReview',
+                number: activePr.number,
+                owner: activePr.owner,
+                repo: activePr.repo,
+                focusAreas: chunkSession.focusAreas || undefined,
+                customInstructions: [
+                  chunkSession.customInstructions,
+                  chunkInstructions(nextBatch, chunkSession.nextBatchIndex, chunkSession.batches.length),
+                ]
+                  .filter((value) => value.trim().length > 0)
+                  .join('\n\n'),
+              })
+              break
+            }
+
+            const merged = mergeChunkResults(chunkSession.aggregated.map((item) => item.result))
+            const elapsedSec = Math.max(0, Math.round((Date.now() - chunkSession.startedAtMs) / 1000))
+            const finalized = withSortedComments(withValidatedComments(merged, chunkSession.validationDiff))
+            chunkSessionRef.current = null
+            setChunkedProgress({
+              running: false,
+              currentBatch: chunkSession.batches.length,
+              totalBatches: chunkSession.batches.length,
+              activeLabel: 'Completed',
+              completed,
+            })
+            setFocusedCommentIdx(0)
+            setState({
+              kind: 'reviewUnsaved',
+              result: finalized,
+              diff: chunkSession.diff || chunkSession.validationDiff,
+              validationDiff: chunkSession.validationDiff,
+              generationElapsedSec: elapsedSec,
+            })
+            toast.success(`Chunked review completed across ${chunkSession.batches.length} batches.`)
+            break
+          }
+
           setFocusedCommentIdx(0)
           setState((prev) => {
             const elapsedSec =
               prev.kind === 'generating'
                 ? Math.max(0, Math.round((Date.now() - prev.startedAtMs) / 1000))
                 : undefined
-            return { kind: 'reviewUnsaved', result, diff, validationDiff, generationElapsedSec: elapsedSec }
+            return {
+              kind: 'reviewUnsaved',
+              result,
+              diff: diff || validationDiff,
+              validationDiff,
+              generationElapsedSec: elapsedSec,
+            }
           })
           break
         }
 
         case 'reviewError':
+          if (chunkSessionRef.current) {
+            const session = chunkSessionRef.current
+            chunkSessionRef.current = null
+            setChunkedProgress((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    running: false,
+                    activeLabel: `Failed at batch ${session.nextBatchIndex + 1}`,
+                  }
+                : prev,
+            )
+            setState({
+              kind: 'error',
+              message: `Chunked review failed at batch ${session.nextBatchIndex + 1}/${session.batches.length}: ${msg.message}`,
+            })
+            break
+          }
           setState({ kind: 'error', message: msg.message })
           break
 
@@ -404,6 +628,26 @@ export function ReviewPane({ pr }: Props) {
     () => validateComments(validationDiff, result?.lineComments ?? []),
     [validationDiff, result?.lineComments],
   )
+  const qualityReport = useMemo<ReviewQualityReport | null>(
+    () => (result ? runReviewQualityCheck(result, validationDiff) : null),
+    [result, validationDiff],
+  )
+
+  function handleRunQualityCheck() {
+    setQualityCheckedAt(Date.now())
+  }
+
+  function applyQualityRepair(action: ReviewQualityAction) {
+    if (!qualityReport) return
+    setState((prev) =>
+      mutateComments(prev, ['draftPresent', 'reviewUnsaved'], () => {
+        const baseResult = resultOf(prev)
+        if (!baseResult) return []
+        return applyReviewQualityRepairs(baseResult, qualityReport, [action]).lineComments
+      }),
+    )
+    setQualityCheckedAt(Date.now())
+  }
 
   if (!pr) {
     return (
@@ -415,9 +659,71 @@ export function ReviewPane({ pr }: Props) {
 
   const currentPr = pr
 
+  function sendChunkBatchRequest(session: ChunkSession, batchIndex: number) {
+    const batch = session.batches[batchIndex]
+    if (!batch) return
+    setChunkedProgress({
+      running: true,
+      currentBatch: batchIndex + 1,
+      totalBatches: session.batches.length,
+      activeLabel: batch.label,
+      completed: session.completed,
+    })
+    setState({
+      kind: 'generating',
+      messages: [`Starting ${batch.label}…`],
+      chunks: [],
+      startedAtMs: session.startedAtMs,
+    })
+    sendToHost({
+      type: 'generateReview',
+      number: currentPr.number,
+      owner: currentPr.owner,
+      repo: currentPr.repo,
+      focusAreas: session.focusAreas || undefined,
+      customInstructions: [
+        session.customInstructions,
+        chunkInstructions(batch, batchIndex, session.batches.length),
+      ]
+        .filter((value) => value.trim().length > 0)
+        .join('\n\n'),
+    })
+  }
+
   function handleGenerate() {
     const focusAreas = focusAreasOverride.trim()
     const customInstructions = customInstructionsOverride.trim()
+
+    if (chunkedMode) {
+      const sourceDiff = validationDiffOf(state)
+      if (!sourceDiff.trim()) {
+        toast.error('Chunked mode needs a loaded diff. Reload the PR and try again.')
+        return
+      }
+      const batches = buildDiffBatches(sourceDiff)
+      if (batches.length <= 1) {
+        toast.info('Chunked mode skipped: this PR has too few changed files for batching.')
+      } else {
+        const session: ChunkSession = {
+          prKey: prKey(currentPr),
+          startedAtMs: Date.now(),
+          batches,
+          nextBatchIndex: 0,
+          aggregated: [],
+          completed: [],
+          diff: diffOf(state) || sourceDiff,
+          validationDiff: sourceDiff,
+          focusAreas,
+          customInstructions,
+        }
+        chunkSessionRef.current = session
+        sendChunkBatchRequest(session, 0)
+        return
+      }
+    }
+
+    chunkSessionRef.current = null
+    setChunkedProgress(null)
     setState({ kind: 'generating', messages: ['Starting review…'], chunks: [], startedAtMs: Date.now() })
     sendToHost({
       type: 'generateReview',
@@ -431,6 +737,8 @@ export function ReviewPane({ pr }: Props) {
 
   function handleCancel() {
     sendToHost({ type: 'cancelReview' })
+    chunkSessionRef.current = null
+    setChunkedProgress((prev) => (prev ? { ...prev, running: false, activeLabel: 'Cancelled' } : null))
     setState({ kind: 'draftLoading' })
     sendToHost({ type: 'selectPR', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo })
   }
@@ -451,6 +759,11 @@ export function ReviewPane({ pr }: Props) {
   function handleDelete() {
     setDeleting(true)
     sendToHost({ type: 'deleteDraft', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo })
+  }
+
+  function handleReloadDraft() {
+    setState({ kind: 'draftLoading' })
+    sendToHost({ type: 'selectPR', number: currentPr.number, owner: currentPr.owner, repo: currentPr.repo })
   }
 
   function handleSubmit(verdict: Verdict, comment = '') {
@@ -671,9 +984,25 @@ export function ReviewPane({ pr }: Props) {
                 <ReviewOverrides
                   focusAreas={focusAreasOverride}
                   customInstructions={customInstructionsOverride}
+                  chunkedMode={chunkedMode}
                   onFocusAreasChange={setFocusAreasOverride}
                   onCustomInstructionsChange={setCustomInstructionsOverride}
+                  onChunkedModeChange={setChunkedMode}
                 />
+              )}
+              {result && qualityCheckedAt && qualityReport && (
+                <div className="px-4 pt-3">
+                  <ReviewQualityCheckCard
+                    checkedAt={qualityCheckedAt}
+                    report={qualityReport}
+                    onApplyRepair={applyQualityRepair}
+                  />
+                </div>
+              )}
+              {chunkedProgress && (
+                <div className="px-4 pt-3">
+                  <ChunkedProgressCard progress={chunkedProgress} />
+                </div>
               )}
               <PaneContent
                 state={state}
@@ -686,6 +1015,9 @@ export function ReviewPane({ pr }: Props) {
                 orphanComments={orphanComments}
                 onEditOrphan={orphanHandlers.onEditOrphan}
                 onDeleteOrphan={orphanHandlers.onDeleteOrphan}
+                onReloadDraft={handleReloadDraft}
+                onOpenSettings={() => sendToHost({ type: 'openSettings' })}
+                onOpenAuthGuide={() => sendToHost({ type: 'openUrl', url: 'https://cli.github.com/manual/gh_auth_login' })}
               />
             </div>
           </ContextMenuTrigger>
@@ -755,6 +1087,7 @@ export function ReviewPane({ pr }: Props) {
           onCancel={handleCancel}
           onRegenerate={handleGenerate}
           onDelete={handleDelete}
+          onRunQualityCheck={handleRunQualityCheck}
           inlineCommentCount={commentCount}
           orphanCommentCount={orphanCount}
           summary={result?.summary ?? ''}
@@ -767,15 +1100,19 @@ export function ReviewPane({ pr }: Props) {
 interface ReviewOverridesProps {
   focusAreas: string
   customInstructions: string
+  chunkedMode: boolean
   onFocusAreasChange: (value: string) => void
   onCustomInstructionsChange: (value: string) => void
+  onChunkedModeChange: (value: boolean) => void
 }
 
 function ReviewOverrides({
   focusAreas,
   customInstructions,
+  chunkedMode,
   onFocusAreasChange,
   onCustomInstructionsChange,
+  onChunkedModeChange,
 }: ReviewOverridesProps) {
   const hasOverrides = focusAreas.trim().length > 0 || customInstructions.trim().length > 0
   return (
@@ -813,7 +1150,107 @@ function ReviewOverrides({
           value={customInstructions}
           onChange={(e) => onCustomInstructionsChange(e.target.value)}
         />
+        <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={chunkedMode}
+            onChange={(e) => onChunkedModeChange(e.target.checked)}
+          />
+          Use chunked review mode (file batches with per-batch confidence)
+        </label>
+        <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
+          Best for large or high-risk PRs (many files, truncated diff context). Leave off for smaller PRs when you
+          want the fastest single-pass review.
+        </p>
       </div>
+    </div>
+  )
+}
+
+function ReviewQualityCheckCard({
+  checkedAt,
+  report,
+  onApplyRepair,
+}: {
+  checkedAt: number
+  report: ReviewQualityReport
+  onApplyRepair: (action: ReviewQualityAction) => void
+}) {
+  const checkedAtLabel = new Date(checkedAt).toLocaleTimeString()
+  const scoreTone = report.score >= 85 ? 'text-status-approve' : report.score >= 65 ? 'text-status-suggestion' : 'text-status-issue'
+
+  return (
+    <div className="rounded border border-border bg-muted/20 px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold">Review Quality Check</span>
+        <span className={cn('text-xs font-mono', scoreTone)}>Score {report.score}/100</span>
+        <span className="text-[11px] text-muted-foreground">Checked at {checkedAtLabel}</span>
+      </div>
+      {report.issues.length === 0 ? (
+        <p className="mt-1 text-xs text-status-approve">No major trust issues detected in this draft.</p>
+      ) : (
+        <ul className="mt-2 space-y-1">
+          {report.issues.map((issue) => (
+            <li key={issue.id} className="text-xs text-muted-foreground">
+              <span className="text-foreground">{issue.title}</span> · {issue.count} · {issue.description}
+            </li>
+          ))}
+        </ul>
+      )}
+      {report.suggestions.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {report.suggestions.includes('removeUnanchored') && (
+            <Button variant="outline" size="sm" className="text-xs" onClick={() => onApplyRepair('removeUnanchored')}>
+              Remove unanchored comments
+            </Button>
+          )}
+          {report.suggestions.includes('addMissingRationale') && (
+            <Button variant="outline" size="sm" className="text-xs" onClick={() => onApplyRepair('addMissingRationale')}>
+              Add rationale placeholders
+            </Button>
+          )}
+          {report.suggestions.includes('downgradeHighRisk') && (
+            <Button variant="outline" size="sm" className="text-xs" onClick={() => onApplyRepair('downgradeHighRisk')}>
+              Downgrade low-evidence issues
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ChunkedProgressCard({ progress }: { progress: ChunkedProgress }) {
+  const percent = progress.totalBatches > 0
+    ? Math.round((progress.completed.length / progress.totalBatches) * 100)
+    : 0
+  return (
+    <div className="rounded border border-border bg-muted/20 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold">Chunked review progress</span>
+        <span className="text-[11px] font-mono text-muted-foreground">
+          {progress.completed.length}/{progress.totalBatches} ({percent}%)
+        </span>
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        {progress.running
+          ? `Running batch ${progress.currentBatch}/${progress.totalBatches}: ${progress.activeLabel}`
+          : `Last run status: ${progress.activeLabel}`}
+      </p>
+      {progress.completed.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {progress.completed.map((item) => (
+            <li key={item.label} className="text-[11px] text-muted-foreground">
+              {item.label} · confidence {(item.confidence * 100).toFixed(0)}% · {item.comments} comments
+              {item.fileConfidence.length > 0 && (
+                <div className="mt-0.5 text-[10px] text-muted-foreground/80">
+                  {item.fileConfidence.map((file) => `${file.file}: ${(file.confidence * 100).toFixed(0)}%`).join(' · ')}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -835,6 +1272,9 @@ interface ContentProps {
   orphanComments: LineComment[]
   onEditOrphan: (orphan: LineComment, body: string) => void
   onDeleteOrphan: (orphan: LineComment) => void
+  onReloadDraft: () => void
+  onOpenSettings: () => void
+  onOpenAuthGuide: () => void
 }
 
 function useElapsedSeconds(active: boolean): number {
@@ -1026,6 +1466,9 @@ function PaneContent({
   orphanComments,
   onEditOrphan,
   onDeleteOrphan,
+  onReloadDraft,
+  onOpenSettings,
+  onOpenAuthGuide,
 }: ContentProps) {
   const elapsed = useElapsedSeconds(state.kind === 'generating')
 
@@ -1057,7 +1500,21 @@ function PaneContent({
           <Alert variant="destructive">
             <AlertDescription>{state.message}</AlertDescription>
           </Alert>
-          <p className="text-xs text-muted-foreground">Check your GitHub token in plugin settings.</p>
+          <p className="text-xs text-muted-foreground">Check GitHub CLI authentication and host settings, then retry.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={onReloadDraft}>
+              <RefreshCw className="w-3.5 h-3.5" />
+              Retry
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={onOpenSettings}>
+              <Settings2 className="w-3.5 h-3.5" />
+              Open Settings
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={onOpenAuthGuide}>
+              <ExternalLink className="w-3.5 h-3.5" />
+              Auth Guide
+            </Button>
+          </div>
         </div>
       )
 
@@ -1216,6 +1673,7 @@ interface FooterProps {
   onCancel: () => void
   onRegenerate: () => void
   onDelete: () => void
+  onRunQualityCheck: () => void
   inlineCommentCount: number
   orphanCommentCount: number
   summary: string
@@ -1231,6 +1689,7 @@ function ReviewFooter({
   onCancel,
   onRegenerate,
   onDelete,
+  onRunQualityCheck,
   inlineCommentCount,
   orphanCommentCount,
   summary,
@@ -1280,6 +1739,24 @@ function ReviewFooter({
         )}
 
         <div className="flex-1" />
+
+        <div className="flex items-center gap-2">
+          <span className="hidden text-[11px] text-muted-foreground lg:inline">
+            Scans trust risks before submit.
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" disabled={busy} className="gap-1.5 text-xs" onClick={onRunQualityCheck}>
+                <Check className="w-3.5 h-3.5" />
+                Quality Check
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
+              Checks for outdated anchors, high-risk low-evidence comments, and missing rationale, then offers one-click
+              repairs.
+            </TooltipContent>
+          </Tooltip>
+        </div>
 
         {/* Delete — always confirm */}
         {state.kind === 'draftPresent' && (

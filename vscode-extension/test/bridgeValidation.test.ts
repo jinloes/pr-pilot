@@ -26,3 +26,7 @@ test('accepts openUrl only when url is a string', () => {
   assert.equal(isValidBridgeRequest({ type: 'openUrl', url: 42 }), false);
 });
 
+test('accepts setup runAuthLogin action', () => {
+  assert.equal(isValidBridgeRequest({ type: 'runAuthLogin' }), true);
+});
+

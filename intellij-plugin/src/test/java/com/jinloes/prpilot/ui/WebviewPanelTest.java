@@ -130,5 +130,12 @@ class WebviewPanelTest {
 
             assertThat(WebviewPanel.isValidIncomingMessage(node)).isFalse();
         }
+
+        @Test
+        void acceptsRunAuthLoginMessage() throws Exception {
+            var node = MAPPER.readTree("{\"type\":\"runAuthLogin\"}");
+
+            assertThat(WebviewPanel.isValidIncomingMessage(node)).isTrue();
+        }
     }
 }

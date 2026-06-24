@@ -389,11 +389,20 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
                 case 'openSettings':
                     await vscode.commands.executeCommand('pr-pilot.openSettings');
                     break;
+                case 'runAuthLogin':
+                    runAuthLoginInTerminal();
+                    break;
                 default:
                     console.warn('[pr-pilot] unknown message type:', msg.type);
             }
         });
     }
+}
+
+function runAuthLoginInTerminal(): void {
+    const terminal = vscode.window.createTerminal({ name: 'PR Pilot Setup' });
+    terminal.show(true);
+    terminal.sendText('gh auth login', true);
 }
 
 // ── Per-view state ─────────────────────────────────────────────────────────────

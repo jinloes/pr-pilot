@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils'
 import { onHostMessage, sendToHost, type PR, type PRListStatus, type PRSearchScope } from '../../bridge/types'
 
 interface Props {
-  onSelect?: (pr: PR) => void
+  onSelect?: (pr: PR) => boolean | void
 }
 
 type StateFilter = 'open' | 'closed' | 'all'
@@ -101,8 +101,9 @@ export function PRList({ onSelect }: Props) {
   })
 
   function handleSelect(pr: PR) {
+    const accepted = onSelect?.(pr)
+    if (accepted === false) return
     setSelected(prKey(pr))
-    onSelect?.(pr)
     sendToHost({ type: 'selectPR', number: pr.number, owner: pr.owner, repo: pr.repo })
   }
 
@@ -318,16 +319,50 @@ export function PRList({ onSelect }: Props) {
                     : `No pull requests for ${scopeLabel(searchScope).toLowerCase()}`}
               </p>
               {!filter && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 text-xs"
-                  onClick={() => fetchWithFilters()}
-                  disabled={refreshing}
-                >
-                  <RefreshCw className={cn('w-3 h-3', refreshing && 'animate-spin')} />
-                  Refresh
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    onClick={() => fetchWithFilters()}
+                    disabled={refreshing}
+                  >
+                    <RefreshCw className={cn('w-3 h-3', refreshing && 'animate-spin')} />
+                    Refresh
+                  </Button>
+                  {stateFilter !== 'all' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => {
+                        setStateFilter('all')
+                        fetchWithFilters('all', searchScope)
+                      }}
+                    >
+                      Show all states
+                    </Button>
+                  )}
+                  {searchScope !== 'authored' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => handleSearchScope('authored')}
+                    >
+                      Show authored PRs
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    onClick={() => sendToHost({ type: 'openSettings' })}
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                    Settings
+                  </Button>
+                </div>
               )}
             </div>
           )}
@@ -413,8 +448,12 @@ interface SetupScreenProps {
 
 function SetupScreen({ reason, detail, refreshing, onRefresh }: SetupScreenProps) {
   const title = reason === 'load_failed' ? 'Could not load pull requests' : 'GitHub not connected'
+  const host = typeof (window as { acquireVsCodeApi?: unknown }).acquireVsCodeApi === 'function'
+    ? 'VS Code'
+    : 'IntelliJ'
   const steps = setupSteps(reason)
   const [copyLabel, setCopyLabel] = useState<'copy' | 'copied' | 'failed'>('copy')
+  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null)
 
   async function handleCopyAuthCommand() {
     try {
@@ -427,12 +466,26 @@ function SetupScreen({ reason, detail, refreshing, onRefresh }: SetupScreenProps
     }
   }
 
+  function runAuthFlow() {
+    if (host === 'VS Code') {
+      sendToHost({ type: 'runAuthLogin' })
+      return
+    }
+    void handleCopyAuthCommand()
+  }
+
+  function checkStatus() {
+    setLastCheckedAt(Date.now())
+    onRefresh()
+  }
+
   return (
     <div className="flex flex-col h-full items-center justify-center gap-5 px-6 text-center">
       <TriangleAlert className="w-10 h-10 text-status-suggestion shrink-0" />
       <div className="flex flex-col gap-2">
         <p className="text-sm font-semibold text-foreground">{title}</p>
         <p className="text-xs text-muted-foreground leading-relaxed">{detail}</p>
+        <p className="text-[11px] text-muted-foreground">Detected host: {host}</p>
       </div>
       <div className="w-full max-w-72 rounded border border-border bg-card text-left">
         {steps.map((step) => (
@@ -449,22 +502,40 @@ function SetupScreen({ reason, detail, refreshing, onRefresh }: SetupScreenProps
           </div>
         ))}
       </div>
-      <div className="w-full max-w-72 rounded border border-border bg-muted/20 px-3 py-2.5 text-left">
+      <div className="w-full max-w-72 rounded border border-border bg-muted/20 px-3 py-2.5 text-left space-y-2">
+        <p className="text-[11px] font-semibold text-foreground">Guided setup</p>
         <p className="text-[11px] font-mono text-foreground">gh auth login</p>
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Run in a terminal if CLI auth is missing.
+          {host === 'VS Code'
+            ? 'Open the integrated terminal and run GitHub CLI auth automatically.'
+            : 'Copy the command, run it in your terminal, then re-check status.'}
         </p>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="mt-2 h-6 px-2 text-[11px] gap-1.5"
-          onClick={() => {
-            void handleCopyAuthCommand()
-          }}
-        >
-          <Copy className="w-3 h-3" />
-          {copyLabel === 'copied' ? 'Copied' : copyLabel === 'failed' ? 'Copy failed' : 'Copy command'}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-[11px] gap-1.5"
+            onClick={runAuthFlow}
+          >
+            <Copy className="w-3 h-3" />
+            {host === 'VS Code' ? 'Run in terminal' : copyLabel === 'copied' ? 'Copied' : copyLabel === 'failed' ? 'Copy failed' : 'Copy command'}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-[11px] gap-1.5"
+            onClick={checkStatus}
+            disabled={refreshing}
+          >
+            <RefreshCw className={cn('w-3 h-3', refreshing && 'animate-spin')} />
+            Check status
+          </Button>
+        </div>
+        {lastCheckedAt && (
+          <p className="text-[11px] text-muted-foreground">
+            Last checked at {new Date(lastCheckedAt).toLocaleTimeString()}
+          </p>
+        )}
       </div>
       <div className="flex flex-wrap items-center justify-center gap-2">
         <Button
@@ -489,7 +560,7 @@ function SetupScreen({ reason, detail, refreshing, onRefresh }: SetupScreenProps
           variant="outline"
           size="sm"
           className="gap-1.5 text-xs"
-          onClick={onRefresh}
+          onClick={checkStatus}
           disabled={refreshing}
         >
           <RefreshCw className={cn('w-3 h-3', refreshing && 'animate-spin')} />

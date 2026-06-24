@@ -12,6 +12,7 @@ const MESSAGE_TYPES = new Set([
   'clearChat',
   'openUrl',
   'openSettings',
+  'runAuthLogin',
 ]);
 
 function hasValidPrIdentity(msg: AnyMessage): boolean {
@@ -33,6 +34,7 @@ export function isValidBridgeRequest(msg: AnyMessage | null | undefined): msg is
     case 'cancelReview':
     case 'clearChat':
     case 'openSettings':
+    case 'runAuthLogin':
       return true;
     case 'openUrl':
       return typeof msg.url === 'string';
