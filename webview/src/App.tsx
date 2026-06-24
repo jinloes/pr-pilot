@@ -145,7 +145,7 @@ export default function App() {
     <Toaster theme="system" position="bottom-right" richColors />
     <div className="flex h-full overflow-hidden">
       {/* Left column — PR list */}
-      <div style={{ width: leftWidth, maxWidth: '45vw' }} className="shrink-0 flex flex-col overflow-hidden">
+      <div data-testid="pr-list-shell" style={{ width: leftWidth, maxWidth: '45vw' }} className="shrink-0 flex flex-col overflow-hidden">
         <PRList
           onSelect={(nextPr) => {
             if (!nextPrSelectionAllowed(nextPr)) return false
@@ -184,7 +184,7 @@ export default function App() {
       </div>
 
       {/* Right column — review pane */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div data-testid="review-pane-shell" className="flex-1 flex flex-col overflow-hidden">
         <ReviewPane pr={selectedPR} onDirtyStateChange={setHasUnsavedReview} />
       </div>
     </div>

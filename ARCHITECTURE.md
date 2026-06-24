@@ -67,6 +67,9 @@ intellij-plugin/                       – IntelliJ plugin host; depends on :cor
       RepoDetector.java
 
 webview/                               – Vite + React + TypeScript webview
+  a11y/
+    app.a11y.spec.ts                 – Playwright + axe smoke check for serious/critical accessibility violations
+  playwright.a11y.config.ts          – Dedicated Playwright config for webview accessibility gate
   src/
     bridge/types.ts
     lib/validateComments.ts
@@ -105,6 +108,8 @@ All webview UI uses shadcn/ui + Tailwind CSS v3. Avoid ad-hoc CSS modules/inline
 
 ### Webview accessibility tooling
 Webview development runs dev-only runtime accessibility scans via `@axe-core/react` in `main.tsx` so missing labels/roles and semantic issues surface early in local runs.
+
+As a temporary CI gate until `eslint-plugin-jsx-a11y` supports ESLint 10, the webview also runs a Playwright + axe smoke test (`npm run test:a11y`) using `playwright.a11y.config.ts`. The gate currently audits the review-pane shell (`data-testid="review-pane-shell"`) and fails on serious/critical axe violations.
 
 ### Module boundaries
 `core` is KMP and has zero IntelliJ dependencies. `intellij-plugin` depends on JVM variant of `core`. Keep Java sources in `core/src/main/java` and `core/src/test/java` (do not move to `src/jvmMain/java`).
