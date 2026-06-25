@@ -11,6 +11,7 @@ import { hasStaleCommits } from './draftState';
 import { isValidBridgeRequest } from './bridgeValidation';
 import { classifySetupAuthError } from './authError';
 import { toUserFacingError } from './userFacingError';
+import { resolveWebviewDistPath } from './webviewAssets';
 
 type Provider = 'claude' | 'copilot';
 
@@ -218,7 +219,7 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
     private panel: vscode.WebviewPanel | undefined;
 
     constructor(extensionUri: vscode.Uri) {
-        this.distUri = vscode.Uri.joinPath(extensionUri, '..', 'webview', 'dist');
+        this.distUri = vscode.Uri.file(resolveWebviewDistPath(extensionUri.fsPath, fs.existsSync));
     }
 
     openPanel(): void {

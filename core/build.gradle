@@ -111,7 +111,7 @@ tasks.withType(JavaCompile).configureEach {
 // Copy the compiled KMP JS output into vscode-extension/node_modules/core so the
 // extension can import it without a published npm package.
 tasks.register('copyJsToVscodeExtension', Copy) {
-    dependsOn 'jsNodeProductionLibraryDistribution'
-    from("$buildDir/js/packages/core")
+    dependsOn 'jsPublicPackageJson', 'jsJar'
+    from("$rootDir/build/js/packages/pr-pilot-core")
     into("$rootDir/vscode-extension/node_modules/core")
 }

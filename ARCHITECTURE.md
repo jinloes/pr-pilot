@@ -13,6 +13,12 @@ IntelliJ and VS Code extension that lists GitHub Pull Requests and generates AI-
 Multi-module Gradle project:
 
 ```
+README.md                              – Root guide: setup, development, checks, and release flow
+
+.github/
+  workflows/
+    release.yml                      – Tag-driven GitHub release pipeline; builds IntelliJ + VS Code artifacts and marks `v*-rc.*` tags as prereleases
+
 core/                                  – KMP module (jvm + js targets); Java services compiled as jvmMain
   src/commonMain/kotlin/com/jinloes/prpilot/
     model/
@@ -80,6 +86,7 @@ webview/                               – Vite + React + TypeScript webview
 vscode-extension/                      – VS Code extension host
   src/
     extension.ts                       – VS Code activation plus PR Pilot webview tab/view bridge
+    webviewAssets.ts                   – Resolves packaged `webview-dist/` assets with a dev fallback to sibling `webview/dist`
     github.ts
     claude.ts
     copilot.ts                         – Copilot SDK service (`@github/copilot-sdk`) with streaming/status forwarding
@@ -217,6 +224,8 @@ Repo detection walks upward to `.git/config` and reads the `[remote "origin"]` U
 
 ### VS Code webview surfaces
 The VS Code host exposes PR Pilot as an editor-tab `WebviewPanel` opened by `pr-pilot.open`. The Activity Bar webview view (`pr-pilot.main`) is a lightweight launcher that immediately reveals the editor tab and includes an "Open PR Pilot" command link; the full PR loading, review generation, chat, and worktree lifecycle run only in the editor-tab panel.
+
+For development, the extension loads UI assets from the sibling `webview/dist` folder. For packaged `.vsix` builds, the release/package flow stages that same output into `vscode-extension/webview-dist`, and the extension resolves the bundled copy first so installed releases do not depend on the source repo layout.
 
 ### IntelliJ webview surfaces
 The IntelliJ host now mirrors VS Code's split: the `PR Pilot` tool window is a lightweight launcher with an "Open PR Pilot" action/link, and the full interactive UI runs in a center editor tab backed by a singleton `PRPilotVirtualFile` per project. PR loading/review/chat behavior remains in `WebviewPanel`; `PRToolWindowFactory` and `PRPilotFileEditorProvider` both wire the same load pipeline so both surfaces behave consistently.

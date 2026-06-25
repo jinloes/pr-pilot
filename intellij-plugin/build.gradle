@@ -44,7 +44,12 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     intellijPlatform {
-        local('/Applications/IntelliJ IDEA Ultimate.app')
+        def localIdea = file('/Applications/IntelliJ IDEA Ultimate.app')
+        if (localIdea.exists()) {
+            local(localIdea)
+        } else {
+            intellijIdeaUltimate('2025.3.2')
+        }
     }
 }
 
