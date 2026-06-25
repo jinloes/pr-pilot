@@ -162,14 +162,6 @@ export function DiffViewer({
   const searchInputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (focusedCommentIdx !== undefined) {
-      document
-        .getElementById(`diff-comment-${focusedCommentIdx}`)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    }
-  }, [focusedCommentIdx])
-
   const openSearch = useCallback(() => {
     setSearchOpen(true)
     setTimeout(() => searchInputRef.current?.focus(), 0)
@@ -221,8 +213,6 @@ export function DiffViewer({
     }
   }, [diff])
 
-  if (files.length === 0) return null
-
   const totalChanges = files.reduce(
     (sum, f) => sum + f.hunks.reduce((s, h) => s + h.changes.length, 0),
     0,
@@ -248,6 +238,21 @@ export function DiffViewer({
     : files
 
   const byFile = groupComments(comments)
+
+  useEffect(() => {
+    if (focusedCommentIdx === undefined) return
+    const targetId = `diff-comment-${focusedCommentIdx}`
+    const target = document.getElementById(targetId)
+    if (!target && truncating) {
+      // Keep navigation functional even when comments fall outside the initial
+      // 500 changed-line render window.
+      startTransition(() => setShowAll(true))
+      return
+    }
+    target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [focusedCommentIdx, truncating])
+
+  if (files.length === 0) return null
 
   return (
     <TooltipProvider delayDuration={400}>
