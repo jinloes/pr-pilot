@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gradle-checks:
+    name: Gradle Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            webview/package-lock.json
+            vscode-extension/package-lock.json
+
+      - name: Spotless check
+        run: ./gradlew spotlessCheck
+
+      - name: Gradle check
+        run: ./gradlew check
+
+      - name: Explicit JVM test suites
+        run: ./gradlew :core:jvmTest :intellij-plugin:unitTest
+
+  web-and-extension-checks:
+    name: Web And Extension Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            webview/package-lock.json
+            vscode-extension/package-lock.json
+
+      - name: Install webview dependencies
+        working-directory: webview
+        run: npm ci
+
+      - name: Lint webview
+        working-directory: webview
+        run: npm run lint
+
+      - name: Typecheck webview
+        working-directory: webview
+        run: npx tsc --noEmit
+
+      - name: Build webview
+        working-directory: webview
+        run: npm run build
+
+      - name: Install VS Code extension dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Lint VS Code extension
+        working-directory: vscode-extension
+        run: npm run lint
+
+      - name: Typecheck VS Code extension
+        working-directory: vscode-extension
+        run: npx tsc --noEmit
+
+      - name: Run VS Code extension unit tests
+        working-directory: vscode-extension
+        run: npm run test:unit
+
+      - name: Build VS Code extension
+        working-directory: vscode-extension
+        run: npm run build
+

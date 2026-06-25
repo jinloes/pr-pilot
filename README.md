@@ -100,6 +100,14 @@ These are the repository's required checks from `AGENTS.md`:
 
 ## CI and release workflow
 
+Continuous integration runs via `.github/workflows/ci.yml` on pushes to `main`, pull requests, and manual dispatch.
+
+CI checks:
+
+- Gradle Spotless + JVM checks (`spotlessCheck`, `check`, `:core:jvmTest`, `:intellij-plugin:unitTest`)
+- Webview lint/typecheck/build
+- VS Code extension lint/typecheck/unit tests/build
+
 Releases are tag-driven via `.github/workflows/release.yml`.
 
 What the workflow does:

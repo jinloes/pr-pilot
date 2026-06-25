@@ -17,6 +17,7 @@ README.md                              – Root guide: setup, development, check
 
 .github/
   workflows/
+    ci.yml                           – Push/PR CI checks: Gradle verification plus webview and VS Code lint/typecheck/tests/build
     release.yml                      – Tag-driven GitHub release pipeline; builds IntelliJ + VS Code artifacts and marks `v*-rc.*` tags as prereleases
 
 core/                                  – KMP module (jvm + js targets); Java services compiled as jvmMain
