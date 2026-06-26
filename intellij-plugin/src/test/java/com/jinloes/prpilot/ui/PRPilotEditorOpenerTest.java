@@ -27,4 +27,3 @@ class PRPilotEditorOpenerTest {
         assertThat(file.isWritable()).isFalse();
     }
 }
-

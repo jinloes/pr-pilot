@@ -3,8 +3,8 @@ package com.jinloes.prpilot.ui;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorState;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
@@ -112,4 +112,3 @@ final class PRPilotFileEditor extends UserDataHolderBase implements FileEditor {
         }
     }
 }
-

@@ -119,7 +119,8 @@ class WebviewPanelTest {
         @Test
         void rejectsPrMessageWithoutOwnerRepoOrNumber() throws Exception {
             var node =
-                    MAPPER.readTree("{\"type\":\"selectPR\",\"number\":0,\"owner\":\"\",\"repo\":\"\"}");
+                    MAPPER.readTree(
+                            "{\"type\":\"selectPR\",\"number\":0,\"owner\":\"\",\"repo\":\"\"}");
 
             assertThat(WebviewPanel.isValidIncomingMessage(node)).isFalse();
         }

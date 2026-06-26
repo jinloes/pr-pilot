@@ -89,9 +89,7 @@ public class PRPilotFileEditorProvider implements FileEditorProvider, DumbAware 
         private static JComponent buildComponent(Project project) {
             JPanel panel = new JPanel(new BorderLayout());
             panel.add(
-                    new JLabel(
-                            "PR Pilot is already open in another editor group.",
-                            JLabel.CENTER),
+                    new JLabel("PR Pilot is already open in another editor group.", JLabel.CENTER),
                     BorderLayout.CENTER);
             JButton focusButton = new JButton("Back to Editor");
             focusButton.addActionListener(event -> PRPilotEditorOpener.openInEditor(project));
@@ -144,4 +142,3 @@ public class PRPilotFileEditorProvider implements FileEditorProvider, DumbAware 
         public void dispose() {}
     }
 }
-

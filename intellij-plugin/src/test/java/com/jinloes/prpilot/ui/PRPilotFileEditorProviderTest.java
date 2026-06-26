@@ -30,4 +30,3 @@ class PRPilotFileEditorProviderTest {
         assertThat(PRPilotFileEditorProvider.tryMarkPrimaryEditorOpen(holder)).isTrue();
     }
 }
-

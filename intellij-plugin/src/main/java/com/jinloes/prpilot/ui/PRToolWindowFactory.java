@@ -20,8 +20,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import javax.swing.JButton;
-import javax.swing.JPanel;
 import javax.swing.JLabel;
+import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -160,7 +160,8 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                                         }));
     }
 
-    private static void loadAndPushPRs(Project project, WebviewPanel webviewPanel) throws Exception {
+    private static void loadAndPushPRs(Project project, WebviewPanel webviewPanel)
+            throws Exception {
         String token = PluginSettings.getInstance().getGithubToken();
         if (token == null) {
             PluginSettings.AuthDiagnosis diagnosis = PluginSettings.getInstance().diagnoseAuth();

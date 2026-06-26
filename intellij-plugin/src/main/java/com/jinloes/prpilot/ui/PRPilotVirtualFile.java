@@ -13,5 +13,3 @@ final class PRPilotVirtualFile extends LightVirtualFile {
         setWritable(false);
     }
 }
-
-
