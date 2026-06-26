@@ -23,7 +23,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
           cache: gradle
 
       - name: Set up Node
@@ -79,7 +79,7 @@ jobs:
 
       - name: Install VS Code extension dependencies
         working-directory: vscode-extension
-        run: npm ci
+        run: npm install
 
       - name: Lint VS Code extension
         working-directory: vscode-extension
