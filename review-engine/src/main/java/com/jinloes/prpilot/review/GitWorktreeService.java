@@ -191,6 +191,35 @@ public class GitWorktreeService {
      */
     public boolean removeWorktree(File repoDir, File worktreeDir) {
         try {
+            return new SemanticWorktreeStore()
+                    .ordinaryRemoval(
+                            worktreeDir.toPath(),
+                            () -> removeOrdinaryWorktree(repoDir, worktreeDir));
+        } catch (IOException | RuntimeException failure) {
+            log.warn("Retained worktree protection blocked cleanup", failure);
+            return false;
+        }
+    }
+
+    boolean isRegisteredHead(File repoDir, File worktreeDir, String head) throws IOException {
+        GitResult current = execGit(worktreeDir, 15, "rev-parse", "HEAD");
+        return current.exitCode() == 0
+                && current.output().trim().equals(head)
+                && isRegisteredWorktree(repoDir, worktreeDir);
+    }
+
+    boolean removeManagedWorktree(File repoDir, File worktreeDir) {
+        try {
+            runGit(repoDir, 30, "worktree", "remove", "--", worktreeDir.getAbsolutePath());
+            return true;
+        } catch (IOException failure) {
+            log.warn("Non-force retained cleanup failed; preserving ownership", failure);
+            return false;
+        }
+    }
+
+    private boolean removeOrdinaryWorktree(File repoDir, File worktreeDir) {
+        try {
             runGit(repoDir, 30, "worktree", "remove", "--force", worktreeDir.getAbsolutePath());
             log.info("Removed worktree at {}", worktreeDir);
             return true;

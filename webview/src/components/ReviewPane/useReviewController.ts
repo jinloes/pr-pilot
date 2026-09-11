@@ -7,6 +7,8 @@ import {
   type LineComment,
   type PR,
   type ReviewResult,
+  type DeepReviewPreparedMessage,
+  type RetainedDeepReview,
 } from '../../bridge/types'
 import { autosaveDelayMs, isReviewDirty, reviewSnapshot } from '@/lib/autosave'
 import { parseDiffSafely } from '@/lib/diffParse'
@@ -66,6 +68,11 @@ export interface PendingChatMessage {
 }
 
 export interface ReviewViewModel {
+  intellijAssisted: boolean
+  deepSetup: DeepReviewPreparedMessage | null
+  retainedDeepReviews: RetainedDeepReview[]
+  deepMaintenanceError: string
+  deepBusy: boolean
   pr: PR | null
   state: PaneState
   activity: ReviewActivity
@@ -102,6 +109,11 @@ export interface ReviewViewModel {
 }
 
 export interface ReviewActions {
+  setIntellijAssisted: (value: boolean) => void
+  continueDeepReview: (server: string) => void
+  ordinaryReview: () => void
+  listDeepReviews: () => void
+  cleanupDeepReview: (id: string) => void
   setFocusAreasOverride: (value: string) => void
   setCustomInstructionsOverride: (value: string) => void
   setChunkedMode: (value: boolean) => void
@@ -267,6 +279,13 @@ export function useReviewController({
   const [selectedContext, setSelectedContext] = useState('')
   const [pendingChatMessage, setPendingChatMessage] = useState<PendingChatMessage | null>(null)
   const [chunkedMode, setChunkedMode] = useState(false)
+  const [intellijAssisted, setIntellijAssisted] = useState(false)
+  const [deepSetup, setDeepSetup] = useState<DeepReviewPreparedMessage | null>(null)
+  const [retainedDeepReviews, setRetainedDeepReviews] = useState<RetainedDeepReview[]>([])
+  const [deepMaintenanceError, setDeepMaintenanceError] = useState('')
+  const [deepBusy, setDeepBusy] = useState(false)
+  const maintenanceOperationRef = useRef<string | null>(null)
+  const beforeDeepPauseRef = useRef<PaneState>(initialPaneState)
   const [qualityExpanded, setQualityExpanded] = useState(false)
   const [chatHeight, setChatHeightState] = useState(() => loadChatHeight(localStorage, window.innerHeight))
   const [chatAvailableHeight, setChatAvailableHeight] = useState(window.innerHeight)
@@ -322,6 +341,9 @@ export function useReviewController({
     setSelectedContext('')
     setPendingChatMessage(null)
     setQualityExpanded(false)
+    setDeepSetup(null)
+    setDeepBusy(false)
+    setIntellijAssisted(false)
     activeReviewOperationIdRef.current = null
     generationStartedAtRef.current = null
     lastSavedSnapshotRef.current = null
@@ -342,6 +364,26 @@ export function useReviewController({
       if ('prKey' in message && message.prKey && (!activePr || message.prKey !== prKey(activePr))) return
 
       switch (message.type) {
+        case 'deepReviewPrepared':
+          if (message.operationId !== activeReviewOperationIdRef.current) break
+          setDeepSetup(message)
+          setDeepBusy(false)
+          activeReviewOperationIdRef.current = null
+          generationStartedAtRef.current = null
+          setReviewActivity(emptyReviewActivity())
+          dispatch({ type: 'restoreBeforeDeepPause', previous: beforeDeepPauseRef.current })
+          break
+        case 'retainedDeepReviews':
+          if (message.operationId !== maintenanceOperationRef.current) break
+          maintenanceOperationRef.current = null
+          setRetainedDeepReviews(message.retained)
+          setDeepMaintenanceError('')
+          break
+        case 'deepReviewMaintenanceError':
+          if (message.operationId !== maintenanceOperationRef.current) break
+          maintenanceOperationRef.current = null
+          setDeepMaintenanceError(message.message)
+          break
         case 'draftLoading':
           dispatch({ type: 'draftLoading' })
           break
@@ -382,6 +424,8 @@ export function useReviewController({
           break
 
         case 'reviewResult': {
+          setDeepSetup(null)
+          setDeepBusy(false)
           const diff = message.diff ?? message.validationDiff ?? ''
           const validationDiff = message.validationDiff ?? diff
           const result = normalizeReviewResult(message.result, validationDiff)
@@ -402,6 +446,7 @@ export function useReviewController({
         }
 
         case 'reviewError': {
+          setDeepBusy(false)
           const nowMs = Date.now()
           activeReviewOperationIdRef.current = null
           generationStartedAtRef.current = null
@@ -744,8 +789,11 @@ export function useReviewController({
     }
   }, [pr, allocateSaveId])
 
-  function handleGenerate() {
+  function handleGenerate(ordinary = false) {
     if (!pr) return
+    setDeepSetup(null)
+    beforeDeepPauseRef.current = state
+    setDeepBusy(intellijAssisted && !ordinary)
     const focusAreas = focusAreasOverride.trim()
     const customInstructions = customInstructionsOverride.trim()
 
@@ -771,6 +819,7 @@ export function useReviewController({
         repo: pr.repo,
         diff: sourceDiff,
         chunkedReview: true,
+        ...(intellijAssisted && !ordinary ? { intellijAssisted: true } : {}),
         focusAreas: focusAreas || undefined,
         customInstructions: customInstructions || undefined,
       })
@@ -789,6 +838,7 @@ export function useReviewController({
       number: pr.number,
       owner: pr.owner,
       repo: pr.repo,
+      ...(intellijAssisted && !ordinary ? { intellijAssisted: true } : {}),
       focusAreas: focusAreas || undefined,
       customInstructions: customInstructions || undefined,
     })
@@ -796,8 +846,18 @@ export function useReviewController({
 
   function handleCancel() {
     if (!pr) return
-    const operationId = activeReviewOperationIdRef.current
+    const operationId = activeReviewOperationIdRef.current ?? deepSetup?.operationId
     if (!operationId) return
+    if (deepSetup || deepBusy) {
+      sendToHost({ type: 'cancelReview', operationId })
+      activeReviewOperationIdRef.current = null
+      generationStartedAtRef.current = null
+      setDeepSetup(null)
+      setDeepBusy(false)
+      setReviewActivity(emptyReviewActivity())
+      dispatch({ type: 'restoreBeforeDeepPause', previous: beforeDeepPauseRef.current })
+      return
+    }
     setReviewActivity((current) =>
       finishReviewActivity(current, 'cancelled', 'Review cancelled', Date.now()),
     )
@@ -1013,6 +1073,11 @@ export function useReviewController({
 
   return {
     model: {
+      intellijAssisted,
+      deepSetup: deepSetup?.prKey === (pr ? prKey(pr) : '') ? deepSetup : null,
+      retainedDeepReviews,
+      deepMaintenanceError,
+      deepBusy,
       pr,
       state,
       activity,
@@ -1048,10 +1113,32 @@ export function useReviewController({
       statusMessage,
     },
     actions: {
+      setIntellijAssisted,
+      continueDeepReview: (server: string) => {
+        if (!pr || !deepSetup || deepSetup.prKey !== prKey(pr) || deepBusy) return
+        const operationId = newOperationId()
+        activeReviewOperationIdRef.current = operationId
+        setDeepBusy(true)
+        generationStartedAtRef.current = Date.now()
+        dispatch({ type: 'startGenerating' })
+        sendToHost({ type: 'continueDeepReview', operationId, number: pr.number, owner: pr.owner,
+          repo: pr.repo, retainedId: deepSetup.retainedId, server })
+      },
+      ordinaryReview: () => { setIntellijAssisted(false); handleGenerate(true) },
+      listDeepReviews: () => {
+        const operationId = newOperationId()
+        maintenanceOperationRef.current = operationId
+        sendToHost({ type: 'listDeepReviews', operationId })
+      },
+      cleanupDeepReview: (retainedId: string) => {
+        const operationId = newOperationId()
+        maintenanceOperationRef.current = operationId
+        sendToHost({ type: 'cleanupDeepReview', operationId, retainedId, projectClosed: true })
+      },
       setFocusAreasOverride,
       setCustomInstructionsOverride,
       setChunkedMode,
-      generate: handleGenerate,
+      generate: () => handleGenerate(),
       cancel: handleCancel,
       save: handleSave,
       deleteDraft: handleDelete,

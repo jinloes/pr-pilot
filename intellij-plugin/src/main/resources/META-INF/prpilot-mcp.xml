@@ -1,0 +1,14 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <projectService serviceImplementation="com.jinloes.prpilot.services.SemanticSnapshotService"/>
+    </extensions>
+    <extensions defaultExtensionNs="com.intellij.mcpServer">
+        <mcpToolsProvider implementation="com.jinloes.prpilot.services.SemanticMcpToolsProvider"/>
+    </extensions>
+    <extensions defaultExtensionNs="com.intellij">
+        <projectService serviceImplementation="com.jinloes.prpilot.services.SourceInventoryService"/>
+    </extensions>
+    <extensions defaultExtensionNs="com.intellij.mcpServer">
+        <mcpToolsProvider implementation="com.jinloes.prpilot.services.SourceInventoryMcpProvider"/>
+    </extensions>
+</idea-plugin>

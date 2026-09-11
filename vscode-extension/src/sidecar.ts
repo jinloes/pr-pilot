@@ -48,6 +48,7 @@ export const REQUIRED_CAPABILITIES = [
     'repoProfile',
     'repoGuidelines',
     'worktrees',
+    'semanticReviews',
     'reviewGeneration',
 ] as const;
 
@@ -269,6 +270,7 @@ export interface SidecarPrInput {
 }
 
 export interface SidecarGenerateReviewParams {
+    deepReview?: { retainedId: string; server: string };
     operationId: string;
     provider: ReviewProvider;
     projectDir?: string;
@@ -299,6 +301,21 @@ export interface SidecarGenerateReviewParams {
      * that merely restate a CI finding instead of only asking the model not to produce them.
      */
     ciAnnotations?: Array<{ file: string; line: number; level: string; message: string }>;
+}
+
+export interface DeepReviewPreparation {
+    retainedId: string;
+    head: string;
+    worktree: string;
+    servers: string[];
+}
+
+export interface RetainedDeepReview {
+    id: string;
+    repository: string;
+    worktree: string;
+    head: string;
+    createdAt: number;
 }
 
 export interface SidecarChatMessage {
@@ -1404,6 +1421,42 @@ export class SidecarClient {
         } catch (err) {
             return { status: 'failed', worktreeDir: '', message: err instanceof Error ? err.message : String(err) };
         }
+    }
+
+    async prepareDeepReview(params: {
+        operationId: string; gitRoot: string; prNumber: number; branch: string; headSha: string;
+        forkCloneUrl: string; prIdentity: string; diffDigest: string;
+    }): Promise<DeepReviewPreparation> {
+        await this.initialize();
+        const value = await this.requestRaw('reviews/prepareDeepReview', params,
+            { timeoutMs: WORKTREE_REQUEST_TIMEOUT_MS }) as Partial<DeepReviewPreparation> | null;
+        if (!value || typeof value.retainedId !== 'string' || !/^[0-9a-f-]{36}$/.test(value.retainedId)
+            || value.head !== params.headSha || typeof value.worktree !== 'string' || !path.isAbsolute(value.worktree)
+            || !Array.isArray(value.servers) || !value.servers.length || value.servers.length > 100
+            || !value.servers.every(s => typeof s === 'string' && s.length > 0 && s.length < 256)
+            || new Set(value.servers).size !== value.servers.length) {
+            throw new Error('Invalid deep preparation response; retained worktrees remain available in cleanup.');
+        }
+        return value as DeepReviewPreparation;
+    }
+
+    async listDeepReviews(): Promise<RetainedDeepReview[]> {
+        const value = await this.request('reviews/listDeepReviews', {});
+        if (!Array.isArray(value) || value.length > 1000 || !value.every((r: Partial<RetainedDeepReview>) =>
+            r && typeof r.id === 'string' && /^[0-9a-f-]{36}$/.test(r.id)
+            && typeof r.repository === 'string' && path.isAbsolute(r.repository)
+            && typeof r.worktree === 'string' && path.isAbsolute(r.worktree)
+            && typeof r.head === 'string' && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(r.head)
+            && typeof r.createdAt === 'number' && Number.isSafeInteger(r.createdAt) && r.createdAt > 0)) {
+            throw new Error('Invalid retained review response');
+        }
+        return value as RetainedDeepReview[];
+    }
+
+    async cleanupDeepReview(retainedId: string, projectClosed: boolean): Promise<boolean> {
+        const value = await this.request('reviews/cleanupDeepReview', { retainedId, projectClosed }) as { removed?: unknown };
+        if (!value || typeof value.removed !== 'boolean') throw new Error('Invalid retained cleanup response');
+        return value.removed;
     }
 
     /** Removes a worktree created by {@link createWorktree}. Cleanup failure is logged, never thrown. */

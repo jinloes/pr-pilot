@@ -7,6 +7,7 @@ Lookup guide for implementation work. Read this file when locating code or tests
 
 | Task | Start here | Follow through | Primary tests |
 |---|---|---|---|
+| Inspect internal source coverage (not readiness) | `model/SourceInventory.java`, `review/SourceInventoryClient.java` | `SourceInventoryFiles.java`, IntelliJ `SourceInventoryService.java` and `SourceInventoryMcpProvider.java` | `SourceInventoryTest`, `SourceInventoryFilesTest`, `SourceInventoryClientTest`, `SourceInventoryServiceTest`, `SourceInventoryMcpProviderTest`; manual README protocol recipe |
 | Change review generation or prompts | `review-engine/.../ClaudeService.java`, `CopilotService.java` | `ReviewEngineApi.java`, `ReviewSessionService.java`, host request wiring | Matching `review-engine` service tests; prompt mirrors listed in `AGENTS.md` |
 | Add an engine capability | `GitHubEngineApi.java` or `ReviewEngineApi.java` | `StdioJsonRpcServer.java`, `SidecarBootstrapService.java`, `vscode-extension/src/sidecar.ts` | `EngineCapabilityCoverageTest.java`, `wireCatalog.test.ts` |
 | Change PR discovery, metadata, diff, or draft mutations | `github-engine/.../sidecar/pr/` | `GitHubEngine.java`, both host bridges, shared webview messages | Matching `github-engine` service test plus host bridge tests |
@@ -17,6 +18,7 @@ Lookup guide for implementation work. Read this file when locating code or tests
 | Change notifications | `intellij-plugin/.../PRNotificationService.java` | `vscode-extension/src/notifications.ts`, both host lifecycle entry points | Notification tests in both hosts |
 | Change local draft/index persistence | `PendingReviewIndex.java`, `DraftRecoveryStore.java`, `SeenPRSet.java`, `vscode-extension/src/draftRecovery.ts` | Both host lifecycle callers; persistence contract in `ARCHITECTURE.md` | Matching IntelliJ and VS Code service tests |
 | Change packaging or releases | `.github/workflows/`, module build files | VS Code staging scripts, root Gradle configuration | CI workflow commands and sidecar smoke test |
+| Select a local IntelliJ sandbox without changing the compile SDK | `gradle/intellij-sandbox.gradle`, `intellij-plugin/build.gradle` | `runIdeLocal`, `printSandboxIdeSelection` | `gradle/intellij-sandbox-tests.gradle` / `:intellij-plugin:testSandboxIdeSelection` |
 
 Paths below omit `src/main/java/com/jinloes/prpilot/` and equivalent test roots where the module
 context makes them unambiguous.
@@ -33,6 +35,10 @@ context makes them unambiguous.
 - `.github/workflows/release.yml` - Tag-driven IntelliJ ZIP and VSIX GitHub releases.
 - `scripts/portable-process.mjs` and `run-gradle.mjs` - Shell-free npm and Gradle wrapper
   invocation used by portable packaging/tests and targeted host CI.
+- `gradle/intellij-sandbox.gradle` - Lazy installed-IDE selection and separate `runIdeLocal`
+  platform/runtime/sandbox wiring; compilation and ordinary `runIde` stay pinned.
+- `gradle/intellij-sandbox-tests.gradle` - Temporary metadata fixtures exercising the production
+  selector plus launch-free pinned/custom configuration assertions, attached to check.
 
 ### `diagrams/`
 
@@ -52,6 +58,8 @@ Plain Java 17 shared models with no host dependencies.
 - `model/ChatMessage.java` - Immutable chat role and content.
 - `model/PRReviewRequest.java` - Immutable review-generation parameter object.
 - `model/ReviewProvider.java` - Claude/Copilot provider enum.
+- `model/SourceInventory.java` - Strict required/nullable wire shapes, canonical identities,
+  source manifest digest and shared protocol limits; no READY state.
 - Tests: `core/src/test/java/com/jinloes/prpilot/`.
 
 ### `review-engine/`
@@ -73,7 +81,22 @@ guidance.
 - `review/ReviewAnchorValidator.java` and `ReviewResultMerger.java` - Changed-line filtering and
   baseline/follow-up deduplication.
 - `review/CancellationToken.java` - Shared cancellation state.
-- `review/BoundedProcessRunner.java` - Bounded subprocess lifecycle and output draining.
+- `review/BoundedProcessRunner.java` - Bounded subprocess lifecycle and output draining;
+  opt-in owned-tree termination/waiting and separate stderr rejection for inventory launches.
+- `review/SourceInventoryFiles.java` - Secure no-follow full-leaf enumeration and bounded
+  source/Git-object hashing; unavailable secure traversal blocks.
+- `review/SourceInventoryClient.java` - Explicit trusted `Launch`, public `collect(root, expectedHead)`
+  parent launcher and `--worker`/`--capture-settings` main; fixed ijctl transport, strict
+  v2 native/worker envelopes, physical identity and settings fingerprints,
+  independent physical/model reconciliation and repeated Git/source hashing.
+  Not exposed over engine RPC or connected to review generation.
+- `:review-engine:sourceInventoryWorkerJar` - Minimal plain runnable Jar at
+  `review-engine/build/libs/pr-pilot-source-inventory-worker.jar`; inventory/runner plus Jackson only.
+  Client and actual SDK-wrapper tests depend on this packaged artifact, not a worker test classpath.
+- `review/SemanticRuntime.java` - Owner-controlled schema-1 launch configuration, Node/ijctl
+  version enforcement, classloader-resource digest verification and owned worker extraction.
+  `SemanticRuntimeTest` exercises open/close, forked settings, unsupported macOS JDK17,
+  ordinary JAR and physically nested resource streams; actual installed Boot loading is separate.
 - `review/CopilotModelDiscovery.java` - Session-cached Copilot model probing.
 - `review/GitWorktreeService.java` - Temporary PR-head worktree lifecycle.
 - `review/RepoGuidelinesReader.java` - Bounded repository-guidance discovery.
@@ -131,6 +154,20 @@ IntelliJ host integration. Depends directly on `core`, `github-engine`, and `rev
 
 - `services/IntellijGitHubService.java` - IntelliJ-facing GitHub engine adapter.
 - `services/IntellijClaudeService.java` - Provider adapter with pooled I/O and EDT callbacks.
+- `services/SourceInventoryService.java` - Project-bound native roots/membership/epochs,
+  one expiring discovery slot, independent VFS traversal/hash verification (no disk verification)
+  and a narrow algorithm test seam.
+- `services/SourceInventoryMcpProvider.java` - Optional MCP pooled coroutine bridge,
+  strict request decoder and fail-closed 262 descriptor/category ABI adapter.
+- `services/SemanticSnapshotService.java` - Native STATUS/CAPTURE/VERIFY, pre-armed paired-import
+  baselines, settings document/VFS/list invalidation and bounded PSI declaration limitations.
+- `services/SemanticMcpToolsProvider.java` - Strict snapshot decoder using the shared
+  native-project/coroutine cancellation dispatcher and optional 262 ABI boundary.
+- `SemanticSnapshotServiceTest` and `SemanticMcpToolsProviderTest` - Real service rejection paths,
+  subscribed document/reload/disposal callbacks, queued tool dispatch/cancellation and model
+  limitations. These bounded tests do not claim a live successful import or ready capture.
+- `src/main/resources/META-INF/prpilot-mcp.xml` - Optional project service and MCP provider
+  registration; absent MCP does not load the inventory integration.
 - `services/UserFacingErrors.java` - Actionable host error copy.
 - `services/PendingReviewIndex.java` - Saved-draft index.
 - `services/DraftRecoveryStore.java` - Token-free local recovery snapshots for interrupted draft replacement.
@@ -183,6 +220,34 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
 - `a11y/` - Playwright and axe end-to-end accessibility scenarios.
 - `visual/` - Deterministic visual-regression scenarios.
 - Tests: colocated `*.test.ts`/`*.test.tsx` files.
+
+### Semantic-review lifecycle entry points
+
+- `intellij-plugin/.../services/SemanticSnapshotService.java` — strict production platform adapter
+  plus package-private raw-input seam. `SemanticSnapshotServiceTest` drives real service
+  transitions with queued native observations; `SemanticMcpToolsProviderTest` exercises scheduled
+  CAPTURE/VERIFY and cancellation. These tests do not replace installed SDK/import evidence.
+- `review-engine/.../review/SemanticReviewService.java` — prepare, collect, query bracketing,
+  engine-owned execution authority, and final validation. `SemanticReviewServiceTest` covers
+  collector negatives; `ReviewPipelineServiceTest` drives actual provider adapters with fake IO.
+- `review-engine/.../review/IjctlClient.java` — fixed read-only allowlist, schemas and limits.
+- `review-engine/.../review/SemanticSkillBundle.java` and `src/main/resources/semantic-skills/`
+  — complete pinned instructions, provenance and license; never project-selected instructions.
+- `review-engine/.../review/SemanticWorktreeStore.java` — durable retained identity and OS leases;
+  `GitWorktreeService` protects retained trees from ordinary cleanup and non-force removal.
+- `review-engine/.../engine/ReviewEngineApi.java`, `ReviewSessionService.java` and
+  `sidecar/.../StdioJsonRpcServer.java` — prepare/list/cleanup capability and lifetime boundary.
+- `intellij-plugin/.../ui/WebviewPanel.java`, `services/IntellijClaudeService.java` and
+  `vscode-extension/src/{extension,deepReview,sidecar}.ts` — actual correlated host callbacks;
+  selection/head/settings/operation fencing; provider ownership until final delivery.
+- `webview/src/components/ReviewPane/{DeepReviewSetup,ReviewOverrides,ReviewPane,useReviewController}`
+  — opt-in, manual pause, Continue/Retry/Cancel/ordinary fallback and retained maintenance.
+  `ReviewPane.component.test.tsx` and `a11y/app.a11y.spec.ts` cover the shared interaction flow.
+- `WebviewPanelTest` and `vscode-extension/test/deepReview.test.ts` exercise actual bridge callbacks
+  with external effects replaced. They do not stand in for installed-host/provider execution.
+- `webview/visual/app.visual.spec.ts` — ordinary/deep-default assertions and deterministic
+  narrow-finding placement. Reviewed discovery, dark-host toast and narrow-finding snapshots are
+  reconciled; the separate high-contrast toast mismatch remains unresolved.
 
 ### `vscode-extension/`
 

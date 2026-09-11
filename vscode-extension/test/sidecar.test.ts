@@ -426,6 +426,37 @@ test('SidecarClient reports a missing packaged jar before spawning', async () =>
   assert.equal(harness.commands.length, 0);
 });
 
+test('deep lifecycle client sends exact identities and rejects malformed preparation and cleanup results', async () => {
+  const head = 'a'.repeat(40);
+  const retainedId = '11111111-1111-4111-8111-111111111111';
+  const preparation = { retainedId, head, worktree: path.join(tempRoot, 'retained'), servers: ['private'] };
+  let malformed = false;
+  const harness = createSidecarHarness((method) => {
+    if (method === 'initialize') return initializeResult;
+    if (method === 'reviews/prepareDeepReview') return malformed ? { ...preparation, head: 'b'.repeat(40) } : preparation;
+    if (method === 'reviews/listDeepReviews') return [{ id: retainedId, repository: tempRoot,
+      worktree: preparation.worktree, head, createdAt: 1 }];
+    if (method === 'reviews/cleanupDeepReview') return { removed: malformed ? 'true' : true };
+    throw new Error(`Unexpected method ${method}`);
+  });
+  const client = new SidecarClient(fakeJar, 'java', harness.spawnSidecar);
+  const input = { operationId: 'deep-1', gitRoot: tempRoot, prNumber: 1, branch: 'main',
+    headSha: head, forkCloneUrl: '', prIdentity: 'a/b#1', diffDigest: 'b'.repeat(64) };
+  try {
+    assert.deepEqual(await client.prepareDeepReview(input), preparation);
+    assert.deepEqual(harness.requests.find(r => r.method === 'reviews/prepareDeepReview')?.params, input);
+    assert.equal((await client.listDeepReviews())[0].id, retainedId);
+    assert.equal(await client.cleanupDeepReview(retainedId, true), true);
+    assert.deepEqual(harness.requests.find(r => r.method === 'reviews/cleanupDeepReview')?.params,
+      { retainedId, projectClosed: true });
+    malformed = true;
+    await assert.rejects(client.prepareDeepReview({ ...input, operationId: 'deep-2' }), /Invalid deep preparation/);
+    await assert.rejects(client.cleanupDeepReview(retainedId, true), /Invalid retained cleanup/);
+  } finally {
+    client.dispose();
+  }
+});
+
 test('SidecarClient reports missing Java with installation guidance', async () => {
   const harness = createSidecarHarness(() => NO_RESPONSE);
   const spawnSidecar: SidecarSpawn = (command, args, options) => {

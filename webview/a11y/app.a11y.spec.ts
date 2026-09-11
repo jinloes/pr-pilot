@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
-import { exampleDiff, examplePr, installHostFixture, pushHostMessage } from './hostFixture'
+import { deepPreparation, exampleDiff, examplePr, installHostFixture, latestHostRequest, pushHostMessage } from './hostFixture'
 
 async function expectNoViolations(page: import('@playwright/test').Page, include?: string) {
   const builder = new AxeBuilder({ page })
@@ -26,6 +26,50 @@ test.beforeEach(async ({ page }) => {
   await installHostFixture(page)
   await page.goto('/')
   await page.waitForLoadState('networkidle')
+})
+
+test('deep setup supports keyboard Continue, Retry, explicit fallback and safe no-PR cleanup', async ({ page }) => {
+  await page.setViewportSize({ width: 380, height: 900 })
+  await pushHostMessage(page, { type: 'prListLoaded', prs: [] })
+  await page.getByRole('button', { name: 'Show review', exact: true }).click()
+  await page.getByText('Retained IntelliJ review worktrees').press('Enter')
+  await page.getByRole('button', { name: 'Refresh retained worktrees' }).press('Enter')
+  const list = await latestHostRequest(page, 'listDeepReviews')
+  await pushHostMessage(page, { type: 'retainedDeepReviews', operationId: list.operationId,
+    retained: [{ id: deepPreparation.retainedId, worktree: deepPreparation.worktree,
+      repository: '/fixture', head: deepPreparation.head, createdAt: 1 }] })
+  await expect(page.getByRole('button', { name: 'Remove retained worktree' })).toBeDisabled()
+  await page.getByRole('checkbox', { name: 'I closed this exact project in every IDE' }).press('Space')
+  await page.getByRole('button', { name: 'Remove retained worktree' }).press('Enter')
+  const cleanup = await latestHostRequest(page, 'cleanupDeepReview')
+  expect(cleanup.projectClosed).toBe(true)
+  await pushHostMessage(page, { type: 'retainedDeepReviews', operationId: cleanup.operationId, retained: [] })
+  await page.getByRole('button', { name: 'Show pull requests' }).click()
+  await pushHostMessage(page, { type: 'prListLoaded', prs: [examplePr] })
+  await page.getByRole('button', { name: /Improve authentication/ }).click()
+  await pushHostMessage(page, { type: 'draftLoaded', prKey: 'acme/platform#42', prState: 'NO_DRAFT',
+    diff: exampleDiff, providerReadiness: { provider: 'claude', available: true, detail: 'Ready' } })
+  await page.locator('summary').filter({ hasText: 'Review instructions (optional)' }).press('Enter')
+  await page.locator('summary').filter({ hasText: 'Advanced review options' }).press('Enter')
+  const toggle = page.getByRole('checkbox', { name: /IntelliJ-assisted/ })
+  await expect(toggle).not.toBeChecked()
+  await toggle.press('Space')
+  await page.getByRole('button', { name: 'Generate Review' }).press('Enter')
+  const prepare = await latestHostRequest(page, 'generateReview')
+  expect(prepare.intellijAssisted).toBe(true)
+  await pushHostMessage(page, { ...deepPreparation, operationId: prepare.operationId })
+  await expect(page.getByRole('combobox', { name: 'Configured MCP server' })).toBeVisible()
+  await expectNoViolations(page, 'section[aria-label="IntelliJ-assisted review setup"]')
+  await page.getByRole('button', { name: 'Continue / Retry' }).press('Enter')
+  const first = await latestHostRequest(page, 'continueDeepReview')
+  expect(first.server).toBe('private')
+  await pushHostMessage(page, { ...deepPreparation, operationId: first.operationId })
+  await page.getByRole('button', { name: 'Continue / Retry' }).press('Enter')
+  const retry = await latestHostRequest(page, 'continueDeepReview')
+  expect(retry.operationId).not.toBe(first.operationId)
+  await pushHostMessage(page, { ...deepPreparation, operationId: retry.operationId })
+  await page.getByRole('button', { name: 'Use ordinary review instead' }).press('Enter')
+  expect((await latestHostRequest(page, 'generateReview')).intellijAssisted).toBeUndefined()
 })
 test('populated discovery and provider-ready review have no axe violations', async ({ page }) => {
   await pushHostMessage(page, { type: 'prListLoaded', prs: [examplePr] })

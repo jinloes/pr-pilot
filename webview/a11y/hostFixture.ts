@@ -29,6 +29,23 @@ export async function pushHostMessage(page: Page, message: Record<string, unknow
   }, { protocolVersion, ...message })
 }
 
+export async function latestHostRequest(page: Page, type: string): Promise<Record<string, unknown>> {
+  return page.evaluate((requestType) => {
+    const { outgoing } = (window as unknown as {
+      __hostFixture: { outgoing: Record<string, unknown>[] }
+    }).__hostFixture
+    const requests = outgoing.filter(m => m.type === requestType)
+    if (!requests.length) throw new Error(`Missing host request: ${requestType}`)
+    return requests[requests.length - 1]
+  }, type)
+}
+
+export const deepPreparation = {
+  type: 'deepReviewPrepared', prKey: 'acme/platform#42',
+  retainedId: '11111111-1111-4111-8111-111111111111', worktree: '/fixture/deep',
+  head: 'a'.repeat(40), servers: ['private'], message: 'Manual sync required',
+}
+
 export const examplePr = {
   number: 42,
   title: 'Improve authentication error recovery and keyboard navigation',

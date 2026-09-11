@@ -14,6 +14,9 @@ interface ReviewOverridesProps {
   onFocusAreasChange: (value: string) => void
   onCustomInstructionsChange: (value: string) => void
   onChunkedModeChange: (value: boolean) => void
+  intellijAssisted?: boolean
+  onIntellijAssistedChange?: (value: boolean) => void
+  onShowRetained?: () => void
 }
 
 export function ReviewOverrides({
@@ -26,6 +29,9 @@ export function ReviewOverrides({
   onFocusAreasChange,
   onCustomInstructionsChange,
   onChunkedModeChange,
+  intellijAssisted = false,
+  onIntellijAssistedChange,
+  onShowRetained,
 }: ReviewOverridesProps) {
   const overrideCount = Number(focusAreas.trim().length > 0) + Number(customInstructions.trim().length > 0)
   const hasOverrides = overrideCount > 0
@@ -90,6 +96,13 @@ export function ReviewOverrides({
               value={customInstructions}
               onChange={(event) => onCustomInstructionsChange(event.target.value)}
             />
+            {onIntellijAssistedChange && <label className="mt-2 block text-xs">
+              <input type="checkbox" checked={intellijAssisted}
+                onChange={e => onIntellijAssistedChange(e.target.checked)} /> IntelliJ-assisted review (requires manual worktree import)
+            </label>}
+            {onShowRetained && <Button size="sm" variant="outline" onClick={onShowRetained}>
+              Retained IntelliJ review worktrees
+            </Button>}
             <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
               <input
                 type="checkbox"

@@ -48,6 +48,12 @@ final class SidecarBootstrapService {
                     Map.entry("repoProfile", Set.of("repo/getProfile")),
                     Map.entry("repoGuidelines", Set.of("reviews/readGuidelines")),
                     Map.entry(
+                            "semanticReviews",
+                            Set.of(
+                                    "reviews/prepareDeepReview",
+                                    "reviews/listDeepReviews",
+                                    "reviews/cleanupDeepReview")),
+                    Map.entry(
                             "worktrees",
                             Set.of(
                                     "reviews/findGitRoot",

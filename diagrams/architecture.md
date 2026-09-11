@@ -88,3 +88,80 @@ flowchart LR
 - Provider processes, worktrees, prompts, parsing, supervision, and review semantics remain inside
   `review-engine`.
 - Engine capabilities are declared once and exposed to every host; hosts may not reimplement them.
+# Semantic collection authorities
+
+```mermaid
+flowchart LR
+    Manual["User: manually open / trust / import / index"]
+    Consumer["Internal SourceInventoryClient(Launch).collect\nexplicit trusted Java / Jar / tools / environment"]
+    Runtime["SemanticRuntime\ntrusted schema-1 machine config"]
+    Bundle["Engine JAR: embedded worker\nschema-2 digest manifest"]
+    Worker["Fresh ordinary JVM worker\nminimal Jar; bounded owned process tree"]
+    Git["Git root / HEAD / index / blob identity"]
+    CLI["Fixed ijctl call: no daemon, private args"]
+    Native["Optional 262+ native inventory tool"]
+    Index["Native roots / ProjectFileIndex / epochs"]
+    Files["Worker-only secure no-follow full walk + disk/Git hashes"]
+    VFS["Independent VFS children + source roots + stream hashes"]
+    Evidence["Native DISCOVERED / VFS_VERIFIED\nnot disk / Git / READY"]
+    Coverage["Worker COVERED\nreconciled source evidence, not deep review"]
+    Manual -. "prerequisite, never automated" .-> Native
+    Bundle --> Runtime
+    Runtime --> Consumer
+    Consumer --> Worker
+    Worker --> Git
+    Worker --> CLI
+    CLI --> Native
+    Native --> Index
+    Native --> VFS
+    Worker --> Files
+    Native --> Evidence
+    Evidence --> Worker
+    Worker --> Coverage
+    Coverage --> Consumer
+```
+
+The shared `SemanticReviewService` consumes this physical coverage before authorizing either
+host/provider's deep pipeline. Library/SDK roots are metadata; external module
+sources block. Native readiness is a separate tool below;
+collection, provider-stage and delivery checks remain separate gates. Ordinary 261/MCP-absent
+loading stays independent.
+
+```mermaid
+flowchart LR
+    Status["Snapshot STATUS"] --> Arm["Pooled pre-import arming"]
+    Arm --> Settings["Native settings plus fresh physical settings fork"]
+    Settings --> Armed["ARMED: request manual sync"]
+    Armed --> Start["Synchronous START freezes completed receipt"]
+    Start --> Success["Paired SUCCESS plus unchanged finish receipt"]
+    Success --> Baseline["Memory-only project baseline"]
+    Changes["Settings document / VFS / list changes\nfailure / cancellation / disposal"] --> Invalid["Invalidate; late finish cannot restore"]
+    Baseline --> Capture["CAPTURE / VERIFY\ncurrent settings and native inventory VERIFY"]
+    Capture --> Ready["Native READY + bounded declaration limitations\nNOT physical source authority or future-stage lease"]
+```
+
+Production observations come from the strict real-platform adapter. Tests substitute raw
+`NativeAccess` observations, not these states or results, and drain queued arm/finish work.
+Successful service-entry tests are distinct from real-262 tracker/import/timing evidence.
+
+```mermaid
+flowchart LR
+    UI["Shared opt-in / manual pause / Continue"]
+    Hosts["IntelliJ callbacks or VS Code sidecar"]
+    Lifecycle["Shared prepare / list / cleanup"]
+    Retained["Durable exact-head worktree and OS lease"]
+    Collector["SemanticReviewService: physical coverage + native READY"]
+    Skills["Pinned full skills; trusted instructions"]
+    Pipeline["Both providers and every pipeline stage"]
+    Final["Revalidate before final delivery"]
+    UI --> Hosts --> Lifecycle --> Retained
+    Retained --> Collector --> Pipeline --> Final
+    Skills --> Pipeline
+    Final --> UI
+    UI -. "explicit closed-project confirmation" .-> Lifecycle
+```
+
+No provider runs during manual setup. The engine keeps the lease through final delivery;
+cancellation releases execution but preserves retention. Cleanup rejects active, dirty or
+uncertain trees and never forces removal. Installed-host/provider matrices and native lifecycle
+controls remain execution evidence, not conclusions inferred from this diagram or archive tests.

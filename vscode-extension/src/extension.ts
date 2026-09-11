@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { execFile } from 'node:child_process';
 import * as path from 'path';
 import * as fs from 'fs';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
+import { DeepReviewFlow, type PreparedDeepReview } from './deepReview';
 import * as claude from './claude';
 import * as copilot from './copilot';
 import * as settings from './settings';
@@ -445,6 +446,7 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
             worktreeEpoch: 0,
             worktreeCreation: null,
             disposed: false,
+            deepReview: new DeepReviewFlow(),
             draftRecoveryStore: this.draftRecoveryStore,
         };
         this.state = state;
@@ -460,6 +462,7 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
         onDidDispose(() => {
             themeSubscription.dispose();
             state.disposed = true;
+            state.deepReview.invalidate();
             state.generationRevision++;
             state.chatRevision++;
             const operationId = state.activeProviderOperation?.operationId;
@@ -520,9 +523,18 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
                     await handleSelectPR(state, msg);
                     break;
                 case 'generateReview':
-                    await handleGenerateReview(state, msg);
+                    if (msg.intellijAssisted === true) await handlePrepareDeepReview(state, msg);
+                    else { state.deepReview.invalidate(); await handleGenerateReview(state, msg); }
+                    break;
+                case 'continueDeepReview':
+                    await handleContinueDeepReview(state, msg);
+                    break;
+                case 'listDeepReviews':
+                case 'cleanupDeepReview':
+                    await handleDeepMaintenance(state, msg);
                     break;
                 case 'cancelReview':
+                    state.deepReview.cancel(msg.operationId as string);
                     if (state.activeProviderOperation?.kind === 'review'
                         && state.activeProviderOperation.operationId === msg.operationId) {
                         await invalidateGenerationAndCancel(
@@ -621,6 +633,7 @@ interface ViewState {
     worktreeEpoch: number;
     worktreeCreation: { key: string; promise: Promise<string> } | null;
     disposed: boolean;
+    deepReview: DeepReviewFlow;
     draftRecoveryStore: DraftRecoveryStore;
 }
 
@@ -1086,7 +1099,116 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
     }
 }
 
-async function handleGenerateReview(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+async function freshDeepPr(number: number, owner: string, repo: string) {
+    const first = await sidecarClient.getPullRequestDetail(githubBaseUrl(), owner, repo, number);
+    const diff = await sidecarClient.getPullRequestDiff(githubBaseUrl(), owner, repo, number, 'validation');
+    const last = await sidecarClient.getPullRequestDetail(githubBaseUrl(), owner, repo, number);
+    if (first.status !== 'ok' || last.status !== 'ok' || !first.detail?.head?.sha
+        || first.detail.head.sha !== last.detail?.head?.sha
+        || diff.status !== 'ok' || !diff.diff) {
+        throw new Error('Cannot bind a fresh PR head and diff. Prepare again.');
+    }
+    return { detail: last.detail, diff: diff.diff };
+}
+
+function deepReviewError(error: unknown): string {
+    return (error instanceof Error ? error.message : 'IntelliJ-assisted review could not continue.').slice(0, 4096);
+}
+
+async function handleDeepMaintenance(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    if (state.disposed) return;
+    try {
+        if (msg.type === 'cleanupDeepReview') {
+            await sidecarClient.cleanupDeepReview(msg.retainedId as string, msg.projectClosed === true);
+        }
+        push(state, { type: 'retainedDeepReviews', operationId: msg.operationId,
+            retained: await sidecarClient.listDeepReviews() });
+    } catch (error) {
+        push(state, { type: 'deepReviewMaintenanceError', operationId: msg.operationId,
+            message: deepReviewError(error) });
+    }
+}
+
+async function handlePrepareDeepReview(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    const number = msg.number as number;
+    const owner = msg.owner as string;
+    const repo = msg.repo as string;
+    const key = prKeyFromParts(number, owner, repo);
+    const revision = state.deepReview.start(msg.operationId as string);
+    const selectionRevision = state.selectionRevision;
+    const configuration = JSON.stringify(snapshotReviewGenerationSettings());
+    const current = () => !state.disposed && prKey(state.activePR) === key
+        && state.selectionRevision === selectionRevision && state.deepReview.isCurrent(revision);
+    try {
+        const previousOperationId = state.activeProviderOperation?.operationId;
+        await invalidateGenerationAndCancel(state, () => previousOperationId
+            ? cancelActiveProvider(previousOperationId) : Promise.resolve());
+        const root = await sidecarClient.findGitRoot(workingDir());
+        const repository = await sidecarClient.detectRepo(workingDir());
+        if (!root || repository?.toLowerCase() !== `${owner}/${repo}`.toLowerCase()) {
+            throw new Error('Open the pull request repository before preparing a deep review.');
+        }
+        const fresh = await freshDeepPr(number, owner, repo);
+        if (!current()) return;
+        const head = fresh.detail.head!;
+        const preparation = await sidecarClient.prepareDeepReview({
+            operationId: msg.operationId as string, gitRoot: root, prNumber: number,
+            branch: head.ref, headSha: head.sha,
+            forkCloneUrl: head.repoFullName !== fresh.detail.baseRepoFullName ? head.cloneUrl ?? '' : '',
+            prIdentity: `${owner}/${repo}#${number}`,
+            diffDigest: createHash('sha256').update(fresh.diff).digest('hex'),
+        });
+        const pending: PreparedDeepReview = { preparation, diff: fresh.diff, prKey: key,
+            settings: configuration, options: { ...msg }, selectionRevision };
+        if (!current() || configuration !== JSON.stringify(snapshotReviewGenerationSettings())
+            || !state.deepReview.install(revision, pending)) return;
+        push(state, { type: 'deepReviewPrepared', prKey: key, operationId: msg.operationId, ...preparation,
+            message: 'Open this exact worktree in IntelliJ. Enable MCP, import Gradle, then Continue. The first Continue may arm tracking and require one manual sync.' });
+    } catch (error) {
+        if (current()) push(state, { type: 'reviewError', prKey: key,
+            message: deepReviewError(error) });
+    }
+}
+
+async function handleContinueDeepReview(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    const key = prKeyFromParts(msg.number as number, msg.owner as string, msg.repo as string);
+    const pendingAtStart = state.deepReview.peek();
+    if (state.disposed || prKey(state.activePR) !== key || !pendingAtStart
+        || pendingAtStart.selectionRevision !== state.selectionRevision
+        || pendingAtStart.preparation.retainedId !== msg.retainedId
+        || state.deepReview.hasConsumed(msg.operationId as string)) return;
+    const generationRevision = state.generationRevision;
+    const current = () => !state.disposed && prKey(state.activePR) === key
+        && state.selectionRevision === pendingAtStart.selectionRevision
+        && state.generationRevision === generationRevision
+        && (state.deepReview.peek() === pendingAtStart
+            || state.deepReview.isOperationCurrent(msg.operationId as string));
+    let refreshing = false;
+    try {
+        const pending = state.deepReview.consume(msg.retainedId, msg.operationId as string, key,
+            JSON.stringify(snapshotReviewGenerationSettings()), state.selectionRevision, msg.server as string);
+        refreshing = true;
+        const fresh = await freshDeepPr(msg.number as number, msg.owner as string, msg.repo as string);
+        refreshing = false;
+        if (!current()) return;
+        if (fresh.detail.head?.sha !== pending.preparation.head || fresh.diff !== pending.diff
+            || pending.settings !== JSON.stringify(snapshotReviewGenerationSettings())) {
+            throw new Error('The PR head or diff changed. Prepare a new deep review; the old tree is retained.');
+        }
+        await handleGenerateReview(state, { ...pending.options, operationId: msg.operationId, diff: pending.diff },
+            { pending, server: msg.server as string });
+    } catch (error) {
+        if (current()) {
+            if (refreshing && pendingAtStart.settings === JSON.stringify(snapshotReviewGenerationSettings())) {
+                state.deepReview.retry(pendingAtStart);
+            }
+            push(state, { type: 'reviewError', prKey: key, message: deepReviewError(error) });
+        }
+    }
+}
+
+async function handleGenerateReview(state: ViewState, msg: Record<string, unknown>,
+    deep?: { pending: PreparedDeepReview; server: string }): Promise<void> {
     const number = msg.number as number;
     const owner = msg.owner as string;
     const repo = msg.repo as string;
@@ -1171,7 +1293,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         const title = activePr?.title ?? '';
         const body = activePr?.body ?? '';
 
-        const reviewDir = await resolveWorkingDir(
+        const reviewDir = deep?.pending.preparation.worktree ?? await resolveWorkingDir(
             state,
             { number, owner, repo, title, body },
             true,
@@ -1220,6 +1342,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             result = await sidecarClient.generateReview(
                 {
                 operationId,
+                deepReview: deep ? { retainedId: deep.pending.preparation.retainedId, server: deep.server } : undefined,
                 provider: settings.provider,
                 projectDir: reviewDir,
                 model: settings.model,
@@ -1275,6 +1398,13 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         }
 
         if (!result) throw new Error('Provider produced no output.');
+        if (deep) {
+            const fresh = await freshDeepPr(number, owner, repo);
+            if (fresh.detail.head?.sha !== deep.pending.preparation.head || fresh.diff !== deep.pending.diff
+                || deep.pending.settings !== JSON.stringify(snapshotReviewGenerationSettings())) {
+                throw new Error('Deep review identity changed before delivery. Output was not published.');
+            }
+        }
         if (!isCurrentGeneration()) return;
         state.activeReviewResult = result;
         state.generatedReviews.set(key, {
@@ -1296,6 +1426,12 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         reviewResultPublished = true;
     } catch (err) {
         if (isCancellationError(err) || !isCurrentGeneration()) return;
+        if (deep) {
+            state.deepReview.retry(deep.pending);
+            push(state, { type: 'deepReviewPrepared', operationId, prKey: key, ...deep.pending.preparation,
+                message: deepReviewError(err) });
+            return;
+        }
         push(state, { type: 'reviewError', prKey: key, message: toUserFacingError(err, 'generate review') });
     }
 }

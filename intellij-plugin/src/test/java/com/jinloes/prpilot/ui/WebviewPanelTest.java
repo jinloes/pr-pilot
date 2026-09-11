@@ -7,14 +7,19 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewStatus;
+import com.jinloes.prpilot.review.SemanticReviewService;
+import com.jinloes.prpilot.review.SemanticWorktreeStore;
 import com.jinloes.prpilot.services.IntellijClaudeService;
+import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.services.PendingReviewIndex;
 import com.jinloes.prpilot.sidecar.pr.PrDetail;
 import java.awt.BorderLayout;
 import java.awt.Rectangle;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -26,6 +31,222 @@ import org.junit.jupiter.api.Test;
 class WebviewPanelTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    @Nested
+    class DeepBridgeCallbacks {
+        @Test
+        void actualBridgePreparesWithoutProviderAndConsumesContinueOnlyOnce() throws Exception {
+            for (String provider : List.of("claude", "copilot")) {
+                var f = new DeepFixture();
+                f.settings = provider;
+                f.send("generateReview", "prepare-1", Map.of("intellijAssisted", true));
+                assertThat(f.generations).isZero();
+                f.drain();
+                assertThat(f.generations).isZero();
+                assertThat(f.messages.get(0).path("type").asText()).isEqualTo("deepReviewPrepared");
+                f.send("continueDeepReview", "continue-1", f.continuation());
+                f.drain();
+                assertThat(f.generations).isEqualTo(1);
+                int messages = f.messages.size();
+                f.send("continueDeepReview", "continue-1", f.continuation());
+                f.drain();
+                assertThat(f.generations).isEqualTo(1);
+                assertThat(f.messages).hasSize(messages);
+            }
+        }
+
+        @Test
+        void retriesTransientPreflightFailureWithNewOperationOnly() throws Exception {
+            var f = new DeepFixture();
+            f.send("generateReview", "prepare-1", Map.of("intellijAssisted", true));
+            f.drain();
+            f.failRefresh = true;
+            f.send("continueDeepReview", "continue-1", f.continuation());
+            f.drain();
+            assertThat(f.generations).isZero();
+            assertThat(f.messages.get(f.messages.size() - 1).path("type").asText())
+                    .isEqualTo("reviewError");
+            f.failRefresh = false;
+            f.send("continueDeepReview", "continue-1", f.continuation());
+            f.drain();
+            assertThat(f.generations).isZero();
+            f.send("continueDeepReview", "retry-2", f.continuation());
+            f.drain();
+            assertThat(f.generations).isEqualTo(1);
+        }
+
+        @Test
+        void failedPreflightDoesNotRestoreInvalidatedPreparation() throws Exception {
+            for (String change :
+                    List.of("cancel", "settings", "selection", "disposed", "prepare")) {
+                var f = new DeepFixture();
+                f.send("generateReview", "prepare-1", Map.of("intellijAssisted", true));
+                f.drain();
+                f.failRefresh = true;
+                f.send("continueDeepReview", "continue-1", f.continuation());
+                switch (change) {
+                    case "cancel" -> f.send("cancelReview", "continue-1", Map.of());
+                    case "settings" -> f.settings = "copilot";
+                    case "selection" -> f.field("selectionRevision", 1L);
+                    case "disposed" -> f.field("disposed", true);
+                    case "prepare" ->
+                            f.send("generateReview", "prepare-2", Map.of("intellijAssisted", true));
+                    default -> throw new AssertionError(change);
+                }
+                f.drain();
+                f.failRefresh = false;
+                f.settings = "claude";
+                f.field("selectionRevision", 0L);
+                f.field("disposed", false);
+                f.send("continueDeepReview", "retry-2", f.continuation());
+                f.drain();
+                assertThat(f.generations).as(change).isZero();
+            }
+        }
+
+        @Test
+        void confirmedHeadChangeDoesNotRestorePreparation() throws Exception {
+            var f = new DeepFixture();
+            f.send("generateReview", "prepare-1", Map.of("intellijAssisted", true));
+            f.drain();
+            f.head = "b".repeat(40);
+            f.send("continueDeepReview", "continue-1", f.continuation());
+            f.drain();
+            f.head = "a".repeat(40);
+            f.send("continueDeepReview", "retry-2", f.continuation());
+            f.drain();
+            assertThat(f.generations).isZero();
+        }
+
+        @Test
+        void actualBridgeRejectsHeadSettingsSelectionAndDisposedChanges() throws Exception {
+            for (String change : List.of("head", "settings", "selection", "disposed")) {
+                var f = new DeepFixture();
+                f.send("generateReview", "prepare-1", Map.of("intellijAssisted", true));
+                f.drain();
+                f.send("continueDeepReview", "continue-1", f.continuation());
+                switch (change) {
+                    case "head" -> f.head = "b".repeat(40);
+                    case "settings" -> f.settings = "copilot";
+                    case "selection" -> f.field("selectionRevision", 1L);
+                    case "disposed" -> f.field("disposed", true);
+                    default -> throw new AssertionError(change);
+                }
+                f.drain();
+                assertThat(f.generations).as(change).isZero();
+                assertThat(f.removals).isEmpty();
+            }
+        }
+
+        @Test
+        void actualBridgeCancellationInvalidatesQueuedPreparationWithoutRemoval() throws Exception {
+            var f = new DeepFixture();
+            f.send("generateReview", "prepare-1", Map.of("intellijAssisted", true));
+            f.send("cancelReview", "prepare-1", Map.of());
+            f.drain();
+            assertThat(f.messages).isEmpty();
+            assertThat(f.generations).isZero();
+            assertThat(f.removals).isEmpty();
+        }
+
+        @Test
+        void actualBridgeMaintenanceNeedsNoPrAndRejectsUnconfirmedCleanup() throws Exception {
+            var f = new DeepFixture();
+            f.field("activePR", null);
+            f.send("listDeepReviews", "list-1", Map.of());
+            f.drain();
+            assertThat(f.messages.get(0).path("type").asText()).isEqualTo("retainedDeepReviews");
+            f.send(
+                    "cleanupDeepReview",
+                    "cleanup-1",
+                    Map.of("retainedId", f.id, "projectClosed", false));
+            f.drain();
+            assertThat(f.removals).isEmpty();
+            f.send(
+                    "cleanupDeepReview",
+                    "cleanup-2",
+                    Map.of("retainedId", f.id, "projectClosed", true));
+            f.drain();
+            assertThat(f.removals).containsExactly(f.id);
+            assertThat(f.generations).isZero();
+        }
+    }
+
+    private static final class DeepFixture implements WebviewPanel.DeepReviewIo {
+        final String id = "11111111-1111-4111-8111-111111111111";
+        String head = "a".repeat(40);
+        String settings = "claude";
+        boolean failRefresh;
+        int generations;
+        final List<Runnable> jobs = new ArrayList<>();
+        final List<com.fasterxml.jackson.databind.JsonNode> messages = new ArrayList<>();
+        final List<String> removals = new ArrayList<>();
+        final WebviewPanel panel =
+                new WebviewPanel(
+                        new PullRequest("Fixture", "", "acme", "widget", 42, "", "", ""),
+                        this,
+                        jobs::add,
+                        () -> settings,
+                        message -> messages.add(MAPPER.valueToTree(message)));
+
+        void field(String name, Object value) throws Exception {
+            var field = WebviewPanel.class.getDeclaredField(name);
+            field.setAccessible(true);
+            field.set(panel, value);
+        }
+
+        void send(String type, String operationId, Map<String, Object> extra) throws Exception {
+            var message =
+                    MAPPER.createObjectNode()
+                            .put("protocolVersion", 1)
+                            .put("type", type)
+                            .put("number", 42)
+                            .put("owner", "acme")
+                            .put("repo", "widget")
+                            .put("operationId", operationId);
+            extra.forEach((key, value) -> message.set(key, MAPPER.valueToTree(value)));
+            panel.handleIncoming(MAPPER.writeValueAsString(message));
+        }
+
+        Map<String, Object> continuation() {
+            return Map.of("retainedId", id, "server", "private");
+        }
+
+        void drain() {
+            while (!jobs.isEmpty()) jobs.remove(0).run();
+        }
+
+        public SemanticReviewService.Preparation prepare(
+                com.fasterxml.jackson.databind.JsonNode options, WebviewPanel.FreshDeepPr fresh) {
+            assertThat(options.path("intellijAssisted").asBoolean()).isTrue();
+            return new SemanticReviewService.Preparation(
+                    id, fresh.head().sha(), "/fixture/deep", List.of("private"));
+        }
+
+        public WebviewPanel.FreshDeepPr fresh(int number, String owner, String repo)
+                throws IOException {
+            if (failRefresh) throw new IOException("Temporary GitHub refresh failure");
+            return new WebviewPanel.FreshDeepPr(
+                    new IntellijGitHubService.PRHeadInfo("fix", head, false, ""), "fresh-diff");
+        }
+
+        public void generate(WebviewPanel.DeepPending pending, String operation, String server) {
+            assertThat(pending.diff()).isEqualTo("fresh-diff");
+            assertThat(pending.settings()).isEqualTo(settings);
+            assertThat(server).isEqualTo("private");
+            generations++;
+        }
+
+        public List<SemanticWorktreeStore.Retained> list() {
+            return List.of(
+                    new SemanticWorktreeStore.Retained(id, "/fixture", "/fixture/deep", head, 1));
+        }
+
+        public void cleanup(String retainedId, boolean closed) {
+            assertThat(closed).isTrue();
+            removals.add(retainedId);
+        }
+    }
 
     @Nested
     class MessagePublication {

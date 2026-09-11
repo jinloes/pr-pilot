@@ -310,7 +310,7 @@ export default function App() {
           <Button size="sm" variant={activePane === 'list' ? 'default' : 'ghost'} onClick={() => setActivePane('list')}>
             {t('app.showPrList')}
           </Button>
-          <Button size="sm" variant={activePane === 'review' ? 'default' : 'ghost'} disabled={!selectedPR} onClick={() => setActivePane('review')}>
+          <Button size="sm" variant={activePane === 'review' ? 'default' : 'ghost'} onClick={() => setActivePane('review')}>
             {t('app.showReview')}
           </Button>
         </div>

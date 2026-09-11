@@ -20,6 +20,13 @@ final class ReviewSupervisorPrompts {
 
     private ReviewSupervisorPrompts() {}
 
+    static String selectionPrompt(
+            PRReviewRequest request, List<CoverageGap> gaps, ReviewResult baseline) {
+        StringBuilder prompt = new StringBuilder(selectionPrompt(gaps, baseline));
+        ClaudeService.appendSemanticSections(prompt, request);
+        return prompt.toString();
+    }
+
     static String selectionPrompt(List<CoverageGap> gaps, ReviewResult baseline) {
         List<Map<String, Object>> encodedGaps =
                 gaps.stream()
@@ -161,6 +168,7 @@ final class ReviewSupervisorPrompts {
                 .linkedIssue(source.getLinkedIssue())
                 .repoProfile(source.getRepoProfile())
                 .ciAnnotations(source.getCiAnnotations())
+                .semanticContext(source.getSemanticContext())
                 .build();
     }
 

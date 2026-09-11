@@ -22,6 +22,7 @@ public final class ReviewPipelineService {
     private final ProviderExecutor provider;
     private final ChunkedReviewService chunkedReviewService;
     private final ReviewCoverageAnalyzer coverageAnalyzer;
+    private final SemanticReviewService.Execution execution;
 
     private ReviewPipelineService(ProviderExecutor provider) {
         this(provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
@@ -31,9 +32,18 @@ public final class ReviewPipelineService {
             ProviderExecutor provider,
             ChunkedReviewService chunkedReviewService,
             ReviewCoverageAnalyzer coverageAnalyzer) {
+        this(provider, chunkedReviewService, coverageAnalyzer, null);
+    }
+
+    private ReviewPipelineService(
+            ProviderExecutor provider,
+            ChunkedReviewService chunkedReviewService,
+            ReviewCoverageAnalyzer coverageAnalyzer,
+            SemanticReviewService.Execution execution) {
         this.provider = provider;
         this.chunkedReviewService = chunkedReviewService;
         this.coverageAnalyzer = coverageAnalyzer;
+        this.execution = execution;
     }
 
     public static ReviewPipelineService forClaude(ClaudeService service, String model) {
@@ -56,16 +66,62 @@ public final class ReviewPipelineService {
             boolean selfCritique,
             boolean supervisorEnabled,
             Consumer<String> onStatus,
+            BiConsumer<String, String> onChunk,
+            SemanticReviewService.Execution execution)
+            throws IOException, InterruptedException {
+        if (execution == null)
+            return review(request, chunked, selfCritique, supervisorEnabled, onStatus, onChunk);
+        ProviderExecutor selected = provider;
+        if (provider instanceof CopilotExecutor copilot) {
+            selected =
+                    new CopilotExecutor(
+                            copilot.service(),
+                            copilot.model(),
+                            copilot.effort(),
+                            false,
+                            copilot.configDir());
+        }
+        return new ReviewPipelineService(
+                        selected, chunkedReviewService, coverageAnalyzer, execution)
+                .review(
+                        request.withSemanticContext(execution.context()),
+                        chunked,
+                        selfCritique,
+                        supervisorEnabled,
+                        onStatus,
+                        onChunk);
+    }
+
+    private void validateAuthority() throws IOException, InterruptedException {
+        provider.checkCancelled();
+        if (execution != null) execution.validate();
+    }
+
+    private ReviewPassResult primary(
+            PRReviewRequest request, Consumer<String> onStatus, BiConsumer<String, String> onChunk)
+            throws IOException, InterruptedException {
+        validateAuthority();
+        return provider.primary(request, onStatus, onChunk);
+    }
+
+    public ReviewResult review(
+            PRReviewRequest request,
+            boolean chunked,
+            boolean selfCritique,
+            boolean supervisorEnabled,
+            Consumer<String> onStatus,
             BiConsumer<String, String> onChunk)
             throws IOException, InterruptedException {
+        if (request.getSemanticContext() != null && execution == null)
+            throw new IOException("Semantic prompt data cannot authorize deep review");
         provider.checkCancelled();
         ReviewPassResult primary =
                 chunked
                         ? chunkedReviewService.reviewPass(
                                 request,
                                 onStatus,
-                                passRequest -> provider.primary(passRequest, onStatus, onChunk))
-                        : provider.primary(request, onStatus, onChunk);
+                                passRequest -> primary(passRequest, onStatus, onChunk))
+                        : primary(request, onStatus, onChunk);
         provider.checkCancelled();
 
         InspectionManifest manifest = InspectionManifest.fromDiff(request.getDiff());
@@ -83,6 +139,7 @@ public final class ReviewPipelineService {
 
         if (selfCritique) {
             onStatus.accept(ClaudeService.STATUS_REFINING);
+            validateAuthority();
             try {
                 PRReviewRequest critiqueRequest =
                         chunked ? chunkedReviewService.finalValidationRequest(request) : request;
@@ -106,6 +163,7 @@ public final class ReviewPipelineService {
         if (supervisorEnabled) {
             candidate = ReviewAnchorValidator.validate(candidate, manifest);
         }
+        validateAuthority();
         return CiFindingSuppressor.suppress(candidate, request.getCiAnnotations());
     }
 
@@ -114,7 +172,7 @@ public final class ReviewPipelineService {
             InspectionManifest manifest,
             ReviewPassResult primary,
             Consumer<String> onStatus)
-            throws InterruptedException {
+            throws IOException, InterruptedException {
         long startedAt = System.nanoTime();
         onStatus.accept("Checking review coverage…");
         List<CoverageGap> gaps = coverageAnalyzer.findGaps(manifest, primary.ledger());
@@ -128,10 +186,12 @@ public final class ReviewPipelineService {
             directives = ReviewSupervisorPrompts.deterministicDirectives(gaps);
         } else {
             onStatus.accept("Prioritizing missed areas…");
+            validateAuthority();
             try {
                 String selected =
                         provider.complete(
-                                ReviewSupervisorPrompts.selectionPrompt(gaps, primary.review()),
+                                ReviewSupervisorPrompts.selectionPrompt(
+                                        request, gaps, primary.review()),
                                 SUPERVISOR_TIMEOUT_MS,
                                 false,
                                 false,
@@ -154,6 +214,7 @@ public final class ReviewPipelineService {
 
         provider.checkCancelled();
         onStatus.accept("Inspecting missed areas…");
+        validateAuthority();
         try {
             PRReviewRequest followUpRequest =
                     ReviewSupervisorPrompts.followUpRequest(request, manifest, directives);

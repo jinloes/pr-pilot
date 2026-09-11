@@ -85,6 +85,7 @@ public final class ChunkedReviewService {
             allPasses.add(reconciled);
             return ReviewPassResult.mergeLedger(reconciled.review(), allPasses);
         } catch (IOException exception) {
+            if (request.getSemanticContext() != null) throw exception;
             onStatus.accept(
                     "Global reconciliation was unavailable; showing a clearly marked batch-only result.");
             return ReviewPassResult.mergeLedger(mergeFallback(results), passes);
@@ -152,6 +153,7 @@ public final class ChunkedReviewService {
                 .linkedIssue(source.getLinkedIssue())
                 .repoProfile(source.getRepoProfile())
                 .ciAnnotations(source.getCiAnnotations())
+                .semanticContext(source.getSemanticContext())
                 .build();
     }
 

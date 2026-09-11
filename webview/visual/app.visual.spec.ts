@@ -306,6 +306,12 @@ test('populated discovery layout', async ({ page }) => {
       reviewStatusAvailable: true,
     },
   })
+  await expect(page.locator('nav li > button')).toHaveCount(2)
+  await expect(page.getByText(examplePr.title, { exact: true })).toBeVisible()
+  await expect(page.getByText('Add long translated review workflow guidance', { exact: true })).toBeVisible()
+  const retained = page.locator('details').filter({ has: page.getByText('Retained IntelliJ review worktrees', { exact: true }) })
+  await expect(retained.locator('summary')).toBeVisible()
+  await expect(retained).not.toHaveAttribute('open')
   await expectViewportFilled(page)
   await expect(page).toHaveScreenshot('discovery-light.png')
 })
@@ -573,13 +579,23 @@ test('toast theme follows the host when OS and host themes disagree', async ({ p
   await openNoDraftReview(page, '')
   await page.getByText('Review instructions (optional)').click()
   await page.getByText('Advanced review options').click()
-  await page.getByRole('checkbox', { name: 'Use chunked review mode as an advanced fallback' }).check()
+  const deepMode = page.getByRole('checkbox', { name: 'IntelliJ-assisted review (requires manual worktree import)' })
+  const chunked = page.getByRole('checkbox', { name: 'Use chunked review mode as an advanced fallback' })
+  await expect(deepMode).toBeVisible()
+  await expect(deepMode).not.toBeChecked()
+  await chunked.check()
+  await expect(chunked).toBeChecked()
   await page.getByRole('button', { name: 'Generate Review' }).click()
 
   const toaster = page.locator('[data-sonner-toaster]')
   const toast = page.locator('[data-sonner-toast]')
   await expect(toaster).toHaveAttribute('data-sonner-theme', 'dark')
   await expect(toast).toContainText('Chunked mode needs a loaded diff')
+  expect(await page.evaluate(() => (window as unknown as {
+    __hostFixture: { outgoing: Record<string, unknown>[] }
+  }).__hostFixture.outgoing.filter(message =>
+    ['generateReview', 'prepareDeepReview', 'continueDeepReview'].includes(String(message.type)),
+  ))).toEqual([])
   await toast.hover()
   await expect(page).toHaveScreenshot('toast-host-dark-os-light.png')
 
@@ -668,9 +684,36 @@ test('finding actions stay clear in a narrow review', async ({ page }) => {
   await openFindingNavigationReview(page)
 
   const finding = page.locator('#diff-comment-0')
-  await finding.scrollIntoViewIfNeeded()
-  await expect(finding.getByRole('button', { name: 'Verify with AI' })).toBeVisible()
-  await expect(finding.getByRole('button', { name: 'Suggest fix with AI' })).toBeVisible()
+  const body = page.getByTestId('review-scroll-body')
+  await expect(page.getByRole('navigation', { name: 'Review navigation' })).toBeVisible()
+  await expect(finding).toBeAttached()
+  await page.evaluate(() => document.fonts.ready)
+  const alignFinding = () => body.evaluate((element) => {
+    const finding = element.querySelector('#diff-comment-0')!
+    const bounds = element.getBoundingClientRect()
+    // scrollTop is pixel-quantized here; round toward visibility, never clip the row's last fraction.
+    element.scrollTop = Math.max(0, Math.min(element.scrollHeight - element.clientHeight,
+      Math.ceil(element.scrollTop + finding.getBoundingClientRect().bottom - bounds.bottom)))
+    return Math.abs(finding.getBoundingClientRect().bottom - bounds.bottom)
+  })
+  await expect.poll(alignFinding).toBeLessThanOrEqual(1)
+  const geometry = () => body.evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    const finding = element.querySelector('#diff-comment-0')!.getBoundingClientRect()
+    return { bottom: finding.bottom, top: finding.top, bodyBottom: bounds.bottom, bodyTop: bounds.top, scrollTop: element.scrollTop }
+  })
+  const aligned = await geometry()
+  await expect.poll(geometry).toEqual(aligned)
+  expect(aligned.top).toBeGreaterThanOrEqual(aligned.bodyTop)
+  expect(Math.abs(aligned.bottom - aligned.bodyBottom)).toBeLessThanOrEqual(1)
+  await expect(finding).toBeInViewport({ ratio: 1 })
+  await expect(finding.getByRole('button', { name: 'Verify with AI' })).toBeInViewport({ ratio: 1 })
+  await expect(finding.getByRole('button', { name: 'Suggest fix with AI' })).toBeInViewport({ ratio: 1 })
+  await expectNoHorizontalOverflow(page, '[data-testid="review-scroll-body"]')
+  const footer = page.getByTestId('review-pane-content').locator(':scope > div')
+    .filter({ has: page.getByRole('button', { name: 'Regenerate', exact: true }) })
+  await expect(footer).toBeInViewport({ ratio: 1 })
+  expect(await footer.evaluate(element => !!element.closest('[data-testid="review-scroll-body"]'))).toBe(false)
   await expect(page).toHaveScreenshot('selected-review-finding-actions-narrow-dark.png')
 })
 

@@ -13,6 +13,8 @@ import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.RepoGuidelinesReader;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
 import com.jinloes.prpilot.review.ReviewPipelineService;
+import com.jinloes.prpilot.review.SemanticReviewService;
+import com.jinloes.prpilot.review.SemanticWorktreeStore;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -41,6 +43,7 @@ public class ReviewSessionService implements ReviewEngineApi {
     private final OperationRegistry activeOperations = new OperationRegistry();
     private final ReviewOutcomeLog outcomeLog;
     private final GitWorktreeService worktreeService;
+    private final SemanticReviewService semanticReviews = new SemanticReviewService();
 
     public ReviewSessionService() {
         this(new ReviewOutcomeLog(), new GitWorktreeService());
@@ -91,6 +94,7 @@ public class ReviewSessionService implements ReviewEngineApi {
                         .repoProfile(params.repoProfile())
                         .ciAnnotations(toCiAnnotations(params.ciAnnotations()))
                         .build();
+        if (params.deepReview() != null) return generateDeep(params, request, onStatus, onChunk);
         if (copilot) {
             CancellationToken cancellationToken = new CancellationToken();
             CopilotService service = new CopilotService(params.projectDir(), cancellationToken);
@@ -132,6 +136,117 @@ public class ReviewSessionService implements ReviewEngineApi {
         } finally {
             activeOperations.finish(operation);
         }
+    }
+
+    private ReviewResult generateDeep(
+            GenerateReviewParams params,
+            PRReviewRequest request,
+            Consumer<String> onStatus,
+            BiConsumer<String, String> onChunk)
+            throws IOException, InterruptedException {
+        CancellationToken token = new CancellationToken();
+        Thread owner = Thread.currentThread();
+        java.util.concurrent.atomic.AtomicReference<Runnable> providerCancel =
+                new java.util.concurrent.atomic.AtomicReference<>(() -> {});
+        ActiveOperation operation =
+                startOperation(
+                        params.operationId(),
+                        token,
+                        () -> {
+                            providerCancel.get().run();
+                            owner.interrupt();
+                        });
+        try (var execution =
+                semanticReviews.begin(
+                        params.deepReview().retainedId(),
+                        params.deepReview().server(),
+                        params.pr().owner() + "/" + params.pr().repo() + "#" + params.pr().number(),
+                        params.operationId(),
+                        request)) {
+            token.throwIfCancelled();
+            // Client projectDir is not authority; the provider only sees the leased worktree.
+            String root = execution.worktree();
+            onStatus.accept(
+                    "IntelliJ-assisted review: streamed output is provisional until final validation.");
+            ReviewResult result;
+            if ("copilot".equals(params.provider())) {
+                CopilotService service = new CopilotService(root, token);
+                providerCancel.set(service::cancelCurrentRequest);
+                result =
+                        ReviewPipelineService.forCopilot(
+                                        service,
+                                        params.model(),
+                                        params.effort(),
+                                        false,
+                                        params.configDir())
+                                .review(
+                                        request,
+                                        params.chunkedReview(),
+                                        params.selfCritique(),
+                                        params.reviewSupervisorEnabled(),
+                                        onStatus,
+                                        onChunk,
+                                        execution);
+            } else {
+                ClaudeService service = new ClaudeService(root, token);
+                providerCancel.set(service::cancelCurrentRequest);
+                result =
+                        ReviewPipelineService.forClaude(service, params.model())
+                                .review(
+                                        request,
+                                        params.chunkedReview(),
+                                        params.selfCritique(),
+                                        params.reviewSupervisorEnabled(),
+                                        onStatus,
+                                        onChunk,
+                                        execution);
+            }
+            token.throwIfCancelled();
+            execution.validate();
+            return result;
+        } finally {
+            activeOperations.finish(operation);
+        }
+    }
+
+    @Override
+    public SemanticReviewService.Preparation prepareDeepReview(PrepareDeepReviewParams params)
+            throws IOException, InterruptedException {
+        if (params == null
+                || !validOperationId(params.operationId())
+                || params.gitRoot() == null
+                || params.prNumber() <= 0
+                || params.branch() == null
+                || params.branch().isBlank()) throw new IOException("Invalid deep preparation");
+        CancellationToken token = new CancellationToken();
+        Thread owner = Thread.currentThread();
+        ActiveOperation operation = startOperation(params.operationId(), token, owner::interrupt);
+        try {
+            return semanticReviews.prepare(
+                    new File(params.gitRoot()),
+                    params.prNumber(),
+                    params.branch(),
+                    params.headSha(),
+                    params.forkCloneUrl(),
+                    params.prIdentity(),
+                    params.diffDigest(),
+                    params.operationId());
+        } finally {
+            activeOperations.finish(operation);
+        }
+    }
+
+    @Override
+    public List<SemanticWorktreeStore.Retained> listDeepReviews() throws IOException {
+        return semanticReviews.list();
+    }
+
+    @Override
+    public WorktreeRemovalResult cleanupDeepReview(CleanupDeepReviewParams params)
+            throws IOException {
+        if (params == null) throw new IOException("Explicit retained cleanup required");
+        return new WorktreeRemovalResult(
+                semanticReviews.cleanup(params.retainedId(), params.projectClosed()));
     }
 
     @Override

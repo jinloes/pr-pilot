@@ -10,6 +10,8 @@ import com.jinloes.prpilot.engine.ReviewEngineApi;
 import com.jinloes.prpilot.engine.ReviewSessionService;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
+import com.jinloes.prpilot.review.SemanticReviewService;
+import com.jinloes.prpilot.review.SemanticWorktreeStore;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -18,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -55,6 +58,119 @@ class StdioJsonRpcServerTest {
     @AfterEach
     void tearDown() {
         reviewExecutor.shutdownNow();
+    }
+
+    @Test
+    void deepLifecycleDispatchesExactIdentityAndNeverStartsAProvider() throws Exception {
+        String retained = "11111111-1111-4111-8111-111111111111";
+        String head = "a".repeat(40);
+        AtomicReference<ReviewEngineApi.PrepareDeepReviewParams> preparation =
+                new AtomicReference<>();
+        AtomicReference<ReviewEngineApi.CleanupDeepReviewParams> cleanup = new AtomicReference<>();
+        ReviewSessionService fake =
+                new ReviewSessionService() {
+                    @Override
+                    public SemanticReviewService.Preparation prepareDeepReview(
+                            ReviewEngineApi.PrepareDeepReviewParams p) {
+                        preparation.set(p);
+                        return new SemanticReviewService.Preparation(
+                                retained, p.headSha(), "/fixture/retained", List.of("private"));
+                    }
+
+                    @Override
+                    public List<SemanticWorktreeStore.Retained> listDeepReviews() {
+                        return List.of(
+                                new SemanticWorktreeStore.Retained(
+                                        retained, "/fixture", "/fixture/retained", head, 1));
+                    }
+
+                    @Override
+                    public ReviewEngineApi.WorktreeRemovalResult cleanupDeepReview(
+                            ReviewEngineApi.CleanupDeepReviewParams p) {
+                        cleanup.set(p);
+                        return new ReviewEngineApi.WorktreeRemovalResult(p.projectClosed());
+                    }
+
+                    @Override
+                    public ReviewResult generate(
+                            ReviewEngineApi.GenerateReviewParams p,
+                            Consumer<String> status,
+                            BiConsumer<String, String> chunks) {
+                        throw new AssertionError(
+                                "Preparation/maintenance must not start providers");
+                    }
+                };
+        server =
+                new StdioJsonRpcServer(
+                        objectMapper,
+                        frameCodec,
+                        new SidecarBootstrapService(),
+                        new GitHubEngine(),
+                        fake,
+                        reviewExecutor);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        server.run(new ByteArrayInputStream(new byte[0]), output);
+        ObjectNode prepare = rpcRequest(101, "reviews/prepareDeepReview");
+        prepare.putObject("params")
+                .put("operationId", "deep-1")
+                .put("gitRoot", "/fixture")
+                .put("prNumber", 1)
+                .put("branch", "main")
+                .put("headSha", head)
+                .put("forkCloneUrl", "")
+                .put("prIdentity", "a/b#1")
+                .put("diffDigest", "b".repeat(64));
+        assertThat(server.handle(objectMapper.writeValueAsBytes(prepare))).isNull();
+        assertThat(
+                        awaitResponses(output, Set.of(101), 2, TimeUnit.SECONDS)
+                                .get(101)
+                                .path("result")
+                                .path("retainedId")
+                                .asText())
+                .isEqualTo(retained);
+        assertThat(preparation.get().prIdentity()).isEqualTo("a/b#1");
+        assertThat(preparation.get().headSha()).isEqualTo(head);
+        ObjectNode list = rpcRequest(102, "reviews/listDeepReviews");
+        list.putObject("params");
+        assertThat(server.handle(objectMapper.writeValueAsBytes(list))).isNull();
+        assertThat(
+                        awaitResponses(output, Set.of(102), 2, TimeUnit.SECONDS)
+                                .get(102)
+                                .path("result")
+                                .get(0)
+                                .path("id")
+                                .asText())
+                .isEqualTo(retained);
+        ObjectNode remove = rpcRequest(103, "reviews/cleanupDeepReview");
+        remove.putObject("params").put("retainedId", retained).put("projectClosed", false);
+        assertThat(server.handle(objectMapper.writeValueAsBytes(remove))).isNull();
+        assertThat(
+                        awaitResponses(output, Set.of(103), 2, TimeUnit.SECONDS)
+                                .get(103)
+                                .path("result")
+                                .path("removed")
+                                .asBoolean())
+                .isFalse();
+        assertThat(cleanup.get())
+                .isEqualTo(new ReviewEngineApi.CleanupDeepReviewParams(retained, false));
+    }
+
+    @Test
+    void rejectsMalformedAndUnknownDeepLifecycleFieldsBeforeDispatch() throws Exception {
+        for (String method :
+                List.of(
+                        "reviews/prepareDeepReview",
+                        "reviews/listDeepReviews",
+                        "reviews/cleanupDeepReview")) {
+            ObjectNode request = rpcRequest(104, method);
+            request.putObject("params").put("command", "unapproved");
+            assertThat(
+                            server.handle(objectMapper.writeValueAsBytes(request))
+                                    .path("error")
+                                    .path("code")
+                                    .asInt())
+                    .isEqualTo(-32602);
+        }
     }
 
     @Test

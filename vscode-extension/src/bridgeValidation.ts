@@ -9,6 +9,9 @@ const MESSAGE_TYPES = new Set([
   'refreshPRs',
   'selectPR',
   'generateReview',
+  'continueDeepReview',
+  'listDeepReviews',
+  'cleanupDeepReview',
   'cancelReview',
   'saveDraft',
   'submitReview',
@@ -105,8 +108,17 @@ export function isValidBridgeRequest(msg: AnyMessage | null | undefined): msg is
         && hasValidPrIdentity(msg)
         && (msg.diff === undefined || isBoundedString(msg.diff, MAX_REVIEW_DIFF))
         && (msg.chunkedReview === undefined || typeof msg.chunkedReview === 'boolean')
+        && (msg.intellijAssisted === undefined || typeof msg.intellijAssisted === 'boolean')
         && (msg.focusAreas === undefined || isBoundedString(msg.focusAreas, 10_000))
         && (msg.customInstructions === undefined || isBoundedString(msg.customInstructions, 20_000));
+    case 'continueDeepReview':
+      return hasValidPrIdentity(msg) && isOperationId(msg.operationId)
+        && isOperationId(msg.retainedId) && isBoundedString(msg.server, 255) && !!msg.server;
+    case 'listDeepReviews':
+      return isOperationId(msg.operationId);
+    case 'cleanupDeepReview':
+      return isOperationId(msg.operationId) && isOperationId(msg.retainedId)
+        && msg.projectClosed === true;
     case 'saveDraft':
       return hasValidPrIdentity(msg)
         && Number.isSafeInteger(msg.saveId) && (msg.saveId as number) > 0

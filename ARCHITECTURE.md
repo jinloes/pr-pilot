@@ -31,6 +31,120 @@ Visual references:
 
 Only decisions that encode active constraints future code must respect and are not obvious from source.
 
+### Source inventory is evidence, not semantic readiness
+
+The optional 262+ IntelliJ MCP source-inventory prerequisite has an internal Java
+consumer used by the shared opt-in semantic-review collector. Physical coverage
+and native readiness are separate mandatory authorities. The ordinary plugin compiles against 2026.1.4 and loads
+without MCP; below 262 or on an unknown MCP ABI the inventory tool is not advertised.
+
+Protocol v2 DISCOVER independently enumerates VFS leaves and native per-file source
+membership, alongside content/source/exclusion roots and separate library/SDK
+metadata. VERIFY binds source bytes to one project instance, expiring discovery,
+model and modification epochs and returns only VFS_VERIFIED. `nativePath` means logical
+VFS containment, not physical identity. No native routing unwrapping or NIO disk proof
+is permitted. The internal client always launches an explicitly trusted ordinary JVM
+with the minimal worker Jar; moving verification into the in-process engine is not isolation.
+That external worker securely enumerates all physical leaves, proves even empty source-root
+directories, and reconciles every leaf and Git index/HEAD
+entry, rejects untracked source contamination regardless of ignored/generated
+status, checks Git blob bytes without transformations and repeats verification.
+Generated sources have no exemption; external module sources block coverage.
+
+Worker secure handle-relative no-follow traversal is mandatory and unsupported runtimes
+fail closed. Evidence is bounded observation, not an OS snapshot, future-use
+lease, Git-cleanliness assertion or READY status. One in-memory discovery slot per
+project expires after 180 seconds and is disposed on project close; no persistent
+settings/state are added. Java/Jar/Git/ijctl/config/HOME/executable PATH are explicit
+caller-trusted assets outside the worktree; no project SDK or ambient runtime arguments
+are inherited. Cleared child environments and fixed commands apply to worker/tool launches.
+Private client request temporaries live outside the worktree and are removed only after
+bounded owned-process-tree teardown. The worker is Java17-compatible but requires a
+secure-handle-capable runtime/filesystem (ordinary JDK/JBR25 on the tested macOS host).
+The engine JAR embeds the minimal worker and a schema-2 digest manifest under
+`semantic-worker/`; `SemanticRuntime` reads resources through its classloader and extracts
+them into owned 0700 temporary storage. It never searches sibling build directories.
+The semantic-review collector consumes discovery/coverage
+rather than guessed manifests or module names. The separate schema-2 native snapshot tool
+adds import/index/document/PSI/classpath readiness; collection/delivery revalidation
+remains an additional engine gate. Both hosts call the shared lifecycle, and both
+provider adapters receive bounded evidence plus separate pinned skill instructions. All IDE open/trust/import/index and installation
+actions are manual; native calls never save documents, refresh or drive import.
+
+### Successful import authority is memory-only and pre-armed
+
+`pr_pilot_review_snapshot` STATUS installs project-lifetime observers and asynchronously
+arms settings receipts using native hashes/stamps plus the independent settings fork.
+Only an already armed receipt followed by paired START/SUCCESS and unchanged finish
+fingerprints can establish a baseline. Missing baselines request manual sync. Every
+readiness check recaptures current physical settings. Settings-document changes invalidate
+receipts before mutation, including edit/revert without a VFS event; VFS/settings-list
+changes, failed/cancelled reloads and disposal also invalidate. Late finish callbacks cannot
+restore invalidated authority. Unsupported tracker schemas or unrepresented linked builds
+fail closed, not as plain projects.
+
+The public service constructor uses a strict platform adapter for tracker rows, module/import
+facts, counters, documents and inventory access. A package-private `NativeAccess` seam replaces
+only those inputs in unit fixtures. Baseline transitions, epoch comparison, settings hashing and
+CAPTURE/VERIFY decisions remain in the production service. Queued fixture work exercises actual
+arm and finish jobs and the scheduled MCP route; it does not establish real tracker-ABI or import
+callback compatibility. That requires the separate installed-262 checkpoint and timing controls.
+
+CAPTURE/VERIFY require the active inventory-v2 discovery and complete source hashes.
+Native READY is not physical source coverage or a future provider-stage lease. Unsupported,
+ambiguous, missing-PSI and capped declaration evidence is summarized in bounded
+`declarationLimitations`, independently of readiness failures. No result implies all callers
+were found. Native READY must never be substituted for external physical coverage.
+
+`SemanticRuntime` accepts only owner-controlled `~/.pr-pilot/semantic-review.json` schema 1.
+Executables, configuration, HOME and PATH directories must be trusted, non-symlink, outside
+the worktree and not group/other-writable. Node >=20 and exactly ijctl 0.3.0 are probed with
+cleared environments. Worker selection is bundled, not configurable. Worker protocol v2 adds
+settings fingerprints and source physical identity; mismatched resources/versions fail closed.
+
+### Opt-in semantic-review lifecycle
+
+`reviews/prepareDeepReview`, `reviews/listDeepReviews`, and
+`reviews/cleanupDeepReview` are shared engine capabilities. Preparation creates an exact-head,
+durably retained worktree and returns manual setup instructions, without starting a provider.
+The shared webview pauses until the reviewer opens and trusts that exact worktree in a supported
+IntelliJ server, completes import/indexing, and explicitly Continues. Importing PR build files can
+execute code: that trust decision belongs to the reviewer, never to a CLI skill or provider.
+
+Host callbacks bind preparation and Continue to PR selection, remote head, settings and unique
+operation identities. A stale/duplicate response, selection change or disposal cannot start or
+publish a newer operation. Readiness failures preserve setup for explicit Retry or ordinary
+fallback; cancellation does not remove a project that may still be open in an IDE.
+
+`SemanticReviewService.Execution` owns the prepared authority and its OS lease. Request models
+carry evidence, not permission to execute. The engine rechecks native snapshot and independent
+physical/Git evidence around collection, each provider stage, and final publication, keeping the
+lease until delivery finishes. Chunked, reconciliation, selection, follow-up and critique request
+copies retain deep context. Invalid authority makes the entire deep result fail; it cannot rescue
+an earlier candidate as successful output. Ordinary review fallback remains a separate user action.
+
+`IjctlClient` allows only fixed read-only calls with closed schemas, explicit project/server,
+bounded output and query counts; neither provider may invent shell/MCP access through the bundle.
+CLI `--project` target metadata does not route native tool calls. After validating the closed caller
+arguments and the native schema's explicit string binding, the engine injects its trusted canonical
+`projectPath` into a fresh payload for all six queries, including argument-free module/dependency
+queries. Caller-supplied `projectPath` is rejected even when it matches; caller maps are never mutated.
+`SemanticSkillBundle` embeds the complete adapted IntelliJ connection and code-intelligence
+skills, their MIT license and provenance manifest pinned to upstream
+`34ec93ad2f9dcd3177a3ffb48eebecbee7512fb4`. Trusted skill instructions are separate from
+untrusted source/native evidence. Deep Copilot disables inherited MCP even if ordinary settings
+request it. No skill installs dependencies, opens/trusts a project, runs builds or mutates files.
+
+Retained records survive restart; OS leases prevent another process from cleaning active work.
+Explicit cleanup requires confirmation that the exact project is closed in every IDE, rechecks
+identity and lease state, and uses non-force Git worktree removal. Dirty/locked/uncertain trees
+remain retained with an actionable failure. Ordinary worktree cleanup cannot remove retained trees.
+Cancellation/disposal release execution ownership, not durable retention.
+
+Automated callback, fake-provider and archive-resource tests are separate evidence from installed
+ZIP/Boot/VSIX execution. Live clean/defect provider matrices, native import lifecycle controls and
+long-generation invalidation must be observed in the isolated caller-owned host environment.
+
 ### Webview styling
 
 All webview UI uses shadcn/ui + Tailwind CSS. Avoid ad-hoc CSS modules/inline layout styles. `DiffViewer.css` is the only hand-crafted CSS exception for diff-table specifics. Use semantic status tokens (`text-status-*`, `bg-status-*/10`, `border-status-*/50`) rather than hardcoded palette classes. Theme colors are semantic CSS variables selected by host-provided `light`, `dark`, `highContrastLight`, or `highContrastDark` bridge state; do not infer the IDE theme from browser media queries alone.
@@ -379,6 +493,22 @@ All VS Code webview surfaces use restrictive Content Security Policy headers. Th
 ### IntelliJ webview surfaces
 The IntelliJ `PR Pilot` tool window is the sole primary interactive surface. It owns one full `WebviewPanel` directly, so selecting the tool-window stripe always shows the real review UI without an editor-tab handoff, launcher, or duplicate webview lifecycle. Hiding the tool window preserves the session; removing its content or closing the project disposes the panel and its JCEF/loopback/worktree resources. This intentionally differs from VS Code's editor-panel container because IntelliJ tool windows can directly and reliably host the persistent JCEF Swing component; it is a container difference, not a feature difference. The plugin declares the `com.intellij.modules.jcef` bundled dependency in both `plugin.xml` and the IntelliJ Platform Gradle configuration; keep both declarations because Toolbox-based IDE distributions provide JCEF as a separate bundled module.
 
+### Pinned IntelliJ SDK versus local sandbox
+
+Compilation, ordinary tests, packaging, CI, and the original `runIde` resolve the
+2026.1.4 SDK unconditionally. `ideaLocalPath` is sandbox-only: the separate
+`intellijPlatformTesting.runIde` registration, `runIdeLocal`, owns independent
+platform/runtime/sandbox configurations. Its installed-build selection is lazy, so
+ordinary build/check must work without an eligible local installation and must never
+launch an IDE. Selector fixture tests run under check without launching one.
+
+The explicit override must be valid and at least build 262; it never silently falls
+back. Automatic macOS discovery is limited to direct IntelliJ app bundles in the two
+Applications directories and orders full numeric metadata builds, including EAPs.
+Other platforms require an explicit path. Discovery may resolve aliases read-only,
+but must not alter app bundles or normal IDE configuration/plugins. No remote
+latest-version lookup or local-selection download fallback is permitted.
+
 ### VS Code extension development target repo
 The `.vscode/launch.json` config `Run PR Pilot Extension Against Target Repo` prompts for an absolute repository path and passes it as `PR_PILOT_TARGET_REPO` to the Extension Development Host. Use it when the PR Pilot source repo is open in the main VS Code window but PR Pilot should inspect PRs for a different local checkout; `workspace.ts` makes repo detection, worktree creation, and CLI working directories resolve against the target repo instead of whichever folder VS Code opened in the dev host.
 
@@ -414,6 +544,16 @@ The VS Code equivalents live in `vscode-extension/package.json` under `contribut
 No API keys or tokens are written to disk.
 
 ## Local data files
+
+The shared semantic runtime reads `~/.pr-pilot/semantic-review.json` (schema 1) as
+machine-local launch configuration. It does not write that file or persist import baselines.
+Owned extracted workers and per-call requests are temporary, outside the worktree, and removed
+after their synchronous owned process calls finish. `semantic-worktrees.json` durably records
+retained repository/worktree/head identities under this directory, guarded by
+`semantic-worktrees.lock`; `semantic-leases/<id>.lock` holds the active execution lease.
+Cancellation or restart releases process locks, not retention. Only explicit project-closed,
+lease-free, identity-checked, clean non-force cleanup removes a retained worktree. The preparation
+binding itself is memory-only: restarting preserves maintenance access, not authority to Continue.
 
 IntelliJ-only (`intellij-plugin`'s `PendingReviewIndex`/`SeenPRSet`); VS Code persists the equivalent state via extension `globalState` instead (see Notification parity above).
 

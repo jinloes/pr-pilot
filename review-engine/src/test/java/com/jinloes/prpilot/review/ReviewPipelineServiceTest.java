@@ -21,6 +21,355 @@ import org.junit.jupiter.api.Test;
 
 class ReviewPipelineServiceTest {
     private static final ObjectMapper JSON = new ObjectMapper();
+    @org.junit.jupiter.api.io.TempDir java.nio.file.Path semanticRoot;
+
+    @Test
+    void bothActualProviderAdaptersUseOwnedEvidenceAndRejectFinalInvalidation() throws Exception {
+        for (boolean copilot : List.of(false, true)) {
+            for (boolean invalidate : List.of(false, true)) {
+                var backend = new SemanticReviewServiceTest.Backend(semanticRoot.toRealPath());
+                AtomicInteger calls = new AtomicInteger();
+                Consumer<PRReviewRequest> primary =
+                        req -> {
+                            calls.incrementAndGet();
+                            assertThat(ClaudeService.buildPrompt(req))
+                                    .contains(
+                                            "<trusted_semantic_review_skills>",
+                                                    "<untrusted_semantic_evidence>",
+                                            "Main <-", "untrusted text-tree");
+                            if (invalidate) backend.physical = "f".repeat(64);
+                        };
+                // Marker does not define arguments; it remains untrusted text.
+                backend.evidence = "Main <- untrusted text-tree";
+                ReviewPipelineService pipeline;
+                if (copilot) {
+                    pipeline =
+                            ReviewPipelineService.forCopilot(
+                                    new CopilotService() {
+                                        @Override
+                                        ReviewPassResult reviewPass(
+                                                PRReviewRequest req,
+                                                String model,
+                                                String effort,
+                                                Consumer<String> status,
+                                                BiConsumer<String, String> chunks,
+                                                boolean inherit,
+                                                String config) {
+                                            assertThat(inherit)
+                                                    .as("Deep ignores forced inherited MCP")
+                                                    .isFalse();
+                                            primary.accept(req);
+                                            return ReviewPassResult.withoutLedger(
+                                                    new ReviewResult(
+                                                            "candidate", "APPROVE", List.of()));
+                                        }
+                                    },
+                                    "fake",
+                                    "high",
+                                    true,
+                                    null);
+                } else {
+                    pipeline =
+                            ReviewPipelineService.forClaude(
+                                    new ClaudeService() {
+                                        @Override
+                                        ReviewPassResult reviewPass(
+                                                PRReviewRequest req,
+                                                String model,
+                                                Consumer<String> status,
+                                                BiConsumer<String, String> chunks) {
+                                            primary.accept(req);
+                                            return ReviewPassResult.withoutLedger(
+                                                    new ReviewResult(
+                                                            "candidate", "APPROVE", List.of()));
+                                        }
+                                    },
+                                    "fake");
+                }
+                try (var execution =
+                        new SemanticReviewService.Execution(
+                                backend.root, backend, () -> {}, SemanticReviewServiceTest.DIFF)) {
+                    execution.collect();
+                    if (invalidate) {
+                        assertThatThrownBy(
+                                        () ->
+                                                pipeline.review(
+                                                        request(SemanticReviewServiceTest.DIFF),
+                                                        false,
+                                                        false,
+                                                        false,
+                                                        ignored -> {},
+                                                        null,
+                                                        execution))
+                                .isInstanceOf(IOException.class)
+                                .hasMessageContaining("invalidated");
+                    } else {
+                        assertThat(
+                                        pipeline.review(
+                                                        request(SemanticReviewServiceTest.DIFF),
+                                                        false,
+                                                        false,
+                                                        false,
+                                                        ignored -> {},
+                                                        null,
+                                                        execution)
+                                                .getSummary())
+                                .isEqualTo("candidate");
+                        assertThat(backend.collections)
+                                .isEqualTo(4); // initial/final collection, pre-provider, final
+                        // publication
+                    }
+                    assertThat(calls).hasValue(1);
+                }
+            }
+        }
+    }
+
+    @Test
+    void failedCritiqueCannotPublishEarlierDeepCandidateAfterAuthorityChanges() throws Exception {
+        var backend = new SemanticReviewServiceTest.Backend(semanticRoot.toRealPath());
+        var provider =
+                new ClaudeService() {
+                    @Override
+                    ReviewPassResult reviewPass(
+                            PRReviewRequest request,
+                            String model,
+                            Consumer<String> status,
+                            BiConsumer<String, String> chunks) {
+                        return ReviewPassResult.withoutLedger(
+                                new ReviewResult("must not escape", "APPROVE", List.of()));
+                    }
+
+                    @Override
+                    String completeReviewPrompt(
+                            String prompt,
+                            String model,
+                            Consumer<String> status,
+                            long timeout,
+                            boolean reads)
+                            throws IOException {
+                        assertThat(prompt)
+                                .contains(
+                                        "<trusted_semantic_review_skills>",
+                                        "<untrusted_semantic_evidence>");
+                        backend.epochs = "settings-edited-and-restored";
+                        throw new IOException("Simulated provider failure");
+                    }
+                };
+        try (var execution =
+                new SemanticReviewService.Execution(
+                        backend.root, backend, () -> {}, SemanticReviewServiceTest.DIFF)) {
+            execution.collect();
+            assertThatThrownBy(
+                            () ->
+                                    ReviewPipelineService.forClaude(provider, "fake")
+                                            .review(
+                                                    request(SemanticReviewServiceTest.DIFF),
+                                                    false,
+                                                    true,
+                                                    false,
+                                                    ignored -> {},
+                                                    null,
+                                                    execution))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("invalidated");
+        }
+    }
+
+    @Test
+    void callerPromptDataCannotGrantExecutionAuthority() {
+        var request =
+                request(SemanticReviewServiceTest.DIFF)
+                        .withSemanticContext(new com.jinloes.prpilot.model.SemanticReviewContext());
+        assertThatThrownBy(
+                        () ->
+                                ReviewPipelineService.forClaude(new ClaudeService(), "fake")
+                                        .review(request, false, false, false, ignored -> {}, null))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("cannot authorize");
+    }
+
+    @Test
+    void bothAdaptersPreserveAuthorityThroughEveryStageAndBestEffortFailure() throws Exception {
+        for (boolean copilot : List.of(false, true)) {
+            for (boolean chunked : List.of(false, true)) {
+                // Four actual adapter calls: primary/selection/follow-up/critique, or two
+                // batch request copies/global reconciliation/final-validation critique.
+                for (int invalidateAt = -1; invalidateAt < 4; invalidateAt++) {
+                    for (boolean providerFailure : List.of(false, true)) {
+                        var backend =
+                                new SemanticReviewServiceTest.Backend(semanticRoot.toRealPath());
+                        backend.expectedRanges = chunked ? 7 : 1;
+                        backend.sourcePaths =
+                                chunked
+                                        ? List.of(
+                                                "F0.java", "F1.java", "F2.java", "F3.java",
+                                                "F4.java", "F5.java", "F6.java")
+                                        : List.of("src/Api.java");
+                        String diff = chunked ? sevenFileDiff() : fourRiskyHunks();
+                        var stages = new DeepStages(backend, invalidateAt, providerFailure);
+                        try (var execution =
+                                new SemanticReviewService.Execution(
+                                        backend.root, backend, () -> {}, diff)) {
+                            execution.collect();
+                            var pipeline = stages.pipeline(copilot);
+                            if (invalidateAt < 0) {
+                                assertThat(
+                                                pipeline.review(
+                                                        request(diff),
+                                                        chunked,
+                                                        true,
+                                                        !chunked,
+                                                        ignored -> {},
+                                                        null,
+                                                        execution))
+                                        .isNotNull();
+                                assertThat(stages.calls)
+                                        .containsExactlyElementsOf(
+                                                chunked
+                                                        ? List.of(
+                                                                "primary",
+                                                                "primary",
+                                                                "primary",
+                                                                "critique")
+                                                        : List.of(
+                                                                "primary",
+                                                                "selection",
+                                                                "follow-up",
+                                                                "critique"));
+                            } else {
+                                assertThatThrownBy(
+                                                () ->
+                                                        pipeline.review(
+                                                                request(diff),
+                                                                chunked,
+                                                                true,
+                                                                !chunked,
+                                                                ignored -> {},
+                                                                null,
+                                                                execution))
+                                        .isInstanceOf(IOException.class);
+                                assertThat(stages.calls)
+                                        .as("No later provider may consume stale authority")
+                                        .hasSize(invalidateAt + 1);
+                                assertThatThrownBy(execution::validate)
+                                        .isInstanceOf(IOException.class);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static final class DeepStages {
+        final SemanticReviewServiceTest.Backend backend;
+        final int invalidateAt;
+        final boolean providerFailure;
+        final List<String> calls = new ArrayList<>();
+
+        DeepStages(
+                SemanticReviewServiceTest.Backend backend,
+                int invalidateAt,
+                boolean providerFailure) {
+            this.backend = backend;
+            this.invalidateAt = invalidateAt;
+            this.providerFailure = providerFailure;
+        }
+
+        void observe(String stage, String prompt) throws IOException {
+            assertThat(prompt)
+                    .contains(
+                            "<trusted_semantic_review_skills>",
+                            "<untrusted_semantic_evidence>",
+                            "untrusted text-tree");
+            // The complete pinned instructions, not merely a marker, must survive each copy.
+            assertThat(prompt).contains(SemanticSkillBundle.load().instructions());
+            calls.add(stage);
+            if (calls.size() - 1 == invalidateAt) {
+                backend.epochs = "settings-edited-and-restored";
+                if (providerFailure) throw new IOException("Simulated provider-stage failure");
+            }
+        }
+
+        ReviewPassResult primary(PRReviewRequest request) throws IOException {
+            assertThat(request.getSemanticContext()).isNotNull();
+            observe("primary", ClaudeService.buildPrompt(request));
+            return new ReviewPassResult(
+                    new ReviewResult("candidate", "APPROVE", List.of()),
+                    new InspectionLedger(true, Set.of(), List.of()));
+        }
+
+        String complete(String prompt, boolean reads) throws IOException {
+            boolean critique = prompt.contains("<draft_review>");
+            observe(critique ? "critique" : reads ? "follow-up" : "selection", prompt);
+            return !reads ? "{\"selectedGapIds\":[\"G004\",\"G002\"]}" : emptyReviewJson();
+        }
+
+        ReviewPipelineService pipeline(boolean copilot) {
+            if (copilot) {
+                return ReviewPipelineService.forCopilot(
+                        new CopilotService() {
+                            @Override
+                            ReviewPassResult reviewPass(
+                                    PRReviewRequest request,
+                                    String model,
+                                    String effort,
+                                    Consumer<String> status,
+                                    BiConsumer<String, String> chunks,
+                                    boolean inherit,
+                                    String config)
+                                    throws IOException {
+                                assertThat(inherit).isFalse();
+                                return primary(request);
+                            }
+
+                            @Override
+                            String completeReviewPrompt(
+                                    String prompt,
+                                    String model,
+                                    String effort,
+                                    boolean inherit,
+                                    String config,
+                                    boolean reads,
+                                    long timeout,
+                                    Consumer<String> status)
+                                    throws IOException {
+                                assertThat(inherit).isFalse();
+                                return complete(prompt, reads);
+                            }
+                        },
+                        "fake",
+                        "high",
+                        true,
+                        null);
+            }
+            return ReviewPipelineService.forClaude(
+                    new ClaudeService() {
+                        @Override
+                        ReviewPassResult reviewPass(
+                                PRReviewRequest request,
+                                String model,
+                                Consumer<String> status,
+                                BiConsumer<String, String> chunks)
+                                throws IOException {
+                            return primary(request);
+                        }
+
+                        @Override
+                        String completeReviewPrompt(
+                                String prompt,
+                                String model,
+                                Consumer<String> status,
+                                long timeout,
+                                boolean reads)
+                                throws IOException {
+                            return complete(prompt, reads);
+                        }
+                    },
+                    "fake");
+        }
+    }
 
     @Nested
     class Review {
@@ -280,7 +629,7 @@ class ReviewPipelineServiceTest {
                                                 "The new signature no longer accepts the required value."))));
     }
 
-    private static String emptyReviewJson() throws Exception {
+    private static String emptyReviewJson() throws IOException {
         return JSON.writeValueAsString(
                 Map.of(
                         "summary", "reviewed",

@@ -26,6 +26,7 @@ public final class PRReviewRequest {
     private final String linkedIssue;
     private final String repoProfile;
     private final java.util.List<CiAnnotation> ciAnnotations;
+    private final SemanticReviewContext semanticContext;
 
     private PRReviewRequest(Builder builder) {
         this.pr = builder.pr;
@@ -39,6 +40,7 @@ public final class PRReviewRequest {
         this.commits = builder.commits;
         this.linkedIssue = builder.linkedIssue;
         this.repoProfile = builder.repoProfile;
+        this.semanticContext = copySemanticContext(builder.semanticContext);
         this.ciAnnotations =
                 builder.ciAnnotations == null
                         ? java.util.List.of()
@@ -111,6 +113,34 @@ public final class PRReviewRequest {
         return copyCiAnnotations(ciAnnotations);
     }
 
+    public SemanticReviewContext getSemanticContext() {
+        return copySemanticContext(semanticContext);
+    }
+
+    public PRReviewRequest withSemanticContext(SemanticReviewContext value) {
+        return builder(pr, diff)
+                .priorReview(priorReview)
+                .existingReviews(existingReviews)
+                .repoGuidelines(repoGuidelines)
+                .focusAreas(focusAreas)
+                .customInstructions(customInstructions)
+                .ciStatus(ciStatus)
+                .commits(commits)
+                .linkedIssue(linkedIssue)
+                .repoProfile(repoProfile)
+                .ciAnnotations(ciAnnotations)
+                .semanticContext(value)
+                .build();
+    }
+
+    private static SemanticReviewContext copySemanticContext(SemanticReviewContext value) {
+        if (value == null) return null;
+        SemanticReviewContext copy = new SemanticReviewContext();
+        copy.setEvidence(value.getEvidence());
+        copy.setLimitations(value.getLimitations());
+        return copy;
+    }
+
     private static java.util.List<CiAnnotation> copyCiAnnotations(
             java.util.List<CiAnnotation> annotations) {
         return annotations.stream().map(CiAnnotation::copyOf).toList();
@@ -130,6 +160,7 @@ public final class PRReviewRequest {
         private String linkedIssue;
         private String repoProfile;
         private java.util.List<CiAnnotation> ciAnnotations = java.util.List.of();
+        private SemanticReviewContext semanticContext;
 
         private Builder(PullRequest pr, String diff) {
             this.pr = pr;
@@ -189,6 +220,11 @@ public final class PRReviewRequest {
 
         public PRReviewRequest build() {
             return new PRReviewRequest(this);
+        }
+
+        public Builder semanticContext(SemanticReviewContext value) {
+            this.semanticContext = copySemanticContext(value);
+            return this;
         }
     }
 }

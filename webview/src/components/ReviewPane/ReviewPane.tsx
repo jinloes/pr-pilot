@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle } from 'react'
+import { forwardRef, useImperativeHandle, useState } from 'react'
 import { ChevronDown, ChevronUp, ExternalLink, MessageSquare } from 'lucide-react'
 import type { PR, ReviewResult } from '../../bridge/types'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import { ReviewActivityLog } from './ReviewActivityLog'
 import { PaneContent } from './ReviewContent'
 import { ReviewFooter } from './ReviewFooter'
 import { ReviewOverrides } from './ReviewOverrides'
+import { DeepReviewSetup } from './DeepReviewSetup'
 import { QualityCheckBadge, ReviewQualityCheckCard } from './ReviewQuality'
 import { useReviewController } from './useReviewController'
 
@@ -49,6 +50,7 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
   ref,
 ) {
   const { model, actions, refs } = useReviewController({ pr, onDirtyStateChange })
+  const [maintenanceVisible, setMaintenanceVisible] = useState(false)
 
   useImperativeHandle(
     ref,
@@ -56,9 +58,15 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
     [actions.discardPendingChanges],
   )
 
+  const deepReviewSetup = <DeepReviewSetup setup={model.deepSetup} retained={model.retainedDeepReviews}
+    busy={model.deepBusy} error={model.deepMaintenanceError} onContinue={actions.continueDeepReview}
+    onOrdinary={actions.ordinaryReview} onCancel={actions.cancel}
+    onList={actions.listDeepReviews} onCleanup={actions.cleanupDeepReview} />
+
   if (!pr) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-background">
+      <div className="flex min-h-0 flex-1 flex-col bg-background">
+        {deepReviewSetup}
         <span className="text-sm text-muted-foreground italic">← select a pull request</span>
       </div>
     )
@@ -79,6 +87,9 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
       onFocusAreasChange={actions.setFocusAreasOverride}
       onCustomInstructionsChange={actions.setCustomInstructionsOverride}
       onChunkedModeChange={actions.setChunkedMode}
+      intellijAssisted={model.intellijAssisted}
+      onIntellijAssistedChange={actions.setIntellijAssisted}
+      onShowRetained={() => setMaintenanceVisible(true)}
     />
   ) : null
 
@@ -109,6 +120,12 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
     <TooltipProvider delayDuration={400}>
       <div ref={refs.paneRef} data-testid="review-pane-content" className="flex min-h-0 flex-1 flex-col bg-background">
         <LiveStatus message={model.statusMessage} />
+        {(model.deepSetup || maintenanceVisible) && <>
+          {deepReviewSetup}
+          {!model.deepSetup && <Button size="sm" variant="ghost" onClick={() => setMaintenanceVisible(false)}>
+            Close retained worktrees
+          </Button>}
+        </>}
         <div className="shrink-0 px-4 py-2.5 border-b border-border bg-card">
           <div className="flex items-center gap-2 min-w-0">
             <span className="font-mono text-xs text-muted-foreground shrink-0">#{pr.number}</span>
@@ -261,6 +278,9 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
+            <ContextMenuItem onSelect={() => setMaintenanceVisible(true)}>
+              Retained IntelliJ review worktrees
+            </ContextMenuItem>
             {model.selectedContext ? (
               <>
                 <ContextMenuLabel className="text-[10px] font-normal text-muted-foreground max-w-[220px] truncate py-1">

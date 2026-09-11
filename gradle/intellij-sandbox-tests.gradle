@@ -1,0 +1,126 @@
+import groovy.json.JsonOutput
+import java.nio.file.Files
+
+tasks.register('testSandboxIdeSelection') {
+    group = 'verification'
+    description = 'Tests production sandbox discovery with owned metadata fixtures; never launches an IDE.'
+    doLast {
+        def select = project.ext.selectSandboxIde
+        def messages = []
+        def report = { message -> messages.add(message) }
+        File root = Files.createTempDirectory('pr-pilot-sandbox-selection-').toFile()
+        try {
+            def install = { String name, String build, String version = '2026.2.1', String os = 'macOS' ->
+                File home = new File(root, name)
+                File resources = new File(home, 'Contents/Resources')
+                assert resources.mkdirs()
+                File launcher = new File(home, 'Contents/MacOS/idea')
+                assert launcher.parentFile.mkdirs()
+                launcher.text = 'fixture only; not executable code'
+                assert launcher.setExecutable(true)
+                File runtime = new File(home, 'Contents/jbr/bin/java')
+                assert runtime.parentFile.mkdirs()
+                runtime.text = 'fixture only; not executable code'
+                assert runtime.setExecutable(true)
+                new File(resources, 'product-info.json').text = JsonOutput.toJson([
+                    name: 'IntelliJ IDEA', productCode: 'IU', version: version, buildNumber: build,
+                    launch: [[os: os, launcherPath: '../MacOS/idea', javaExecutablePath: '../jbr/bin/java']]
+                ])
+                home
+            }
+            def rejects = { Closure action, String reason ->
+                try {
+                    action()
+                    throw new AssertionError("Expected rejection: ${reason}")
+                } catch (GradleException e) {
+                    assert e.message.contains(reason) : e.message
+                }
+            }
+            rejects({ select(null, [root], 'macOS', report) }, 'No eligible')
+            def unversioned = install('IntelliJ IDEA.app', '262.9.10')
+            assert select(null, [root], 'macOS', report).path == unversioned.canonicalFile
+            def newest = install('IntelliJ IDEA EAP.app', '262.10.2', '2026.2 EAP')
+            assert select(null, [root], 'macOS', report).path == newest.canonicalFile
+            def tie = install('IntelliJ A.app', '262.10.2')
+            assert select(null, [root], 'macOS', report).path == tie.canonicalFile
+            try {
+                Files.createSymbolicLink(new File(root, 'IntelliJ Alias.app').toPath(), newest.toPath())
+            } catch (java.nio.file.FileSystemException e) {
+                if (!System.getProperty('os.name').startsWith('Windows')) throw e
+                logger.lifecycle('Alias fixture skipped: Windows account cannot create symlinks')
+            }
+            assert select(null, [root], 'macOS', report).path == tie.canonicalFile
+            assert select(unversioned.path, [root], 'macOS', report).path == unversioned.canonicalFile
+            def old = install('IntelliJ Old.app', '261.9999.9999')
+            rejects({ select(old.path, [root], 'macOS', report) }, '>=262')
+            rejects({ select(new File(root, 'missing').path, [root], 'macOS', report) }, 'Not a readable')
+            rejects({ select('relative', [root], 'macOS', report) }, 'absolute')
+            rejects({ select('', [root], 'macOS', report) }, 'absolute')
+            def malformed = install('IntelliJ Broken.app', '262.100.1')
+            def metadata = new File(malformed, 'Contents/Resources/product-info.json')
+            metadata.text = '{bad json'
+            rejects({ select(malformed.path, [root], 'macOS', report) }, 'Malformed')
+            assert select(null, [root], 'macOS', report).path == tie.canonicalFile
+            assert messages.any { it.contains('Skipping') }
+            ['bad', 'IU-262.1', '262', '262.-1.2', '262.1.SNAPSHOT'].each { build ->
+                metadata.text = JsonOutput.toJson([
+                    name: 'IntelliJ IDEA', productCode: 'IU', version: 'EAP', buildNumber: build
+                ])
+                rejects({ select(malformed.path, [root], 'macOS', report) }, 'Invalid IntelliJ')
+            }
+            metadata.text = JsonOutput.toJson([
+                name: 'PyCharm', productCode: 'PY', version: '2026.2', buildNumber: '262.1'
+            ])
+            rejects({ select(malformed.path, [root], 'macOS', report) }, 'Invalid IntelliJ')
+            def missingLauncher = install('IntelliJ Missing Launcher.app', '262.10.3')
+            assert new File(missingLauncher, 'Contents/MacOS/idea').delete()
+            rejects({ select(missingLauncher.path, [root], 'macOS', report) }, 'launcher')
+            def linux = install('linux-idea', '262.10.3', '2026.2', 'Linux')
+            assert select(linux.path, [], 'Linux', report).path == linux.canonicalFile
+            rejects({ select(null, [root], 'Linux', report) }, 'ideaLocalPath')
+            def windows = install('windows-idea', '262.10.4', '2026.2', 'Windows')
+            assert select(windows.path, [], 'Windows', report).path == windows.canonicalFile
+            assert new File(windows, 'Contents/jbr/bin/java').delete()
+            rejects({ select(windows.path, [], 'Windows', report) }, 'bundled runtime')
+            def noMetadata = new File(root, 'IntelliJ No Metadata.app')
+            assert noMetadata.mkdir()
+            rejects({ select(noMetadata.path, [root], 'macOS', report) }, 'product-info.json')
+            def extraTuple = install('IntelliJ Extra Tuple.app', '262.10.2.1')
+            assert select(null, [root], 'macOS', report).path == extraTuple.canonicalFile
+
+            // Inspect lazy wiring without resolving or executing any sandbox task.
+            def primary = configurations.intellijPlatformDependencyArchive.dependencies
+            assert primary.size() == 1
+            assert primary.first().version == '2026.1.4'
+            assert configurations.intellijPlatformLocal.dependencies.empty
+            def custom = intellijPlatformTesting.runIde.getByName('runIdeLocal')
+            assert custom.task.name == 'runIdeLocal'
+            assert custom.prepareSandboxTask.name == 'prepareSandbox_runIdeLocal'
+            ['intellijPlatformDependency', 'intellijPlatformLocal', 'jetbrainsRuntime'].each {
+                assert configurations.findByName("${it}_runIdeLocal") != null
+                assert configurations.getByName(it) != configurations.getByName("${it}_runIdeLocal")
+            }
+            def localTask = custom.task.get()
+            def sandboxTask = custom.prepareSandboxTask.get()
+            assert localTask.intelliJPlatformConfiguration.from.contains(
+                configurations.intellijPlatformDependency_runIdeLocal)
+            assert localTask.jetbrainsRuntimeConfiguration.from.contains(
+                configurations.jetbrainsRuntime_runIdeLocal)
+            assert sandboxTask.intelliJPlatformConfiguration.from.contains(
+                configurations.intellijPlatformDependency_runIdeLocal)
+            assert localTask.dependsOn.any {
+                it instanceof org.gradle.api.tasks.TaskProvider && it.get().is(sandboxTask)
+            }
+            assert tasks.named('runIde').get().intelliJPlatformConfiguration.from.contains(
+                configurations.intellijPlatformDependency)
+            logger.lifecycle('Sandbox selector fixture and pinned/custom wiring checks passed')
+        } finally {
+            // Files.walk does not follow aliases, and the root is owned exclusively by this task.
+            Files.walk(root.toPath()).withCloseable { paths ->
+                paths.sorted(Comparator.reverseOrder()).forEach { Files.delete(it) }
+            }
+        }
+    }
+}
+
+tasks.named('check') { dependsOn 'testSandboxIdeSelection' }

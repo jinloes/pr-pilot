@@ -159,7 +159,27 @@ export interface ThemeChangedMessage {
   theme: HostTheme
 }
 
+export interface DeepReviewPreparedMessage {
+  type: 'deepReviewPrepared'
+  operationId: string
+  prKey: string
+  retainedId: string
+  worktree: string
+  head: string
+  servers: string[]
+  message: string
+}
+export interface RetainedDeepReview {
+  id: string
+  repository: string
+  worktree: string
+  head: string
+  createdAt: number
+}
 export type IncomingMessage = { readonly protocolVersion: typeof BRIDGE_PROTOCOL_VERSION } & (
+  | DeepReviewPreparedMessage
+  | { type: 'retainedDeepReviews'; operationId: string; retained: RetainedDeepReview[] }
+  | { type: 'deepReviewMaintenanceError'; operationId: string; message: string }
   | PRListLoadedMessage
   | PRLoadingMessage
   | DraftLoadingMessage
@@ -258,6 +278,7 @@ export interface GenerateReviewRequest {
   diff?: string
   /** Runs bounded batches plus a mandatory engine-owned global reconciliation pass. */
   chunkedReview?: boolean
+  intellijAssisted?: boolean
   /** Optional per-review override of the focus areas; falls back to the saved setting. */
   focusAreas?: string
   /** Optional per-review override of custom instructions; falls back to the saved setting. */
@@ -333,6 +354,9 @@ export interface WebviewLayoutChangedRequest {
 }
 
 export type OutgoingMessage =
+  | { type: 'continueDeepReview'; operationId: string; number: number; owner: string; repo: string; retainedId: string; server: string }
+  | { type: 'listDeepReviews'; operationId: string }
+  | { type: 'cleanupDeepReview'; operationId: string; retainedId: string; projectClosed: true }
   | SelectPRRequest
   | RefreshPRsRequest
   | GenerateReviewRequest

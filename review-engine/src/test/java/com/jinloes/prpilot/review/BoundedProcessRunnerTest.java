@@ -25,6 +25,179 @@ import org.junit.jupiter.api.Test;
 class BoundedProcessRunnerTest {
 
     @Nested
+    class OwnedTree {
+        @Test
+        void enumerationFailureStillTerminatesPreviouslyRecordedDescendants() throws Exception {
+            var alive = new java.util.concurrent.atomic.AtomicBoolean(true);
+            ProcessHandle descendant =
+                    (ProcessHandle)
+                            java.lang.reflect.Proxy.newProxyInstance(
+                                    getClass().getClassLoader(),
+                                    new Class<?>[] {ProcessHandle.class},
+                                    (proxy, method, args) ->
+                                            switch (method.getName()) {
+                                                case "isAlive" -> alive.get();
+                                                case "destroyForcibly" -> {
+                                                    alive.set(false);
+                                                    yield true;
+                                                }
+                                                default ->
+                                                        throw new AssertionError(method.getName());
+                                            });
+            var teardown =
+                    BoundedProcessRunner.class.getDeclaredMethod(
+                            "teardownTree", Process.class, java.util.Map.class);
+            teardown.setAccessible(true);
+            // The completed stub cannot enumerate handles. Cleanup must nevertheless drain
+            // the already-owned set, rather than abandon it on that error.
+            assertThatThrownBy(
+                            () ->
+                                    teardown.invoke(
+                                            null,
+                                            StubProcess.completed(""),
+                                            new java.util.LinkedHashMap<>(
+                                                    java.util.Map.of(1L, descendant))))
+                    .cause()
+                    .isInstanceOf(IOException.class);
+            assertThat(alive.get()).isFalse();
+        }
+
+        @Test
+        void timeoutTerminatesAndWaitsForRecordedChildrenAndGrandchildren() throws Exception {
+            var file = java.nio.file.Files.createTempFile("owned-tree-", ".pids");
+            try {
+                assertThatThrownBy(
+                                () ->
+                                        new BoundedProcessRunner()
+                                                .runOwnedTree(
+                                                        treeCommand(file), 2, TimeUnit.SECONDS))
+                        .isInstanceOf(TimeoutException.class);
+                var pids = java.nio.file.Files.readAllLines(file);
+                assertThat(pids).hasSize(3);
+                for (String pid : pids) {
+                    assertThat(
+                                    ProcessHandle.of(Long.parseLong(pid))
+                                            .map(ProcessHandle::isAlive)
+                                            .orElse(false))
+                            .as("terminated PID %s", pid)
+                            .isFalse();
+                }
+            } finally {
+                killFixture(file);
+            }
+        }
+
+        @Test
+        void interruptionWaitsForTreeAndPreservesInterrupt() throws Exception {
+            var file = java.nio.file.Files.createTempFile("owned-tree-", ".pids");
+            var outcome = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            var interrupted = new java.util.concurrent.atomic.AtomicBoolean();
+            Thread thread =
+                    new Thread(
+                            () -> {
+                                try {
+                                    new BoundedProcessRunner()
+                                            .runOwnedTree(treeCommand(file), 10, TimeUnit.SECONDS);
+                                } catch (Throwable e) {
+                                    outcome.set(e);
+                                    interrupted.set(Thread.currentThread().isInterrupted());
+                                }
+                            });
+            try {
+                thread.start();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (java.nio.file.Files.readAllLines(file).size() != 3
+                        && System.nanoTime() < deadline) {
+                    Thread.sleep(10);
+                }
+                assertThat(java.nio.file.Files.readAllLines(file)).hasSize(3);
+                Thread.sleep(100); // Allow the runner to record the grandchild before cancellation.
+                thread.interrupt();
+                thread.join(7000);
+                assertThat(thread.isAlive()).isFalse();
+                assertThat(outcome.get()).isInstanceOf(InterruptedException.class);
+                assertThat(interrupted.get()).isTrue();
+                for (String pid : java.nio.file.Files.readAllLines(file)) {
+                    assertThat(
+                                    ProcessHandle.of(Long.parseLong(pid))
+                                            .map(ProcessHandle::isAlive)
+                                            .orElse(false))
+                            .isFalse();
+                }
+            } finally {
+                thread.interrupt();
+                thread.join(7000);
+                killFixture(file);
+            }
+        }
+
+        @Test
+        void stderrIsNotAcceptedEvenWhenStdoutIsValidJson() {
+            assertThatThrownBy(
+                            () ->
+                                    new BoundedProcessRunner()
+                                            .runOwnedTree(
+                                                    new ProcessBuilder(
+                                                            "/bin/sh",
+                                                            "-c",
+                                                            "printf '{}'; printf 'polluted' >&2"),
+                                                    2,
+                                                    TimeUnit.SECONDS))
+                    .hasMessageContaining("stderr");
+        }
+
+        private ProcessBuilder treeCommand(java.nio.file.Path file) {
+            return new ProcessBuilder(
+                    java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java")
+                            .toString(),
+                    "-cp",
+                    System.getProperty("java.class.path"),
+                    TreeFixture.class.getName(),
+                    file.toString(),
+                    "2");
+        }
+
+        private void killFixture(java.nio.file.Path file) throws IOException {
+            for (String pid : java.nio.file.Files.readAllLines(file)) {
+                ProcessHandle.of(Long.parseLong(pid))
+                        .ifPresent(
+                                handle -> {
+                                    if (handle.isAlive()) handle.destroyForcibly();
+                                });
+            }
+            java.nio.file.Files.delete(file);
+        }
+    }
+
+    public static class TreeFixture {
+        public static void main(String[] args) throws Exception {
+            java.nio.file.Files.writeString(
+                    java.nio.file.Path.of(args[0]),
+                    ProcessHandle.current().pid() + "\n",
+                    java.nio.file.StandardOpenOption.APPEND);
+            int depth = Integer.parseInt(args[1]);
+            if (depth == 0) {
+                Thread.sleep(30_000);
+            } else {
+                Process child =
+                        new ProcessBuilder(
+                                        java.nio.file.Path.of(
+                                                        System.getProperty("java.home"),
+                                                        "bin",
+                                                        "java")
+                                                .toString(),
+                                        "-cp",
+                                        System.getProperty("java.class.path"),
+                                        TreeFixture.class.getName(),
+                                        args[0],
+                                        Integer.toString(depth - 1))
+                                .start();
+                child.waitFor();
+            }
+        }
+    }
+
+    @Nested
     class Run {
 
         @Test

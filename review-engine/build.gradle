@@ -35,5 +35,59 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    dependsOn tasks.named('sourceInventoryWorkerJar'), tasks.named('jar')
+    systemProperty 'sourceInventory.workerJar', layout.buildDirectory.file('libs/pr-pilot-source-inventory-worker.jar').get().asFile.absolutePath
+    systemProperty 'semantic.engineJar', tasks.named('jar').get().archiveFile.get().asFile.absolutePath
 }
 
+tasks.register('sourceInventoryWorkerJar', Jar) {
+    archiveFileName = 'pr-pilot-source-inventory-worker.jar'
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    dependsOn tasks.named('compileJava'), project(':core').tasks.named('compileJava')
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+    manifest {
+        attributes 'Main-Class': 'com.jinloes.prpilot.review.SourceInventoryClient'
+    }
+    from(sourceSets.main.output.classesDirs) {
+        include 'com/jinloes/prpilot/review/SourceInventoryClient*.class'
+        include 'com/jinloes/prpilot/review/SourceInventoryFiles*.class'
+        include 'com/jinloes/prpilot/review/BoundedProcessRunner*.class'
+    }
+    from(project(':core').sourceSets.main.output.classesDirs) {
+        include 'com/jinloes/prpilot/model/SourceInventory*.class'
+    }
+
+    from({
+        configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts.findAll {
+            it.moduleVersion.id.group == 'com.fasterxml.jackson.core' &&
+                it.name in ['jackson-annotations', 'jackson-core', 'jackson-databind']
+        }.collect { zipTree(it.file) }
+    }) {
+        include 'com/fasterxml/jackson/**'
+        exclude '**/module-info.class'
+    }
+}
+
+def semanticManifest = layout.buildDirectory.file('semantic-worker/manifest.json')
+tasks.register('semanticWorkerManifest') {
+    dependsOn tasks.named('sourceInventoryWorkerJar')
+    inputs.file(tasks.named('sourceInventoryWorkerJar').flatMap { it.archiveFile })
+    outputs.file(semanticManifest)
+    doLast {
+        def worker = tasks.named('sourceInventoryWorkerJar').get().archiveFile.get().asFile
+        def digest = java.security.MessageDigest.getInstance('SHA-256').digest(worker.bytes).encodeHex().toString()
+        def output = semanticManifest.get().asFile
+        output.parentFile.mkdirs()
+        output.text = groovy.json.JsonOutput.toJson([schemaVersion: 2, sha256: digest])
+    }
+}
+tasks.named('jar') {
+    dependsOn tasks.named('semanticWorkerManifest')
+    from(tasks.named('sourceInventoryWorkerJar').flatMap { it.archiveFile }) {
+        into 'semantic-worker'
+    }
+    from(semanticManifest) {
+        into 'semantic-worker'
+    }
+}

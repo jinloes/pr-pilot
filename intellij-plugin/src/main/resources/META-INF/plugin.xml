@@ -10,6 +10,7 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.java</depends>
     <depends>com.intellij.modules.jcef</depends>
+    <depends optional="true" config-file="prpilot-mcp.xml">com.intellij.mcpServer</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow id="PR Pilot"

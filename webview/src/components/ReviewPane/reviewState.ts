@@ -45,6 +45,7 @@ export type PaneState =
   | { kind: 'deleteError'; message: string; draft: DraftPresentState }
 
 export type ReviewStateEvent =
+  | { type: 'restoreBeforeDeepPause'; previous: PaneState }
   | { type: 'reset'; hasPr: boolean }
   | { type: 'draftLoading' }
   | {
@@ -175,6 +176,8 @@ function mutationErrorState(
 
 export function reviewReducer(state: PaneState, event: ReviewStateEvent): PaneState {
   switch (event.type) {
+    case 'restoreBeforeDeepPause':
+      return event.previous;
     case 'reset':
       return { kind: event.hasPr ? 'draftLoading' : 'idle' }
 

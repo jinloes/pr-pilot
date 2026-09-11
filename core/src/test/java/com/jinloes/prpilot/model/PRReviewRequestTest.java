@@ -9,6 +9,22 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class PRReviewRequestTest {
+    @Test
+    void semanticContextIsOptionalAndDefensiveAcrossBuilderAccessorAndCopies() {
+        var ordinary =
+                PRReviewRequest.builder(pr(), "diff").customInstructions("instructions").build();
+        assertThat(ordinary.getSemanticContext()).isNull();
+        var evidence = new SemanticReviewContext();
+        evidence.setEvidence("original");
+        evidence.setLimitations(List.of("bounded"));
+        var deep = ordinary.withSemanticContext(evidence);
+        evidence.setEvidence("mutated");
+        deep.getSemanticContext().setEvidence("accessor mutation");
+        assertThat(deep.getSemanticContext().getEvidence()).isEqualTo("original");
+        assertThat(deep.getCustomInstructions()).isEqualTo("instructions");
+        assertThat(deep.getSemanticContext().getLimitations()).containsExactly("bounded");
+        assertThat(ordinary.getSemanticContext()).isNull();
+    }
 
     private static PullRequest pr() {
         return new PullRequest("T", "url", "o", "r", 1, "body", "author", "2026-01-01", false);

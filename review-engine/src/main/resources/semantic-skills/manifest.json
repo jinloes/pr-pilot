@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "upstream": "https://github.com/jinloes/intellij-mcp-cli",
+  "commit": "34ec93ad2f9dcd3177a3ffb48eebecbee7512fb4",
+  "cliVersion": "0.3.0",
+  "adaptation": "Full setup/routing and code-intelligence workflows adapted for precollected read-only review; daemon, fallback, refactor, run/debug, terminal and database execution removed.",
+  "resources": {
+    "LICENSE": {
+      "upstreamSha256": "813f5b67bad441ac0ebba570d310c3499536a0817a15c9d67767b3a441f48a45",
+      "sha256": "813f5b67bad441ac0ebba570d310c3499536a0817a15c9d67767b3a441f48a45"
+    },
+    "intellij-mcp-tools/SKILL.md": {
+      "upstreamSha256": "102a878cc44def4c13cb76ccb76a724a5ef6b81a3edba61d19719512cad742cf",
+      "sha256": "a201031611f6db25b1743701310d22cd6428f2d479c3dc1f92486871454b72f3"
+    },
+    "intellij-code-intelligence/SKILL.md": {
+      "upstreamSha256": "2c194bad703316eef342be1ec1455389ff94624e913cd6518459c70855fae20b",
+      "sha256": "9cde6e93e5d3eb7ac492f744b315ef06b70c7af42a3ec7997c214f85680d93d3"
+    }
+  }
+}

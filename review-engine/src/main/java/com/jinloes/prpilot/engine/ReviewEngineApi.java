@@ -31,6 +31,9 @@ public interface ReviewEngineApi {
                     Map.entry("readGuidelines", "reviews/readGuidelines"),
                     Map.entry("findGitRoot", "reviews/findGitRoot"),
                     Map.entry("createWorktree", "reviews/createWorktree"),
+                    Map.entry("prepareDeepReview", "reviews/prepareDeepReview"),
+                    Map.entry("listDeepReviews", "reviews/listDeepReviews"),
+                    Map.entry("cleanupDeepReview", "reviews/cleanupDeepReview"),
                     Map.entry("removeWorktree", "reviews/removeWorktree"));
 
     /** Pull-request identity and metadata needed to build a review prompt. */
@@ -82,7 +85,86 @@ public interface ReviewEngineApi {
             String linkedIssue,
             String repoProfile,
             List<CiAnnotationParam> ciAnnotations,
-            boolean chunkedReview) {}
+            boolean chunkedReview,
+            DeepReviewParams deepReview) {
+        public GenerateReviewParams(
+                String operationId,
+                String provider,
+                String projectDir,
+                String model,
+                String effort,
+                boolean inheritMcp,
+                String configDir,
+                boolean selfCritique,
+                boolean reviewSupervisorEnabled,
+                PrParams pr,
+                String diff,
+                String priorReview,
+                String existingReviews,
+                String repoGuidelines,
+                String focusAreas,
+                String customInstructions,
+                String ciStatus,
+                String commits,
+                String linkedIssue,
+                String repoProfile,
+                List<CiAnnotationParam> ciAnnotations,
+                boolean chunkedReview) {
+            this(
+                    operationId,
+                    provider,
+                    projectDir,
+                    model,
+                    effort,
+                    inheritMcp,
+                    configDir,
+                    selfCritique,
+                    reviewSupervisorEnabled,
+                    pr,
+                    diff,
+                    priorReview,
+                    existingReviews,
+                    repoGuidelines,
+                    focusAreas,
+                    customInstructions,
+                    ciStatus,
+                    commits,
+                    linkedIssue,
+                    repoProfile,
+                    ciAnnotations,
+                    chunkedReview,
+                    null);
+        }
+    }
+
+    record DeepReviewParams(String retainedId, String server) {}
+
+    record PrepareDeepReviewParams(
+            String operationId,
+            String gitRoot,
+            int prNumber,
+            String branch,
+            String headSha,
+            String forkCloneUrl,
+            String prIdentity,
+            String diffDigest) {}
+
+    record CleanupDeepReviewParams(String retainedId, boolean projectClosed) {}
+
+    default com.jinloes.prpilot.review.SemanticReviewService.Preparation prepareDeepReview(
+            PrepareDeepReviewParams params) throws IOException, InterruptedException {
+        throw new IOException("Deep review unavailable");
+    }
+
+    default List<com.jinloes.prpilot.review.SemanticWorktreeStore.Retained> listDeepReviews()
+            throws IOException {
+        throw new IOException("Deep review unavailable");
+    }
+
+    default WorktreeRemovalResult cleanupDeepReview(CleanupDeepReviewParams params)
+            throws IOException {
+        throw new IOException("Deep review unavailable");
+    }
 
     /** One prior conversation turn. */
     record ChatMessageParam(String role, String content) {}

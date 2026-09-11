@@ -128,6 +128,9 @@ final class StdioJsonRpcServer {
         handlers.put("reviews/findGitRoot", this::findGitRoot);
         handlers.put("reviews/createWorktree", this::createWorktree);
         handlers.put("reviews/removeWorktree", this::removeWorktree);
+        handlers.put("reviews/prepareDeepReview", this::prepareDeepReview);
+        handlers.put("reviews/listDeepReviews", this::listDeepReviews);
+        handlers.put("reviews/cleanupDeepReview", this::cleanupDeepReview);
     }
 
     /** Wire method names this server answers. Used by the engine capability coverage test. */
@@ -923,6 +926,102 @@ final class StdioJsonRpcServer {
      * origin fetch path. A git failure comes back as a {@code failed} status rather than an RPC
      * error, because callers degrade to the user's own checkout instead of failing the review.
      */
+    private JsonNode prepareDeepReview(JsonNode request) {
+        JsonNode id = requestId(request);
+        JsonNode input = request.get("params");
+        if (input == null
+                || !input.isObject()
+                || !hasOnlyFields(
+                        input,
+                        Set.of(
+                                "operationId",
+                                "gitRoot",
+                                "prNumber",
+                                "branch",
+                                "headSha",
+                                "forkCloneUrl",
+                                "prIdentity",
+                                "diffDigest"))
+                || !input.path("prNumber").isInt()
+                || input.path("prNumber").intValue() <= 0
+                || !isTextualOrAbsent(input.path("forkCloneUrl")))
+            return error(id, -32602, "Invalid params");
+        for (String field :
+                List.of("operationId", "gitRoot", "branch", "headSha", "prIdentity", "diffDigest"))
+            if (!input.path(field).isTextual() || input.path(field).textValue().isBlank())
+                return error(id, -32602, "Invalid params");
+        if (!validOperationId(input.get("operationId").textValue()))
+            return error(id, -32602, "Invalid operation");
+        ReviewEngineApi.PrepareDeepReviewParams params;
+        try {
+            params = objectMapper.treeToValue(input, ReviewEngineApi.PrepareDeepReviewParams.class);
+        } catch (Exception failure) {
+            return error(id, -32602, "Invalid params");
+        }
+        if (!submitReviewOperation(
+                params.operationId(),
+                id,
+                request.has("id"),
+                "Preparation interrupted.",
+                operation -> {
+                    try {
+                        operation.complete(result(id, review.prepareDeepReview(params)));
+                    } catch (InterruptedException failure) {
+                        Thread.currentThread().interrupt();
+                        operation.completeCancellation();
+                    } catch (Exception failure) {
+                        operation.complete(error(id, -32000, safeMessage(failure)));
+                    }
+                })) return error(id, -32602, "Duplicate operation ID");
+        return null;
+    }
+
+    private JsonNode listDeepReviews(JsonNode request) {
+        JsonNode input = request.get("params");
+        if (input != null && (!input.isObject() || !input.isEmpty()))
+            return error(requestId(request), -32602, "Invalid params");
+        return deepMaintenance(request, () -> review.listDeepReviews());
+    }
+
+    private JsonNode cleanupDeepReview(JsonNode request) {
+        JsonNode input = request.get("params");
+        if (input == null
+                || !input.isObject()
+                || !hasOnlyFields(input, Set.of("retainedId", "projectClosed"))
+                || !input.path("retainedId").isTextual()
+                || !input.path("projectClosed").isBoolean())
+            return error(requestId(request), -32602, "Invalid params");
+        return deepMaintenance(
+                request,
+                () ->
+                        review.cleanupDeepReview(
+                                new ReviewEngineApi.CleanupDeepReviewParams(
+                                        input.get("retainedId").textValue(),
+                                        input.get("projectClosed").booleanValue())));
+    }
+
+    @FunctionalInterface
+    private interface DeepMaintenance {
+        Object run() throws IOException;
+    }
+
+    private JsonNode deepMaintenance(JsonNode request, DeepMaintenance action) {
+        JsonNode id = requestId(request);
+        if (!submitReviewOperation(
+                "deep-maintenance-" + java.util.UUID.randomUUID(),
+                id,
+                request.has("id"),
+                "Maintenance interrupted.",
+                operation -> {
+                    try {
+                        operation.complete(result(id, action.run()));
+                    } catch (Exception failure) {
+                        operation.complete(error(id, -32000, safeMessage(failure)));
+                    }
+                })) return error(id, -32000, "Maintenance busy");
+        return null;
+    }
+
     private ObjectNode createWorktree(JsonNode request) {
         JsonNode params = request.get("params");
         if (params == null

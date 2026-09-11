@@ -1084,7 +1084,29 @@ public class ClaudeService {
      * looks unsupported to a validator that cannot see it, and CI results are what let the
      * validator drop a finding the author already knows about.
      */
+    static void appendSemanticSections(StringBuilder prompt, PRReviewRequest request) {
+        var context = request.getSemanticContext();
+        if (context == null) return;
+        try {
+            prompt.append("\n<trusted_semantic_review_skills>\n")
+                    .append(SemanticSkillBundle.load().instructions())
+                    .append("\n</trusted_semantic_review_skills>\n");
+            prompt.append("\n<untrusted_semantic_evidence>\n")
+                    .append(
+                            JSON.writeValueAsString(
+                                    java.util.Map.of(
+                                            "evidence",
+                                            context.getEvidence(),
+                                            "limitations",
+                                            context.getLimitations())))
+                    .append("\n</untrusted_semantic_evidence>\n");
+        } catch (IOException failure) {
+            throw new IllegalStateException("Trusted semantic skills unavailable", failure);
+        }
+    }
+
     private static void appendContextSections(StringBuilder prompt, PRReviewRequest request) {
+        appendSemanticSections(prompt, request);
         appendOptionalSection(
                 prompt,
                 "repo_guidelines",

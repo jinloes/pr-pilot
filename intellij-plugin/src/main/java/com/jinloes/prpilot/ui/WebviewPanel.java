@@ -342,7 +342,7 @@ public class WebviewPanel implements Disposable {
     private final JBCefBrowser browser;
     private final JPanel browserPanel;
     private final JBCefJSQuery bridgeQuery;
-    private final Alarm layoutRepaintAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD, this);
+    private final Alarm layoutRepaintAlarm;
     private final ObjectMapper mapper =
             new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     private final PendingReviewIndex pendingIndex = new PendingReviewIndex();
@@ -351,9 +351,47 @@ public class WebviewPanel implements Disposable {
             () -> {};
     private final IntellijClaudeService claudeService;
     private final GitWorktreeService worktreeService = new GitWorktreeService();
-    private final IntellijGitHubService ghSvc = IntellijGitHubService.getInstance();
-    private final DraftRecoveryStore draftRecoveryStore = DraftRecoveryStore.getInstance();
+    private final com.jinloes.prpilot.review.SemanticReviewService semanticReviews =
+            new com.jinloes.prpilot.review.SemanticReviewService();
+    private DeepPending deepPending;
+    private long deepPreparationRevision;
+    private String deepOperationId;
+    private final java.util.Set<String> consumedDeepOperations = new java.util.HashSet<>();
+
+    record DeepPending(
+            com.jinloes.prpilot.review.SemanticReviewService.Preparation preparation,
+            JsonNode options,
+            String key,
+            long selection,
+            Object settings,
+            String diff,
+            long revision) {}
+
+    private record DeepInvocation(DeepPending pending, String server) {}
+
+    private final IntellijGitHubService ghSvc;
+    private final DraftRecoveryStore draftRecoveryStore;
     private final Project project;
+    private final DeepReviewIo deepIo;
+    private final Consumer<Runnable> deepBackground;
+    private final java.util.function.Supplier<Object> deepSettings;
+    private final Consumer<Object> testMessageSink;
+
+    /**
+     * External effects only; correlation, head checks and Continue consumption stay in the host.
+     */
+    interface DeepReviewIo {
+        com.jinloes.prpilot.review.SemanticReviewService.Preparation prepare(
+                JsonNode options, FreshDeepPr fresh) throws Exception;
+
+        FreshDeepPr fresh(int number, String owner, String repo) throws Exception;
+
+        void generate(DeepPending pending, String operationId, String server);
+
+        List<com.jinloes.prpilot.review.SemanticWorktreeStore.Retained> list() throws Exception;
+
+        void cleanup(String id, boolean closed) throws Exception;
+    }
 
     /**
      * Points to the service that owns the currently running review process (may be a per-worktree
@@ -396,6 +434,77 @@ public class WebviewPanel implements Disposable {
 
     public WebviewPanel(Project project) {
         this.project = project;
+        this.layoutRepaintAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD, this);
+        this.ghSvc = IntellijGitHubService.getInstance();
+        this.draftRecoveryStore = DraftRecoveryStore.getInstance();
+        this.deepSettings = this::readDeepSettingsIdentity;
+        this.deepBackground = job -> getApplication().executeOnPooledThread(job);
+        this.testMessageSink = null;
+        this.deepIo =
+                new DeepReviewIo() {
+                    public com.jinloes.prpilot.review.SemanticReviewService.Preparation prepare(
+                            JsonNode options, FreshDeepPr fresh) throws Exception {
+                        String base = project.getBasePath();
+                        var root =
+                                base == null
+                                        ? null
+                                        : worktreeService.findGitRoot(new java.io.File(base));
+                        String detected = base == null ? null : ghSvc.detectCurrentRepo(base);
+                        String owner = options.path("owner").asText(),
+                                repo = options.path("repo").asText();
+                        if (root == null || !(owner + "/" + repo).equalsIgnoreCase(detected))
+                            throw new java.io.IOException(
+                                    "Open the pull request repository before preparing a deep review.");
+                        String digest =
+                                java.util.HexFormat.of()
+                                        .formatHex(
+                                                java.security.MessageDigest.getInstance("SHA-256")
+                                                        .digest(
+                                                                fresh.diff()
+                                                                        .getBytes(
+                                                                                java.nio.charset
+                                                                                        .StandardCharsets
+                                                                                        .UTF_8)));
+                        int number = options.path("number").asInt();
+                        return semanticReviews.prepare(
+                                root,
+                                number,
+                                fresh.head().ref(),
+                                fresh.head().sha(),
+                                fresh.head().isFork() ? fresh.head().forkCloneUrl() : "",
+                                owner + "/" + repo + "#" + number,
+                                digest,
+                                options.path("operationId").asText());
+                    }
+
+                    public FreshDeepPr fresh(int number, String owner, String repo)
+                            throws Exception {
+                        return freshDeepPr(number, owner, repo);
+                    }
+
+                    public void generate(DeepPending pending, String operationId, String server) {
+                        var options = pending.options();
+                        handleGenerateReview(
+                                options.path("number").asInt(),
+                                options.path("owner").asText(),
+                                options.path("repo").asText(),
+                                pending.diff(),
+                                options.path("chunkedReview").asBoolean(),
+                                options.path("focusAreas").asText(""),
+                                options.path("customInstructions").asText(""),
+                                operationId,
+                                new DeepInvocation(pending, server));
+                    }
+
+                    public List<com.jinloes.prpilot.review.SemanticWorktreeStore.Retained> list()
+                            throws Exception {
+                        return semanticReviews.list();
+                    }
+
+                    public void cleanup(String id, boolean closed) throws Exception {
+                        semanticReviews.cleanup(id, closed);
+                    }
+                };
         this.claudeService = new IntellijClaudeService(project.getBasePath());
         this.activeReviewService = this.claudeService;
         this.activeChatService = this.claudeService;
@@ -445,6 +554,29 @@ public class WebviewPanel implements Disposable {
                 .getMessageBus()
                 .connect(this)
                 .subscribe(LafManagerListener.TOPIC, source -> pushCurrentTheme());
+    }
+
+    /** Headless bridge fixture: only external IDE/Git/provider effects are substituted. */
+    WebviewPanel(
+            PullRequest selected,
+            DeepReviewIo io,
+            Consumer<Runnable> background,
+            java.util.function.Supplier<Object> settings,
+            Consumer<Object> messages) {
+        project = null;
+        browser = null;
+        browserPanel = null;
+        bridgeQuery = null;
+        layoutRepaintAlarm = null;
+        ghSvc = null;
+        draftRecoveryStore = null;
+        claudeService = null;
+        worktrees = new WorktreeCoordinator<>();
+        activePR = selected;
+        deepIo = io;
+        deepBackground = background;
+        deepSettings = settings;
+        testMessageSink = messages;
     }
 
     private void startServerAndLoad() {
@@ -586,7 +718,7 @@ public class WebviewPanel implements Disposable {
                         });
     }
 
-    private void handleIncoming(String json) {
+    void handleIncoming(String json) {
         try {
             var node = mapper.readTree(json);
             if (!isValidIncomingMessage(node)) {
@@ -634,7 +766,14 @@ public class WebviewPanel implements Disposable {
                                                 BrowserUtil.browse(
                                                         "https://cli.github.com/manual/gh_auth_login"));
                 case "webviewLayoutChanged" -> scheduleWebviewLayoutRepaint();
-                case "generateReview" ->
+                case "generateReview" -> {
+                    if (node.path("intellijAssisted").asBoolean(false)) {
+                        handlePrepareDeepReview(node.deepCopy());
+                    } else {
+                        synchronized (this) {
+                            deepPending = null;
+                            deepPreparationRevision++;
+                        }
                         handleGenerateReview(
                                 number,
                                 owner,
@@ -643,7 +782,13 @@ public class WebviewPanel implements Disposable {
                                 node.path("chunkedReview").asBoolean(false),
                                 node.path("focusAreas").asText(""),
                                 node.path("customInstructions").asText(""),
-                                node.path("operationId").asText());
+                                node.path("operationId").asText(),
+                                null);
+                    }
+                }
+                case "continueDeepReview" -> handleContinueDeepReview(node.deepCopy());
+                case "listDeepReviews", "cleanupDeepReview" ->
+                        handleDeepMaintenance(node.deepCopy());
                 case "cancelReview" -> cancelActiveReview(node.path("operationId").asText());
                 case "saveDraft" -> {
                     long saveId = node.path("saveId").asLong();
@@ -1111,6 +1256,11 @@ public class WebviewPanel implements Disposable {
         IntellijClaudeService service;
         ReviewProvider provider;
         synchronized (this) {
+            if (operationId != null && operationId.equals(deepOperationId)) {
+                deepPending = null;
+                deepOperationId = null;
+                deepPreparationRevision++;
+            }
             if (!StringUtils.equals(activeReviewOperationId, operationId)) return;
             activeGenerationId = generationSequence.incrementAndGet();
             service = activeReviewService;
@@ -1119,10 +1269,240 @@ public class WebviewPanel implements Disposable {
             activeReviewProvider = ReviewProvider.CLAUDE;
             activeReviewOperationId = null;
         }
-        service.cancelCurrentRequest(provider);
+        if (service != null) service.cancelCurrentRequest(provider);
     }
 
     // --- generateReview ---
+
+    private Object readDeepSettingsIdentity() {
+        PluginSettings settings = PluginSettings.getInstance();
+        return java.util.Arrays.asList(
+                IntellijClaudeService.snapshotReviewRuntimeSettings().identity(),
+                settings.getResolvedReviewFocusAreas(),
+                settings.getResolvedReviewCustomInstructions(),
+                List.copyOf(settings.getResolvedReviewGuidanceGlobs()));
+    }
+
+    record FreshDeepPr(IntellijGitHubService.PRHeadInfo head, String diff) {}
+
+    private FreshDeepPr freshDeepPr(int number, String owner, String repo) throws Exception {
+        var before = ghSvc.getPRHeadInfo(owner, repo, number);
+        String diff = ghSvc.getPRDiffFull(owner, repo, number);
+        var after = ghSvc.getPRHeadInfo(owner, repo, number);
+        if (before.sha() == null
+                || !before.sha().equals(after.sha())
+                || diff == null
+                || diff.isBlank())
+            throw new java.io.IOException("Cannot bind a fresh PR head and diff. Prepare again.");
+        return new FreshDeepPr(after, diff);
+    }
+
+    private void publishDeepPrepared(DeepPending pending, String operationId, String message) {
+        var p = pending.preparation();
+        pushMessage(
+                java.util.Map.of(
+                        "type",
+                        "deepReviewPrepared",
+                        "prKey",
+                        pending.key(),
+                        "operationId",
+                        operationId,
+                        "retainedId",
+                        p.retainedId(),
+                        "worktree",
+                        p.worktree(),
+                        "head",
+                        p.head(),
+                        "servers",
+                        p.servers(),
+                        "message",
+                        message));
+    }
+
+    private void handlePrepareDeepReview(JsonNode options) {
+        int number = options.path("number").asInt();
+        String owner = options.path("owner").asText(), repo = options.path("repo").asText();
+        String key = bridgePrKey(number, owner, repo);
+        final long revision, selection;
+        final Object settings = deepSettings.get();
+        synchronized (this) {
+            if (disposed || !matchesPrRequest(activePR, number, owner, repo)) return;
+            revision = ++deepPreparationRevision;
+            selection = selectionRevision;
+            deepPending = null;
+            deepOperationId = options.path("operationId").asText();
+        }
+        cancelActiveReview(activeReviewOperationId);
+        deepBackground.accept(
+                () -> {
+                    try {
+                        var fresh = deepIo.fresh(number, owner, repo);
+                        var prepared = deepIo.prepare(options, fresh);
+                        synchronized (this) {
+                            if (disposed
+                                    || revision != deepPreparationRevision
+                                    || !isCurrentSelectionLocked(key, selection)
+                                    || !settings.equals(deepSettings.get())) return;
+                            deepPending =
+                                    new DeepPending(
+                                            prepared,
+                                            options,
+                                            key,
+                                            selection,
+                                            settings,
+                                            fresh.diff(),
+                                            revision);
+                            publishDeepPrepared(
+                                    deepPending,
+                                    options.path("operationId").asText(),
+                                    "Open this exact worktree in IntelliJ, enable MCP and import Gradle. Continue may first arm tracking; then run one manual Gradle sync and Retry.");
+                        }
+                    } catch (Exception error) {
+                        synchronized (this) {
+                            if (!disposed
+                                    && revision == deepPreparationRevision
+                                    && isCurrentSelectionLocked(key, selection))
+                                pushMessage(
+                                        new ErrorMsg(
+                                                "reviewError",
+                                                key,
+                                                String.valueOf(error.getMessage())));
+                        }
+                    }
+                });
+    }
+
+    private void handleContinueDeepReview(JsonNode input) {
+        final DeepPending pending;
+        String operationId = input.path("operationId").asText(),
+                server = input.path("server").asText();
+        String key =
+                bridgePrKey(
+                        input.path("number").asInt(),
+                        input.path("owner").asText(),
+                        input.path("repo").asText());
+        synchronized (this) {
+            pending = deepPending;
+            if (disposed
+                    || pending == null
+                    || consumedDeepOperations.contains(operationId)
+                    || !pending.key().equals(key)
+                    || !isCurrentSelectionLocked(key, pending.selection())
+                    || !pending.preparation()
+                            .retainedId()
+                            .equals(input.path("retainedId").asText())) return;
+            if (pending.revision() != deepPreparationRevision
+                    || !pending.settings().equals(deepSettings.get())
+                    || !pending.preparation().servers().contains(server)) {
+                pushMessage(
+                        new ErrorMsg(
+                                "reviewError",
+                                key,
+                                "Stale, duplicate or changed deep review; prepare again."));
+                return;
+            }
+            consumedDeepOperations.add(operationId);
+            deepOperationId = operationId;
+            deepPending = null;
+        }
+        deepBackground.accept(
+                () -> {
+                    boolean refreshing = true;
+                    try {
+                        var o = pending.options();
+                        var fresh =
+                                deepIo.fresh(
+                                        o.path("number").asInt(),
+                                        o.path("owner").asText(),
+                                        o.path("repo").asText());
+                        refreshing = false;
+                        validateDeepHead(pending, fresh);
+                        deepIo.generate(pending, operationId, server);
+                    } catch (Exception error) {
+                        synchronized (this) {
+                            if (!disposed
+                                    && pending.revision() == deepPreparationRevision
+                                    && operationId.equals(deepOperationId)
+                                    && isCurrentSelectionLocked(key, pending.selection())) {
+                                if (refreshing && pending.settings().equals(deepSettings.get())) {
+                                    deepPending = pending;
+                                }
+                                pushMessage(
+                                        new ErrorMsg(
+                                                "reviewError",
+                                                key,
+                                                String.valueOf(error.getMessage())));
+                            }
+                        }
+                    }
+                });
+    }
+
+    private void validateDeepHead(DeepPending pending) throws Exception {
+        var o = pending.options();
+        var fresh =
+                deepIo.fresh(
+                        o.path("number").asInt(),
+                        o.path("owner").asText(),
+                        o.path("repo").asText());
+        validateDeepHead(pending, fresh);
+    }
+
+    private void validateDeepHead(DeepPending pending, FreshDeepPr fresh) throws Exception {
+        synchronized (this) {
+            if (disposed
+                    || pending.revision() != deepPreparationRevision
+                    || !fresh.head().sha().equals(pending.preparation().head())
+                    || !fresh.diff().equals(pending.diff())
+                    || !pending.settings().equals(deepSettings.get())
+                    || !isCurrentSelectionLocked(pending.key(), pending.selection()))
+                throw new java.io.IOException(
+                        "Deep review PR, settings or selection changed; prepare again.");
+        }
+    }
+
+    private void handleDeepMaintenance(JsonNode input) {
+        if (disposed) return;
+        deepBackground.accept(
+                () -> {
+                    try {
+                        if ("cleanupDeepReview".equals(input.path("type").asText()))
+                            deepIo.cleanup(
+                                    input.path("retainedId").asText(),
+                                    input.path("projectClosed").asBoolean());
+                        pushMessage(
+                                java.util.Map.of(
+                                        "type",
+                                        "retainedDeepReviews",
+                                        "operationId",
+                                        input.path("operationId").asText(),
+                                        "retained",
+                                        deepIo.list()));
+                    } catch (Exception error) {
+                        pushMessage(
+                                java.util.Map.of(
+                                        "type",
+                                        "deepReviewMaintenanceError",
+                                        "operationId",
+                                        input.path("operationId").asText(),
+                                        "message",
+                                        String.valueOf(error.getMessage())));
+                    }
+                });
+    }
+
+    private void handleGenerateReview(
+            int number,
+            String owner,
+            String repo,
+            String overrideDiff,
+            boolean chunkedReview,
+            String focus,
+            String custom,
+            String operationId) {
+        handleGenerateReview(
+                number, owner, repo, overrideDiff, chunkedReview, focus, custom, operationId, null);
+    }
 
     private void handleGenerateReview(
             int number,
@@ -1132,7 +1512,8 @@ public class WebviewPanel implements Disposable {
             boolean chunkedReview,
             String overrideFocusAreas,
             String overrideCustomInstructions,
-            String operationId) {
+            String operationId,
+            DeepInvocation deep) {
         String key = bridgePrKey(number, owner, repo);
         final PullRequest pr;
         final long reviewRevision;
@@ -1314,7 +1695,11 @@ public class WebviewPanel implements Disposable {
                                             "reviewGenerating", key, "Preparing PR branch…"));
                             IntellijClaudeService reviewService;
                             try {
-                                reviewService = resolvePrClaudeService(promptPr);
+                                reviewService =
+                                        deep == null
+                                                ? resolvePrClaudeService(promptPr)
+                                                : new IntellijClaudeService(
+                                                        deep.pending().preparation().worktree());
                             } catch (Exception e) {
                                 log.warn(
                                         "Worktree resolution for PR #{} failed: {}",
@@ -1356,11 +1741,15 @@ public class WebviewPanel implements Disposable {
                                 activeReviewProvider = generationSettings.runtime().provider();
                                 PrWorktree activeWorktree = worktrees.activeValue();
                                 guidelinesDir =
-                                        activeWorktree != null
-                                                ? activeWorktree.directory()
-                                                : (project.getBasePath() != null
-                                                        ? new java.io.File(project.getBasePath())
-                                                        : null);
+                                        deep != null
+                                                ? new java.io.File(
+                                                        deep.pending().preparation().worktree())
+                                                : activeWorktree != null
+                                                        ? activeWorktree.directory()
+                                                        : (project.getBasePath() != null
+                                                                ? new java.io.File(
+                                                                        project.getBasePath())
+                                                                : null);
                                 priorResult = lastResult;
                             }
                             publishIfCurrentGeneration(
@@ -1494,13 +1883,38 @@ public class WebviewPanel implements Disposable {
                                         String lower = err.toLowerCase(java.util.Locale.ROOT);
                                         if (!lower.contains("cancel")
                                                 && !lower.contains("interrupt")) {
+                                            if (deep != null) {
+                                                synchronized (WebviewPanel.this) {
+                                                    if (!disposed
+                                                            && deep.pending().revision()
+                                                                    == deepPreparationRevision
+                                                            && isCurrentGenerationLocked(
+                                                                    key,
+                                                                    reviewRevision,
+                                                                    generationId)) {
+                                                        deepPending = deep.pending();
+                                                        publishDeepPrepared(
+                                                                deep.pending(), operationId, err);
+                                                    }
+                                                }
+                                                return;
+                                            }
                                             publishIfCurrentGeneration(
                                                     key,
                                                     reviewRevision,
                                                     generationId,
                                                     new ErrorMsg("reviewError", key, err));
                                         }
-                                    });
+                                    },
+                                    deep == null
+                                            ? null
+                                            : new IntellijClaudeService.DeepReviewOperation(
+                                                    semanticReviews,
+                                                    deep.pending().preparation().retainedId(),
+                                                    deep.server(),
+                                                    owner + "/" + repo + "#" + number,
+                                                    operationId,
+                                                    () -> validateDeepHead(deep.pending())));
                         });
     }
 
@@ -2241,6 +2655,10 @@ public class WebviewPanel implements Disposable {
      * literal characters inside JSON strings.
      */
     private void pushMessage(Object payload) {
+        if (testMessageSink != null) {
+            publishIfActive(this, () -> disposed, () -> testMessageSink.accept(payload));
+            return;
+        }
         try {
             ObjectNode versioned = mapper.valueToTree(payload);
             versioned.put("protocolVersion", BridgeMessageValidator.PROTOCOL_VERSION);

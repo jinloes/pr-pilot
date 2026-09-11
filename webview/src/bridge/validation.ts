@@ -32,6 +32,7 @@ const PR_SCOPED_TYPES = new Set([
   'draftLoading', 'draftLoaded', 'reviewGenerating', 'reviewChunk', 'reviewResult',
   'reviewError', 'validationDiffUpdated', 'draftSaved', 'draftSaveError',
   'reviewSubmitted', 'reviewSubmitError', 'draftDeleted', 'draftDeleteError',
+  'deepReviewPrepared',
 ])
 
 function isLineComment(value: unknown): value is LineComment {
@@ -136,6 +137,27 @@ export function parseIncomingMessage(value: unknown): IncomingMessage | null {
     case 'draftDeleteError':
     case 'chatError':
       valid = hasMessage(value)
+      break
+    case 'deepReviewPrepared':
+      valid = isString(value.operationId, 128) && !!value.operationId
+        && isString(value.retainedId, 36) && /^[0-9a-f-]{36}$/.test(value.retainedId)
+        && isString(value.worktree, 4096) && value.worktree.startsWith('/')
+        && isString(value.head, 64) && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(value.head)
+        && Array.isArray(value.servers) && value.servers.length > 0 && value.servers.length <= 100
+        && value.servers.every(s => isString(s, 255) && s.length > 0)
+        && new Set(value.servers).size === value.servers.length && hasMessage(value)
+      break
+    case 'retainedDeepReviews':
+      valid = isString(value.operationId, 128) && !!value.operationId
+        && Array.isArray(value.retained) && value.retained.length <= 1000
+        && value.retained.every(r => isRecord(r) && isString(r.id, 36) && /^[0-9a-f-]{36}$/.test(r.id)
+          && isString(r.worktree, 4096) && r.worktree.startsWith('/')
+          && isString(r.repository, 4096) && r.repository.startsWith('/')
+          && isString(r.head, 64) && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(r.head)
+          && Number.isSafeInteger(r.createdAt) && (r.createdAt as number) > 0)
+      break
+    case 'deepReviewMaintenanceError':
+      valid = isString(value.operationId, 128) && !!value.operationId && hasMessage(value)
       break
     case 'reviewChunk':
       valid = ['text', 'thinking'].includes(value.kind as string) && isString(value.chunk)

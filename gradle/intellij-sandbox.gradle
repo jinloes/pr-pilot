@@ -1,0 +1,119 @@
+import groovy.json.JsonSlurper
+import groovy.json.JsonException
+
+// Injected inputs let the verification task exercise the production policy without launching an IDE.
+ext.selectSandboxIde = { String override, List<File> directories, String os, Closure report ->
+    def inspect = { File candidate ->
+        File home = candidate.canonicalFile
+        if (!home.isDirectory() || !home.canRead()) {
+            throw new GradleException("Not a readable IntelliJ installation: ${candidate}")
+        }
+        File metadata = [new File(home, 'Contents/Resources/product-info.json'),
+                         new File(home, 'product-info.json')].find { it.isFile() && it.canRead() }
+        if (metadata == null || metadata.length() > 1024 * 1024) {
+            throw new GradleException("Missing or oversized product-info.json: ${home}")
+        }
+        def product
+        try {
+            product = new JsonSlurper().parse(metadata, 'UTF-8')
+        } catch (JsonException | IOException e) {
+            throw new GradleException("Malformed product-info.json: ${home}", e)
+        }
+        if (!(product instanceof Map) || !(product.productCode in ['IU', 'IC']) ||
+            !(product.name instanceof String) || !product.name.startsWith('IntelliJ IDEA') ||
+            !(product.version instanceof String) || product.version.trim().isEmpty() ||
+            !(product.buildNumber instanceof String) ||
+            !(product.buildNumber ==~ /[0-9]+(\.[0-9]+)+/)) {
+            throw new GradleException("Invalid IntelliJ product identity/build metadata: ${home}")
+        }
+        def build = product.buildNumber.split(/\./).collect { new BigInteger(it) }
+        if (build[0] < 262) {
+            throw new GradleException("Local deep-review sandbox requires IntelliJ build >=262: ${home}")
+        }
+        def launch = product.launch instanceof List ? product.launch.find { entry ->
+            entry instanceof Map && entry.os == os && entry.launcherPath instanceof String
+        } : null
+        if (launch == null) {
+            throw new GradleException("Missing ${os} launcher metadata: ${home}")
+        }
+        File launcher = new File(metadata.parentFile, launch.launcherPath).canonicalFile
+        if (!launcher.toPath().startsWith(home.toPath()) || !launcher.isFile() ||
+            !launcher.canRead() || (os != 'Windows' && !launcher.canExecute())) {
+            throw new GradleException("Missing or invalid ${os} launcher: ${home}")
+        }
+        if (!(launch.javaExecutablePath instanceof String)) {
+            throw new GradleException("Missing bundled runtime metadata: ${home}")
+        }
+        File runtime = new File(metadata.parentFile, launch.javaExecutablePath).canonicalFile
+        if (!runtime.toPath().startsWith(home.toPath()) || !runtime.isFile() ||
+            !runtime.canRead() || (os != 'Windows' && !runtime.canExecute())) {
+            throw new GradleException("Missing or invalid bundled runtime: ${home}")
+        }
+        [path: home, version: product.version, build: product.buildNumber, tuple: build]
+    }
+    if (override != null) {
+        if (override.trim().isEmpty() || !new File(override).isAbsolute()) {
+            throw new GradleException('ideaLocalPath must be an absolute IntelliJ installation path')
+        }
+        def selected = inspect(new File(override))
+        report("Local sandbox: ${selected.path} (version ${selected.version}, build ${selected.build})")
+        return selected
+    }
+    if (os != 'macOS') {
+        throw new GradleException('Set ideaLocalPath to an IntelliJ build >=262 for runIdeLocal on this OS')
+    }
+    def candidates = directories.collectMany { dir ->
+        (dir.listFiles() ?: [] as File[]).findAll {
+            it.name.startsWith('IntelliJ') && it.name.endsWith('.app')
+        }
+    }
+    def valid = []
+    candidates.each { candidate ->
+        try {
+            valid.add(inspect(candidate))
+        } catch (GradleException | IOException e) {
+            report("Skipping local sandbox candidate ${candidate}: ${e.message}")
+        }
+    }
+    valid = valid.unique { it.path.path }
+    valid.sort { a, b ->
+        int comparison = 0
+        for (int i = 0; i < Math.max(a.tuple.size(), b.tuple.size()); i++) {
+            comparison = (i < b.tuple.size() ? b.tuple[i] : BigInteger.ZERO) <=>
+                (i < a.tuple.size() ? a.tuple[i] : BigInteger.ZERO)
+            if (comparison != 0) break
+        }
+        comparison != 0 ? comparison : a.path.path <=> b.path.path
+    }
+    if (valid.isEmpty()) {
+        throw new GradleException('No eligible IntelliJ build >=262; install one or set ideaLocalPath for runIdeLocal')
+    }
+    def selected = valid.first()
+    report("Local sandbox: ${selected.path} (version ${selected.version}, build ${selected.build})")
+    selected
+}
+
+def selector = ext.selectSandboxIde
+def overridePath = providers.gradleProperty('ideaLocalPath')
+def localSelection = providers.provider {
+    String osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+    String os = osName.contains('mac') ? 'macOS' : osName.contains('windows') ? 'Windows' : 'Linux'
+    selector(overridePath.orNull,
+        [new File(System.getProperty('user.home'), 'Applications'), new File('/Applications')],
+        os, { message -> logger.lifecycle(message) })
+}
+ext.sandboxIdeSelection = localSelection
+
+intellijPlatformTesting {
+    runIde {
+        register('runIdeLocal') {
+            localPath.set(layout.dir(localSelection.map { it.path }))
+        }
+    }
+}
+
+tasks.register('printSandboxIdeSelection') {
+    group = 'intellij platform'
+    description = 'Validates and prints the local sandbox IDE without launching it.'
+    doLast { localSelection.get() }
+}

@@ -8,6 +8,9 @@ version = providers.gradleProperty('releaseVersion').orElse('1.0.4').get()
 
 repositories {
     mavenCentral()
+    apply from: rootProject.file('gradle/intellij-sandbox.gradle')
+    apply from: rootProject.file('gradle/intellij-sandbox-tests.gradle')
+
     intellijPlatform {
         defaultRepositories()
     }
@@ -41,22 +44,10 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     intellijPlatform {
-        // Set ideaLocalPath in ~/.gradle/gradle.properties to override the local IDE.
-        def configuredLocalIdea = providers.gradleProperty('ideaLocalPath').orNull
-        def userHome = System.getProperty('user.home')
-        def localIdeaCandidates = [
-            configuredLocalIdea,
-            "${userHome}/Applications/IntelliJ IDEA 2026.2.0.1.app",
-        ].findAll { it != null }
-            .collect { file(it) }
-
-        def localIdea = localIdeaCandidates.find { it.exists() }
-        if (localIdea != null) {
-            local(localIdea)
-        } else {
-            intellijIdeaUltimate('2026.1.4')
-        }
+        // Compile against the ordinary-review floor, never a user's running IDE.
+        intellijIdeaUltimate('2026.1.4')
         bundledPlugin('com.intellij.modules.jcef')
+        bundledPlugin('com.intellij.mcpServer')
     }
 }
 
@@ -68,11 +59,21 @@ tasks.register('unitTest', Test) {
     description = 'Runs plain JUnit 5 unit tests without the IntelliJ Platform sandbox.'
     group = 'verification'
     useJUnitPlatform()
+    // The actual SDK filesystem wrapper implements this JDK-internal interface.
+    jvmArgs '--add-exports=java.base/sun.nio.fs=ALL-UNNAMED'
+    dependsOn ':review-engine:sourceInventoryWorkerJar', ':review-engine:testClasses'
+    systemProperty 'sourceInventory.workerJar', project(':review-engine').layout.buildDirectory.file('libs/pr-pilot-source-inventory-worker.jar').get().asFile.absolutePath
     testClassesDirs = sourceSets.test.output.classesDirs
-    classpath = sourceSets.test.runtimeClasspath +
+    classpath = sourceSets.test.runtimeClasspath + files(project(':review-engine').layout.buildDirectory.dir('classes/java/test')) +
         configurations.intellijPlatformTestClasspath.filter { f ->
             !f.name.startsWith('testFramework')
         }
+
+}
+
+tasks.named('compileTestJava') {
+    dependsOn ':review-engine:testClasses'
+    classpath += files(project(':review-engine').layout.buildDirectory.dir('classes/java/test'))
 }
 
 // Wire unitTest into the standard check lifecycle so `./gradlew check` runs it.

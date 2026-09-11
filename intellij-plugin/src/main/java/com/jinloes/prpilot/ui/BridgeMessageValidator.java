@@ -16,6 +16,9 @@ final class BridgeMessageValidator {
                     "refreshPRs",
                     "selectPR",
                     "generateReview",
+                    "continueDeepReview",
+                    "listDeepReviews",
+                    "cleanupDeepReview",
                     "cancelReview",
                     "saveDraft",
                     "submitReview",
@@ -66,8 +69,21 @@ final class BridgeMessageValidator {
                             && hasValidPrIdentity(node)
                             && optionalText(node.get("diff"), MAX_REVIEW_DIFF)
                             && optionalBoolean(node.get("chunkedReview"))
+                            && optionalBoolean(node.get("intellijAssisted"))
                             && optionalText(node.get("focusAreas"), 10_000)
                             && optionalText(node.get("customInstructions"), 20_000);
+            case "continueDeepReview" ->
+                    hasValidPrIdentity(node)
+                            && validOperationId(node.get("operationId"))
+                            && validOperationId(node.get("retainedId"))
+                            && boundedText(node.get("server"), 255)
+                            && !node.path("server").asText().isBlank();
+            case "listDeepReviews" -> validOperationId(node.get("operationId"));
+            case "cleanupDeepReview" ->
+                    validOperationId(node.get("operationId"))
+                            && validOperationId(node.get("retainedId"))
+                            && node.path("projectClosed").isBoolean()
+                            && node.path("projectClosed").asBoolean();
             case "saveDraft" ->
                     hasValidPrIdentity(node)
                             && node.path("saveId").canConvertToLong()
