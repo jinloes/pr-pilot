@@ -305,6 +305,9 @@ test('populated discovery layout', async ({ page }) => {
       limited: false,
       reviewStatusAvailable: true,
     },
+    providerReadiness: {
+      provider: 'copilot', available: true, authenticationStatus: 'unverified', detail: 'CLI found',
+    },
   })
   await expect(page.locator('nav li > button')).toHaveCount(2)
   await expect(page.getByText(examplePr.title, { exact: true })).toBeVisible()
@@ -334,6 +337,9 @@ test('narrow pseudo-localized layout', async ({ page }) => {
       resultLimit: 50,
       limited: false,
       reviewStatusAvailable: true,
+    },
+    providerReadiness: {
+      provider: 'claude', available: true, authenticationStatus: 'unverified', detail: 'CLI found',
     },
   })
   await expect(page.locator('nav li > button').first()).toBeInViewport()

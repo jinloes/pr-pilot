@@ -6,6 +6,7 @@ interface Props {
   pr: PR
   selected: boolean
   spotlighted: boolean
+  compactMetadata?: boolean
   onClick: () => void
 }
 
@@ -23,7 +24,7 @@ function formatCreatedAt(createdAt?: string): string {
   return date.toLocaleDateString()
 }
 
-export function PRListItem({ pr, selected, spotlighted, onClick }: Props) {
+export function PRListItem({ pr, selected, spotlighted, compactMetadata = false, onClick }: Props) {
   const date = formatCreatedAt(pr.createdAt)
 
   return (
@@ -37,11 +38,24 @@ export function PRListItem({ pr, selected, spotlighted, onClick }: Props) {
       aria-current={selected ? 'page' : undefined}
     >
       <span className="line-clamp-2 text-sm leading-snug text-foreground">{pr.title}</span>
-      <span className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 font-mono text-xs text-muted-foreground">
-        <span className="min-w-0 break-all">{pr.owner}/{pr.repo}</span>
-        <span className="shrink-0">#{pr.number}</span>
-      </span>
-      <span className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-0.5 text-xs text-muted-foreground">
+      {compactMetadata ? (
+        <span className="sr-only">{pr.owner}/{pr.repo}</span>
+      ) : (
+        <span className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 font-mono text-xs text-muted-foreground">
+          <span className="min-w-0 break-all">{pr.owner}/{pr.repo}</span>
+          <span className="shrink-0">#{pr.number}</span>
+        </span>
+      )}
+      <span className={cn(
+        'flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-0.5 text-xs text-muted-foreground',
+        compactMetadata ? 'mt-1' : 'mt-0.5',
+      )}>
+        {compactMetadata && (
+          <>
+            <span className="break-all font-mono">#{pr.number}</span>
+            <span aria-hidden="true">·</span>
+          </>
+        )}
         <span className="min-w-0 break-all">@{pr.author}</span>
         {date && (
           <>

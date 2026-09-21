@@ -82,6 +82,157 @@ test('populated discovery and provider-ready review have no axe violations', asy
   await expectNoViolations(page)
 })
 
+for (const width of [220, 280, 320, 396, 520]) {
+  for (const theme of ['light', 'dark', 'highContrastLight', 'highContrastDark'] as const) {
+    test(`discovery context and neutral readiness at ${width}px in ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await pushHostMessage(page, { type: 'themeChanged', theme })
+      const provider = width === 320 || width === 520 ? 'claude' : 'copilot'
+      const longRepo = 'organization-with-a-long-name/repository-with-a-long-name'
+      const pr = {
+        ...examplePr,
+        owner: 'organization-with-a-long-name',
+        repo: 'repository-with-a-long-name',
+        author: 'reviewer-with-a-long-name',
+        title: 'A long pull request title that must wrap without displacing repository context',
+        isDraft: true, hasReviewDraft: true, reviewStatus: 'UPDATED_SINCE_REVIEW',
+      }
+      const listStatus = {
+        searchScope: 'currentRepo', currentRepo: longRepo, resultLimit: 50,
+        limited: false, reviewStatusAvailable: true,
+      }
+      await pushHostMessage(page, {
+        type: 'prListLoaded', prs: [pr, { ...examplePr, number: 43 }], listStatus,
+        providerReadiness: { provider, available: true, authenticationStatus: 'unverified', detail: 'CLI found' },
+      })
+      const nav = page.locator('nav')
+      await expect(page.getByTestId('pr-list-shell')).toHaveCSS('width', `${width}px`)
+      await expect(page.getByTestId('pr-list-repository')).toHaveText(longRepo)
+      const rows = nav.locator('li > button')
+      await expect(rows.first().getByText(longRepo)).toHaveClass('sr-only')
+      await expect(rows.nth(1).getByText('acme/platform')).not.toHaveClass('sr-only')
+      await expect(rows.first()).toHaveAccessibleName(new RegExp(longRepo))
+      const coach = nav.getByRole('status').filter({ hasText: 'Sign-in has not been checked.' })
+      await expect(coach).toHaveClass(/bg-muted/)
+      await expect(coach.locator('svg').first()).toHaveClass(/lucide-info/)
+      await expect(coach).toContainText(provider === 'copilot' ? 'Copilot CLI found.' : 'Claude CLI found.')
+      const contrasts = await coach.evaluate((element) => {
+        const canvas = document.createElement('canvas')
+        const context = canvas.getContext('2d')!
+        const luminance = (color: string) => {
+          context.fillStyle = color
+          context.fillRect(0, 0, 1, 1)
+          const rgb = Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3)
+          const linear = rgb.map(value => {
+            const channel = value / 255
+            return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+          })
+          return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+        }
+        const background = luminance(getComputedStyle(element).backgroundColor)
+        return ['p', 'svg'].map(selector => {
+          const foreground = luminance(getComputedStyle(element.querySelector(selector)!).color)
+          return (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05)
+        })
+      })
+      expect(contrasts[0]).toBeGreaterThanOrEqual(4.5)
+      expect(contrasts[1]).toBeGreaterThanOrEqual(3)
+      for (const element of [nav, coach, page.getByTestId('pr-list-repository'), rows.first(), rows.nth(1)]) {
+        expect(await element.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true)
+      }
+      await expectNoViolations(page, 'nav')
+      const dismiss = coach.getByRole('button', { name: 'Dismiss readiness message' })
+      if (width === 220) {
+        await dismiss.focus()
+        await expect(dismiss).toBeFocused()
+        await page.keyboard.press('Enter')
+      } else {
+        await dismiss.click()
+      }
+      await expect(coach).toHaveCount(0)
+      await expect.poll(() => page.evaluate(() => localStorage.getItem('pr-pilot:first-success-coach-shown'))).toBe('1')
+    })
+  }
+}
+
+test('discovery compact rows remove one line, preserve keyboard selection and fall back during scope transitions', async ({ page }) => {
+  await page.setViewportSize({ width: 396, height: 900 })
+  const pr = { ...examplePr, title: 'Short title', author: 'octocat', createdAt: '2026-07-10T10:00:00Z', reviewStatus: 'UNREVIEWED' }
+  const listStatus = { searchScope: 'currentRepo', currentRepo: 'acme/platform', resultLimit: 50, limited: false, reviewStatusAvailable: true }
+  await pushHostMessage(page, { type: 'prListLoaded', prs: [pr], listStatus })
+  const row = page.locator('nav li > button')
+  const compactHeight = (await row.boundingBox())!.height
+  const titleFont = await row.getByText('Short title').evaluate(node => getComputedStyle(node).fontSize)
+  expect(titleFont).toBe('14px')
+  await expect(row.getByText('@octocat')).toHaveCSS('font-size', '12px')
+  await pushHostMessage(page, { type: 'prListLoaded', prs: [pr] })
+  await expect(page.getByTestId('pr-list-repository')).toHaveCount(0)
+  await expect(row.getByText('acme/platform')).not.toHaveClass('sr-only')
+  expect((await row.boundingBox())!.height - compactHeight).toBeGreaterThanOrEqual(16)
+  await pushHostMessage(page, { type: 'prListLoaded', prs: [pr], listStatus })
+  await page.getByRole('combobox', { name: 'Pull request scope' }).click()
+  await page.getByRole('option', { name: 'Authored by me', exact: true }).click()
+  await expect(page.getByTestId('pr-list-repository')).toHaveCount(0)
+  await expect(row.getByText('acme/platform')).not.toHaveClass('sr-only')
+  await pushHostMessage(page, { type: 'prListLoaded', prs: [pr], listStatus: { ...listStatus, searchScope: 'authored' } })
+  await expect(page.getByTestId('pr-list-repository')).toHaveCount(0)
+  await page.getByRole('combobox', { name: 'Pull request scope' }).click()
+  await page.getByRole('option', { name: 'Current repo', exact: true }).click()
+  await expect(page.getByTestId('pr-list-repository')).toHaveCount(0)
+  await pushHostMessage(page, { type: 'prListLoaded', prs: [pr], listStatus })
+  await expect(page.getByTestId('pr-list-repository')).toHaveText('acme/platform')
+  const filter = page.getByRole('textbox', { name: 'Filter pull requests' })
+  await filter.fill('#42')
+  await expect(row).toHaveCount(1)
+  await filter.press('Escape')
+  await expect(filter).toHaveValue('')
+  await expect(row).toHaveCount(1)
+  await row.focus()
+  await expect(row).toBeFocused()
+  await page.keyboard.press('Space')
+  expect(await latestHostRequest(page, 'selectPR')).toMatchObject({ number: 42, owner: 'acme', repo: 'platform' })
+})
+
+for (const width of [220, 280, 320, 396, 520]) {
+  test(`discovery expanded readiness and repository text wrap at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto('/?locale=pseudo')
+    await page.evaluate(() => localStorage.removeItem('pr-pilot:first-success-coach-shown'))
+    await pushHostMessage(page, {
+      type: 'prListLoaded',
+      prs: [{ ...examplePr, owner: 'long-organization-name', repo: 'long-repository-name', author: 'long-reviewer-name' }],
+      listStatus: { searchScope: 'currentRepo', currentRepo: 'long-organization-name/long-repository-name', resultLimit: 50, limited: false, reviewStatusAvailable: true },
+      providerReadiness: { provider: 'claude', available: true, authenticationStatus: 'unverified', detail: 'CLI found' },
+    })
+    const coach = page.locator('nav [role="status"]').filter({ has: page.locator('.lucide-info') })
+    await expect(coach).toContainText('⟦')
+    expect(await coach.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true)
+    for (const selector of ['nav li > button', '[data-testid="pr-list-repository"]', 'nav']) {
+      const geometry = await page.locator(selector).evaluate(node => ({
+        clientWidth: node.clientWidth, scrollWidth: node.scrollWidth,
+        overflowing: Array.from(node.querySelectorAll('*')).filter(child => child.clientWidth && child.scrollWidth > child.clientWidth && !child.classList.contains('sr-only'))
+          .map(child => ({ tag: child.tagName, className: child.getAttribute('class'), clientWidth: child.clientWidth, scrollWidth: child.scrollWidth })),
+      }))
+      expect(geometry.scrollWidth, `${width}px ${selector}: ${JSON.stringify(geometry)}`).toBeLessThanOrEqual(geometry.clientWidth)
+    }
+    await expectNoViolations(page, 'nav')
+    const stateButtons = page.getByRole('radiogroup').getByRole('radio')
+    await expect(stateButtons).toHaveCount(3)
+    const navBox = (await page.locator('nav').boundingBox())!
+    for (const button of await stateButtons.all()) {
+      const box = (await button.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(navBox.x)
+      expect(box.x + box.width).toBeLessThanOrEqual(navBox.x + navBox.width)
+      expect(box.height).toBeGreaterThanOrEqual(24)
+    }
+    await stateButtons.first().focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(stateButtons.nth(1)).toBeFocused()
+    await page.keyboard.press('Space')
+    expect(await latestHostRequest(page, 'refreshPRs')).toMatchObject({ state: 'closed' })
+  })
+}
+
 test('narrow discovery exceptions and simultaneous statuses have no axe violations', async ({ page }) => {
   await page.setViewportSize({ width: 220, height: 720 })
   await page.evaluate(() => localStorage.setItem('pr-pilot:first-success-coach-shown', '1'))

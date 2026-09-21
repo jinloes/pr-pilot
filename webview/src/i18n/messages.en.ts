@@ -6,6 +6,8 @@ export const englishMessages = {
   'filter.scope': 'Pull request search scope',
   'filter.repository': 'Repository filter',
   'filter.state': 'Pull request state',
+  'readiness.copilotUnverified': 'Copilot CLI found. Sign-in has not been checked.',
+  'readiness.claudeUnverified': 'Claude CLI found. Sign-in has not been checked.',
   'review.focusAreas': 'Focus areas',
   'review.customInstructions': 'Custom instructions for this review',
   'review.advanced': 'Advanced review options',

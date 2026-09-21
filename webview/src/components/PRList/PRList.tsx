@@ -74,8 +74,8 @@ export function PRList({ onSelect, selectedPr }: Props) {
           return refreshed
         })
         setRepoFilter(msg.defaultRepo ?? 'all')
+        setListStatus(msg.listStatus ?? null)
         if (msg.listStatus) {
-          setListStatus(msg.listStatus)
           setSearchScope(msg.listStatus.searchScope)
         }
         setProviderReadiness(msg.providerReadiness ?? null)
@@ -139,16 +139,24 @@ export function PRList({ onSelect, selectedPr }: Props) {
     if (repoFilter !== 'all' && !repos.includes(repoFilter)) setRepoFilter('all')
   }, [repos, repoFilter])
 
+  // While a refresh is pending, keep row identities until its context arrives with the results.
+  const displayedRepo = !loading && !refreshing
+    && searchScope === 'currentRepo' && listStatus?.searchScope === 'currentRepo'
+    && listStatus.currentRepo?.trim()
+    ? listStatus.currentRepo
+    : undefined
+
+  const query = filter.trim().toLowerCase()
+  const numberQuery = /^#[0-9]+$/.test(query) ? query.slice(1) : query
   const filtered = prs.filter((pr) => {
     const repoKey = `${pr.owner}/${pr.repo}`
     if (repoFilter !== 'all' && repoKey !== repoFilter) return false
-    if (filter === '') return true
-    const q = filter.toLowerCase()
+    if (query === '') return true
     return (
-      pr.title.toLowerCase().includes(q) ||
-      pr.author.toLowerCase().includes(q) ||
-      repoKey.toLowerCase().includes(q) ||
-      String(pr.number).includes(q)
+      pr.title.toLowerCase().includes(query) ||
+      pr.author.toLowerCase().includes(query) ||
+      repoKey.toLowerCase().includes(query) ||
+      String(pr.number).includes(numberQuery)
     )
   })
   const spotlightedPr = spotlightedKey
@@ -264,6 +272,12 @@ export function PRList({ onSelect, selectedPr }: Props) {
           </Tooltip>
         </div>
 
+        {displayedRepo && (
+          <p data-testid="pr-list-repository" className="min-w-0 break-all font-mono text-xs text-muted-foreground">
+            {displayedRepo}
+          </p>
+        )}
+
         <PRListControls
           prs={prs}
           repos={repos}
@@ -306,13 +320,13 @@ export function PRList({ onSelect, selectedPr }: Props) {
           {!loading && filtered.length === 0 && (
             <div className="flex flex-col items-start gap-3 p-5">
               <p className="text-sm text-muted-foreground">
-                {filter
+                {query
                   ? `No results for "${filter}"`
                   : repoFilter !== 'all'
                     ? `No pull requests in ${repoFilter}`
                     : `No pull requests for ${scopeLabel(searchScope).toLowerCase()}`}
               </p>
-              {!filter && (
+              {!query && (
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     variant="outline"
@@ -388,6 +402,7 @@ export function PRList({ onSelect, selectedPr }: Props) {
               <li key={prKey(pr)}>
                 <PRListItem
                   pr={pr}
+                  compactMetadata={displayedRepo === `${pr.owner}/${pr.repo}`}
                   selected={selected === prKey(pr)}
                   spotlighted={spotlightedKey === prKey(pr)}
                   onClick={() => handleSelect(pr)}

@@ -54,7 +54,7 @@ export function PRListControls({
           type="single"
           value={stateFilter}
           onValueChange={onStateFilter}
-          className="gap-1"
+          className="min-w-0 max-w-full flex-wrap justify-start gap-1"
           aria-label="Pull request state"
         >
           {(['open', 'closed', 'all'] as StateFilter[]).map((state) => (

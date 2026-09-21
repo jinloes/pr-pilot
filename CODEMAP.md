@@ -192,12 +192,15 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
 - `src/App.tsx` - Application state and top-level host workflow.
 - `src/bridge/types.ts` - Cross-host message schemas.
 - `src/components/` - PR discovery, diff, review, chat, settings-adjacent UI, and reusable controls.
-- `src/components/PRList/PRList.tsx` - Pull-request discovery state and host-message ingestion.
+- `src/components/PRList/PRList.tsx` - Pull-request discovery state, host-message ingestion,
+  shared current-repository context, and local text/#number filtering.
 - `src/components/PRList/PRListControls.tsx`, `PRListNotices.tsx` - Scope/filter controls and
-  exception-only list notices.
+  exception-only list notices; state controls wrap in narrow, expanded-text layouts.
 - `src/components/PRList/PRListItem.tsx`, `PRStatusBadges.tsx` - Title-first rows and readable
-  draft/notification/review-freshness badges.
-- `src/components/PRList/ReadinessCoach.tsx` - Compact persisted first-success confirmation.
+  draft/notification/review-freshness badges; compact metadata only when shared repository context
+  matches, with repository identity retained for accessibility and out-of-context rows.
+- `src/components/PRList/ReadinessCoach.tsx` - Compact persisted first-success confirmation;
+  unverified provider sign-in uses localized, neutral information styling.
 - `src/components/Setup/` - App-level prerequisite recovery UI and the setup reason/action matrix.
 - `src/components/ReviewPane/ReviewPane.tsx` - Review feature composition root and public component API.
 - `src/components/ReviewPane/useReviewController.ts` - PR-scoped bridge events, autosave, mutation

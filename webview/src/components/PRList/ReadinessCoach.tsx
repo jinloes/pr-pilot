@@ -1,5 +1,7 @@
-import { CheckCircle2, X } from 'lucide-react'
+import { CheckCircle2, Info, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useI18n } from '@/i18n/I18nProvider'
+import { cn } from '@/lib/utils'
 import type { ProviderReadiness } from '../../bridge/types'
 
 interface Props {
@@ -9,17 +11,29 @@ interface Props {
 }
 
 export function ReadinessCoach({ providerReadiness, recoveredSetup, onDismiss }: Props) {
-  const readiness = providerReadiness?.authenticationStatus === 'unverified'
-    ? `${providerReadiness.provider === 'copilot' ? 'Copilot' : 'Claude'} CLI found; authentication is unverified.`
+  const t = useI18n()
+  const unverified = providerReadiness?.authenticationStatus === 'unverified'
+  const Icon = unverified ? Info : CheckCircle2
+  const readiness = unverified
+    ? t(providerReadiness.provider === 'copilot' ? 'readiness.copilotUnverified' : 'readiness.claudeUnverified')
     : recoveredSetup
       ? 'GitHub and the review provider are ready.'
       : 'PR Pilot is ready.'
 
   return (
-    <div className="shrink-0 border-b border-border bg-status-approve/5 px-3 py-1.5" role="status">
+    <div className={cn(
+      'shrink-0 border-b border-border px-3 py-1.5',
+      unverified ? 'bg-muted' : 'bg-status-approve/5',
+    )} role="status">
       <div className="flex items-start gap-2">
-        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-status-approve" aria-hidden="true" />
-        <p className="min-w-0 flex-1 text-xs leading-5 text-foreground">
+        <Icon className={cn(
+          'mt-0.5 h-4 w-4 shrink-0',
+          unverified ? 'text-muted-foreground' : 'text-status-approve',
+        )} aria-hidden="true" />
+        <p className={cn(
+          'min-w-0 flex-1 break-words text-xs leading-5',
+          unverified ? 'text-muted-foreground' : 'text-foreground',
+        )}>
           <span className="font-semibold">{readiness}</span>{' '}
           Choose a pull request to start.
         </p>
