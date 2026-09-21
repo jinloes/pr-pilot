@@ -43,7 +43,7 @@ function isLineComment(value: unknown): value is LineComment {
     && ['issue', 'suggestion', 'note'].includes(value.type as string)
     && isString(value.body)
     && (value.severity === undefined || ['blocker', 'major', 'minor', 'nit'].includes(value.severity as string))
-    && (value.category === undefined || ['correctness', 'security', 'performance', 'tests', 'maintainability', 'style'].includes(value.category as string))
+    && (value.category === undefined || ['correctness', 'security', 'performance', 'tests', 'maintainability', 'compatibility', 'style'].includes(value.category as string))
     && (value.confidence === undefined || ['low', 'medium', 'high'].includes(value.confidence as string))
     && isOptionalString(value.rationale)
 }

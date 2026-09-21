@@ -133,8 +133,9 @@ class ReviewOutcomeLogTest {
         @Test
         void carriesMetadataAndSegmentationFieldsOntoEveryRecord() {
             LineComment generated = comment("A.java", 10, "bug");
-            generated.setSeverity("Major");
-            generated.setConfidence("High");
+            generated.setSeverity("major");
+            generated.setCategory("compatibility");
+            generated.setConfidence("high");
 
             ReviewOutcomeLog.OutcomeRecord record =
                     log.classify(List.of(generated), List.of(), META).get(0);
@@ -144,6 +145,7 @@ class ReviewOutcomeLogTest {
             assertThat(record.model()).isEqualTo("sonnet");
             assertThat(record.type()).isEqualTo("issue");
             assertThat(record.severity()).isEqualTo("major");
+            assertThat(record.category()).isEqualTo("compatibility");
             assertThat(record.confidence()).isEqualTo("high");
             assertThat(record.recordedAt()).isNotBlank();
         }
@@ -163,6 +165,17 @@ class ReviewOutcomeLogTest {
         void ignoresWhitespaceReflow() {
             assertThat(ReviewOutcomeLog.fingerprint(comment("A.java", 10, "a  b")))
                     .isEqualTo(ReviewOutcomeLog.fingerprint(comment("A.java", 10, " a b ")));
+        }
+
+        @Test
+        void categoryDoesNotAffectFingerprint() {
+            LineComment first = comment("A.java", 10, "bug");
+            first.setCategory("correctness");
+            LineComment second = comment("A.java", 10, "bug");
+            second.setCategory("compatibility");
+
+            assertThat(ReviewOutcomeLog.fingerprint(first))
+                    .isEqualTo(ReviewOutcomeLog.fingerprint(second));
         }
 
         @Test

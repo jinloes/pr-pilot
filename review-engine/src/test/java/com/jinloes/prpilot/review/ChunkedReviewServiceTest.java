@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class ChunkedReviewServiceTest {
@@ -174,6 +175,39 @@ class ChunkedReviewServiceTest {
                 .startsWith("## Degraded mode")
                 .contains(longSummary + "1", longSummary + "2");
         assertThat(result.getSummary().length()).isGreaterThan(1_200);
+    }
+
+    @Nested
+    class FinalValidationRequest {
+
+        @Test
+        void singleBatchRequestsReceiveAContractIndexForFinalValidation() {
+            String diff =
+                    "diff --git a/Api.java b/Api.java\n"
+                            + "--- a/Api.java\n"
+                            + "+++ b/Api.java\n"
+                            + "@@ -1 +1 @@\n"
+                            + "-void call(String old) {}\n"
+                            + "+void call() {}\n"
+                            + "diff --git a/Caller.java b/Caller.java\n"
+                            + "--- a/Caller.java\n"
+                            + "+++ b/Caller.java\n"
+                            + "@@ -2 +2 @@\n"
+                            + "-call(old);\n"
+                            + "+call();\n";
+            PRReviewRequest request = PRReviewRequest.builder(pr(), diff).build();
+
+            PRReviewRequest validation = new ChunkedReviewService().finalValidationRequest(request);
+
+            assertThat(validation.getDiff())
+                    .contains(
+                            "Changed files and contract-relevant changed lines.",
+                            "FILE Api.java",
+                            "FILE Caller.java",
+                            "OLD 1 | -void call(String old) {}",
+                            "NEW 2 | +call();")
+                    .doesNotContain("diff --git");
+        }
     }
 
     private static PullRequest pr() {

@@ -142,7 +142,7 @@ public final class ReviewPipelineService {
             validateAuthority();
             try {
                 PRReviewRequest critiqueRequest =
-                        chunked ? chunkedReviewService.finalValidationRequest(request) : request;
+                        chunkedReviewService.finalValidationRequest(request);
                 String raw =
                         provider.complete(
                                 ClaudeService.buildCritiquePrompt(critiqueRequest, candidate),

@@ -1,5 +1,5 @@
 export type Severity = 'blocker' | 'major' | 'minor' | 'nit';
-export type Category = 'correctness' | 'security' | 'performance' | 'tests' | 'maintainability' | 'style';
+export type Category = 'correctness' | 'security' | 'performance' | 'tests' | 'maintainability' | 'style' | 'compatibility';
 export type Confidence = 'low' | 'medium' | 'high';
 export type ReviewStatus = 'UNREVIEWED' | 'REVIEWED' | 'UPDATED_SINCE_REVIEW' | 'UNAVAILABLE';
 

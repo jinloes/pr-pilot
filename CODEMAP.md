@@ -69,9 +69,9 @@ guidance.
 
 - `engine/ReviewEngineApi.java` - Complete review capability surface and JSON-RPC wire-name map.
 - `engine/ReviewSessionService.java` - Provider dispatch and operation-scoped cancellation.
-- `review/ClaudeService.java` - Claude CLI execution and canonical review/chat prompts.
+- `review/ClaudeService.java` - Claude CLI execution, canonical review/chat prompts, and review category parsing including compatibility findings.
 - `review/CopilotService.java` - Copilot SDK execution with the same review API.
-- `review/ChunkedReviewService.java` - Shared diff batching and mandatory global reconciliation.
+- `review/ChunkedReviewService.java` - Shared diff batching, contract-index generation, and mandatory global reconciliation.
 - `review/ReviewPipelineService.java` - Shared primary/chunked orchestration, bounded supervision,
   final critique, cancellation checkpoints, fallback behavior, and final CI suppression.
 - `review/InspectionManifest.java`, `ReviewPassParser.java`, `InspectionLedger.java`, and
@@ -284,7 +284,7 @@ VS Code host integration. All GitHub and review generation routes through the Ja
 
 `ReviewPane`/`App.tsx` -> host bridge -> `ReviewEngineApi` -> `ReviewSessionService` ->
 `ReviewPipelineService` -> direct or chunked primary pass -> optional bounded supervisor/follow-up ->
-final critique/CI suppression -> status/chunk notifications -> host bridge -> shared webview.
+contract-index-backed final critique/CI suppression -> status/chunk notifications -> host bridge -> shared webview.
 
 ### GitHub operations
 

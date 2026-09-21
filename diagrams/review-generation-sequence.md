@@ -90,7 +90,8 @@ sequenceDiagram
     end
 
     opt Self-critique enabled
-        Pipeline->>Provider: Validate findings against the same bounded context
+        Pipeline->>Pipeline: Build contract index from changed files, even for direct/single-batch reviews
+        Pipeline->>Provider: Validate findings against bounded context and contract index
         Provider-->>Pipeline: Refined review
     end
 
@@ -131,7 +132,7 @@ sequenceDiagram
 ## Evidence boundary
 
 Automated tests exercise both actual provider adapters with fake IO across primary, chunk copies,
-reconciliation, supervisor selection/follow-up and final critique, including invalidation after
-best-effort provider failure. Raw-native-input tests separately exercise service orchestration and
+reconciliation, supervisor selection/follow-up and final critique, including single-batch contract-index
+coverage and invalidation after best-effort provider failure. Raw-native-input tests separately exercise service orchestration and
 scheduled MCP dispatch. Neither proves this installed-host sequence: private IntelliJ and VS Code,
 each provider, clean/defect ordinary/deep runs, delayed generation and cleanup remain live gates.

@@ -245,7 +245,7 @@ export interface LineComment {
 }
 
 export type Severity = 'blocker' | 'major' | 'minor' | 'nit'
-export type Category = 'correctness' | 'security' | 'performance' | 'tests' | 'maintainability' | 'style'
+export type Category = 'correctness' | 'security' | 'performance' | 'tests' | 'maintainability' | 'compatibility' | 'style'
 export type Confidence = 'low' | 'medium' | 'high'
 
 /**

@@ -163,6 +163,7 @@ final class BridgeMessageValidator {
                                 "performance",
                                 "tests",
                                 "maintainability",
+                                "compatibility",
                                 "style"))
                 && optionalEnum(node.get("confidence"), Set.of("low", "medium", "high"))
                 && optionalText(node.get("rationale"), MAX_TEXT);

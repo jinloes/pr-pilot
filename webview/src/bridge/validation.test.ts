@@ -13,7 +13,7 @@ const review = {
     type: 'note',
     body: 'Body',
     severity: 'minor',
-    category: 'maintainability',
+    category: 'compatibility',
     confidence: 'high',
     rationale: 'Evidence',
   }],
@@ -48,6 +48,12 @@ void test('rejects malformed nested review values', () => {
     ...version,
     type: 'reviewResult',
     result: { ...review, lineComments: [{ ...review.lineComments[0], line: 0 }] },
+    diff: 'diff',
+  }), null)
+  assert.equal(parseIncomingMessage({
+    ...version,
+    type: 'reviewResult',
+    result: { ...review, lineComments: [{ ...review.lineComments[0], category: 'boundary' }] },
     diff: 'diff',
   }), null)
 })

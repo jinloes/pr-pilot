@@ -76,6 +76,7 @@ public final class ReviewOutcomeLog {
             String outcome,
             String type,
             String severity,
+            String category,
             String confidence) {}
 
     private final Path logFile;
@@ -193,6 +194,7 @@ public final class ReviewOutcomeLog {
                 outcome.name().toLowerCase(Locale.ROOT),
                 comment.getType(),
                 comment.getSeverity(),
+                comment.getCategory(),
                 comment.getConfidence());
     }
 

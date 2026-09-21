@@ -57,7 +57,7 @@ function isLineComment(value: unknown): boolean {
     && ['issue', 'suggestion', 'note'].includes(comment.type as string)
     && isBoundedString(comment.body)
     && (comment.severity === undefined || ['blocker', 'major', 'minor', 'nit'].includes(comment.severity as string))
-    && (comment.category === undefined || ['correctness', 'security', 'performance', 'tests', 'maintainability', 'style'].includes(comment.category as string))
+    && (comment.category === undefined || ['correctness', 'security', 'performance', 'tests', 'maintainability', 'compatibility', 'style'].includes(comment.category as string))
     && (comment.confidence === undefined || ['low', 'medium', 'high'].includes(comment.confidence as string))
     && (comment.rationale === undefined || isBoundedString(comment.rationale));
 }

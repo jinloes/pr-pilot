@@ -94,7 +94,7 @@ public final class ChunkedReviewService {
 
     PRReviewRequest finalValidationRequest(PRReviewRequest request) {
         List<DiffBatch> batches = buildBatches(request.getDiff());
-        if (batches.size() <= 1) {
+        if (batches.isEmpty()) {
             return request;
         }
         return copyRequest(request, buildContractIndex(batches), request.getCustomInstructions());

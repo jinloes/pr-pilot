@@ -67,7 +67,7 @@ test('validates nested review fields', () => {
     result: {
       summary: 'Summary',
       verdict: 'COMMENT',
-      lineComments: [{ file: 'src/a.ts', line: 1, type: 'note', body: 'Body', confidence: 'high' }],
+      lineComments: [{ file: 'src/a.ts', line: 1, type: 'note', body: 'Body', category: 'compatibility', confidence: 'high' }],
     },
     generatedResult: { summary: 'Generated', verdict: 'COMMENT', lineComments: [] },
   }), true);
@@ -121,6 +121,14 @@ test('rejects invalid rich comment metadata', () => {
       summary: 'Summary',
       verdict: 'COMMENT',
       lineComments: [{ file: 'src/a.ts', line: 1, type: 'note', body: 'Body', severity: 'urgent' }],
+    },
+  }), false);
+  assert.equal(isValidBridgeRequest({
+    ...base,
+    result: {
+      summary: 'Summary',
+      verdict: 'COMMENT',
+      lineComments: [{ file: 'src/a.ts', line: 1, type: 'note', body: 'Body', category: 'boundary' }],
     },
   }), false);
 });
