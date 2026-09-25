@@ -41,6 +41,8 @@ export interface DraftLoadedMessage {
   recoveryPending?: boolean
   status?: string
   providerReadiness?: ProviderReadiness
+  /** Experimental host setting; absent or anything but `true` hides IntelliJ-assisted controls. */
+  intellijAssistedEnabled?: boolean
 }
 
 export interface ReviewGeneratingMessage {

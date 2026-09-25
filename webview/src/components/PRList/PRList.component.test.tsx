@@ -43,6 +43,14 @@ afterEach(() => {
 })
 
 describe('PRList', () => {
+  it('uses an explicit accessible loading status before the first result', () => {
+    render(<PRList />)
+
+    expect(screen.getByRole('status', { name: /Loading pull requests/ })).toBeVisible()
+    expect(screen.getByText('Loading pull requests…')).toBeVisible()
+    expect(screen.queryByText('loading…')).not.toBeInTheDocument()
+  })
+
   it('displays authoritative repository context once while preserving exception and accessible identities', () => {
     render(<PRList />)
     load([firstPr, { ...firstPr, number: 43 }, { ...firstPr, repo: 'infra' }])

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
     COPILOT_MODEL_SUGGESTIONS,
+    buildModelsMessage,
     buildSettingsHtml,
     escapeHtml,
     mergeCopilotModelOptions,
@@ -74,6 +75,34 @@ test('mergeCopilotModelOptions excludes blank ids and de-dupes', () => {
     assert.deepEqual(merged, ['a', 'b']);
 });
 
+// ── buildModelsMessage ────────────────────────────────────────────────────────
+
+test('buildModelsMessage reports a successful refresh with the fresh list', () => {
+    const msg = buildModelsMessage(['claude-opus-5.5', 'gpt-5.5'], ['old'], 'gpt-5.5', true);
+    assert.deepEqual(msg, {
+        type: 'models',
+        ok: true,
+        quiet: true,
+        message: '2 models available to your Copilot account.',
+        copilotModels: ['claude-opus-5.5', 'gpt-5.5'],
+    });
+});
+
+test('buildModelsMessage keeps the last good list when a refresh fails', () => {
+    const msg = buildModelsMessage([], ['m1', 'm2'], 'custom', false);
+    assert.equal(msg.ok, false);
+    assert.equal(msg.quiet, false);
+    assert.match(msg.message, /last loaded list/);
+    assert.deepEqual(msg.copilotModels, ['m1', 'm2', 'custom']);
+});
+
+test('buildModelsMessage falls back to suggestions when nothing has ever loaded', () => {
+    const msg = buildModelsMessage([], null, '', true);
+    assert.equal(msg.ok, false);
+    assert.match(msg.message, /Showing suggestions/);
+    assert.deepEqual(msg.copilotModels, COPILOT_MODEL_SUGGESTIONS);
+});
+
 // ── escapeHtml ────────────────────────────────────────────────────────────────
 
 test('escapeHtml escapes all HTML-significant characters', () => {
@@ -120,6 +149,14 @@ test('buildSettingsHtml renders the Copilot MCP inheritance controls', () => {
     assert.match(html, /save\('copilotInheritMcp', \$\('inheritMcp'\)\.checked\)/);
     assert.match(html, /save\('copilotAutoEnableMcpOnReview', \$\('reviewAutoEnableMcp'\)\.checked\)/);
     assert.match(html, /save\('copilotConfigDir'/);
+});
+
+test('buildSettingsHtml renders the experimental IntelliJ-assisted toggle under Advanced review options', () => {
+    const html = buildSettingsHtml('csp', 'n');
+    assert.match(html, /<summary>Advanced review options<\/summary>[\s\S]*id="experimentalIntellijAssistedReview"/);
+    assert.match(html, /Enable IntelliJ-assisted review \(experimental\)/);
+    assert.match(html, /save\('experimentalIntellijAssistedReview', \$\('experimentalIntellijAssistedReview'\)\.checked\)/);
+    assert.match(html, /\$\('experimentalIntellijAssistedReview'\)\.checked = state\.experimentalIntellijAssistedReview === true/);
 });
 
 test('buildSettingsHtml renders reusable review-guidance profile controls', () => {

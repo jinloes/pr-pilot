@@ -2,6 +2,10 @@ package com.jinloes.prpilot.review;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.github.copilot.rpc.ModelInfo;
+import com.github.copilot.rpc.ModelPolicy;
+import com.jinloes.prpilot.review.CopilotModelDiscovery.Result;
+import com.jinloes.prpilot.review.CopilotModelDiscovery.Source;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -9,7 +13,18 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -111,16 +126,209 @@ class CopilotModelDiscoveryTest {
     }
 
     @Nested
-    class ListModelsAndInvalidate {
+    class Discover {
 
         @Test
-        void invalidateDropsTheCacheSoTheNextCallReProbes() {
-            // We can't easily mock the real `copilot` invocation, so we just verify the invalidate
-            // contract: after calling it, a fresh call returns a non-null list either way.
+        void liveCatalogWinsOverHelpFallback() {
+            AtomicInteger helpCalls = new AtomicInteger();
+
+            Result result =
+                    CopilotModelDiscovery.discover(
+                            () -> List.of("claude-opus-5.5", "gpt-5.5"),
+                            () -> {
+                                helpCalls.incrementAndGet();
+                                return List.of("stale");
+                            });
+
+            assertThat(result.models()).containsExactly("claude-opus-5.5", "gpt-5.5");
+            assertThat(result.source()).isEqualTo(Source.ACCOUNT);
+            assertThat(result.failureReason()).isEmpty();
+            assertThat(helpCalls).hasValue(0);
+        }
+
+        @Test
+        void liveFailureFallsBackToHelpAndKeepsTheReason() {
+            Result result =
+                    CopilotModelDiscovery.discover(
+                            () -> {
+                                throw new ExecutionException(new IOException("not signed in"));
+                            },
+                            () -> List.of("claude-opus-5"));
+
+            assertThat(result.models()).containsExactly("claude-opus-5");
+            assertThat(result.source()).isEqualTo(Source.CLI_HELP);
+            assertThat(result.failureReason()).isEqualTo("not signed in");
+        }
+
+        @Test
+        void emptyLiveCatalogFallsBackToHelp() {
+            Result result = CopilotModelDiscovery.discover(List::of, () -> List.of("a"));
+
+            assertThat(result.source()).isEqualTo(Source.CLI_HELP);
+            assertThat(result.failureReason()).contains("no enabled models");
+        }
+
+        @Test
+        void timeoutIsReportedInPlainLanguage() {
+            Result result =
+                    CopilotModelDiscovery.discover(
+                            () -> {
+                                throw new TimeoutException();
+                            },
+                            List::of);
+
+            assertThat(result.source()).isEqualTo(Source.NONE);
+            assertThat(result.models()).isEmpty();
+            assertThat(result.failureReason()).isEqualTo("Copilot did not respond in time");
+        }
+
+        @Test
+        void interruptionRestoresTheFlagAndSkipsTheFallback() {
+            try {
+                Result result =
+                        CopilotModelDiscovery.discover(
+                                () -> {
+                                    throw new InterruptedException();
+                                },
+                                () -> List.of("should-not-run"));
+
+                assertThat(result.source()).isEqualTo(Source.NONE);
+                assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            } finally {
+                Thread.interrupted();
+            }
+        }
+    }
+
+    @Nested
+    class FilterModelIds {
+
+        @Test
+        void dropsDisabledBlankAndDuplicateIdsPreservingOrder() {
+            List<ModelInfo> models =
+                    List.of(
+                            model("auto", null),
+                            model("claude-opus-5.5", "enabled"),
+                            model("blocked", "disabled"),
+                            model("  ", "enabled"),
+                            model(null, "enabled"),
+                            model("gpt-5.3-codex", "unconfigured"),
+                            model("claude-opus-5.5", "enabled"));
+
+            assertThat(CopilotModelDiscovery.filterModelIds(models))
+                    .containsExactly("auto", "claude-opus-5.5", "gpt-5.3-codex");
+        }
+
+        @Test
+        void nullListIsEmpty() {
+            assertThat(CopilotModelDiscovery.filterModelIds(null)).isEmpty();
+        }
+
+        private ModelInfo model(String id, String policyState) {
+            ModelInfo info = new ModelInfo().setId(id);
+            if (policyState != null) info.setPolicy(new ModelPolicy().setState(policyState));
+            return info;
+        }
+    }
+
+    @Nested
+    class RefreshAndCache {
+
+        @BeforeEach
+        @AfterEach
+        void resetCache() {
             CopilotModelDiscovery.invalidate();
-            List<String> first = CopilotModelDiscovery.listModels();
-            assertThat(first).isNotNull();
-            CopilotModelDiscovery.invalidate();
+        }
+
+        @Test
+        void successfulRefreshIsCachedAndServedByListModels() {
+            Result fresh = new Result(List.of("m1", "m2"), Source.ACCOUNT, "");
+
+            assertThat(CopilotModelDiscovery.refresh(() -> fresh)).isEqualTo(fresh);
+
+            assertThat(CopilotModelDiscovery.cached()).isEqualTo(fresh);
+            assertThat(CopilotModelDiscovery.listModels()).containsExactly("m1", "m2");
+        }
+
+        @Test
+        void refreshReplacesAStaleCachedList() {
+            CopilotModelDiscovery.refresh(() -> new Result(List.of("old"), Source.CLI_HELP, "x"));
+
+            CopilotModelDiscovery.refresh(() -> new Result(List.of("new"), Source.ACCOUNT, ""));
+
+            assertThat(CopilotModelDiscovery.cached().models()).containsExactly("new");
+        }
+
+        @Test
+        void failedRefreshKeepsThePreviousGoodList() {
+            Result good = new Result(List.of("m1"), Source.ACCOUNT, "");
+            CopilotModelDiscovery.refresh(() -> good);
+
+            Result failed = CopilotModelDiscovery.refresh(() -> Result.none("offline"));
+
+            assertThat(failed.failureReason()).isEqualTo("offline");
+            assertThat(CopilotModelDiscovery.cached()).isEqualTo(good);
+        }
+
+        @Test
+        void failuresAreNotCachedSoTheNextRefreshRetries() {
+            CopilotModelDiscovery.refresh(() -> Result.none("offline"));
+
+            assertThat(CopilotModelDiscovery.cached()).isNull();
+        }
+
+        @Test
+        void discovererExceptionBecomesAFailedResult() {
+            Result result =
+                    CopilotModelDiscovery.refresh(
+                            () -> {
+                                throw new IllegalStateException("boom");
+                            });
+
+            assertThat(result.source()).isEqualTo(Source.NONE);
+            assertThat(result.failureReason()).isEqualTo("boom");
+        }
+
+        @Test
+        void concurrentRefreshesShareOneProbe() throws Exception {
+            CountDownLatch probeStarted = new CountDownLatch(1);
+            CountDownLatch releaseProbe = new CountDownLatch(1);
+            AtomicInteger probes = new AtomicInteger();
+            Supplier<Result> slow =
+                    () -> {
+                        probes.incrementAndGet();
+                        probeStarted.countDown();
+                        try {
+                            releaseProbe.await(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        return new Result(List.of("m1"), Source.ACCOUNT, "");
+                    };
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                Future<Result> first = pool.submit(() -> CopilotModelDiscovery.refresh(slow));
+                assertThat(probeStarted.await(5, TimeUnit.SECONDS)).isTrue();
+                AtomicReference<Result> secondResult = new AtomicReference<>();
+                Thread second =
+                        new Thread(() -> secondResult.set(CopilotModelDiscovery.refresh(slow)));
+                second.start();
+                // The joining caller parks on the in-flight future; wait for that before releasing.
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (second.getState() != Thread.State.WAITING && System.nanoTime() < deadline) {
+                    Thread.onSpinWait();
+                }
+                assertThat(second.getState()).isEqualTo(Thread.State.WAITING);
+
+                releaseProbe.countDown();
+
+                assertThat(first.get(5, TimeUnit.SECONDS).models()).containsExactly("m1");
+                second.join(5_000);
+                assertThat(secondResult.get().models()).containsExactly("m1");
+                assertThat(probes).hasValue(1);
+            } finally {
+                pool.shutdownNow();
+            }
         }
     }
 

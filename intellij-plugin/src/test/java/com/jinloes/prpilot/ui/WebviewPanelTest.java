@@ -56,6 +56,29 @@ class WebviewPanelTest {
         }
 
         @Test
+        void rejectsAssistedRequestWhileExperimentalSettingIsOff() throws Exception {
+            var f = new DeepFixture();
+            f.assistedEnabled = false;
+            f.send("generateReview", "prepare-1", Map.of("intellijAssisted", true));
+            assertThat(f.jobs).isEmpty();
+            f.drain();
+            assertThat(f.generations).isZero();
+            assertThat(f.messages).hasSize(1);
+            assertThat(f.messages.get(0).path("type").asText()).isEqualTo("reviewError");
+            assertThat(f.messages.get(0).path("prKey").asText()).isEqualTo("acme/widget#42");
+            assertThat(f.messages.get(0).path("message").asText())
+                    .isEqualTo(
+                            "IntelliJ-assisted review is disabled; enable it in PR Pilot"
+                                    + " settings (experimental)");
+
+            f.assistedEnabled = true;
+            f.send("generateReview", "prepare-2", Map.of("intellijAssisted", true));
+            f.drain();
+            assertThat(f.messages.get(f.messages.size() - 1).path("type").asText())
+                    .isEqualTo("deepReviewPrepared");
+        }
+
+        @Test
         void retriesTransientPreflightFailureWithNewOperationOnly() throws Exception {
             var f = new DeepFixture();
             f.send("generateReview", "prepare-1", Map.of("intellijAssisted", true));
@@ -176,6 +199,7 @@ class WebviewPanelTest {
         final String id = "11111111-1111-4111-8111-111111111111";
         String head = "a".repeat(40);
         String settings = "claude";
+        boolean assistedEnabled = true;
         boolean failRefresh;
         int generations;
         final List<Runnable> jobs = new ArrayList<>();
@@ -187,7 +211,8 @@ class WebviewPanelTest {
                         this,
                         jobs::add,
                         () -> settings,
-                        message -> messages.add(MAPPER.valueToTree(message)));
+                        message -> messages.add(MAPPER.valueToTree(message)),
+                        () -> assistedEnabled);
 
         void field(String name, Object value) throws Exception {
             var field = WebviewPanel.class.getDeclaredField(name);
@@ -813,9 +838,13 @@ class WebviewPanelTest {
                             false,
                             false,
                             "",
-                            new WebviewPanel.ProviderReadinessDto("claude", true, "Ready"));
+                            new WebviewPanel.ProviderReadinessDto("claude", true, "Ready"),
+                            true);
 
             var json = MAPPER.valueToTree(message);
+
+            assertThat(json.path("intellijAssistedEnabled").isBoolean()).isTrue();
+            assertThat(json.path("intellijAssistedEnabled").asBoolean()).isTrue();
 
             assertThat(json.has("reviewId")).isFalse();
             assertThat(json.has("result")).isFalse();
@@ -838,9 +867,13 @@ class WebviewPanelTest {
                             false,
                             false,
                             "PR is merged.",
-                            new WebviewPanel.ProviderReadinessDto("copilot", true, "Ready"));
+                            new WebviewPanel.ProviderReadinessDto("copilot", true, "Ready"),
+                            false);
 
             var json = MAPPER.valueToTree(message);
+
+            assertThat(json.path("intellijAssistedEnabled").isBoolean()).isTrue();
+            assertThat(json.path("intellijAssistedEnabled").asBoolean()).isFalse();
 
             assertThat(json.has("reviewId")).isFalse();
             assertThat(json.has("result")).isFalse();

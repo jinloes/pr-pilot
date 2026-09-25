@@ -44,7 +44,7 @@ export function DeepReviewSetup({ setup, retained, busy, error, onContinue, onOr
       </div>
     </>}
     <details>
-      <summary className="cursor-pointer">Retained IntelliJ review worktrees</summary>
+      <summary className="cursor-pointer">Review maintenance</summary>
       <p>Close each worktree project in every IDE before removal. Active leases and dirty trees cannot be removed.</p>
       <Button size="sm" variant="outline" onClick={onList}>Refresh retained worktrees</Button>
       {error && <p role="alert">{error}</p>}

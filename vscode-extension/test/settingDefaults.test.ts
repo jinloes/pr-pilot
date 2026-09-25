@@ -60,6 +60,17 @@ test('reviewSupervisorEnabled defaults to off and matches the reader fallback', 
     assert.equal(readerFallback('reviewSupervisorEnabled'), String(property.default));
 });
 
+test('experimentalIntellijAssistedReview defaults to off and matches the reader fallback', () => {
+    const property = packageJsonDefaults()['pr-pilot.experimentalIntellijAssistedReview'] as {
+        default: boolean; description: string;
+    };
+    assert.equal(property.default, false);
+    assert.equal(readerFallback('experimentalIntellijAssistedReview'), String(property.default));
+    assert.match(property.description, /Experimental/);
+    assert.match(property.description, /IntelliJ IDEA 262\+/);
+    assert.match(property.description, /semantic-review\.json/);
+});
+
 test('review-guidance profile settings default to the built-in profile', () => {
     const properties = packageJsonDefaults();
     assert.equal(properties['pr-pilot.reviewGuidanceGlobs'], undefined);

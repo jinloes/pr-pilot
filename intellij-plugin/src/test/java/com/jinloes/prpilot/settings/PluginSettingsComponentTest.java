@@ -2,16 +2,23 @@ package com.jinloes.prpilot.settings;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTextArea;
 import com.intellij.util.ui.JBUI;
 import com.jinloes.prpilot.model.ReviewProvider;
+import com.jinloes.prpilot.review.CopilotModelDiscovery;
+import com.jinloes.prpilot.services.PRNotificationService;
 import com.jinloes.prpilot.sidecar.github.CheckAuthResult;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.ContainerOrderFocusTraversalPolicy;
 import java.awt.FocusTraversalPolicy;
+import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -31,6 +38,105 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class PluginSettingsComponentTest {
+
+    @Nested
+    class CopilotModelRefresh {
+
+        @Test
+        void showsTheCachedListImmediatelyThenRefreshesOnOpen() throws Exception {
+            runUiProbe("models-cached-then-refresh", "1.0");
+        }
+
+        @Test
+        void withoutACacheShowsLoadingUntilTheProbeAnswers() throws Exception {
+            runUiProbe("models-loading", "1.0");
+        }
+
+        @Test
+        void refreshButtonReprobesAndKeepsTheTypedModel() throws Exception {
+            runUiProbe("models-refresh-button", "1.0");
+        }
+
+        @Test
+        void failedRefreshKeepsTheCurrentListAndSaysWhy() throws Exception {
+            runUiProbe("models-failed-refresh", "1.0");
+        }
+
+        @Test
+        void refreshButtonIsDisabledWhileAProbeIsRunning() throws Exception {
+            runUiProbe("models-no-overlap", "1.0");
+        }
+    }
+
+    @Nested
+    class CopilotModelStatus {
+
+        @Test
+        void accountResultCountsModels() {
+            assertThat(PluginSettingsComponent.copilotModelStatus(account("a", "b", "c"), false))
+                    .startsWith("3 models available to your Copilot account.");
+        }
+
+        @Test
+        void helpFallbackWarnsTheListMayBeStale() {
+            CopilotModelDiscovery.Result result =
+                    new CopilotModelDiscovery.Result(
+                            List.of("a"), CopilotModelDiscovery.Source.CLI_HELP, "timed out");
+
+            assertThat(PluginSettingsComponent.copilotModelStatus(result, false))
+                    .contains("(timed out)")
+                    .contains("may miss newer models");
+        }
+
+        @Test
+        void failureWithoutAPreviousListPointsAtSuggestions() {
+            assertThat(
+                            PluginSettingsComponent.copilotModelStatus(
+                                    CopilotModelDiscovery.Result.none(""), false))
+                    .isEqualTo(
+                            "Couldn't load models. Showing suggestions; type any model ID to"
+                                    + " override.");
+        }
+
+        @Test
+        void failureReasonIsHtmlEscaped() {
+            assertThat(
+                            PluginSettingsComponent.copilotModelStatus(
+                                    CopilotModelDiscovery.Result.none("<b>bad</b>"), true))
+                    .contains("(&lt;b&gt;bad&lt;/b&gt;)")
+                    .doesNotContain("<b>");
+        }
+    }
+
+    private static CopilotModelDiscovery.Result account(String... models) {
+        return new CopilotModelDiscovery.Result(
+                List.of(models), CopilotModelDiscovery.Source.ACCOUNT, "");
+    }
+
+    /** Mimics the real cache: successful refreshes become the cached result. */
+    private static final class FakeCatalog implements PluginSettingsComponent.CopilotModelCatalog {
+        private CopilotModelDiscovery.Result cached;
+        private CopilotModelDiscovery.Result next;
+        private final AtomicInteger refreshes = new AtomicInteger();
+
+        FakeCatalog(CopilotModelDiscovery.Result cached, CopilotModelDiscovery.Result next) {
+            this.cached = cached;
+            this.next = next;
+        }
+
+        @Override
+        public CopilotModelDiscovery.Result cached() {
+            return cached;
+        }
+
+        @Override
+        public CopilotModelDiscovery.Result refresh() {
+            refreshes.incrementAndGet();
+            CopilotModelDiscovery.Result result = next;
+            if (!result.models().isEmpty()) cached = result;
+            return result;
+        }
+    }
 
     @Nested
     class AuthStatus {
@@ -115,6 +221,16 @@ class PluginSettingsComponentTest {
         void keepsProfileNameCorrectionContextOpenUntilValidOrCancelled() throws Exception {
             runUiProbe("profile-validation");
         }
+
+        @Test
+        void offersTheExperimentalIntellijAssistedToggleOffByDefault() throws Exception {
+            runUiProbe("intellij-assisted-toggle");
+        }
+
+        @Test
+        void persistsTheExperimentalIntellijAssistedToggleThroughApplyAndReset() throws Exception {
+            runUiProbe("intellij-assisted-configurable");
+        }
     }
 
     public static final class UiProbe {
@@ -126,6 +242,13 @@ class PluginSettingsComponentTest {
                     case "profile-layout" -> verifyProfileLayout();
                     case "sections-and-hints" -> verifySectionsAndHints();
                     case "profile-validation" -> verifyProfileNameValidation();
+                    case "intellij-assisted-toggle" -> verifyIntellijAssistedToggle();
+                    case "intellij-assisted-configurable" -> verifyIntellijAssistedConfigurable();
+                    case "models-cached-then-refresh" -> verifyModelsCachedThenRefresh();
+                    case "models-loading" -> verifyModelsLoading();
+                    case "models-refresh-button" -> verifyModelsRefreshButton();
+                    case "models-failed-refresh" -> verifyModelsFailedRefresh();
+                    case "models-no-overlap" -> verifyModelsNoOverlap();
                     default -> throw new IllegalArgumentException("Unknown probe: " + args[0]);
                 }
             } catch (Throwable failure) {
@@ -168,6 +291,100 @@ class PluginSettingsComponentTest {
         assertThat(process.exitValue())
                 .withFailMessage("UI probe failed at %s scale:%n%s", uiScale, output)
                 .isZero();
+    }
+
+    /** A settings component whose background work is queued until {@link #runBackground}. */
+    private record ModelHarness(PluginSettingsComponent component, List<Runnable> background) {
+        static ModelHarness create(FakeCatalog catalog) {
+            List<Runnable> background = new ArrayList<>();
+            PluginSettingsComponent component =
+                    new PluginSettingsComponent(
+                            ignored -> authenticated("octocat"),
+                            background::add,
+                            Runnable::run,
+                            () -> null,
+                            (parent, title, initial, validation) -> null,
+                            catalog);
+            return new ModelHarness(component, background);
+        }
+
+        void runBackground() {
+            List<Runnable> tasks = new ArrayList<>(background);
+            background.clear();
+            tasks.forEach(Runnable::run);
+        }
+    }
+
+    private static void verifyModelsCachedThenRefresh() {
+        FakeCatalog catalog =
+                new FakeCatalog(account("claude-opus-5"), account("claude-opus-5", "new-one"));
+        ModelHarness harness = ModelHarness.create(catalog);
+        PluginSettingsComponent component = harness.component();
+
+        assertThat(component.getCopilotModelOptions()).containsExactly("", "claude-opus-5");
+        assertThat(component.getRefreshModelsButton().isEnabled()).isFalse();
+        assertThat(component.getRefreshModelsButton().getText()).isEqualTo("Refreshing…");
+
+        harness.runBackground();
+
+        assertThat(catalog.refreshes).hasValue(1);
+        assertThat(component.getCopilotModelOptions())
+                .containsExactly("", "claude-opus-5", "new-one");
+        assertThat(component.getCopilotModelHintText())
+                .contains("2 models available to your Copilot account");
+        assertThat(component.getRefreshModelsButton().isEnabled()).isTrue();
+        assertThat(component.getRefreshModelsButton().getText()).isEqualTo("Refresh");
+    }
+
+    private static void verifyModelsLoading() {
+        ModelHarness harness = ModelHarness.create(new FakeCatalog(null, account("m1")));
+
+        assertThat(harness.component().getCopilotModelHintText())
+                .contains(PluginSettingsComponent.MODELS_LOADING_HINT);
+        harness.runBackground();
+        assertThat(harness.component().getCopilotModelOptions()).contains("m1");
+    }
+
+    private static void verifyModelsRefreshButton() {
+        FakeCatalog catalog = new FakeCatalog(null, account("m1"));
+        ModelHarness harness = ModelHarness.create(catalog);
+        PluginSettingsComponent component = harness.component();
+        harness.runBackground();
+        component.setReviewModelCopilot("custom-model");
+        catalog.next = account("m1", "m2");
+
+        component.getRefreshModelsButton().doClick();
+        harness.runBackground();
+
+        assertThat(catalog.refreshes).hasValue(2);
+        assertThat(component.getCopilotModelOptions())
+                .containsExactly("", "m1", "m2", "custom-model");
+        assertThat(component.getReviewModelCopilot()).isEqualTo("custom-model");
+    }
+
+    private static void verifyModelsFailedRefresh() {
+        ModelHarness harness =
+                ModelHarness.create(
+                        new FakeCatalog(
+                                account("m1"), CopilotModelDiscovery.Result.none("not signed in")));
+
+        harness.runBackground();
+
+        assertThat(harness.component().getCopilotModelOptions()).containsExactly("", "m1");
+        assertThat(harness.component().getCopilotModelHintText())
+                .contains("Couldn't refresh models (not signed in)")
+                .contains("last loaded list");
+    }
+
+    private static void verifyModelsNoOverlap() {
+        FakeCatalog catalog = new FakeCatalog(null, account("m1"));
+        ModelHarness harness = ModelHarness.create(catalog);
+
+        harness.component().getRefreshModelsButton().doClick();
+        harness.runBackground();
+
+        assertThat(catalog.refreshes).hasValue(1);
+        assertThat(harness.component().getRefreshModelsButton().isEnabled()).isTrue();
     }
 
     private static void verifySharedWidth() {
@@ -383,12 +600,111 @@ class PluginSettingsComponentTest {
 
         component.setReviewProvider(ReviewProvider.COPILOT);
         JComponent copilotModel = (JComponent) label(panel, "Model:").getLabelFor();
-        assertFieldWithHint(copilotModel, hintContaining(panel, "Auto-populated from"));
+        assertFieldWithHint(
+                (JComponent) copilotModel.getParent(),
+                hintContaining(panel, PluginSettingsComponent.MODELS_LOADING_HINT));
+        assertThat(copilotModel.getParent().getComponents()).contains(button(panel, "Refreshing…"));
 
         JComponent effort = (JComponent) label(panel, "Reasoning effort:").getLabelFor();
         assertFieldWithHint(effort, hintContaining(panel, "Higher effort"));
         AbstractButton inheritMcp = button(panel, "Allow MCP tools for untrusted PR content");
         assertFieldWithHint(inheritMcp, hintContaining(panel, "Copilot inherits MCP servers"));
+    }
+
+    private static void verifyIntellijAssistedToggle() {
+        PluginSettingsComponent component = component();
+        JPanel panel = component.getPanel();
+        List<String> texts =
+                descendants(panel).stream()
+                        .filter(JLabel.class::isInstance)
+                        .map(JLabel.class::cast)
+                        .map(JLabel::getText)
+                        .toList();
+
+        assertThat(
+                        List.of("Review validation", "Advanced review options", "Notifications")
+                                .stream()
+                                .map(section -> indexContaining(texts, section))
+                                .toList())
+                .isSorted();
+        AbstractButton toggle = button(panel, "Enable IntelliJ-assisted review (experimental)");
+        assertFieldWithHint(toggle, hintContaining(panel, "IntelliJ IDEA 262+"));
+        assertThat(hintContaining(panel, "IntelliJ IDEA 262+").getText())
+                .contains("semantic-review.json")
+                .contains("Off by default");
+
+        assertThat(toggle.isSelected()).isFalse();
+        assertThat(component.isExperimentalIntellijAssistedReview()).isFalse();
+        component.setExperimentalIntellijAssistedReview(true);
+        assertThat(toggle.isSelected()).isTrue();
+        assertThat(component.isExperimentalIntellijAssistedReview()).isTrue();
+        toggle.doClick();
+        assertThat(component.isExperimentalIntellijAssistedReview()).isFalse();
+    }
+
+    /**
+     * Drives the real Configurable Apply/Reset/isModified against in-memory settings. Runs in the
+     * probe subprocess because it installs a global Application and a temporary user.home.
+     */
+    private static void verifyIntellijAssistedConfigurable() throws Exception {
+        Path home = Files.createTempDirectory("pr-pilot-configurable-");
+        System.setProperty("user.home", home.toString());
+        PluginSettings settings = new PluginSettings();
+        settings.setNotificationsEnabled(false);
+        AtomicReference<PRNotificationService> notifications = new AtomicReference<>();
+        PluginSettingsComponent component = component();
+        ApplicationManager.setApplication(
+                (Application)
+                        Proxy.newProxyInstance(
+                                Application.class.getClassLoader(),
+                                new Class<?>[] {Application.class},
+                                (proxy, method, args) -> {
+                                    if (method.getDeclaringClass() == Object.class) {
+                                        return switch (method.getName()) {
+                                            case "hashCode" -> System.identityHashCode(proxy);
+                                            case "equals" -> proxy == args[0];
+                                            default -> "configurable-fixture";
+                                        };
+                                    }
+                                    if (method.getName().equals("isUnitTestMode")) return true;
+                                    if (method.getName().equals("getService")) {
+                                        if (args[0] == PluginSettings.class) return settings;
+                                        if (args[0] == PRNotificationService.class) {
+                                            notifications.compareAndSet(
+                                                    null, new PRNotificationService());
+                                            return notifications.get();
+                                        }
+                                        return null;
+                                    }
+                                    throw new AssertionError(
+                                            "Unexpected application call " + method);
+                                }));
+        PluginSettingsConfigurable configurable = new PluginSettingsConfigurable();
+        Field field = PluginSettingsConfigurable.class.getDeclaredField("component");
+        field.setAccessible(true);
+        field.set(configurable, component);
+
+        configurable.reset();
+        assertThat(component.isExperimentalIntellijAssistedReview()).isFalse();
+        assertThat(configurable.isModified()).isFalse();
+
+        component.setExperimentalIntellijAssistedReview(true);
+        assertThat(configurable.isModified()).isTrue();
+        configurable.apply();
+        assertThat(settings.isExperimentalIntellijAssistedReview()).isTrue();
+        assertThat(configurable.isModified()).isFalse();
+
+        component.setExperimentalIntellijAssistedReview(false);
+        assertThat(configurable.isModified()).isTrue();
+        configurable.reset();
+        assertThat(component.isExperimentalIntellijAssistedReview()).isTrue();
+        assertThat(configurable.isModified()).isFalse();
+
+        component.setExperimentalIntellijAssistedReview(false);
+        configurable.apply();
+        assertThat(settings.isExperimentalIntellijAssistedReview()).isFalse();
+        assertThat(configurable.isModified()).isFalse();
+        assertThat(home.resolve(".pr-pilot")).doesNotExist();
     }
 
     private static PluginSettingsComponent component() {

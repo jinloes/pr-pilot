@@ -11,6 +11,7 @@ type Call = (state: object, input: Record<string, unknown>) => Promise<void>;
 function host() {
     let head = 'a'.repeat(40);
     let provider = 'claude';
+    let assistedEnabled = true;
     let providerCalls = 0;
     let detailHook = async () => {};
     let generateHook = async () => {};
@@ -47,7 +48,8 @@ function host() {
         cancelReview: async () => {},
     };
     const vscode = { workspace: { workspaceFolders: [{ uri: { fsPath: '/fixture' } }],
-        getConfiguration: () => ({ get: (key: string, fallback: unknown) => key === 'reviewProvider' ? provider : fallback }) } };
+        getConfiguration: () => ({ get: (key: string, fallback: unknown) => key === 'reviewProvider' ? provider
+            : key === 'experimentalIntellijAssistedReview' ? assistedEnabled : fallback }) } };
     const cache = new Map<string, { exports: Record<string, unknown> }>();
     function load(file: string): Record<string, unknown> {
         const cached = cache.get(file);
@@ -87,7 +89,8 @@ function host() {
         onDetail: (hook: () => Promise<void>) => { detailHook = hook; },
         onPrepare: (hook: () => Promise<void>) => { prepareHook = hook; },
         onGenerate: (hook: () => Promise<void>) => { generateHook = hook; },
-        setHead: () => { head = 'b'.repeat(40); }, setProvider: (value: string) => { provider = value; } };
+        setHead: () => { head = 'b'.repeat(40); }, setProvider: (value: string) => { provider = value; },
+        setAssistedEnabled: (value: boolean) => { assistedEnabled = value; } };
 }
 
 test('actual host pauses without provider and resumes both configured provider paths once', async () => {
@@ -105,6 +108,21 @@ test('actual host pauses without provider and resumes both configured provider p
         assert.equal(h.calls(), 1);
         assert.equal(h.messages.length, count, 'duplicate replies must not replace completed output');
     }
+});
+
+test('actual host rejects IntelliJ-assisted requests while the experimental setting is off', async () => {
+    const h = host();
+    h.setAssistedEnabled(false);
+    await h.api.prepare(h.state, h.options);
+    assert.equal(h.calls(), 0, 'a disabled assisted request must never fall back to an ordinary review');
+    // Host messages come from the vm realm, so compare their JSON form.
+    assert.equal(JSON.stringify(h.messages), JSON.stringify([{ protocolVersion: 1, type: 'reviewError',
+        prKey: 'acme/widget#42',
+        message: 'IntelliJ-assisted review is disabled; enable it in PR Pilot settings (experimental)' }]));
+    assert.equal(h.state.deepReview.peek(), undefined);
+    h.setAssistedEnabled(true);
+    await h.api.prepare(h.state, h.options);
+    assert.equal(h.messages[h.messages.length - 1]?.type, 'deepReviewPrepared');
 });
 
 test('actual host retries readiness failure with fresh identity and preserves its previous draft', async () => {

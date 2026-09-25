@@ -32,7 +32,7 @@ test('deep setup supports keyboard Continue, Retry, explicit fallback and safe n
   await page.setViewportSize({ width: 380, height: 900 })
   await pushHostMessage(page, { type: 'prListLoaded', prs: [] })
   await page.getByRole('button', { name: 'Show review', exact: true }).click()
-  await page.getByText('Retained IntelliJ review worktrees').press('Enter')
+  await page.getByText('Review maintenance').press('Enter')
   await page.getByRole('button', { name: 'Refresh retained worktrees' }).press('Enter')
   const list = await latestHostRequest(page, 'listDeepReviews')
   await pushHostMessage(page, { type: 'retainedDeepReviews', operationId: list.operationId,
@@ -44,11 +44,12 @@ test('deep setup supports keyboard Continue, Retry, explicit fallback and safe n
   const cleanup = await latestHostRequest(page, 'cleanupDeepReview')
   expect(cleanup.projectClosed).toBe(true)
   await pushHostMessage(page, { type: 'retainedDeepReviews', operationId: cleanup.operationId, retained: [] })
-  await page.getByRole('button', { name: 'Show pull requests' }).click()
+  await page.getByTestId('review-pane-shell').getByRole('button', { name: 'Show pull requests' }).click()
   await pushHostMessage(page, { type: 'prListLoaded', prs: [examplePr] })
   await page.getByRole('button', { name: /Improve authentication/ }).click()
   await pushHostMessage(page, { type: 'draftLoaded', prKey: 'acme/platform#42', prState: 'NO_DRAFT',
-    diff: exampleDiff, providerReadiness: { provider: 'claude', available: true, detail: 'Ready' } })
+    diff: exampleDiff, providerReadiness: { provider: 'claude', available: true, detail: 'Ready' },
+    intellijAssistedEnabled: true })
   await page.locator('summary').filter({ hasText: 'Review instructions (optional)' }).press('Enter')
   await page.locator('summary').filter({ hasText: 'Advanced review options' }).press('Enter')
   const toggle = page.getByRole('checkbox', { name: /IntelliJ-assisted/ })

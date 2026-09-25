@@ -23,6 +23,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
+import org.apache.commons.text.StringEscapeUtils;
 
 public class PluginSettingsComponent {
 
@@ -36,6 +37,28 @@ public class PluginSettingsComponent {
 
     static final String PROFILE_NAME_REQUIRED = "Enter a profile name.";
 
+    /** Seam over {@link CopilotModelDiscovery} so tests don't spawn the Copilot CLI. */
+    interface CopilotModelCatalog {
+        CopilotModelDiscovery.Result cached();
+
+        CopilotModelDiscovery.Result refresh();
+
+        CopilotModelCatalog DISCOVERY =
+                new CopilotModelCatalog() {
+                    @Override
+                    public CopilotModelDiscovery.Result cached() {
+                        return CopilotModelDiscovery.cached();
+                    }
+
+                    @Override
+                    public CopilotModelDiscovery.Result refresh() {
+                        return CopilotModelDiscovery.refresh();
+                    }
+                };
+    }
+
+    static final String MODELS_LOADING_HINT = "Loading models available to your Copilot account…";
+
     private static final List<ModelOption> CLAUDE_MODELS =
             List.of(
                     new ModelOption("CLI default (unset)", ""),
@@ -44,10 +67,9 @@ public class PluginSettingsComponent {
                     new ModelOption("Opus — most thorough", "claude-opus-4-7"));
 
     /**
-     * Recent Copilot CLI model IDs offered as autocomplete suggestions. This list is intentionally
-     * a small subset rather than the full catalog — Copilot's available models change frequently,
-     * and the field is editable so users can type any ID. Run {@code copilot help config} to see
-     * what the installed CLI actually supports.
+     * Fallback Copilot model IDs shown only until discovery succeeds. This list is intentionally a
+     * small subset rather than the full catalog — Copilot's available models change frequently, and
+     * the field is editable so users can type any ID.
      */
     private static final String[] COPILOT_MODEL_SUGGESTIONS = {
         "", "claude-sonnet-4.6", "claude-opus-4.7", "claude-opus-4.8", "gpt-5.5", "gpt-5.4",
@@ -97,6 +119,8 @@ public class PluginSettingsComponent {
     private final JCheckBox reviewSelfCritiqueBox =
             new JCheckBox("Validate findings with a second pass");
     private final JCheckBox reviewSupervisorBox = new JCheckBox("Inspect high-risk coverage gaps");
+    private final JCheckBox experimentalIntellijAssistedBox =
+            new JCheckBox("Enable IntelliJ-assisted review (experimental)");
     private final JComboBox<ReviewProvider> providerCombo =
             new JComboBox<>(ReviewProvider.values());
     private final JBLabel modelLabel = new JBLabel("Model:");
@@ -111,6 +135,11 @@ public class PluginSettingsComponent {
     private final JButton checkButton = new JButton("Check Status");
     private final AuthCheckCoordinator authChecks;
     private final Supplier<String> pollStatusSupplier;
+    private final Consumer<Runnable> backgroundExecutor;
+    private final Consumer<Runnable> uiExecutor;
+    private final CopilotModelCatalog copilotModelCatalog;
+    private final JButton refreshModelsButton = new JButton("Refresh");
+    private final JBLabel copilotModelHint = hintLabel(hintHtml(MODELS_LOADING_HINT));
 
     // Notification settings
     private final JCheckBox notificationsEnabledBox =
@@ -163,9 +192,28 @@ public class PluginSettingsComponent {
             Consumer<Runnable> uiExecutor,
             Supplier<String> pollStatusSupplier,
             ProfileNamePrompt profileNamePrompt) {
+        this(
+                authChecker,
+                backgroundExecutor,
+                uiExecutor,
+                pollStatusSupplier,
+                profileNamePrompt,
+                CopilotModelCatalog.DISCOVERY);
+    }
+
+    PluginSettingsComponent(
+            Function<String, CheckAuthResult> authChecker,
+            Consumer<Runnable> backgroundExecutor,
+            Consumer<Runnable> uiExecutor,
+            Supplier<String> pollStatusSupplier,
+            ProfileNamePrompt profileNamePrompt,
+            CopilotModelCatalog copilotModelCatalog) {
         this.authChecks = new AuthCheckCoordinator(authChecker, backgroundExecutor, uiExecutor);
         this.pollStatusSupplier = pollStatusSupplier;
         this.profileNamePrompt = profileNamePrompt;
+        this.backgroundExecutor = backgroundExecutor;
+        this.uiExecutor = uiExecutor;
+        this.copilotModelCatalog = copilotModelCatalog;
         checkButton.addActionListener(e -> checkStatus());
 
         providerCombo.setRenderer(
@@ -189,28 +237,31 @@ public class PluginSettingsComponent {
         copilotModelCombo.setEditable(true);
         boundContentWidth(copilotModelCombo);
         boundContentWidth(claudeModelCombo);
-        JLabel copilotHint =
-                hintLabel(
-                        "<html><small>Auto-populated from <code>copilot help config</code>;"
-                                + " type any model ID to override.</small></html>");
         // BoxLayout centers children unless told otherwise. Force LEFT_ALIGNMENT on every child of
         // copilotModelCard or the hint floats to the middle/right of the row.
-        copilotHint.setAlignmentX(Component.LEFT_ALIGNMENT);
+        copilotModelHint.setAlignmentX(Component.LEFT_ALIGNMENT);
+        refreshModelsButton.setToolTipText("Reload the models available to your Copilot account");
+        refreshModelsButton.addActionListener(e -> refreshCopilotModels());
 
-        // Probe the CLI off the EDT — its first call can take up to 10 seconds. The dropdown
-        // starts with the hardcoded suggestions so users see something immediately; results from
-        // the probe (cached for the session) augment the list when they arrive.
-        backgroundExecutor.accept(
-                () -> {
-                    List<String> discovered = CopilotModelDiscovery.listModels();
-                    if (discovered.isEmpty()) return;
-                    uiExecutor.accept(() -> mergeCopilotModelOptions(discovered));
-                });
+        JPanel copilotModelRow = new JPanel();
+        copilotModelRow.setLayout(new BoxLayout(copilotModelRow, BoxLayout.X_AXIS));
+        copilotModelRow.setFocusable(false);
+        copilotModelRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        copilotModelRow.add(copilotModelCombo);
+        copilotModelRow.add(Box.createHorizontalStrut(JBUI.scale(6)));
+        copilotModelRow.add(refreshModelsButton);
+        copilotModelRow.setMaximumSize(copilotModelRow.getPreferredSize());
+
+        // Show the last known list instantly, then re-probe on every open: the catalog changes as
+        // models roll out, and an IDE-session-long cache left newly available models missing.
+        CopilotModelDiscovery.Result cachedModels = copilotModelCatalog.cached();
+        if (cachedModels != null) applyCopilotModelResult(cachedModels);
+        refreshCopilotModels();
 
         copilotModelCard.setLayout(new BoxLayout(copilotModelCard, BoxLayout.Y_AXIS));
         copilotModelCard.setFocusable(false);
-        copilotModelCard.add(copilotModelCombo);
-        copilotModelCard.add(copilotHint);
+        copilotModelCard.add(copilotModelRow);
+        copilotModelCard.add(copilotModelHint);
 
         // Wrap the Claude combo in a left-aligned BoxLayout card too: CardLayout ignores
         // maximumSize and would otherwise stretch the bare combo to the full panel width.
@@ -375,6 +426,16 @@ public class PluginSettingsComponent {
                         hintLabel(
                                 "<html><small>Runs a bounded coverage check and at most one targeted"
                                         + " follow-up. Off by default because it adds latency.</small></html>"));
+        JPanel intellijAssistedField =
+                fieldWithHint(
+                        experimentalIntellijAssistedBox,
+                        hintLabel(
+                                "<html><small>Shows the IntelliJ-assisted option in the review"
+                                        + " pane's advanced options. Requires a separate IntelliJ"
+                                        + " IDEA 262+ installation, a hand-written"
+                                        + " ~/.pr-pilot/semantic-review.json, and manually"
+                                        + " importing a retained worktree per review. Off by"
+                                        + " default; ordinary reviews are unaffected.</small></html>"));
         JPanel providerField = contentField(providerCombo);
 
         mainPanel =
@@ -410,6 +471,9 @@ public class PluginSettingsComponent {
                         .addComponent(sectionTitle("Review validation"), 1)
                         .addComponentToRightColumn(validationField, 1)
                         .addComponentToRightColumn(supervisorField, 1)
+                        .addSeparator(8)
+                        .addComponent(sectionTitle("Advanced review options"), 1)
+                        .addComponentToRightColumn(intellijAssistedField, 1)
                         .addSeparator(8)
                         .addComponent(sectionTitle("Notifications"), 1)
                         .addComponent(notificationsEnabledBox, 1)
@@ -635,6 +699,14 @@ public class PluginSettingsComponent {
         reviewSupervisorBox.setSelected(value);
     }
 
+    public boolean isExperimentalIntellijAssistedReview() {
+        return experimentalIntellijAssistedBox.isSelected();
+    }
+
+    public void setExperimentalIntellijAssistedReview(boolean value) {
+        experimentalIntellijAssistedBox.setSelected(value);
+    }
+
     private static JBLabel sectionTitle(String text) {
         JBLabel label = new JBLabel("<html><b>" + text + "</b></html>");
         label.setBorder(JBUI.Borders.emptyTop(8));
@@ -834,6 +906,13 @@ public class PluginSettingsComponent {
     }
 
     private static JBLabel hintLabel(String html) {
+        JBLabel label = new JBLabel(boundedHintHtml(html));
+        label.setBorder(JBUI.Borders.emptyTop(2));
+        label.setFocusable(false);
+        return label;
+    }
+
+    private static String boundedHintHtml(String html) {
         // Constrain hint width so long hints wrap instead of widening the whole settings panel
         // (an unbounded single-line HTML label reports a huge preferred width, which forces a
         // horizontal scrollbar and pushes full-width fields like the model dropdown off-screen).
@@ -844,16 +923,7 @@ public class PluginSettingsComponent {
         if (inner.endsWith("</html>")) {
             inner = inner.substring(0, inner.length() - "</html>".length());
         }
-        JBLabel label =
-                new JBLabel(
-                        "<html><div style='width:"
-                                + JBUI.scale(480)
-                                + "px'>"
-                                + inner
-                                + "</div></html>");
-        label.setBorder(JBUI.Borders.emptyTop(2));
-        label.setFocusable(false);
-        return label;
+        return "<html><div style='width:" + JBUI.scale(480) + "px'>" + inner + "</div></html>";
     }
 
     private void updateActiveModelCombo() {
@@ -873,6 +943,80 @@ public class PluginSettingsComponent {
         copilotInheritMcpBox.setEnabled(copilotProvider);
         copilotAutoEnableMcpOnReviewBox.setEnabled(copilotProvider);
         copilotConfigDirField.setEnabled(copilotProvider);
+    }
+
+    /**
+     * Re-probes the Copilot model catalog off the EDT. The dropdown keeps its current entries while
+     * loading, and the button stays disabled so refreshes never overlap.
+     */
+    private void refreshCopilotModels() {
+        refreshModelsButton.setEnabled(false);
+        refreshModelsButton.setText("Refreshing…");
+        if (copilotModelCatalog.cached() == null) {
+            copilotModelHint.setText(boundedHintHtml(hintHtml(MODELS_LOADING_HINT)));
+        }
+        backgroundExecutor.accept(
+                () -> {
+                    CopilotModelDiscovery.Result result = copilotModelCatalog.refresh();
+                    uiExecutor.accept(
+                            () -> {
+                                refreshModelsButton.setEnabled(true);
+                                refreshModelsButton.setText("Refresh");
+                                applyCopilotModelResult(result);
+                            });
+                });
+    }
+
+    private void applyCopilotModelResult(CopilotModelDiscovery.Result result) {
+        if (!result.models().isEmpty()) mergeCopilotModelOptions(result.models());
+        boolean hasPreviousList = copilotModelCatalog.cached() != null;
+        copilotModelHint.setText(
+                boundedHintHtml(hintHtml(copilotModelStatus(result, hasPreviousList))));
+    }
+
+    /** User-facing status for a discovery result. Package-private for tests. */
+    static String copilotModelStatus(CopilotModelDiscovery.Result result, boolean hasPreviousList) {
+        String reason =
+                result.failureReason().isBlank()
+                        ? ""
+                        : " (" + StringEscapeUtils.escapeHtml4(result.failureReason()) + ")";
+        return switch (result.source()) {
+            case ACCOUNT ->
+                    result.models().size()
+                            + " models available to your Copilot account."
+                            + " Type any model ID to override.";
+            case CLI_HELP ->
+                    "Couldn't load your account's models"
+                            + reason
+                            + ". Showing the Copilot CLI's built-in list, which may miss newer"
+                            + " models.";
+            case NONE ->
+                    hasPreviousList
+                            ? "Couldn't refresh models" + reason + ". Showing the last loaded list."
+                            : "Couldn't load models"
+                                    + reason
+                                    + ". Showing suggestions; type any model ID to override.";
+        };
+    }
+
+    private static String hintHtml(String text) {
+        return "<html><small>" + text + "</small></html>";
+    }
+
+    List<String> getCopilotModelOptions() {
+        List<String> options = new ArrayList<>();
+        for (int i = 0; i < copilotModelCombo.getItemCount(); i++) {
+            options.add(copilotModelCombo.getItemAt(i));
+        }
+        return options;
+    }
+
+    String getCopilotModelHintText() {
+        return copilotModelHint.getText();
+    }
+
+    JButton getRefreshModelsButton() {
+        return refreshModelsButton;
     }
 
     /**

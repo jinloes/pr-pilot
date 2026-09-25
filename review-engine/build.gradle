@@ -38,6 +38,8 @@ tasks.named('test') {
     dependsOn tasks.named('sourceInventoryWorkerJar'), tasks.named('jar')
     systemProperty 'sourceInventory.workerJar', layout.buildDirectory.file('libs/pr-pilot-source-inventory-worker.jar').get().asFile.absolutePath
     systemProperty 'semantic.engineJar', tasks.named('jar').get().archiveFile.get().asFile.absolutePath
+    // SemanticRuntimeTest fixture root: owner-only, never under a world-writable /tmp.
+    systemProperty 'semantic.testRoot', layout.buildDirectory.dir('semantic-runtime-test').get().asFile.absolutePath
 }
 
 tasks.register('sourceInventoryWorkerJar', Jar) {

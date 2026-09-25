@@ -21,12 +21,14 @@ import { PaneContent } from './ReviewContent'
 import { ReviewFooter } from './ReviewFooter'
 import { ReviewOverrides } from './ReviewOverrides'
 import { DeepReviewSetup } from './DeepReviewSetup'
+import { ReviewEmptyState } from './ReviewEmptyState'
 import { QualityCheckBadge, ReviewQualityCheckCard } from './ReviewQuality'
 import { useReviewController } from './useReviewController'
 
 interface Props {
   pr: PR | null
   onDirtyStateChange?: (dirty: boolean) => void
+  onShowList?: () => void
 }
 
 export interface ReviewPaneHandle {
@@ -46,7 +48,7 @@ const VERDICT_LABEL: Record<ReviewResult['verdict'], string> = {
 }
 
 export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPane(
-  { pr, onDirtyStateChange },
+  { pr, onDirtyStateChange, onShowList },
   ref,
 ) {
   const { model, actions, refs } = useReviewController({ pr, onDirtyStateChange })
@@ -66,8 +68,8 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
   if (!pr) {
     return (
       <div className="flex min-h-0 flex-1 flex-col bg-background">
+        <ReviewEmptyState onShowList={onShowList} />
         {deepReviewSetup}
-        <span className="text-sm text-muted-foreground italic">← select a pull request</span>
       </div>
     )
   }
@@ -88,8 +90,8 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
       onCustomInstructionsChange={actions.setCustomInstructionsOverride}
       onChunkedModeChange={actions.setChunkedMode}
       intellijAssisted={model.intellijAssisted}
-      onIntellijAssistedChange={actions.setIntellijAssisted}
-      onShowRetained={() => setMaintenanceVisible(true)}
+      onIntellijAssistedChange={model.intellijAssistedEnabled ? actions.setIntellijAssisted : undefined}
+      onShowRetained={model.intellijAssistedEnabled ? () => setMaintenanceVisible(true) : undefined}
     />
   ) : null
 

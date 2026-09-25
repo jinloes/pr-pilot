@@ -155,6 +155,14 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
         /** Enables bounded coverage supervision and at most one targeted follow-up review pass. */
         public boolean reviewSupervisorEnabled = false;
+
+        /**
+         * Experimental: shows the IntelliJ-assisted review controls in the webview and lets the
+         * host accept {@code intellijAssisted} generate requests. Off by default because the mode
+         * needs IntelliJ IDEA 262+, a hand-written {@code ~/.pr-pilot/semantic-review.json}, and a
+         * manual worktree import per review.
+         */
+        public boolean experimentalIntellijAssistedReview = false;
     }
 
     private State myState = new State();
@@ -416,5 +424,13 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
     public void setReviewSupervisorEnabled(boolean value) {
         myState.reviewSupervisorEnabled = value;
+    }
+
+    public boolean isExperimentalIntellijAssistedReview() {
+        return myState.experimentalIntellijAssistedReview;
+    }
+
+    public void setExperimentalIntellijAssistedReview(boolean value) {
+        myState.experimentalIntellijAssistedReview = value;
     }
 }

@@ -51,6 +51,7 @@ export interface SettingsState {
     activeReviewGuidanceProfileId: string;
     reviewSelfCritique: boolean;
     reviewSupervisorEnabled: boolean;
+    experimentalIntellijAssistedReview: boolean;
     notificationsEnabled: boolean;
     notifyReviewRequested: boolean;
     notifyStarredRepos: boolean;
@@ -106,6 +107,45 @@ export function mergeCopilotModelOptions(discovered: string[], current: string):
         merged.push(trimmed);
     }
     return merged;
+}
+
+/** Host → webview message carrying a refreshed Copilot model list. */
+export interface ModelsMessage {
+    type: 'models';
+    ok: boolean;
+    /** True for the automatic refresh on open: update the list without a status toast on success. */
+    quiet: boolean;
+    message: string;
+    copilotModels: string[];
+}
+
+/**
+ * Builds the `models` message for a refresh. `discovered` empty means the live probe failed; the
+ * dropdown then keeps the last good list (`previous`) or falls back to suggestions.
+ */
+export function buildModelsMessage(
+    discovered: string[],
+    previous: string[] | null,
+    current: string,
+    quiet: boolean,
+): ModelsMessage {
+    const ok = discovered.length > 0;
+    const hasPrevious = previous !== null && previous.length > 0;
+    let message: string;
+    if (ok) {
+        message = `${discovered.length} models available to your Copilot account.`;
+    } else if (hasPrevious) {
+        message = 'Could not refresh Copilot models. Showing the last loaded list.';
+    } else {
+        message = 'Could not load Copilot models. Showing suggestions.';
+    }
+    return {
+        type: 'models',
+        ok,
+        quiet,
+        message,
+        copilotModels: mergeCopilotModelOptions(ok ? discovered : (previous ?? []), current),
+    };
 }
 
 /** Escapes a string for safe interpolation into HTML text/attribute contexts. */
@@ -261,7 +301,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       <label for="copilotModel">Copilot model</label>
       <div class="row">
         <select id="copilotModel"></select>
-        <button id="refreshModels" class="secondary" title="Re-probe available models">Refresh</button>
+        <button id="refreshModels" class="secondary" title="Reload the models available to your Copilot account">Refresh</button>
       </div>
       <div class="hint">Pick a discovered model. Choose "CLI default" to use the Copilot CLI's own routing.</div>
     </div>
@@ -337,6 +377,16 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       <label><input type="checkbox" id="reviewSupervisorEnabled" style="width:auto;margin-right:6px;">Inspect high-risk coverage gaps</label>
       <div class="hint">Runs a bounded coverage check and at most one targeted follow-up. Off by default because it adds latency.</div>
     </div>
+
+    <details id="advancedReview" class="advanced">
+      <summary>Advanced review options</summary>
+      <div class="advanced-fields">
+        <div class="field">
+          <label><input type="checkbox" id="experimentalIntellijAssistedReview" style="width:auto;margin-right:6px;">Enable IntelliJ-assisted review (experimental)</label>
+          <div class="hint">Shows the IntelliJ-assisted option in a review's Advanced review options. Requires a separate IntelliJ IDEA 262+ installation, a hand-written <code>~/.pr-pilot/semantic-review.json</code>, and manually importing a retained worktree per review. Off by default; ordinary reviews are unaffected.</div>
+        </div>
+      </div>
+    </details>
   </div>
 
   <div class="section">
@@ -653,6 +703,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   $('customInstructions').addEventListener('change', () => saveGuidanceField('reviewCustomInstructions'));
   $('reviewSelfCritique').addEventListener('change', () => save('reviewSelfCritique', $('reviewSelfCritique').checked));
   $('reviewSupervisorEnabled').addEventListener('change', () => save('reviewSupervisorEnabled', $('reviewSupervisorEnabled').checked));
+  $('experimentalIntellijAssistedReview').addEventListener('change', () => save('experimentalIntellijAssistedReview', $('experimentalIntellijAssistedReview').checked));
   $('notificationsEnabled').addEventListener('change', () => {
     state.notificationsEnabled = $('notificationsEnabled').checked;
     applyNotificationVisibility(state.notificationsEnabled);
@@ -666,8 +717,12 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
     setStatus('Retrying notification poll…');
     vscode.postMessage({ type: 'retryNotifications' });
   });
+  function setModelsRefreshing(refreshing) {
+    $('refreshModels').textContent = refreshing ? 'Refreshing…' : 'Refresh';
+    $('refreshModels').disabled = refreshing;
+  }
   $('refreshModels').addEventListener('click', () => {
-    $('refreshModels').textContent = 'Refreshing…';
+    setModelsRefreshing(true);
     setStatus('Refreshing model list…');
     vscode.postMessage({ type: 'refreshModels' });
   });
@@ -707,6 +762,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       loadGuidanceFields();
       $('reviewSelfCritique').checked = state.reviewSelfCritique !== false;
       $('reviewSupervisorEnabled').checked = state.reviewSupervisorEnabled === true;
+      $('experimentalIntellijAssistedReview').checked = state.experimentalIntellijAssistedReview === true;
       $('notificationsEnabled').checked = state.notificationsEnabled === true;
       $('notifyReviewRequested').checked = state.notifyReviewRequested === true;
       $('notifyStarredRepos').checked = state.notifyStarredRepos === true;
@@ -714,11 +770,16 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       applyNotificationVisibility(state.notificationsEnabled);
       renderNotificationHealth(state.notificationHealth);
       renderCopilotModels(msg.copilotModels || [], state.reviewModelCopilot);
+      if (msg.refreshingModels === true) setModelsRefreshing(true);
       applyProviderVisibility(state.provider);
     } else if (msg.type === 'models') {
-      $('refreshModels').textContent = 'Refresh';
+      setModelsRefreshing(false);
       renderCopilotModels(msg.copilotModels || [], copilotModelValue());
-      setStatus(msg.ok === false ? (msg.message || 'Could not refresh models.') : 'Model list refreshed.', msg.ok === false ? 'error' : 'ok');
+      // The automatic refresh on open stays silent when it succeeds; failures always explain why
+      // the list may be stale.
+      if (msg.quiet !== true || msg.ok === false) {
+        setStatus(msg.message || (msg.ok === false ? 'Could not refresh models.' : 'Model list refreshed.'), msg.ok === false ? 'error' : 'ok');
+      }
     } else if (msg.type === 'saveResult') {
       if (typeof msg.requestId === 'number' && msg.requestId !== latestSaveRequestId) return;
       setStatus(msg.ok ? (msg.message || 'Saved.') : (msg.message || 'Could not save setting.'), msg.ok ? 'ok' : 'error');

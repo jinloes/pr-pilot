@@ -149,6 +149,20 @@ class PluginSettingsTest {
     }
 
     @Test
+    void experimentalIntellijAssistedReviewDefaultsToFalseAndRoundTrips() {
+        PluginSettings settings = new PluginSettings();
+
+        assertThat(settings.isExperimentalIntellijAssistedReview()).isFalse();
+        assertThat(new PluginSettings.State().experimentalIntellijAssistedReview).isFalse();
+        settings.setExperimentalIntellijAssistedReview(true);
+        assertThat(settings.isExperimentalIntellijAssistedReview()).isTrue();
+        assertThat(
+                        java.util.Objects.requireNonNull(settings.getState())
+                                .experimentalIntellijAssistedReview)
+                .isTrue();
+    }
+
+    @Test
     void copilotInheritMcpDefaultsToFalse() {
         PluginSettings s = new PluginSettings();
         assertThat(s.isCopilotInheritMcp()).isFalse();

@@ -117,15 +117,20 @@ function buildRuntimeEnv(): NodeJS.ProcessEnv {
 // ── Model discovery ───────────────────────────────────────────────────────────
 
 /**
- * Cached list of Copilot model IDs. `null` means "not probed yet"; an empty array means a probe
- * ran but found nothing (binary missing, policy-blocked account, schema drift) — callers fall back
- * to their own hardcoded suggestions. Mirrors CopilotModelDiscovery's AtomicReference semantics.
+ * Last successful list of Copilot model IDs, or `null` when no probe has succeeded yet. A failed
+ * probe never overwrites a good list, so a transient failure doesn't strip newer models from the
+ * dropdown. Mirrors CopilotModelDiscovery's cache semantics.
  */
 let modelCache: string[] | null = null;
 
 /** Drops the cached model list so the next {@link listModels} call re-probes. */
 export function invalidateModelCache(): void {
     modelCache = null;
+}
+
+/** Last successful model list without probing, or `null` if none has succeeded yet. */
+export function cachedModels(): string[] | null {
+    return modelCache;
 }
 
 interface ModelInfoLike {
@@ -147,13 +152,12 @@ export function filterModelIds(models: ModelInfoLike[]): string[] {
 }
 
 /**
- * Returns the Copilot model IDs available to the current account, querying the SDK's
- * `client.listModels()` once and caching the result. Only models whose policy is not `disabled`
- * are returned. On any failure returns an empty array (and caches it) so the caller falls back to
- * its own suggestion list rather than blocking on a broken probe every call.
+ * Returns the Copilot model IDs available to the current account via the SDK's
+ * `client.listModels()` (the live account catalog). Only models whose policy is not `disabled` are
+ * returned. Serves the cached list unless `forceRefresh` is set. On failure returns an empty array
+ * and keeps any previously cached list, so callers can fall back without losing a good result.
  *
- * Mirrors CopilotModelDiscovery.listModels (IntelliJ), but uses the SDK directly instead of
- * shelling out to `copilot help config`.
+ * Mirrors CopilotModelDiscovery.refresh (IntelliJ), which uses the same live catalog.
  */
 export async function listModels(forceRefresh = false): Promise<string[]> {
     if (!forceRefresh && modelCache !== null) return modelCache;
@@ -167,13 +171,13 @@ export async function listModels(forceRefresh = false): Promise<string[]> {
     try {
         await withTimeout(client.start(), SDK_BOOT_TIMEOUT_MS, 'runtime startup');
         const models = await withTimeout(client.listModels(), SDK_BOOT_TIMEOUT_MS, 'model discovery');
-        modelCache = filterModelIds(models);
-        return modelCache;
+        const ids = filterModelIds(models);
+        if (ids.length > 0) modelCache = ids;
+        return ids;
     } catch (err) {
         console.warn('[pr-pilot] Failed to probe copilot models:',
             err instanceof Error ? err.message : String(err));
-        modelCache = [];
-        return modelCache;
+        return [];
     } finally {
         await client.stop().catch(() => undefined);
     }

@@ -23,6 +23,7 @@ import com.jinloes.prpilot.model.SourceInventory.Source;
 import com.jinloes.prpilot.model.SourceInventory.Status;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -123,7 +124,17 @@ public class SourceInventoryClientTest {
                 configuration,
                 "fixture-server",
                 fixture,
-                "/usr/bin:/bin");
+                fixtureExecutablePath());
+    }
+
+    /**
+     * Real fixture PATH directories only: usrmerge Linux makes {@code /bin} a symlink, which
+     * production PATH validation correctly rejects.
+     */
+    static String fixtureExecutablePath() {
+        return Stream.of("/usr/bin", "/bin")
+                .filter(dir -> Files.isDirectory(Path.of(dir), LinkOption.NOFOLLOW_LINKS))
+                .collect(Collectors.joining(":"));
     }
 
     /** Shared fixture for the actual SDK-wrapper regression, without packaging any test code. */
@@ -920,7 +931,7 @@ public class SourceInventoryClientTest {
                                 Path.of(args[6]),
                                 "fixture-server",
                                 Path.of(args[7]),
-                                "/usr/bin:/bin");
+                                fixtureExecutablePath());
                 var coverage = new SourceInventoryClient(launch).collect(Path.of(args[0]), args[1]);
                 if (coverage.files().size() != 1) throw new IOException("Incomplete coverage");
                 System.out.print("SANITIZED_COVERAGE");

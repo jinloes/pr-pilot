@@ -355,7 +355,12 @@ export default function App() {
         aria-label={t('app.review')}
         className={`${narrow ? (activePane === 'review' ? 'flex w-full pt-12' : 'hidden') : 'flex'} min-h-0 min-w-0 flex-1 flex-col overflow-hidden`}
       >
-        <ReviewPane ref={reviewPaneRef} pr={selectedPR} onDirtyStateChange={handleDirtyStateChange} />
+        <ReviewPane
+          ref={reviewPaneRef}
+          pr={selectedPR}
+          onDirtyStateChange={handleDirtyStateChange}
+          onShowList={() => setActivePane('list')}
+        />
       </section>
     </main>
     </>

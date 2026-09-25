@@ -1046,7 +1046,8 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         if (detail.merged) {
             await state.draftRecoveryStore.clear(key);
             push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: false });
-            push(state, { type: 'draftLoaded', prKey: key, prState: 'MERGED', diff, validationDiff, providerReadiness: readiness });
+            push(state, { type: 'draftLoaded', prKey: key, prState: 'MERGED', diff, validationDiff, providerReadiness: readiness,
+                intellijAssistedEnabled: intellijAssistedEnabled() });
         } else if (draft) {
             const staleCommits = hasStaleCommits(draft.commitId, detail.head?.sha ?? '');
             push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: true });
@@ -1062,10 +1063,12 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
                 importedFromGitHub: draft.importedFromGitHub,
                 recoveryPending: draft.recoveryPending,
                 providerReadiness: readiness,
+                intellijAssistedEnabled: intellijAssistedEnabled(),
             });
         } else {
             push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: false });
-            push(state, { type: 'draftLoaded', prKey: key, prState: 'NO_DRAFT', diff, validationDiff, providerReadiness: readiness });
+            push(state, { type: 'draftLoaded', prKey: key, prState: 'NO_DRAFT', diff, validationDiff, providerReadiness: readiness,
+                intellijAssistedEnabled: intellijAssistedEnabled() });
         }
 
         // Comment-position validation benefits from an untruncated diff, but it must not block the
@@ -1095,6 +1098,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
             prState: 'NO_DRAFT',
             status: toUserFacingError(err, 'load PR details'),
             providerReadiness: providerReadiness(),
+            intellijAssistedEnabled: intellijAssistedEnabled(),
         });
     }
 }
@@ -1129,11 +1133,24 @@ async function handleDeepMaintenance(state: ViewState, msg: Record<string, unkno
     }
 }
 
+/** Experimental opt-in; while off, the webview hides the IntelliJ-assisted controls. */
+function intellijAssistedEnabled(): boolean {
+    return config().get<boolean>('experimentalIntellijAssistedReview', false) === true;
+}
+
+const INTELLIJ_ASSISTED_DISABLED_ERROR =
+    'IntelliJ-assisted review is disabled; enable it in PR Pilot settings (experimental)';
+
 async function handlePrepareDeepReview(state: ViewState, msg: Record<string, unknown>): Promise<void> {
     const number = msg.number as number;
     const owner = msg.owner as string;
     const repo = msg.repo as string;
     const key = prKeyFromParts(number, owner, repo);
+    if (!intellijAssistedEnabled()) {
+        // Reject rather than downgrade: an ordinary review must be an explicit user choice.
+        push(state, { type: 'reviewError', prKey: key, message: INTELLIJ_ASSISTED_DISABLED_ERROR });
+        return;
+    }
     const revision = state.deepReview.start(msg.operationId as string);
     const selectionRevision = state.selectionRevision;
     const configuration = JSON.stringify(snapshotReviewGenerationSettings());

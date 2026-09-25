@@ -245,7 +245,7 @@ export function PRList({ onSelect, selectedPr }: Props) {
                 variant="ghost"
                 size="sm"
                 onClick={() => sendToHost({ type: 'openSettings' })}
-                className="pr-list-toolbar-action ml-auto h-6 min-w-6 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+                className="pr-list-toolbar-action ml-auto h-6 min-w-6 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
                 aria-label="Open PR Pilot settings"
               >
                 <Settings2 className="w-3.5 h-3.5" />
@@ -261,7 +261,7 @@ export function PRList({ onSelect, selectedPr }: Props) {
                 size="sm"
                 onClick={() => fetchWithFilters()}
                 disabled={refreshing}
-                className="pr-list-toolbar-action h-6 min-w-6 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+                className="pr-list-toolbar-action h-6 min-w-6 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
                 aria-label="Refresh pull requests"
               >
                 <RefreshCw className={cn('w-3 h-3', refreshing && 'animate-spin')} />
@@ -311,9 +311,14 @@ export function PRList({ onSelect, selectedPr }: Props) {
             {loading ? 'Loading pull requests' : refreshing ? 'Refreshing pull requests' : `${filtered.length} pull requests shown`}
           </div>
           {loading && (
-            <div className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
-              <span className="font-mono animate-pulse text-primary">█</span>
-              loading…
+            <div
+              className="flex items-center gap-2 p-5 text-sm text-muted-foreground"
+              role="status"
+              aria-label="Loading pull requests"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              Loading pull requests…
             </div>
           )}
 

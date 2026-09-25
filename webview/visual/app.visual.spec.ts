@@ -131,7 +131,7 @@ async function openFindingNavigationReview(page: Page) {
   })
 }
 
-async function openNoDraftReview(page: Page, diff = reviewDiff) {
+async function openNoDraftReview(page: Page, diff = reviewDiff, intellijAssistedEnabled = false) {
   await selectExamplePr(page, false)
   await pushHostMessage(page, {
     type: 'draftLoaded',
@@ -140,6 +140,7 @@ async function openNoDraftReview(page: Page, diff = reviewDiff) {
     diff,
     validationDiff: diff,
     providerReadiness: { provider: 'claude', available: true, detail: 'Ready' },
+    ...(intellijAssistedEnabled ? { intellijAssistedEnabled } : {}),
   })
 }
 
@@ -312,7 +313,7 @@ test('populated discovery layout', async ({ page }) => {
   await expect(page.locator('nav li > button')).toHaveCount(2)
   await expect(page.getByText(examplePr.title, { exact: true })).toBeVisible()
   await expect(page.getByText('Add long translated review workflow guidance', { exact: true })).toBeVisible()
-  const retained = page.locator('details').filter({ has: page.getByText('Retained IntelliJ review worktrees', { exact: true }) })
+  const retained = page.locator('details').filter({ has: page.getByText('Review maintenance', { exact: true }) })
   await expect(retained.locator('summary')).toBeVisible()
   await expect(retained).not.toHaveAttribute('open')
   await expectViewportFilled(page)
@@ -582,7 +583,7 @@ test('toast theme follows the host when OS and host themes disagree', async ({ p
   await page.emulateMedia({ colorScheme: 'light' })
   await page.goto('/')
   await pushHostMessage(page, { type: 'themeChanged', theme: 'dark' })
-  await openNoDraftReview(page, '')
+  await openNoDraftReview(page, '', true)
   await page.getByText('Review instructions (optional)').click()
   await page.getByText('Advanced review options').click()
   const deepMode = page.getByRole('checkbox', { name: 'IntelliJ-assisted review (requires manual worktree import)' })
@@ -608,7 +609,7 @@ test('toast theme follows the host when OS and host themes disagree', async ({ p
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.reload()
   await pushHostMessage(page, { type: 'themeChanged', theme: 'light' })
-  await openNoDraftReview(page, '')
+  await openNoDraftReview(page, '', true)
   await page.getByText('Review instructions (optional)').click()
   await page.getByText('Advanced review options').click()
   await page.getByRole('checkbox', { name: 'Use chunked review mode as an advanced fallback' }).check()
@@ -617,7 +618,7 @@ test('toast theme follows the host when OS and host themes disagree', async ({ p
 
   await page.reload()
   await pushHostMessage(page, { type: 'themeChanged', theme: 'highContrastDark' })
-  await openNoDraftReview(page, '')
+  await openNoDraftReview(page, '', true)
   await page.getByText('Review instructions (optional)').click()
   await page.getByText('Advanced review options').click()
   await page.getByRole('checkbox', { name: 'Use chunked review mode as an advanced fallback' }).check()

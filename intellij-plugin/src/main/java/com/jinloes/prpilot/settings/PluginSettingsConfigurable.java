@@ -47,7 +47,9 @@ public class PluginSettingsConfigurable implements Configurable {
                         .getActiveReviewGuidanceProfileId()
                         .equals(s.getActiveReviewGuidanceProfileId())
                 || component.isReviewSelfCritique() != s.isReviewSelfCritique()
-                || component.isReviewSupervisorEnabled() != s.isReviewSupervisorEnabled();
+                || component.isReviewSupervisorEnabled() != s.isReviewSupervisorEnabled()
+                || component.isExperimentalIntellijAssistedReview()
+                        != s.isExperimentalIntellijAssistedReview();
     }
 
     @Override
@@ -83,6 +85,7 @@ public class PluginSettingsConfigurable implements Configurable {
         s.setActiveReviewGuidanceProfileId(component.getActiveReviewGuidanceProfileId());
         s.setReviewSelfCritique(component.isReviewSelfCritique());
         s.setReviewSupervisorEnabled(component.isReviewSupervisorEnabled());
+        s.setExperimentalIntellijAssistedReview(component.isExperimentalIntellijAssistedReview());
 
         // Restart/stop polling to reflect the new settings immediately
         PRNotificationService svc = PRNotificationService.getInstance();
@@ -115,6 +118,7 @@ public class PluginSettingsConfigurable implements Configurable {
         component.setActiveReviewGuidanceProfileId(s.getActiveReviewGuidanceProfileId());
         component.setReviewSelfCritique(s.isReviewSelfCritique());
         component.setReviewSupervisorEnabled(s.isReviewSupervisorEnabled());
+        component.setExperimentalIntellijAssistedReview(s.isExperimentalIntellijAssistedReview());
         loadGithubBaseUrlAndRefresh(
                 s.getGithubBaseUrl(), component::setGithubBaseUrl, component::refreshAuthStatus);
     }

@@ -226,6 +226,11 @@
           "type": "boolean",
           "default": false,
           "description": "Run bounded coverage supervision and at most one targeted follow-up pass for high-risk changes the first pass did not inspect. Off by default because it adds latency."
+        },
+        "pr-pilot.experimentalIntellijAssistedReview": {
+          "type": "boolean",
+          "default": false,
+          "description": "Experimental: show the IntelliJ-assisted review option in Advanced review options. Requires a separate IntelliJ IDEA 262+ installation, a hand-written ~/.pr-pilot/semantic-review.json, and manually importing a retained worktree per review. Off by default; ordinary reviews are unaffected. Retained worktrees stay removable from the review context menu either way."
         }
       }
     }

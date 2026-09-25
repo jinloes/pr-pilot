@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jinloes.prpilot.model.SourceInventory;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -34,7 +35,23 @@ class SemanticRuntimeTest {
 
     @BeforeEach
     void setup() throws Exception {
-        root = Files.createTempDirectory("semantic-runtime-test-").toRealPath();
+        root = Files.createTempDirectory(fixtureBase(), "semantic-runtime-test-").toRealPath();
+    }
+
+    /**
+     * Production {@link SemanticRuntime#trusted} rejects launch assets beneath any group- or
+     * world-writable ancestor, so the fixture must not live under Linux's sticky world-writable
+     * {@code /tmp}. The Gradle test task supplies an owner-only directory under build output; other
+     * runners fall back to {@code java.io.tmpdir}.
+     */
+    private static Path fixtureBase() throws IOException {
+        String configured = System.getProperty("semantic.testRoot");
+        if (configured == null || configured.isBlank()) {
+            return Path.of(System.getProperty("java.io.tmpdir"));
+        }
+        Path base = Files.createDirectories(Path.of(configured));
+        Files.setPosixFilePermissions(base, PosixFilePermissions.fromString("rwx------"));
+        return base;
     }
 
     @AfterEach

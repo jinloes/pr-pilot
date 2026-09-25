@@ -139,7 +139,8 @@ public class WebviewPanel implements Disposable {
             boolean importedFromGitHub,
             boolean recoveryPending,
             String status,
-            @JsonProperty("providerReadiness") ProviderReadinessDto providerReadiness) {}
+            @JsonProperty("providerReadiness") ProviderReadinessDto providerReadiness,
+            @JsonProperty("intellijAssistedEnabled") boolean intellijAssistedEnabled) {}
 
     private record ReviewGeneratingMsg(
             String type, @JsonProperty("prKey") String prKey, String message) {}
@@ -377,6 +378,12 @@ public class WebviewPanel implements Disposable {
     private final java.util.function.Supplier<Object> deepSettings;
     private final Consumer<Object> testMessageSink;
 
+    /** Experimental opt-in; while off, the webview hides the IntelliJ-assisted controls. */
+    private final java.util.function.BooleanSupplier intellijAssistedEnabled;
+
+    static final String INTELLIJ_ASSISTED_DISABLED_ERROR =
+            "IntelliJ-assisted review is disabled; enable it in PR Pilot settings (experimental)";
+
     /**
      * External effects only; correlation, head checks and Continue consumption stay in the host.
      */
@@ -440,6 +447,8 @@ public class WebviewPanel implements Disposable {
         this.deepSettings = this::readDeepSettingsIdentity;
         this.deepBackground = job -> getApplication().executeOnPooledThread(job);
         this.testMessageSink = null;
+        this.intellijAssistedEnabled =
+                () -> PluginSettings.getInstance().isExperimentalIntellijAssistedReview();
         this.deepIo =
                 new DeepReviewIo() {
                     public com.jinloes.prpilot.review.SemanticReviewService.Preparation prepare(
@@ -556,13 +565,24 @@ public class WebviewPanel implements Disposable {
                 .subscribe(LafManagerListener.TOPIC, source -> pushCurrentTheme());
     }
 
-    /** Headless bridge fixture: only external IDE/Git/provider effects are substituted. */
+    /** Headless bridge fixture with the experimental IntelliJ-assisted setting enabled. */
     WebviewPanel(
             PullRequest selected,
             DeepReviewIo io,
             Consumer<Runnable> background,
             java.util.function.Supplier<Object> settings,
             Consumer<Object> messages) {
+        this(selected, io, background, settings, messages, () -> true);
+    }
+
+    /** Headless bridge fixture: only external IDE/Git/provider effects are substituted. */
+    WebviewPanel(
+            PullRequest selected,
+            DeepReviewIo io,
+            Consumer<Runnable> background,
+            java.util.function.Supplier<Object> settings,
+            Consumer<Object> messages,
+            java.util.function.BooleanSupplier intellijAssistedEnabled) {
         project = null;
         browser = null;
         browserPanel = null;
@@ -577,6 +597,7 @@ public class WebviewPanel implements Disposable {
         deepBackground = background;
         deepSettings = settings;
         testMessageSink = messages;
+        this.intellijAssistedEnabled = intellijAssistedEnabled;
     }
 
     private void startServerAndLoad() {
@@ -922,7 +943,8 @@ public class WebviewPanel implements Disposable {
                             false,
                             false,
                             "Pull request is no longer available. Refresh the pull request list and try again.",
-                            currentProviderReadiness()));
+                            currentProviderReadiness(),
+                            intellijAssistedEnabled.getAsBoolean()));
             return;
         }
 
@@ -1118,7 +1140,8 @@ public class WebviewPanel implements Disposable {
                                                 false,
                                                 false,
                                                 "PR is merged.",
-                                                providerReadiness));
+                                                providerReadiness,
+                                                intellijAssistedEnabled.getAsBoolean()));
                                 return;
                             }
 
@@ -1163,7 +1186,8 @@ public class WebviewPanel implements Disposable {
                                                 recovery != null
                                                         ? "Recovered a local draft snapshot; save is pending."
                                                         : "Loaded pending draft review.",
-                                                providerReadiness));
+                                                providerReadiness,
+                                                intellijAssistedEnabled.getAsBoolean()));
                                 return;
                             }
 
@@ -1195,7 +1219,8 @@ public class WebviewPanel implements Disposable {
                                             false,
                                             false,
                                             "",
-                                            providerReadiness));
+                                            providerReadiness,
+                                            intellijAssistedEnabled.getAsBoolean()));
                         });
     }
 
@@ -1323,6 +1348,11 @@ public class WebviewPanel implements Disposable {
         int number = options.path("number").asInt();
         String owner = options.path("owner").asText(), repo = options.path("repo").asText();
         String key = bridgePrKey(number, owner, repo);
+        if (!intellijAssistedEnabled.getAsBoolean()) {
+            // Reject rather than downgrade: an ordinary review must be an explicit user choice.
+            pushMessage(new ErrorMsg("reviewError", key, INTELLIJ_ASSISTED_DISABLED_ERROR));
+            return;
+        }
         final long revision, selection;
         final Object settings = deepSettings.get();
         synchronized (this) {

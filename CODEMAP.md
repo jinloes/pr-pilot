@@ -7,7 +7,7 @@ Lookup guide for implementation work. Read this file when locating code or tests
 
 | Task | Start here | Follow through | Primary tests |
 |---|---|---|---|
-| Inspect internal source coverage (not readiness) | `model/SourceInventory.java`, `review/SourceInventoryClient.java` | `SourceInventoryFiles.java`, IntelliJ `SourceInventoryService.java` and `SourceInventoryMcpProvider.java` | `SourceInventoryTest`, `SourceInventoryFilesTest`, `SourceInventoryClientTest`, `SourceInventoryServiceTest`, `SourceInventoryMcpProviderTest`; manual README protocol recipe |
+| Inspect internal source coverage (not readiness) | `model/SourceInventory.java`, `review/SourceInventoryClient.java` | `SourceInventoryFiles.java`, IntelliJ `SourceInventoryService.java` and `SourceInventoryMcpProvider.java` | `SourceInventoryTest`, `SourceInventoryFilesTest`, `SourceInventoryClientTest`, `SourceInventoryServiceTest`, `SourceInventoryMcpProviderTest`; manual protocol recipe in `docs/intellij-assisted-review.md` |
 | Change review generation or prompts | `review-engine/.../ClaudeService.java`, `CopilotService.java` | `ReviewEngineApi.java`, `ReviewSessionService.java`, host request wiring | Matching `review-engine` service tests; prompt mirrors listed in `AGENTS.md` |
 | Add an engine capability | `GitHubEngineApi.java` or `ReviewEngineApi.java` | `StdioJsonRpcServer.java`, `SidecarBootstrapService.java`, `vscode-extension/src/sidecar.ts` | `EngineCapabilityCoverageTest.java`, `wireCatalog.test.ts` |
 | Change PR discovery, metadata, diff, or draft mutations | `github-engine/.../sidecar/pr/` | `GitHubEngine.java`, both host bridges, shared webview messages | Matching `github-engine` service test plus host bridge tests |
@@ -28,6 +28,7 @@ context makes them unambiguous.
 ### Root and automation
 
 - `README.md` - User setup, development, checks, and release flow.
+- `docs/intellij-assisted-review.md` - Experimental IntelliJ-assisted review, native readiness and source-inventory protocol.
 - `AGENTS.md` - Agent workflow, testing rules, and cross-host obligations.
 - `ARCHITECTURE.md` - Stable design constraints, settings persistence, and local data.
 - `diagrams/` - Mermaid architecture and PR review-generation sequence diagrams.
@@ -97,7 +98,7 @@ guidance.
   version enforcement, classloader-resource digest verification and owned worker extraction.
   `SemanticRuntimeTest` exercises open/close, forked settings, unsupported macOS JDK17,
   ordinary JAR and physically nested resource streams; actual installed Boot loading is separate.
-- `review/CopilotModelDiscovery.java` - Session-cached Copilot model probing.
+- `review/CopilotModelDiscovery.java` - Copilot model discovery from the live account catalog (help-config fallback), cached with refresh-on-open.
 - `review/GitWorktreeService.java` - Temporary PR-head worktree lifecycle.
 - `review/RepoGuidelinesReader.java` - Bounded repository-guidance discovery.
 - `review/BinaryLocator.java` - Provider binary-path probing.
@@ -246,6 +247,9 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
 - `webview/src/components/ReviewPane/{DeepReviewSetup,ReviewOverrides,ReviewPane,useReviewController}`
   — opt-in, manual pause, Continue/Retry/Cancel/ordinary fallback and retained maintenance.
   `ReviewPane.component.test.tsx` and `a11y/app.a11y.spec.ts` cover the shared interaction flow.
+  The opt-in controls render only when `draftLoaded.intellijAssistedEnabled` is `true`, set from the
+  default-off `PluginSettings.experimentalIntellijAssistedReview` /
+  `pr-pilot.experimentalIntellijAssistedReview`; both hosts reject assisted requests while it is off.
 - `WebviewPanelTest` and `vscode-extension/test/deepReview.test.ts` exercise actual bridge callbacks
   with external effects replaced. They do not stand in for installed-host/provider execution.
 - `webview/visual/app.visual.spec.ts` — ordinary/deep-default assertions and deterministic

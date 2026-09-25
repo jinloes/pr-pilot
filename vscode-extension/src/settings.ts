@@ -3,6 +3,7 @@ import * as crypto from 'crypto';
 import * as copilot from './copilot';
 import type { SidecarClient } from './sidecar';
 import {
+    buildModelsMessage,
     buildSettingsHtml,
     GITHUB_BASE_URL_ERROR,
     mergeCopilotModelOptions,
@@ -41,6 +42,7 @@ function readState(notificationHealth: NotificationHealth = EMPTY_NOTIFICATION_H
         activeReviewGuidanceProfileId: c.get<string>('activeReviewGuidanceProfileId', ''),
         reviewSelfCritique: c.get<boolean>('reviewSelfCritique', true),
         reviewSupervisorEnabled: c.get<boolean>('reviewSupervisorEnabled', false),
+        experimentalIntellijAssistedReview: c.get<boolean>('experimentalIntellijAssistedReview', false),
         notificationsEnabled: c.get<boolean>('notificationsEnabled', false),
         notifyReviewRequested: c.get<boolean>('notifyReviewRequested', true),
         notifyStarredRepos: c.get<boolean>('notifyStarredRepos', false),
@@ -54,6 +56,7 @@ const ALLOWED_KEYS = new Set([
     'copilotInheritMcp', 'copilotAutoEnableMcpOnReview', 'copilotConfigDir', 'reviewFocusAreas',
     'reviewCustomInstructions', 'reviewGuidanceProfiles',
     'activeReviewGuidanceProfileId', 'reviewSelfCritique', 'reviewSupervisorEnabled',
+    'experimentalIntellijAssistedReview',
     'notificationsEnabled', 'notifyReviewRequested', 'notifyStarredRepos', 'notificationPollMinutes',
 ]);
 
@@ -62,6 +65,7 @@ const BOOLEAN_KEYS = new Set([
     'copilotAutoEnableMcpOnReview',
     'reviewSelfCritique',
     'reviewSupervisorEnabled',
+    'experimentalIntellijAssistedReview',
     'notificationsEnabled',
     'notifyReviewRequested',
     'notifyStarredRepos',
@@ -200,14 +204,29 @@ export function openSettings(
         return saveQueue;
     };
 
-    const sendInit = async () => {
+    const refreshModels = async (quiet: boolean) => {
+        const previous = copilot.cachedModels();
+        const discovered = await copilot.listModels(true).catch(() => []);
+        try {
+            void current.webview.postMessage(
+                buildModelsMessage(discovered, previous, readState().reviewModelCopilot, quiet),
+            );
+        } catch {
+            // The panel was closed while the probe was running; the next open refreshes again.
+        }
+    };
+
+    // Render immediately from the last known list, then re-probe: the probe boots the Copilot
+    // runtime (seconds), and the account's catalog changes as new models roll out.
+    const sendInit = async (refresh = true) => {
         const state = readState(getNotificationHealth());
-        const discovered = await copilot.listModels().catch(() => []);
         current.webview.postMessage({
             type: 'init',
             state,
-            copilotModels: mergeCopilotModelOptions(discovered, state.reviewModelCopilot),
+            refreshingModels: refresh,
+            copilotModels: mergeCopilotModelOptions(copilot.cachedModels() ?? [], state.reviewModelCopilot),
         });
+        if (refresh) await refreshModels(true);
     };
 
     current.webview.onDidReceiveMessage(async (msg: SettingsMessage) => {
@@ -225,25 +244,12 @@ export function openSettings(
                 break;
             }
             case 'refreshModels': {
-                let ok = true;
-                let message = 'Model list refreshed.';
-                const discovered = await copilot.listModels(true).catch((err) => {
-                    ok = false;
-                    message = err instanceof Error ? err.message : 'Could not refresh models.';
-                    return [];
-                });
-                const state = readState();
-                current.webview.postMessage({
-                    type: 'models',
-                    ok,
-                    message,
-                    copilotModels: mergeCopilotModelOptions(discovered, state.reviewModelCopilot),
-                });
+                await refreshModels(false);
                 break;
             }
             case 'retryNotifications': {
                 await retryNotifications();
-                await sendInit();
+                await sendInit(false);
                 break;
             }
             case 'testConnection': {

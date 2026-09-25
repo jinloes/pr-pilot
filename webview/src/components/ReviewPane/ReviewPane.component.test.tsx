@@ -41,19 +41,81 @@ afterEach(() => {
 })
 
 describe('IntelliJ-assisted workflow', () => {
-  function fixture() {
+  function loadDraft(intellijAssistedEnabled?: boolean) {
+    act(() => hostMessage({ type: 'draftLoaded', prKey: 'acme/widget#42', prState: 'NO_DRAFT',
+      diff: diffWithFiles(1), providerReadiness: { provider: 'claude', available: true, detail: 'Ready' },
+      ...(intellijAssistedEnabled === undefined ? {} : { intellijAssistedEnabled }) }))
+  }
+
+  function fixture(intellijAssistedEnabled: boolean | 'absent' = true) {
     const outgoing: Record<string, unknown>[] = []
     ;(window as unknown as { cefQuery: (arg: { request: string }) => void }).cefQuery =
       ({ request }) => outgoing.push(JSON.parse(request))
     const view = render(<ReviewPane pr={pr} />)
-    act(() => hostMessage({ type: 'draftLoaded', prKey: 'acme/widget#42', prState: 'NO_DRAFT',
-      diff: diffWithFiles(1), providerReadiness: { provider: 'claude', available: true, detail: 'Ready' } }))
+    loadDraft(intellijAssistedEnabled === 'absent' ? undefined : intellijAssistedEnabled)
     const last = (type: string) => { const matches = outgoing.filter(m => m.type === type); return matches[matches.length - 1] }
     const prepared = (operationId: unknown) => ({ type: 'deepReviewPrepared', prKey: 'acme/widget#42',
       operationId, retainedId: '11111111-1111-4111-8111-111111111111', head: 'a'.repeat(40),
       worktree: '/fixture/deep', servers: ['private'], message: 'Manual sync required' })
     return { outgoing, view, last, prepared }
   }
+
+  async function openAdvancedOptions(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByText('Review instructions (optional)'))
+    await user.click(screen.getByText('Advanced review options'))
+  }
+
+  async function openContextMenu() {
+    fireEvent.contextMenu(screen.getByTestId('review-scroll-body'))
+    return await screen.findByRole('menuitem', { name: 'Retained IntelliJ review worktrees' })
+  }
+
+  for (const flag of ['absent', false] as const) {
+    it(`hides assisted controls by default when the host setting is ${String(flag)}`, async () => {
+      const user = userEvent.setup()
+      const f = fixture(flag)
+      await openAdvancedOptions(user)
+      expect(screen.getByText('Use chunked review mode as an advanced fallback')).toBeVisible()
+      expect(screen.queryByRole('checkbox', { name: /IntelliJ-assisted/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Retained IntelliJ review worktrees' })).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Generate Review' }))
+      expect(f.last('generateReview').intellijAssisted).toBeUndefined()
+      expect(f.last('generateReview')).toMatchObject({ number: 42, owner: 'acme', repo: 'widget' })
+    })
+  }
+
+  it('keeps the context-menu maintenance entry available with the setting off', async () => {
+    const user = userEvent.setup()
+    fixture('absent')
+    await user.click(await openContextMenu())
+    expect(screen.getByRole('button', { name: 'Close retained worktrees' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Refresh retained worktrees' })).toBeInTheDocument()
+  })
+
+  it('shows both assisted controls and the context-menu entry with the setting on', async () => {
+    const user = userEvent.setup()
+    fixture(true)
+    await openAdvancedOptions(user)
+    expect(screen.getByRole('checkbox', { name: /IntelliJ-assisted/ })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Retained IntelliJ review worktrees' }))
+    expect(screen.getByRole('button', { name: 'Close retained worktrees' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Close retained worktrees' }))
+    expect(await openContextMenu()).toBeVisible()
+  })
+
+  it('resets a checked assisted request when the host setting turns off', async () => {
+    const user = userEvent.setup()
+    const f = fixture(true)
+    await openAdvancedOptions(user)
+    await user.click(screen.getByRole('checkbox', { name: /IntelliJ-assisted/ }))
+    expect(screen.getByRole('checkbox', { name: /IntelliJ-assisted/ })).toBeChecked()
+    loadDraft(false)
+    expect(screen.queryByRole('checkbox', { name: /IntelliJ-assisted/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Generate Review' }))
+    expect(f.last('generateReview').intellijAssisted).toBeUndefined()
+    loadDraft(true)
+    expect(screen.getByRole('checkbox', { name: /IntelliJ-assisted/ })).not.toBeChecked()
+  })
 
   it('pauses, ignores stale setup, retries with new IDs, and explicitly falls back', async () => {
     const user = userEvent.setup()
@@ -105,7 +167,7 @@ describe('IntelliJ-assisted workflow', () => {
     const user = userEvent.setup()
     const f = fixture()
     f.view.rerender(<ReviewPane pr={null} />)
-    await user.click(screen.getByText('Retained IntelliJ review worktrees'))
+    await user.click(screen.getByText('Review maintenance'))
     await user.click(screen.getByRole('button', { name: 'Refresh retained worktrees' }))
     const retained = [{ id: '11111111-1111-4111-8111-111111111111', repository: '/fixture',
       worktree: '/fixture/deep', head: 'a'.repeat(40), createdAt: 1 }]
@@ -117,6 +179,26 @@ describe('IntelliJ-assisted workflow', () => {
     await user.click(screen.getByRole('button', { name: 'Remove retained worktree' }))
     expect(f.last('cleanupDeepReview').projectClosed).toBe(true)
     expect(screen.getByRole('button', { name: 'Remove retained worktree' })).toBeDisabled()
+  })
+
+  it('presents an actionable empty state and keeps maintenance secondary', async () => {
+    const user = userEvent.setup()
+    const onShowList = vi.fn()
+    const view = render(<ReviewPane pr={null} onShowList={onShowList} />)
+
+    expect(screen.getByRole('heading', { name: 'Choose a pull request to begin' })).toBeVisible()
+    expect(screen.getByText('Select a pull request to open its diff and review actions.')).toBeVisible()
+    expect(screen.getByText('Review maintenance')).toBeVisible()
+    expect(
+      screen.getByRole('heading', { name: 'Choose a pull request to begin' })
+        .compareDocumentPosition(screen.getByText('Review maintenance')) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    await user.click(screen.getByRole('button', { name: 'Show pull requests' }))
+    expect(onShowList).toHaveBeenCalledOnce()
+
+    view.rerender(<ReviewPane pr={pr} onShowList={onShowList} />)
+    expect(screen.queryByRole('heading', { name: 'Choose a pull request to begin' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show pull requests' })).not.toBeInTheDocument()
   })
 })
 

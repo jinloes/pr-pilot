@@ -69,6 +69,7 @@ export interface PendingChatMessage {
 
 export interface ReviewViewModel {
   intellijAssisted: boolean
+  intellijAssistedEnabled: boolean
   deepSetup: DeepReviewPreparedMessage | null
   retainedDeepReviews: RetainedDeepReview[]
   deepMaintenanceError: string
@@ -280,6 +281,7 @@ export function useReviewController({
   const [pendingChatMessage, setPendingChatMessage] = useState<PendingChatMessage | null>(null)
   const [chunkedMode, setChunkedMode] = useState(false)
   const [intellijAssisted, setIntellijAssisted] = useState(false)
+  const [intellijAssistedEnabled, setIntellijAssistedEnabled] = useState(false)
   const [deepSetup, setDeepSetup] = useState<DeepReviewPreparedMessage | null>(null)
   const [retainedDeepReviews, setRetainedDeepReviews] = useState<RetainedDeepReview[]>([])
   const [deepMaintenanceError, setDeepMaintenanceError] = useState('')
@@ -390,6 +392,9 @@ export function useReviewController({
 
         case 'draftLoaded': {
           generatedBaselineRef.current = null
+          const assistedEnabled = message.intellijAssistedEnabled === true
+          setIntellijAssistedEnabled(assistedEnabled)
+          if (!assistedEnabled) setIntellijAssisted(false)
           const diff = message.diff ?? message.validationDiff ?? ''
           const validationDiff = message.validationDiff ?? diff
           const normalizedResult = message.result
@@ -793,7 +798,8 @@ export function useReviewController({
     if (!pr) return
     setDeepSetup(null)
     beforeDeepPauseRef.current = state
-    setDeepBusy(intellijAssisted && !ordinary)
+    const assisted = intellijAssisted && intellijAssistedEnabled && !ordinary
+    setDeepBusy(assisted)
     const focusAreas = focusAreasOverride.trim()
     const customInstructions = customInstructionsOverride.trim()
 
@@ -819,7 +825,7 @@ export function useReviewController({
         repo: pr.repo,
         diff: sourceDiff,
         chunkedReview: true,
-        ...(intellijAssisted && !ordinary ? { intellijAssisted: true } : {}),
+        ...(assisted ? { intellijAssisted: true } : {}),
         focusAreas: focusAreas || undefined,
         customInstructions: customInstructions || undefined,
       })
@@ -838,7 +844,7 @@ export function useReviewController({
       number: pr.number,
       owner: pr.owner,
       repo: pr.repo,
-      ...(intellijAssisted && !ordinary ? { intellijAssisted: true } : {}),
+      ...(assisted ? { intellijAssisted: true } : {}),
       focusAreas: focusAreas || undefined,
       customInstructions: customInstructions || undefined,
     })
@@ -1074,6 +1080,7 @@ export function useReviewController({
   return {
     model: {
       intellijAssisted,
+      intellijAssistedEnabled,
       deepSetup: deepSetup?.prKey === (pr ? prKey(pr) : '') ? deepSetup : null,
       retainedDeepReviews,
       deepMaintenanceError,
