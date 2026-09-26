@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Check, Loader2, Send, X, XCircle } from 'lucide-react'
+import { AlertTriangle, Check, Send, Square, X, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
@@ -13,6 +13,8 @@ interface Message {
   role: 'user' | 'assistant'
   content: string
   isError?: boolean
+  /** The user stopped this turn before the provider answered. */
+  stopped?: boolean
   contextSummary?: string[]
   /**
    * Opaque caller token copied from the `pendingMessage` this reply answers. ChatPane never
@@ -69,6 +71,7 @@ export function ChatPane({
   const pendingTokenRef = useRef<string | undefined>(undefined)
   const pendingContextSummaryRef = useRef<string[]>([])
   const activeOperationIdRef = useRef<string | null>(null)
+  const stoppedTurnRef = useRef(false)
 
   useEffect(() => {
     setMessages([])
@@ -80,11 +83,17 @@ export function ChatPane({
     pendingTokenRef.current = undefined
     pendingContextSummaryRef.current = []
     activeOperationIdRef.current = null
+    stoppedTurnRef.current = false
   }, [pr.number, pr.owner, pr.repo])
 
   useEffect(() => {
     return onHostMessage((msg) => {
       if ('prKey' in msg && msg.prKey && msg.prKey !== prKey(pr)) return
+
+      // Chat messages carry no operation id, so after Stop anything until the next question
+      // belongs to the stopped turn and must not resurrect it.
+      if ((msg.type === 'chatChunk' || msg.type === 'chatResponse' || msg.type === 'chatError')
+        && stoppedTurnRef.current) return
 
       switch (msg.type) {
         case 'chatChunk':
@@ -152,6 +161,7 @@ export function ChatPane({
     setBusy(true)
     onPendingMessageSent?.()
     const operationId = newOperationId()
+    stoppedTurnRef.current = false
     activeOperationIdRef.current = operationId
     sendToHost({ type: 'askClaude', operationId, context: ctx, question: q })
   }, [pendingMessage, busy, onPendingMessageSent, contextSummary])
@@ -177,7 +187,22 @@ export function ChatPane({
     pendingTokenRef.current = undefined
     pendingContextSummaryRef.current = []
     activeOperationIdRef.current = null
+    stoppedTurnRef.current = false
     sendToHost({ type: 'clearChat', operationId })
+  }
+
+  function handleStop() {
+    const operationId = activeOperationIdRef.current
+    if (!operationId) return
+    activeOperationIdRef.current = null
+    stoppedTurnRef.current = true
+    pendingTokenRef.current = undefined
+    pendingContextSummaryRef.current = []
+    setActiveContextSummary(null)
+    setStreaming('')
+    setBusy(false)
+    setMessages((prev) => [...prev, { role: 'assistant', content: 'Response stopped.', stopped: true }])
+    sendToHost({ type: 'cancelChat', operationId })
   }
 
   function handleSend() {
@@ -191,6 +216,7 @@ export function ChatPane({
     setBusy(true)
     onContextUsed?.()
     const operationId = newOperationId()
+    stoppedTurnRef.current = false
     activeOperationIdRef.current = operationId
     sendToHost({ type: 'askClaude', operationId, context: ctx, question: q })
   }
@@ -234,7 +260,15 @@ export function ChatPane({
       </div>
 
       {/* Keep this flexible region mounted so an empty chat anchors its composer to the panel bottom. */}
-      <div ref={messagesRef} data-testid="chat-messages" className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+      <div
+        ref={messagesRef}
+        data-testid="chat-messages"
+        role="region"
+        aria-label="Chat messages"
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Scrollable chat history needs a keyboard focus target.
+        tabIndex={0}
+        className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
         {hasContent && (
           <>
           {messages.map((m, i) => {
@@ -261,11 +295,18 @@ export function ChatPane({
                       m.role === 'user'
                         ? 'bg-primary text-primary-foreground'
                         : m.isError
-                          ? 'bg-destructive/20 text-destructive border border-destructive/40'
-                          : 'bg-secondary text-secondary-foreground',
+                          ? 'flex items-start gap-2 border border-status-issue/50 bg-status-issue/10 text-foreground'
+                          : m.stopped
+                            ? 'border border-border text-muted-foreground italic'
+                            : 'bg-secondary text-secondary-foreground',
                     )}
                   >
                     {m.isError ? (
+                      <>
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-issue" aria-hidden="true" />
+                        <span>{m.content}</span>
+                      </>
+                    ) : m.stopped ? (
                       m.content
                     ) : (
                       <MarkdownContent className={cn(
@@ -349,18 +390,30 @@ export function ChatPane({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           rows={2}
-          disabled={busy}
         />
-        <Button
-          size="sm"
-          onClick={handleSend}
-          disabled={busy || !input.trim()}
-          className="self-end shrink-0"
-          title="Send (Enter)"
-          aria-label="Send"
-        >
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-        </Button>
+        {busy ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleStop}
+            className="self-end shrink-0"
+            title="Stop response"
+            aria-label="Stop response"
+          >
+            <Square className="w-4 h-4" />
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            onClick={handleSend}
+            disabled={!input.trim()}
+            className="self-end shrink-0"
+            title="Send (Enter)"
+            aria-label="Send"
+          >
+            <Send className="w-4 h-4" />
+          </Button>
+        )}
       </div>
       <p className="px-3 pb-2 text-[11px] text-muted-foreground">
         Uses the active PR context shown above · right-click selected text to ask about it

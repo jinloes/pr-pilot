@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw, Settings2 } from 'lucide-react'
+import { AlertTriangle, RefreshCw, Settings2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -51,8 +51,11 @@ export function PRList({ onSelect, selectedPr }: Props) {
   const [coachRecoveredSetup, setCoachRecoveredSetup] = useState(false)
   const [scopeHelpVisible, setScopeHelpVisible] = useState(false)
   const [spotlightedKey, setSpotlightedKey] = useState<string | null>(null)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const sawSetupScreenRef = useRef(false)
+  // Mirrors App: once a list has loaded, `load_failed` is a recoverable refresh error, not setup.
+  const listLoadedRef = useRef(false)
   const spotlightedKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -81,6 +84,8 @@ export function PRList({ onSelect, selectedPr }: Props) {
         setProviderReadiness(msg.providerReadiness ?? null)
         setLoading(false)
         setRefreshing(false)
+        setRefreshError(null)
+        listLoadedRef.current = true
         const shouldCoach = sawSetupScreenRef.current || !localStorage.getItem(FIRST_SUCCESS_KEY)
         if (shouldCoach) {
           setCoachVisible(true)
@@ -91,6 +96,11 @@ export function PRList({ onSelect, selectedPr }: Props) {
       } else if (msg.type === 'prLoading') {
         setRefreshing(true)
       } else if (msg.type === 'setupRequired') {
+        if (msg.reason === 'load_failed' && listLoadedRef.current) {
+          setRefreshError(msg.detail)
+          setRefreshing(false)
+          return
+        }
         sawSetupScreenRef.current = true
         setLoading(false)
         setRefreshing(false)
@@ -174,6 +184,7 @@ export function PRList({ onSelect, selectedPr }: Props) {
     s: StateFilter = stateFilter,
     scope: PRSearchScope = searchScope,
   ) {
+    setRefreshError(null)
     setRefreshing(true)
     sendToHost({ type: 'refreshPRs', state: s, searchScope: scope })
   }
@@ -296,6 +307,36 @@ export function PRList({ onSelect, selectedPr }: Props) {
           onFilter={setFilter}
           onToggleScopeHelp={() => setScopeHelpVisible((value) => !value)}
         />
+
+        {refreshError !== null && (
+          <div
+            role="alert"
+            data-testid="pr-list-refresh-error"
+            className="flex flex-wrap items-start gap-2 rounded-md border border-status-issue/50 bg-status-issue/10 px-2 py-1.5"
+          >
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-issue" aria-hidden="true" />
+            <p className="min-w-0 flex-1 basis-[110px] break-words text-xs text-foreground">
+              {`Couldn't refresh pull requests. ${refreshError}`}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 shrink-0 px-2 text-xs"
+              onClick={() => fetchWithFilters()}
+            >
+              Retry
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 shrink-0 p-0"
+              aria-label="Dismiss refresh error"
+              onClick={() => setRefreshError(null)}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
 
         <PRListNotices
           status={listStatus}

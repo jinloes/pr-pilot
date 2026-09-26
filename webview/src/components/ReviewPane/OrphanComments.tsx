@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { DELETE_COMMENT_DESCRIPTION } from '../DiffViewer/DiffViewer'
 
 const ORPHAN_BADGE: Record<LineComment['type'], string> = {
   issue: 'text-status-issue border-status-issue/50 bg-status-issue/10',
@@ -126,7 +127,7 @@ function OrphanRow({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive"
+                    className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-status-issue"
                     aria-label="Delete unanchored comment"
                     disabled={readOnly}
                   >
@@ -136,9 +137,7 @@ function OrphanRow({
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>Delete this comment?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This comment will be removed. Save the draft to persist the change.
-                    </AlertDialogDescription>
+                    <AlertDialogDescription>{DELETE_COMMENT_DESCRIPTION}</AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>

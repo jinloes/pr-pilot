@@ -103,6 +103,7 @@ without justification.
 | `review-engine/CopilotService.DEFAULT_REASONING_EFFORT` | `vscode-extension/src/copilot.ts` |
 | `webview/src/bridge/types.ts` message schemas | `WebviewPanel.java` and `vscode-extension/src/extension.ts` handlers |
 | `core/.../model/DiffCoverage.java` trailer grammar (`split`, header/path format, limits) | `webview/src/lib/diffCoverage.ts` `splitDiffCoverage`/`parseDiffCoverage`; add accepted and rejected cases to the shared `core/src/test/resources/diff-coverage/trailer.golden.txt`, which both `DiffCoverageTest` and `diffCoverage.test.ts` read |
+| `github-engine/.../DraftReviewMutationService.java` `effectiveBody` fallback bodies and `DraftReviewCodec.encodeBody` general-note/detached-section rules | `webview/src/components/ReviewPane/publishBody.ts` `FALLBACK_REVIEW_BODY`/`publishedBodySections`; `publishBody.test.ts` and `DraftReviewMutationServiceTest` pin the strings. Retire it by adding a read-only publish-preview engine capability. |
 | `PluginSettings` adding new setting | `vscode-extension/package.json` config contribution + `vscode-extension/src/extension.ts` reader |
 | Any new **notification** shape (`reviews/status`, `reviews/chunk`, `reviews/chatChunk`) | `vscode-extension/src/sidecar.ts` dispatch — notifications are not in `RPC_METHODS`, so nothing enforces them |
 

@@ -29,6 +29,8 @@ interface Props {
   pr: PR | null
   onDirtyStateChange?: (dirty: boolean) => void
   onShowList?: () => void
+  /** Session-level experimental flag from the latest PR list; hides retained-worktree maintenance when not true. */
+  intellijAssistedEnabled?: boolean
 }
 
 export interface ReviewPaneHandle {
@@ -42,13 +44,15 @@ const VERDICT_COLOR: Record<ReviewResult['verdict'], string> = {
 }
 
 const VERDICT_LABEL: Record<ReviewResult['verdict'], string> = {
-  APPROVE: 'Approve',
-  REQUEST_CHANGES: 'Request Changes',
-  COMMENT: 'Comment',
+  APPROVE: 'Suggested: Approve',
+  REQUEST_CHANGES: 'Suggested: Request changes',
+  COMMENT: 'Suggested: Comment',
 }
 
+const DRAFT_STATES = new Set(['draftPresent', 'reviewUnsaved', 'saveError', 'submitError', 'deleteError'])
+
 export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPane(
-  { pr, onDirtyStateChange, onShowList },
+  { pr, onDirtyStateChange, onShowList, intellijAssistedEnabled = false },
   ref,
 ) {
   const { model, actions, refs } = useReviewController({ pr, onDirtyStateChange })
@@ -69,7 +73,7 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
     return (
       <div className="flex min-h-0 flex-1 flex-col bg-background">
         <ReviewEmptyState onShowList={onShowList} />
-        {deepReviewSetup}
+        {intellijAssistedEnabled && deepReviewSetup}
       </div>
     )
   }
@@ -78,14 +82,18 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
   const orphanCount = model.orphanComments.length
   const totalCount = commentCount + orphanCount
 
+  const isDraftState = DRAFT_STATES.has(model.state.kind)
   const reviewOverrides = model.showReviewOverrides ? (
     <ReviewOverrides
-      summaryLabel={model.state.kind === 'error' ? 'Adjust instructions before retry' : undefined}
+      summaryLabel={model.state.kind === 'error'
+        ? 'Adjust instructions before retry'
+        : isDraftState ? 'Regeneration options' : undefined}
       focusAreas={model.focusAreasOverride}
       customInstructions={model.customInstructionsOverride}
       chunkedMode={model.chunkedMode}
       preflight={model.preflight}
       recommendation={model.recommendation}
+      coverageGain={model.coverageGain}
       onFocusAreasChange={actions.setFocusAreasOverride}
       onCustomInstructionsChange={actions.setCustomInstructionsOverride}
       onChunkedModeChange={actions.setChunkedMode}
@@ -98,6 +106,10 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
   const paneContent = (
     <PaneContent
       state={model.state}
+      generationOptions={model.state.kind === 'noDraft' ? reviewOverrides : undefined}
+      coverageGain={model.coverageGain}
+      chunkedMode={model.chunkedMode}
+      onChunkedModeChange={actions.setChunkedMode}
       focusedCommentIdx={model.focusedCommentIdx}
       commentFocusRequestId={model.commentFocusRequestId}
       onGenerate={actions.generate}
@@ -240,7 +252,6 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
             <div ref={refs.reviewBodyRef} data-testid="review-scroll-body" className="flex-1 overflow-y-auto min-h-0">
               {model.state.kind === 'noDraft' && paneContent}
               {model.state.kind === 'error' && paneContent}
-              {model.state.kind !== 'error' && reviewOverrides}
               {model.activity.outcome !== 'idle' && (
                 <div className={cn(
                   'px-4 pt-3',
@@ -277,12 +288,15 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
               {model.state.kind !== 'noDraft'
                 && model.state.kind !== 'error'
                 && paneContent}
+              {isDraftState && reviewOverrides && <div className="pb-4">{reviewOverrides}</div>}
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
-            <ContextMenuItem onSelect={() => setMaintenanceVisible(true)}>
-              Retained IntelliJ review worktrees
-            </ContextMenuItem>
+            {(intellijAssistedEnabled || model.deepSetup) && (
+              <ContextMenuItem onSelect={() => setMaintenanceVisible(true)}>
+                Retained IntelliJ review worktrees
+              </ContextMenuItem>
+            )}
             {model.selectedContext ? (
               <>
                 <ContextMenuLabel className="text-[10px] font-normal text-muted-foreground max-w-[220px] truncate py-1">
@@ -315,7 +329,7 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
         {model.showChat && (
           <div
             data-testid="chat-panel"
-            className="flex min-h-0 flex-col border-t border-border overflow-hidden"
+            className="flex min-h-0 shrink-0 flex-col border-t border-border overflow-hidden"
             style={{ height: model.chatVisible ? model.chatHeight : 0 }}
           >
             {model.chatVisible && (
@@ -353,8 +367,9 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
           onRegenerate={actions.generate}
           onDelete={actions.deleteDraft}
           onRunQualityCheck={actions.runQualityCheck}
-          inlineCommentCount={commentCount}
-          orphanCommentCount={orphanCount}
+          inlineCommentCount={model.publishSections.inlineCount}
+          publishSections={model.publishSections}
+          commentsMovedToBody={model.commentsMovedToBody}
           summary={model.result?.summary ?? ''}
           qualityReport={model.qualityReport}
           diffUnavailable={model.diffUnavailable}

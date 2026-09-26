@@ -2,7 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LineComment } from '@/bridge/types'
-import { DiffViewer } from './DiffViewer'
+import { AUTOSAVE_DEBOUNCE_MS } from '@/lib/autosave'
+import { DELETE_COMMENT_DESCRIPTION, DiffViewer } from './DiffViewer'
 
 const diff = `diff --git a/src/auth.ts b/src/auth.ts
 --- a/src/auth.ts
@@ -223,6 +224,29 @@ describe('DiffViewer', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete comment' })).toBeVisible()
   })
 
+  it('explains that a deleted comment is saved by autosave and offers Save now', async () => {
+    const user = userEvent.setup()
+    const onDeleteComment = vi.fn()
+    render(<DiffViewer diff={diff} comments={comments} onEditComment={vi.fn()} onDeleteComment={onDeleteComment} />)
+
+    await user.click(screen.getByRole('button', { name: 'More finding actions' }))
+    const deleteItem = screen.getByRole('menuitem', { name: 'Delete comment' })
+    expect(deleteItem).toHaveClass('text-status-issue')
+    expect(deleteItem).not.toHaveClass('text-destructive')
+    await user.click(deleteItem)
+
+    const dialog = await screen.findByRole('alertdialog')
+    const seconds = AUTOSAVE_DEBOUNCE_MS / 1000
+    expect(within(dialog).getByText(
+      `This comment will be removed from your pending GitHub review at the next autosave (within ${seconds} seconds). `
+      + 'Use Save now to update GitHub immediately.',
+    )).toBeVisible()
+    expect(DELETE_COMMENT_DESCRIPTION).toContain(`within ${seconds} seconds`)
+    expect(dialog).not.toHaveTextContent('Save the draft to persist the change.')
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    expect(onDeleteComment).toHaveBeenCalledOnce()
+  })
+
   it('closes a pending comment editor when the diff becomes read-only', () => {
     const { rerender } = render(<DiffViewer diff={diff} comments={[]} onAddComment={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Add comment on src/auth.ts, new line 1' }))
@@ -231,6 +255,20 @@ describe('DiffViewer', () => {
     rerender(<DiffViewer diff={diff} comments={[]} onAddComment={vi.fn()} readOnly />)
 
     expect(screen.queryByRole('textbox', { name: 'Comment on src/auth.ts, line 1' })).not.toBeInTheDocument()
+  })
+
+  it('makes read-only file sections named keyboard scroll targets and leaves editable sections unfocusable', () => {
+    const { rerender } = render(<DiffViewer diff={diff} comments={[]} readOnly />)
+
+    const readOnlySection = screen.getByRole('region', { name: 'src/auth.ts' })
+    expect(readOnlySection).toHaveAttribute('tabindex', '0')
+    expect(screen.queryByRole('button', { name: /^Add comment on/ })).not.toBeInTheDocument()
+
+    rerender(<DiffViewer diff={diff} comments={[]} onAddComment={vi.fn()} />)
+
+    const editableSection = screen.getByRole('region', { name: 'src/auth.ts' })
+    expect(editableSection).not.toHaveAttribute('tabindex')
+    expect(within(editableSection).getAllByRole('button', { name: /^Add comment on src\/auth\.ts/ }).length).toBeGreaterThan(0)
   })
 
   it('updates the current-file indicator while the diff scroll position changes', async () => {

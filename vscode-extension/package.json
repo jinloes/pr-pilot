@@ -65,10 +65,16 @@
         {
           "id": "pr-pilot.main",
           "name": "PR Pilot",
-          "type": "webview"
+          "icon": "./media/pr-pilot.svg"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "pr-pilot.main",
+        "contents": "Review pull requests with AI assistance in an editor tab.\n[Open PR Pilot](command:pr-pilot.open)\nOr open [Settings](command:pr-pilot.openSettings)."
+      }
+    ],
     "configuration": {
       "title": "PR Pilot",
       "properties": {
@@ -167,7 +173,7 @@
         "pr-pilot.copilotInheritMcp": {
           "type": "boolean",
           "default": false,
-          "description": "Advanced capability elevation. When enabled, Copilot may call MCP servers defined in your trusted Copilot config (`~/.copilot/mcp-config.json`, or `pr-pilot.copilotConfigDir`). A pull request's own repo-local `.mcp.json` is never loaded, since PR content is untrusted. Disabled by default."
+          "description": "Allow Copilot to use MCP tools from your trusted Copilot config. Applies while reviewing untrusted pull request content. Servers load only from your own Copilot config (`~/.copilot/mcp-config.json`, or `pr-pilot.copilotConfigDir`); a pull request's `.mcp.json` is never loaded. Disabled by default."
         },
         "pr-pilot.copilotAutoEnableMcpOnReview": {
           "type": "boolean",
@@ -220,7 +226,7 @@
         "pr-pilot.reviewSelfCritique": {
           "type": "boolean",
           "default": true,
-          "description": "Run a second self-critique pass that re-validates each finding against the diff and the same context the first pass saw, dropping misattributed, unsupported, and CI-duplicated ones. On by default for precision; turn it off to roughly halve review latency."
+          "description": "Validate findings with a second pass that re-checks each finding against the diff and the same context the first pass saw, dropping misattributed, unsupported, and CI-duplicated ones. On by default for precision; turn it off to roughly halve review latency."
         },
         "pr-pilot.reviewSupervisorEnabled": {
           "type": "boolean",
@@ -230,7 +236,7 @@
         "pr-pilot.experimentalIntellijAssistedReview": {
           "type": "boolean",
           "default": false,
-          "description": "Experimental: show the IntelliJ-assisted review option in Advanced review options. Requires a separate IntelliJ IDEA 262+ installation, a hand-written ~/.pr-pilot/semantic-review.json, and manually importing a retained worktree per review. Off by default; ordinary reviews are unaffected. Retained worktrees stay removable from the review context menu either way."
+          "description": "Experimental: show the IntelliJ-assisted review option in Advanced review options. Requires a separate IntelliJ IDEA 262+ installation, a hand-written ~/.pr-pilot/semantic-review.json, and manually importing a retained worktree per review. Off by default; ordinary reviews are unaffected. Turning this off also hides retained-worktree maintenance; turn it back on to remove retained worktrees."
         }
       }
     }

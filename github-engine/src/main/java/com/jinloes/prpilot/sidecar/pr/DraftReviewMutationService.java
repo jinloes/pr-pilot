@@ -194,16 +194,29 @@ public final class DraftReviewMutationService {
         if (session.failure() != null) return session.failure();
 
         try {
-            String url =
+            String reviewPath =
                     pullPath(params.owner(), params.repo(), params.number())
                             + "/reviews/"
-                            + params.reviewId()
-                            + "/events";
+                            + params.reviewId();
+            // An explicit submit body replaces the pending body, so read it first and republish
+            // its visible sections; never submit when that read fails.
+            RestResponse pendingResponse =
+                    client.get(session.apiBase(), session.token(), reviewPath);
+            requireSuccess(pendingResponse);
+            JsonNode pendingBody = readJson(pendingResponse.body()).path("body");
+            String retained =
+                    codec.visibleBody(pendingBody.isTextual() ? pendingBody.textValue() : "");
             ObjectNode payload = mapper.createObjectNode();
             payload.put("event", params.event());
-            payload.put("body", effectiveBody(params.event(), params.body()));
+            payload.put(
+                    "body",
+                    effectiveBody(params.event(), composeSubmitBody(params.body(), retained)));
             requireSuccess(
-                    client.post(session.apiBase(), session.token(), url, writeJson(payload)));
+                    client.post(
+                            session.apiBase(),
+                            session.token(),
+                            reviewPath + "/events",
+                            writeJson(payload)));
             return DraftReviewMutationResult.ok("Review submitted.");
         } catch (MutationException exception) {
             return DraftReviewMutationResult.failure(exception.status(), exception.getMessage());
@@ -239,9 +252,19 @@ public final class DraftReviewMutationService {
         }
     }
 
-    // GitHub rejects REQUEST_CHANGES/COMMENT submissions with an empty body ("422: You need to
-    // leave a comment indicating the requested changes."), so a placeholder is required when the
-    // caller does not supply one.
+    /** Joins the non-blank reviewer text and retained visible pending body, in that order. */
+    private static String composeSubmitBody(String reviewerText, String retainedBody) {
+        List<String> parts = new ArrayList<>();
+        String reviewer = reviewerText == null ? "" : reviewerText.strip();
+        if (!reviewer.isEmpty()) parts.add(reviewer);
+        if (retainedBody != null && !retainedBody.isBlank()) parts.add(retainedBody);
+        return String.join("\n\n", parts);
+    }
+
+    // A live check on 2026-09-25 showed that, for COMMENT, an explicit submit body replaces the
+    // pending review body and an omitted body keeps it. submit therefore always sends the composed
+    // body; this canned fallback remains only for the case where both the reviewer text and the
+    // retained sections are empty, because empty-body behavior was not re-tested.
     private static String effectiveBody(String event, String body) {
         if (body != null && !body.isBlank()) return body;
         return switch (event) {

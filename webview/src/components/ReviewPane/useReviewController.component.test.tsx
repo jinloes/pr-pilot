@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PR, ReviewResult } from '../../bridge/types'
-import { MUTATION_WATCHDOG_MS, useReviewController } from './useReviewController'
+import { MUTATION_WATCHDOG_MS, SELECTION_CAPTURE_DEBOUNCE_MS, useReviewController } from './useReviewController'
 
 const pr: PR = {
   number: 42,
@@ -439,5 +439,94 @@ describe('useReviewController', () => {
       'diff excerpt',
       'PR worktree (read-only)',
     ])
+  })
+
+  describe('keyboard selection capture', () => {
+    function selectContents(element: Element) {
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+      document.dispatchEvent(new Event('selectionchange'))
+    }
+
+    afterEach(() => {
+      window.getSelection()?.removeAllRanges()
+      document.body.innerHTML = ''
+    })
+
+    it('captures a selection made without the mouse after the debounce', () => {
+      vi.useFakeTimers()
+      const paragraph = document.createElement('p')
+      paragraph.textContent = '  Selected summary text  '
+      document.body.append(paragraph)
+      const { result } = renderHook(() => useReviewController({ pr }))
+
+      act(() => selectContents(paragraph))
+      expect(result.current.model.selectedContext).toBe('')
+      act(() => { vi.advanceTimersByTime(SELECTION_CAPTURE_DEBOUNCE_MS) })
+
+      expect(result.current.model.selectedContext).toBe('Selected summary text')
+    })
+
+    it('keeps the captured context when the selection collapses', () => {
+      vi.useFakeTimers()
+      const paragraph = document.createElement('p')
+      paragraph.textContent = 'Keep me'
+      document.body.append(paragraph)
+      const { result } = renderHook(() => useReviewController({ pr }))
+
+      act(() => selectContents(paragraph))
+      act(() => { vi.advanceTimersByTime(SELECTION_CAPTURE_DEBOUNCE_MS) })
+      act(() => {
+        window.getSelection()!.removeAllRanges()
+        document.dispatchEvent(new Event('selectionchange'))
+      })
+      act(() => { vi.advanceTimersByTime(SELECTION_CAPTURE_DEBOUNCE_MS) })
+
+      expect(result.current.model.selectedContext).toBe('Keep me')
+    })
+
+    it('ignores selections inside the chat input and other text fields', () => {
+      vi.useFakeTimers()
+      const composer = document.createElement('div')
+      composer.className = 'chat-pane__input'
+      composer.textContent = 'Typing a question'
+      const label = document.createElement('label')
+      const textarea = document.createElement('textarea')
+      label.textContent = 'Field label'
+      label.append(textarea)
+      document.body.append(composer, label)
+      const { result } = renderHook(() => useReviewController({ pr }))
+
+      act(() => selectContents(composer))
+      act(() => { vi.advanceTimersByTime(SELECTION_CAPTURE_DEBOUNCE_MS) })
+      textarea.focus()
+      act(() => selectContents(label))
+      act(() => { vi.advanceTimersByTime(SELECTION_CAPTURE_DEBOUNCE_MS) })
+
+      expect(result.current.model.selectedContext).toBe('')
+    })
+
+    it('removes the listener when no pull request is selected', () => {
+      vi.useFakeTimers()
+      const paragraph = document.createElement('p')
+      paragraph.textContent = 'Not captured'
+      document.body.append(paragraph)
+      const removeListener = vi.spyOn(document, 'removeEventListener')
+      const initialProps: { selectedPr: PR | null } = { selectedPr: pr }
+      const { result, rerender } = renderHook(
+        ({ selectedPr }) => useReviewController({ pr: selectedPr }),
+        { initialProps },
+      )
+
+      rerender({ selectedPr: null })
+      expect(removeListener).toHaveBeenCalledWith('selectionchange', expect.any(Function))
+      act(() => selectContents(paragraph))
+      act(() => { vi.advanceTimersByTime(SELECTION_CAPTURE_DEBOUNCE_MS) })
+
+      expect(result.current.model.selectedContext).toBe('')
+    })
   })
 })

@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildErrorHtml, buildLauncherHtml, buildMainWebviewHtml } from '../src/webviewHtml';
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
+
+import { buildErrorHtml, buildMainWebviewHtml } from '../src/webviewHtml';
 
 test('main webview HTML applies a restrictive CSP and nonces scripts', () => {
   const html = buildMainWebviewHtml(
@@ -19,14 +22,34 @@ test('main webview HTML applies a restrictive CSP and nonces scripts', () => {
   assert.match(html, /href="vscode-resource:\/\/assets\/app\.css"/);
 });
 
-test('launcher uses a nonce and a message instead of a command URI', () => {
-  const html = buildLauncherHtml('vscode-webview://origin', 'fixed-nonce');
+test('Activity Bar view uses native welcome content instead of a launcher webview', () => {
+  const manifest = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as {
+    contributes: {
+      views: Record<string, Array<Record<string, unknown>>>;
+      viewsWelcome: Array<{ view: string; contents: string }>;
+      viewsContainers: { activitybar: Array<{ id: string; icon: string }> };
+    };
+  };
+  const [view] = manifest.contributes.views['pr-pilot'];
 
-  assert.match(html, /default-src 'none'/);
-  assert.match(html, /<style nonce="fixed-nonce">/);
-  assert.match(html, /<script nonce="fixed-nonce">/);
-  assert.match(html, /postMessage\(\{ type: 'open' }\)/);
-  assert.doesNotMatch(html, /command:/);
+  assert.equal(view.id, 'pr-pilot.main');
+  assert.equal(view.type, undefined);
+  assert.equal(view.icon, './media/pr-pilot.svg');
+  assert.equal(manifest.contributes.viewsContainers.activitybar[0].icon, './media/pr-pilot.svg');
+  assert.deepEqual(manifest.contributes.viewsWelcome, [{
+    view: 'pr-pilot.main',
+    contents: 'Review pull requests with AI assistance in an editor tab.\n'
+      + '[Open PR Pilot](command:pr-pilot.open)\n'
+      + 'Or open [Settings](command:pr-pilot.openSettings).',
+  }]);
+});
+
+test('opening PR Pilot no longer closes the sidebar or registers a webview view', () => {
+  const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'extension.ts'), 'utf8');
+
+  assert.doesNotMatch(source, /workbench\.action\.closeSidebar/);
+  assert.doesNotMatch(source, /registerWebviewViewProvider/);
+  assert.match(source, /createTreeView\('pr-pilot\.main'/);
 });
 
 test('main webview HTML rejects documents without a head', () => {

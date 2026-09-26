@@ -132,3 +132,11 @@ test('rejects invalid rich comment metadata', () => {
     },
   }), false);
 });
+
+test('accepts cancelChat only with a bounded operation ID', () => {
+  assert.equal(isValidBridgeRequest({ ...version, type: 'cancelChat', operationId: 'chat-1' }), true);
+  assert.equal(isValidBridgeRequest({ ...version, type: 'cancelChat' }), false);
+  assert.equal(isValidBridgeRequest({ ...version, type: 'cancelChat', operationId: '' }), false);
+  assert.equal(isValidBridgeRequest({ ...version, type: 'cancelChat', operationId: 'x'.repeat(129) }), false);
+  assert.equal(isValidBridgeRequest({ ...version, type: 'cancelChat', operationId: 'bad\nid' }), false);
+});

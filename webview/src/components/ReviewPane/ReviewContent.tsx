@@ -27,6 +27,12 @@ export interface EditCommentHandlers {
 
 interface PaneContentProps {
   state: PaneState
+  /** Next-generation options rendered inside the no-draft generation card. */
+  generationOptions?: ReactNode
+  /** Changed files chunked review would add over the standard review diff. */
+  coverageGain: number
+  chunkedMode: boolean
+  onChunkedModeChange: (value: boolean) => void
   focusedCommentIdx: number
   commentFocusRequestId: number
   onGenerate: () => void
@@ -57,45 +63,83 @@ function formatGenerationSummary(elapsedSec?: number): string | null {
   return `Generated in ${formatElapsed(elapsedSec)}`
 }
 
-function coverageSummary(coverage: DiffCoverage): string {
-  const budget = formatBudget(coverage.budget)
-  const consequence = 'Single-pass review input and the diff view omit'
-  if (coverage.omitted === 0) {
-    return `This PR's diff was too large to scan completely within the ${budget} review budget, so some changed `
-      + `files may be missing. ${consequence} any such files, and chat uses a diff excerpt.`
-  }
-  const count = coverage.omitted
-  const files = `${count} changed file${count === 1 ? '' : 's'}`
-  const lead = coverage.scanComplete ? files : `At least ${files}`
-  const scan = coverage.scanComplete ? '' : ' and was too large to scan completely'
-  return `${lead} ${count === 1 ? 'was' : 'were'} left out of this PR's diff because it exceeds the ${budget} review `
-    + `budget${scan}. ${consequence} ${count === 1 ? 'this file' : 'these files'}, and chat uses a diff excerpt.`
+function plural(count: number, singular: string, pluralForm: string): string {
+  return count === 1 ? singular : pluralForm
 }
 
-/** Shown whenever the single-pass review diff omits changed files, as declared by its trailer. */
-function DiffCoverageBanner({ coverage }: { coverage: DiffCoverage }) {
+function coverageLead(coverage: DiffCoverage): string {
+  const budget = formatBudget(coverage.budget)
+  const count = coverage.omitted
+  const reason = `because the pull request's diff is larger than ${budget}.`
+  if (count === 0) return `Some changed files may not be included in this review ${reason}`
+  const files = `${count} changed ${plural(count, 'file', 'files')} ${plural(count, "isn't", "aren't")}`
+  return `${coverage.scanComplete ? files : `At least ${files}`} included in this review ${reason}`
+}
+
+function coverageConsequence(diffShown: boolean): string {
+  return diffShown
+    ? "They won't appear in the diff below, the generated review, or chat."
+    : "They won't be part of the generated review or chat."
+}
+
+function coverageRemedy(gain: number, chunkedMode: boolean): string {
+  if (gain <= 0) return 'Chunked review would not add these files. Consider splitting the pull request.'
+  return chunkedMode
+    ? `Chunked review is on. The next review will include ${gain} more ${plural(gain, 'file', 'files')}.`
+    : `Chunked review can include ${gain} of them.`
+}
+
+interface CoverageRemedyProps {
+  coverageGain: number
+  chunkedMode: boolean
+  onChunkedModeChange: (value: boolean) => void
+  /** True when a review already exists, so turning chunked mode on only affects the next run. */
+  nextRegeneration: boolean
+}
+
+/** Shown whenever the standard review diff omits changed files, as declared by its trailer. */
+function DiffCoverageBanner({
+  coverage,
+  diffShown,
+  coverageGain,
+  chunkedMode,
+  onChunkedModeChange,
+  nextRegeneration,
+}: { coverage: DiffCoverage; diffShown: boolean } & CoverageRemedyProps) {
   const unlisted = unlistedCount(coverage)
   return (
-    <Alert className="mx-4 mt-3 mb-0 border-status-suggestion/40 bg-status-suggestion/5">
-      <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
-      <AlertDescription className="text-xs text-status-suggestion">
-        <p>{coverageSummary(coverage)}</p>
-        {coverage.paths.length > 0 && (
-          <details className="mt-1">
-            <summary className="cursor-pointer">Show omitted files</summary>
-            <ul className="mt-1 list-disc space-y-0.5 pl-4">
-              {coverage.paths.map((path, index) => (
-                <li key={`${index}:${path}`} className="break-all font-mono text-[11px]">{path}</li>
-              ))}
-              {unlisted > 0 && <li className="list-none">{`+${unlisted} more not listed`}</li>}
-            </ul>
-          </details>
-        )}
-        {coverage.paths.length === 0 && coverage.omitted > 0 && (
-          <p className="mt-1">{`${coverage.omitted} omitted file${coverage.omitted === 1 ? ' is' : 's are'} not listed.`}</p>
-        )}
-      </AlertDescription>
-    </Alert>
+    <div className="px-4 pt-3">
+      <Alert className="mt-0 mb-0 border-status-suggestion/40 bg-status-suggestion/5">
+        <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
+        <AlertDescription className="text-xs text-status-suggestion">
+          <p>{`${coverageLead(coverage)} ${coverageConsequence(diffShown)} ${coverageRemedy(coverageGain, chunkedMode)}`}</p>
+          {coverageGain > 0 && !chunkedMode && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 h-auto min-h-7 whitespace-normal px-2 py-1 text-left text-[11px]"
+              onClick={() => onChunkedModeChange(true)}
+            >
+              {nextRegeneration ? 'Use chunked review for the next regeneration' : 'Include them with chunked review'}
+            </Button>
+          )}
+          {coverage.paths.length > 0 && (
+            <details className="mt-1">
+              <summary className="cursor-pointer">Show omitted files</summary>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                {coverage.paths.map((path, index) => (
+                  <li key={`${index}:${path}`} className="break-all font-mono text-[11px]">{path}</li>
+                ))}
+                {unlisted > 0 && <li className="list-none">{`+${unlisted} more not listed`}</li>}
+              </ul>
+            </details>
+          )}
+          {coverage.paths.length === 0 && coverage.omitted > 0 && (
+            <p className="mt-1">{`${coverage.omitted} omitted file${coverage.omitted === 1 ? ' is' : 's are'} not listed.`}</p>
+          )}
+        </AlertDescription>
+      </Alert>
+    </div>
   )
 }
 
@@ -118,7 +162,11 @@ function ReviewAndDiff({
   onDeleteOrphan,
   readOnly = false,
   generationMessage,
-}: {
+  coverageGain,
+  chunkedMode,
+  onChunkedModeChange,
+  nextRegeneration,
+}: CoverageRemedyProps & {
   result: ReviewResult | null
   diff?: string
   generationElapsedSec?: number
@@ -149,38 +197,51 @@ function ReviewAndDiff({
         </div>
       )}
       {staleCommits && (
-        <Alert className="mx-4 mt-3 mb-0 border-status-suggestion/40 bg-status-suggestion/5">
-          <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
-          <AlertDescription className="text-xs text-status-suggestion">
-            Draft generated against an older commit — new commits may have been pushed.
-          </AlertDescription>
-        </Alert>
+        <div className="px-4 pt-3">
+          <Alert className="mt-0 mb-0 border-status-suggestion/40 bg-status-suggestion/5">
+            <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
+            <AlertDescription className="text-xs text-status-suggestion">
+              Draft generated against an older commit — new commits may have been pushed.
+            </AlertDescription>
+          </Alert>
+        </div>
       )}
       {importedFromGitHub && (
-        <Alert className="mx-4 mt-3 mb-0 border-status-suggestion/40 bg-status-suggestion/5">
-          <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
-          <AlertDescription className="text-xs text-status-suggestion">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span>
-                Draft was reconstructed from GitHub comments — hidden PR Pilot metadata was missing, so review details
-                may be incomplete.
-              </span>
-              {onReanchor && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-6 shrink-0 gap-1.5 px-2 text-[11px]"
-                  onClick={onReanchor}
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  Re-anchor from current diff
-                </Button>
-              )}
-            </div>
-          </AlertDescription>
-        </Alert>
+        <div className="px-4 pt-3">
+          <Alert className="mt-0 mb-0 border-status-suggestion/40 bg-status-suggestion/5">
+            <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
+            <AlertDescription className="text-xs text-status-suggestion">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  Draft was reconstructed from GitHub comments — hidden PR Pilot metadata was missing, so review details
+                  may be incomplete.
+                </span>
+                {onReanchor && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 shrink-0 gap-1.5 px-2 text-[11px]"
+                    onClick={onReanchor}
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Re-anchor from current diff
+                  </Button>
+                )}
+              </div>
+            </AlertDescription>
+          </Alert>
+        </div>
       )}
-      {coverage && <DiffCoverageBanner coverage={coverage} />}
+      {coverage && (
+        <DiffCoverageBanner
+          coverage={coverage}
+          diffShown={Boolean(displayDiff)}
+          coverageGain={coverageGain}
+          chunkedMode={chunkedMode}
+          onChunkedModeChange={onChunkedModeChange}
+          nextRegeneration={nextRegeneration}
+        />
+      )}
       {generationSummary && (
         <p className="px-4 pt-3 text-xs text-muted-foreground">{generationSummary}</p>
       )}
@@ -235,7 +296,11 @@ function ErrorWithReview({
   onFocusComment,
   readOnly = false,
   actions,
-}: {
+  coverageGain,
+  chunkedMode,
+  onChunkedModeChange,
+  nextRegeneration,
+}: CoverageRemedyProps & {
   message: string
   result: ReviewResult | null
   diff: string
@@ -271,14 +336,70 @@ function ErrorWithReview({
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
           readOnly={readOnly}
+          coverageGain={coverageGain}
+          chunkedMode={chunkedMode}
+          onChunkedModeChange={onChunkedModeChange}
+          nextRegeneration={nextRegeneration}
         />
       )}
     </div>
   )
 }
 
+function GenerationCard({
+  state,
+  onGenerate,
+  onOpenSettings,
+  generationOptions,
+}: {
+  state: Extract<PaneState, { kind: 'noDraft' }>
+  onGenerate: () => void
+  onOpenSettings: () => void
+  generationOptions?: ReactNode
+}) {
+  const readiness = state.providerReadiness
+  const unavailable = readiness?.available === false
+  return (
+    <div className="px-4 pt-3">
+      <div data-testid="generation-card" className="rounded-md border border-border bg-card">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3">
+          <Button
+            data-testid="generate-review"
+            onClick={onGenerate}
+            className="gap-2"
+            disabled={unavailable}
+          >
+            Generate Review
+          </Button>
+          <div className="min-w-0 flex-1 basis-[180px]">
+            <p className="text-sm text-muted-foreground">No pending draft for this PR.</p>
+            {readiness && (
+              <p
+                className={cn('text-xs font-medium', readiness.available ? 'text-status-approve' : 'text-status-issue')}
+                role="status"
+              >
+                {readiness.available
+                  ? `${readiness.provider === 'claude' ? 'Claude' : 'Copilot'} ready`
+                  : readiness.detail}
+              </p>
+            )}
+          </div>
+          {unavailable && (
+            <Button variant="outline" size="sm" onClick={onOpenSettings}>Open Settings</Button>
+          )}
+        </div>
+        {generationOptions && <div className="[&>div]:px-3 [&>div]:pb-3 [&>div]:pt-0">{generationOptions}</div>}
+      </div>
+    </div>
+  )
+}
+
 export function PaneContent({
   state,
+  generationOptions,
+  coverageGain,
+  chunkedMode,
+  onChunkedModeChange,
   focusedCommentIdx,
   commentFocusRequestId,
   onGenerate,
@@ -310,34 +431,31 @@ export function PaneContent({
       )
 
     case 'noDraft': {
-      const coverage = splitDiffCoverage(state.diff).coverage
+      const coverageProps = { coverageGain, chunkedMode, onChunkedModeChange, nextRegeneration: false }
       return (
         <>
-          {coverage && <DiffCoverageBanner coverage={coverage} />}
-          <div className="flex flex-col items-center justify-center gap-4 p-8">
-            <p className="text-sm text-muted-foreground">No pending draft for this PR.</p>
-            {state.providerReadiness && (
-              <p
-                className={cn('text-xs font-medium', state.providerReadiness.available ? 'text-status-approve' : 'text-status-issue')}
-                role="status"
-              >
-                {state.providerReadiness.available
-                  ? `${state.providerReadiness.provider === 'claude' ? 'Claude' : 'Copilot'} ready`
-                  : state.providerReadiness.detail}
-              </p>
-            )}
-            <Button
-              data-testid="generate-review"
-              onClick={onGenerate}
-              className="gap-2"
-              disabled={state.providerReadiness?.available === false}
-            >
-              Generate Review
-            </Button>
-            {state.providerReadiness?.available === false && (
-              <Button variant="outline" size="sm" onClick={onOpenSettings}>Open Settings</Button>
-            )}
-          </div>
+          <GenerationCard
+            state={state}
+            onGenerate={onGenerate}
+            onOpenSettings={onOpenSettings}
+            generationOptions={generationOptions}
+          />
+          {state.diff?.trim() && (
+            <ReviewAndDiff
+              result={null}
+              diff={state.diff}
+              focusedCommentIdx={focusedCommentIdx}
+              commentFocusRequestId={commentFocusRequestId}
+              editCommentHandlers={editCommentHandlers}
+              onFocusComment={onFocusComment}
+              inlineComments={[]}
+              orphanComments={[]}
+              onEditOrphan={onEditOrphan}
+              onDeleteOrphan={onDeleteOrphan}
+              readOnly
+              {...coverageProps}
+            />
+          )}
         </>
       )
     }
@@ -388,6 +506,10 @@ export function PaneContent({
           generationMessage={state.replacingDraft
             ? 'Regenerating — current draft remains until the new review is ready. Editing and review actions are paused.'
             : 'Keep inspecting the changed files while PR Pilot generates the review. Editing and review actions are paused.'}
+          coverageGain={coverageGain}
+          chunkedMode={chunkedMode}
+          onChunkedModeChange={onChunkedModeChange}
+          nextRegeneration
         />
       )
 
@@ -410,6 +532,10 @@ export function PaneContent({
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
+          coverageGain={coverageGain}
+          chunkedMode={chunkedMode}
+          onChunkedModeChange={onChunkedModeChange}
+          nextRegeneration
         />
       )
 
@@ -429,6 +555,10 @@ export function PaneContent({
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
+          coverageGain={coverageGain}
+          chunkedMode={chunkedMode}
+          onChunkedModeChange={onChunkedModeChange}
+          nextRegeneration
         />
       )
 
@@ -475,6 +605,10 @@ export function PaneContent({
                 Try Again
               </Button>
             )}
+            coverageGain={coverageGain}
+            chunkedMode={chunkedMode}
+            onChunkedModeChange={onChunkedModeChange}
+            nextRegeneration={false}
           />
         )
       }
@@ -504,6 +638,10 @@ export function PaneContent({
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
+          coverageGain={coverageGain}
+          chunkedMode={chunkedMode}
+          onChunkedModeChange={onChunkedModeChange}
+          nextRegeneration
         />
       )
 
@@ -521,6 +659,10 @@ export function PaneContent({
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
+          coverageGain={coverageGain}
+          chunkedMode={chunkedMode}
+          onChunkedModeChange={onChunkedModeChange}
+          nextRegeneration
         />
       )
 
@@ -545,6 +687,10 @@ export function PaneContent({
               <Button variant="ghost" size="sm" onClick={onKeepDraft}>Keep draft</Button>
             </div>
           )}
+          coverageGain={coverageGain}
+          chunkedMode={chunkedMode}
+          onChunkedModeChange={onChunkedModeChange}
+          nextRegeneration
         />
       )
   }

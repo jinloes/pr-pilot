@@ -71,9 +71,9 @@
     --input: 240 4% 15%;
     --ring: 262 83% 68%;
     --status-approve: 142 65% 52%;
-    --status-changes: 0 70% 60%;
+    --status-changes: 0 90% 70%;
     --status-comment: 204 85% 62%;
-    --status-issue: 0 70% 60%;
+    --status-issue: 0 90% 70%;
     --status-suggestion: 38 90% 58%;
     --status-note: 204 85% 62%;
     --diff-add-foreground: 142 65% 62%;

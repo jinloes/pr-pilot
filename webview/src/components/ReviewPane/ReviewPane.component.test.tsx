@@ -3,7 +3,12 @@ import userEvent from '@testing-library/user-event'
 import { createRef } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PR } from '../../bridge/types'
+import { I18nProvider } from '../../i18n/I18nProvider'
+import { ReviewFooter } from './ReviewFooter'
 import { ReviewPane, type ReviewPaneHandle } from './ReviewPane'
+import { TooltipProvider } from '@/components/ui/tooltip'
+// Vitest collects only *.component.test.* files; this pulls the pure publish-body tests into the run.
+import './publishBody.test'
 
 const pr: PR = {
   number: 42,
@@ -52,11 +57,11 @@ describe('IntelliJ-assisted workflow', () => {
       ...(intellijAssistedEnabled === undefined ? {} : { intellijAssistedEnabled }) }))
   }
 
-  function fixture(intellijAssistedEnabled: boolean | 'absent' = true) {
+  function fixture(intellijAssistedEnabled: boolean | 'absent' = true, sessionFlag = intellijAssistedEnabled === true) {
     const outgoing: Record<string, unknown>[] = []
     ;(window as unknown as { cefQuery: (arg: { request: string }) => void }).cefQuery =
       ({ request }) => outgoing.push(JSON.parse(request))
-    const view = render(<ReviewPane pr={pr} />)
+    const view = render(<ReviewPane pr={pr} intellijAssistedEnabled={sessionFlag} />)
     loadDraft(intellijAssistedEnabled === 'absent' ? undefined : intellijAssistedEnabled)
     const last = (type: string) => { const matches = outgoing.filter(m => m.type === type); return matches[matches.length - 1] }
     const prepared = (operationId: unknown) => ({ type: 'deepReviewPrepared', prKey: 'acme/widget#42',
@@ -89,12 +94,33 @@ describe('IntelliJ-assisted workflow', () => {
     })
   }
 
-  it('keeps the context-menu maintenance entry available with the setting off', async () => {
+  for (const flag of ['absent', false] as const) {
+    it(`hides the context-menu maintenance entry when the session setting is ${String(flag)}`, async () => {
+      fixture(flag, false)
+      fireEvent.contextMenu(screen.getByTestId('review-scroll-body'))
+      expect(await screen.findByRole('menuitem', { name: 'Select text to chat about it' })).toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: 'Retained IntelliJ review worktrees' })).not.toBeInTheDocument()
+    })
+  }
+
+  it('keeps the context-menu maintenance entry reachable with the session setting on', async () => {
     const user = userEvent.setup()
-    fixture('absent')
+    fixture(false, true)
     await user.click(await openContextMenu())
     expect(screen.getByRole('button', { name: 'Close retained worktrees' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Refresh retained worktrees' })).toBeInTheDocument()
+  })
+
+  it('keeps an active assisted setup and its maintenance entry even when the session setting is off', async () => {
+    const user = userEvent.setup()
+    const f = fixture(true, false)
+    await openAdvancedOptions(user)
+    await user.click(screen.getByRole('checkbox', { name: /IntelliJ-assisted/ }))
+    await user.click(screen.getByRole('button', { name: 'Generate Review' }))
+    act(() => hostMessage(f.prepared(f.last('generateReview').operationId)))
+    expect(screen.getByText('/fixture/deep')).toBeVisible()
+    expect(screen.getByText('Review maintenance')).toBeInTheDocument()
+    expect(await openContextMenu()).toBeVisible()
   })
 
   it('shows both assisted controls and the context-menu entry with the setting on', async () => {
@@ -171,7 +197,7 @@ describe('IntelliJ-assisted workflow', () => {
   it('lists and safely confirms cleanup without any selected PR and ignores stale responses', async () => {
     const user = userEvent.setup()
     const f = fixture()
-    f.view.rerender(<ReviewPane pr={null} />)
+    f.view.rerender(<ReviewPane pr={null} intellijAssistedEnabled />)
     await user.click(screen.getByText('Review maintenance'))
     await user.click(screen.getByRole('button', { name: 'Refresh retained worktrees' }))
     const retained = [{ id: '11111111-1111-4111-8111-111111111111', repository: '/fixture',
@@ -189,7 +215,7 @@ describe('IntelliJ-assisted workflow', () => {
   it('presents an actionable empty state and keeps maintenance secondary', async () => {
     const user = userEvent.setup()
     const onShowList = vi.fn()
-    const view = render(<ReviewPane pr={null} onShowList={onShowList} />)
+    const view = render(<ReviewPane pr={null} onShowList={onShowList} intellijAssistedEnabled />)
 
     expect(screen.getByRole('heading', { name: 'Choose a pull request to begin' })).toBeVisible()
     expect(screen.getByText('Select a pull request to open its diff and review actions.')).toBeVisible()
@@ -205,6 +231,16 @@ describe('IntelliJ-assisted workflow', () => {
     expect(screen.queryByRole('heading', { name: 'Choose a pull request to begin' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Show pull requests' })).not.toBeInTheDocument()
   })
+
+  for (const flag of [undefined, false] as const) {
+    it(`omits retained-worktree maintenance from the empty state when the session setting is ${String(flag)}`, () => {
+      render(<ReviewPane pr={null} intellijAssistedEnabled={flag} />)
+
+      expect(screen.getByRole('heading', { name: 'Choose a pull request to begin' })).toBeVisible()
+      expect(screen.queryByText('Review maintenance')).not.toBeInTheDocument()
+      expect(screen.queryByRole('region', { name: 'IntelliJ-assisted review setup' })).not.toBeInTheDocument()
+    })
+  }
 })
 
 describe('ReviewPane review submission', () => {
@@ -349,8 +385,11 @@ describe('ReviewPane review submission', () => {
 
       await openAdvanced(user)
       expect(screen.getByRole('checkbox', { name: /Use chunked review mode/ })).not.toBeChecked()
-      expect(screen.getByText('Fallback available: consider chunked mode.')).toBeInTheDocument()
-      expect(screen.getByText(/miss cross-file interactions and provide limited synthesis/)).toBeInTheDocument()
+      expect(screen.getByText('Recommended: standard review.')).toBeInTheDocument()
+      expect(screen.getByText(
+        'Chunked review works in file batches, so it can miss cross-file interactions. Use it when a standard '
+        + 'review would leave files out.',
+      )).toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: 'Generate Review' }))
 
@@ -531,7 +570,7 @@ describe('ReviewPane review submission', () => {
       await openAdvanced(user)
 
       expect(screen.getByRole('checkbox', { name: /Use chunked review mode/ })).not.toBeChecked()
-      expect(screen.getByText('Fallback available: consider chunked mode.')).toBeInTheDocument()
+      expect(screen.getByText('Recommended for this PR: chunked review.')).toBeInTheDocument()
       expect(screen.getByText('Chunked review includes 2 changed files that single-pass review omits.'))
         .toBeInTheDocument()
       expect(screen.queryByText(/would not add coverage/)).not.toBeInTheDocument()
@@ -546,7 +585,7 @@ describe('ReviewPane review submission', () => {
       await openAdvanced(user)
 
       expect(screen.getByRole('checkbox', { name: /Use chunked review mode/ })).not.toBeChecked()
-      expect(screen.getByText('Recommended: Single-pass mode.')).toBeInTheDocument()
+      expect(screen.getByText('Recommended: standard review.')).toBeInTheDocument()
       expect(screen.getByText('Chunked review would not add coverage.')).toBeInTheDocument()
       expect(screen.queryByText(/Chunked review includes/)).not.toBeInTheDocument()
     })
@@ -560,7 +599,7 @@ describe('ReviewPane review submission', () => {
       await openAdvanced(user)
 
       expect(screen.getByRole('checkbox', { name: /Use chunked review mode/ })).not.toBeChecked()
-      expect(screen.getByText('Fallback available: consider chunked mode.')).toBeInTheDocument()
+      expect(screen.getByText('Recommended: standard review.')).toBeInTheDocument()
       expect(screen.getByText('Many changed files. Chunked review would not add coverage.')).toBeInTheDocument()
     })
 
@@ -573,9 +612,10 @@ describe('ReviewPane review submission', () => {
       )
 
       expect(screen.getByText(
-        "5 changed files were left out of this PR's diff because it exceeds the 250 KB review budget. "
-        + 'Single-pass review input and the diff view omit these files, and chat uses a diff excerpt.',
+        "5 changed files aren't included in this review because the pull request's diff is larger than 250 KB. "
+        + "They won't appear in the diff below, the generated review, or chat. Chunked review can include 5 of them.",
       )).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Include them with chunked review' })).toBeVisible()
       const omitted = screen.getByText('Show omitted files').closest('details')!
       expect(within(omitted).getByText('src/huge.ts')).toBeInTheDocument()
       expect(within(omitted).getByText('data/generated.json')).toBeInTheDocument()
@@ -590,10 +630,11 @@ describe('ReviewPane review submission', () => {
       loadReviewableDiff(`${diffWithFiles(1)}\n${coverageTrailer(3, ['src/huge.ts'], 'incomplete')}`)
 
       expect(screen.getByText(
-        "At least 3 changed files were left out of this PR's diff because it exceeds the 250 KB review budget "
-        + 'and was too large to scan completely. Single-pass review input and the diff view omit these files, '
-        + 'and chat uses a diff excerpt.',
+        "At least 3 changed files aren't included in this review because the pull request's diff is larger than "
+        + "250 KB. They won't appear in the diff below, the generated review, or chat. Chunked review would not add "
+        + 'these files. Consider splitting the pull request.',
       )).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /chunked review/ })).not.toBeInTheDocument()
       expect(screen.getByText('+2 more not listed')).toBeInTheDocument()
     })
 
@@ -605,7 +646,7 @@ describe('ReviewPane review submission', () => {
 
       await openAdvanced(user)
 
-      expect(screen.queryByText(/left out of this PR's diff/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/included in this review/)).not.toBeInTheDocument()
       expect(screen.queryByText('Show omitted files')).not.toBeInTheDocument()
       expect(screen.getByText('Single-pass review is likely sufficient.')).toBeInTheDocument()
     })
@@ -626,8 +667,9 @@ describe('ReviewPane review submission', () => {
       })
 
       expect(screen.getByText(
-        "1 changed file was left out of this PR's diff because it exceeds the 250 KB review budget. "
-        + 'Single-pass review input and the diff view omit this file, and chat uses a diff excerpt.',
+        "1 changed file isn't included in this review because the pull request's diff is larger than 250 KB. "
+        + "They won't appear in the diff below, the generated review, or chat. Chunked review would not add these "
+        + 'files. Consider splitting the pull request.',
       )).toBeInTheDocument()
       expect(screen.getAllByText(/src\/file-0\.ts/).length).toBeGreaterThan(0)
       expect(screen.queryByText(/\[pr-pilot:/)).not.toBeInTheDocument()
@@ -649,7 +691,11 @@ describe('ReviewPane review submission', () => {
         })
       })
 
-      expect(screen.getByText(/^2 changed files were left out of this PR's diff/)).toBeInTheDocument()
+      expect(screen.getByText(
+        "2 changed files aren't included in this review because the pull request's diff is larger than 250 KB. "
+        + "They won't be part of the generated review or chat. Chunked review would not add these files. Consider "
+        + 'splitting the pull request.',
+      )).toBeInTheDocument()
       expect(screen.getByText('2 omitted files are not listed.')).toBeInTheDocument()
       expect(screen.queryByText(/\[pr-pilot:/)).not.toBeInTheDocument()
     })
@@ -659,8 +705,9 @@ describe('ReviewPane review submission', () => {
       loadDiffs(`${diffWithFiles(1)}\n${coverageTrailer(0, [], 'incomplete')}`, diffWithFiles(1))
 
       expect(screen.getByText(
-        "This PR's diff was too large to scan completely within the 250 KB review budget, so some changed files "
-        + 'may be missing. Single-pass review input and the diff view omit any such files, and chat uses a diff excerpt.',
+        "Some changed files may not be included in this review because the pull request's diff is larger than 250 KB. "
+        + "They won't appear in the diff below, the generated review, or chat. Chunked review would not add these "
+        + 'files. Consider splitting the pull request.',
       )).toBeInTheDocument()
       expect(screen.queryByText('Show omitted files')).not.toBeInTheDocument()
       expect(screen.queryByText(/not listed/)).not.toBeInTheDocument()
@@ -675,7 +722,7 @@ describe('ReviewPane review submission', () => {
       await openAdvanced(user)
 
       expect(screen.getByRole('checkbox', { name: /Use chunked review mode/ })).not.toBeChecked()
-      expect(screen.getByText('Recommended: Single-pass mode.')).toBeInTheDocument()
+      expect(screen.getByText('Recommended: standard review.')).toBeInTheDocument()
     })
 
     it('runs chunked review only after the user explicitly enables it', async () => {
@@ -791,97 +838,105 @@ describe('ReviewPane review submission', () => {
         validationDiff: 'not a unified diff',
       })
     })
-    await user.click(screen.getByRole('button', { name: 'Comment' }))
+    await user.click(screen.getByRole('button', { name: 'Submit review…' }))
 
     expect(screen.getByText('The diff could not be rendered. Review the raw diff before publishing.')).toBeInTheDocument()
-    const submit = screen.getByRole('button', { name: 'Submit Comment' })
+    const submit = screen.getByRole('button', { name: 'Publish as Comment' })
     expect(submit).toBeDisabled()
+    await user.click(screen.getByRole('radio', { name: 'Approve' }))
+    expect(screen.getByRole('button', { name: 'Publish as Approve' })).toBeDisabled()
     await user.click(screen.getByRole('checkbox'))
-    expect(submit).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Publish as Approve' })).toBeEnabled()
   })
 
-  it('keeps the selected submit option as the primary action', async () => {
-    const user = userEvent.setup()
-    ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
-    render(<ReviewPane pr={pr} />)
-
-    act(() => {
-      hostMessage({
-        type: 'draftLoaded',
-        prKey: 'acme/widget#42',
-        prState: 'DRAFT_PRESENT',
-        reviewId: 'draft-1',
-        result: { summary: 'Changes needed.', verdict: 'REQUEST_CHANGES', lineComments: [] },
-        diff: '',
-        validationDiff: '',
+  describe('suggested verdict', () => {
+    function loadVerdict(verdict: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT', summary = 'Looks good.') {
+      act(() => {
+        hostMessage({
+          type: 'draftLoaded',
+          prKey: 'acme/widget#42',
+          prState: 'DRAFT_PRESENT',
+          reviewId: 'draft-1',
+          result: { summary, verdict, lineComments: [] },
+          diff: '',
+          validationDiff: '',
+        })
       })
+    }
+
+    function submits(cefQuery: ReturnType<typeof vi.fn>) {
+      return cefQuery.mock.calls
+        .map(([arg]) => JSON.parse(arg.request) as { type: string; verdict?: string; comment?: string })
+        .filter((message) => message.type === 'submitReview')
+    }
+
+    it('labels the AI verdict as a suggestion in the header and summary and uses one neutral publish button', () => {
+      ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
+      render(<ReviewPane pr={pr} />)
+      loadVerdict('REQUEST_CHANGES')
+
+      expect(screen.getAllByText('Suggested: Request changes')).toHaveLength(2)
+      const submit = screen.getByRole('button', { name: 'Submit review…' })
+      expect(submit).not.toHaveClass('bg-destructive')
+      expect(screen.queryByRole('button', { name: 'More submit options' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Request Changes' })).not.toBeInTheDocument()
     })
 
-    expect(screen.getByRole('button', { name: 'Request Changes' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'More submit options' }))
-    await user.click(screen.getByRole('menuitem', { name: 'Approve' }))
-    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+    it('preselects the suggestion in a verdict radio group and resets a changed verdict on cancel', async () => {
+      const user = userEvent.setup()
+      const cefQuery = vi.fn()
+      ;(window as unknown as { cefQuery?: typeof cefQuery }).cefQuery = cefQuery
+      render(<ReviewPane pr={pr} />)
+      loadVerdict('APPROVE')
 
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Request Changes' })).not.toBeInTheDocument()
-  })
+      await user.click(screen.getByRole('button', { name: 'Submit review…' }))
+      const dialog = screen.getByRole('alertdialog')
+      expect(within(dialog).getByRole('heading', { name: 'Publish review' })).toBeVisible()
+      const group = within(dialog).getByRole('radiogroup', { name: 'Verdict' })
+      expect(within(group).getAllByRole('radio').map((radio) => radio.getAttribute('value')))
+        .toEqual(['COMMENT', 'APPROVE', 'REQUEST_CHANGES'])
+      expect(within(group).getByRole('radio', { name: 'Approve (suggested)' })).toBeChecked()
 
-  it('submits Comment from an Approve review split menu', async () => {
-    const user = userEvent.setup()
-    const cefQuery = vi.fn()
-    ;(window as unknown as { cefQuery?: typeof cefQuery }).cefQuery = cefQuery
-    render(<ReviewPane pr={pr} />)
+      await user.click(within(group).getByRole('radio', { name: 'Request changes' }))
+      const confirm = within(dialog).getByRole('button', { name: 'Publish as Request changes' })
+      expect(confirm).not.toHaveClass('bg-destructive')
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
 
-    act(() => {
-      hostMessage({
-        type: 'draftLoaded',
-        prKey: 'acme/widget#42',
-        prState: 'DRAFT_PRESENT',
-        reviewId: 'draft-1',
-        result: { summary: 'Looks good.', verdict: 'APPROVE', lineComments: [] },
-        diff: '',
-        validationDiff: '',
-      })
+      await user.click(screen.getByRole('button', { name: 'Submit review…' }))
+      expect(screen.getByRole('radio', { name: 'Approve (suggested)' })).toBeChecked()
+      expect(screen.getByRole('button', { name: 'Publish as Approve' })).toBeVisible()
+      expect(submits(cefQuery)).toEqual([])
     })
 
-    await user.click(screen.getByRole('button', { name: 'More submit options' }))
-    const commentOption = screen.getByRole('menuitem', { name: 'Comment' })
-    expect(commentOption).not.toHaveAttribute('data-disabled')
-    await user.click(commentOption)
-    await user.click(await screen.findByRole('button', { name: 'Submit Comment' }))
+    it('publishes exactly the verdict chosen in the dialog', async () => {
+      const user = userEvent.setup()
+      const cefQuery = vi.fn()
+      ;(window as unknown as { cefQuery?: typeof cefQuery }).cefQuery = cefQuery
+      render(<ReviewPane pr={pr} />)
+      loadVerdict('APPROVE')
 
-    const outgoing = cefQuery.mock.calls
-      .map(([arg]) => JSON.parse(arg.request) as { type: string; verdict?: string })
-      .filter((message) => message.type === 'submitReview')
-    expect(outgoing).toEqual([expect.objectContaining({ verdict: 'COMMENT' })])
-  })
+      await user.click(screen.getByRole('button', { name: 'Submit review…' }))
+      screen.getByRole('radio', { name: 'Approve (suggested)' }).focus()
+      await user.keyboard('{ArrowLeft}')
+      expect(screen.getByRole('radio', { name: 'Comment' })).toBeChecked()
+      await user.click(screen.getByRole('button', { name: 'Publish as Comment' }))
 
-  it('sends one submitReview message when the confirmation action is clicked twice before rerender', () => {
-    const cefQuery = vi.fn()
-    ;(window as unknown as { cefQuery?: typeof cefQuery }).cefQuery = cefQuery
-    render(<ReviewPane pr={pr} />)
-
-    act(() => {
-      hostMessage({
-        type: 'draftLoaded',
-        prKey: 'acme/widget#42',
-        prState: 'DRAFT_PRESENT',
-        reviewId: 'draft-1',
-        result: { summary: 'Looks good.', verdict: 'APPROVE', lineComments: [] },
-        diff: '',
-        validationDiff: '',
-      })
+      expect(submits(cefQuery)).toEqual([expect.objectContaining({ verdict: 'COMMENT' })])
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
-    const confirm = screen.getByRole('button', { name: 'Submit Approve' })
-    fireEvent.click(confirm)
-    fireEvent.click(confirm)
+    it('sends one submitReview message when the confirmation action is clicked twice before rerender', () => {
+      const cefQuery = vi.fn()
+      ;(window as unknown as { cefQuery?: typeof cefQuery }).cefQuery = cefQuery
+      render(<ReviewPane pr={pr} />)
+      loadVerdict('APPROVE')
 
-    const outgoing = cefQuery.mock.calls
-      .map(([arg]) => JSON.parse(arg.request) as { type: string })
-      .filter((message) => message.type === 'submitReview')
-    expect(outgoing).toHaveLength(1)
+      fireEvent.click(screen.getByRole('button', { name: 'Submit review…' }))
+      const confirm = screen.getByRole('button', { name: 'Publish as Approve' })
+      fireEvent.click(confirm)
+      fireEvent.click(confirm)
+
+      expect(submits(cefQuery)).toHaveLength(1)
+    })
   })
 
   it('keeps a review dirty until the matching save acknowledgement', async () => {
@@ -983,5 +1038,452 @@ describe('ReviewPane review submission', () => {
       expect(screen.queryByText('· 1 unanchored')).not.toBeInTheDocument()
       expect(screen.getByText('Generated review.')).toBeInTheDocument()
     })
+  })
+})
+
+function outgoingOf(cefQuery: ReturnType<typeof vi.fn>, type: string) {
+  return cefQuery.mock.calls
+    .map(([arg]) => JSON.parse((arg as { request: string }).request) as Record<string, unknown>)
+    .filter((message) => message.type === type)
+}
+
+function installHost() {
+  const cefQuery = vi.fn()
+  ;(window as unknown as { cefQuery?: typeof cefQuery }).cefQuery = cefQuery
+  return cefQuery
+}
+
+function loadNoDraft(diff: string, validationDiff = diff, available = true) {
+  act(() => {
+    hostMessage({
+      type: 'draftLoaded',
+      prKey: 'acme/widget#42',
+      prState: 'NO_DRAFT',
+      diff,
+      validationDiff,
+      providerReadiness: available
+        ? { provider: 'claude', available: true, detail: 'Ready.' }
+        : { provider: 'claude', available: false, detail: 'Claude CLI was not found.' },
+    })
+  })
+}
+
+function loadDraftPresent(result: object, extra: object = {}) {
+  act(() => {
+    hostMessage({
+      type: 'draftLoaded',
+      prKey: 'acme/widget#42',
+      prState: 'DRAFT_PRESENT',
+      reviewId: 'draft-1',
+      result,
+      diff: '',
+      validationDiff: '',
+      ...extra,
+    })
+  })
+}
+
+describe('no-draft workspace', () => {
+  it('shows the read-only diff below a generation card with Generate before the instructions', () => {
+    installHost()
+    render(<ReviewPane pr={pr} />)
+    loadNoDraft(diffWithFiles(2))
+
+    const card = screen.getByTestId('generation-card')
+    const generate = within(card).getByRole('button', { name: 'Generate Review' })
+    const instructions = within(card).getByText('Review instructions (optional)')
+    const navigation = screen.getByRole('navigation', { name: 'Review navigation' })
+    expect(generate.compareDocumentPosition(instructions) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(card.compareDocumentPosition(navigation) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(screen.getAllByText(/src\/file-1\.ts/).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: /^Add comment on/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Verify with AI' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Suggest fix with AI' })).not.toBeInTheDocument()
+    expect(screen.getAllByText('Review instructions (optional)')).toHaveLength(1)
+  })
+
+  it('keeps the diff visible when the provider is unavailable', () => {
+    installHost()
+    render(<ReviewPane pr={pr} />)
+    loadNoDraft(diffWithFiles(1), diffWithFiles(1), false)
+
+    expect(screen.getByRole('button', { name: 'Generate Review' })).toBeDisabled()
+    expect(screen.getByText('Claude CLI was not found.')).toHaveClass('text-status-issue')
+    expect(screen.getByRole('button', { name: 'Open Settings' })).toBeVisible()
+    expect(screen.getByRole('navigation', { name: 'Review navigation' })).toBeVisible()
+  })
+
+  it('renders only the generation card for an empty diff', () => {
+    installHost()
+    render(<ReviewPane pr={pr} />)
+    loadNoDraft('')
+
+    expect(screen.getByTestId('generation-card')).toBeVisible()
+    expect(screen.queryByRole('navigation', { name: 'Review navigation' })).not.toBeInTheDocument()
+  })
+
+  it('renders the coverage banner once above the diff', () => {
+    installHost()
+    render(<ReviewPane pr={pr} />)
+    loadNoDraft(`${diffWithFiles(1)}\n${coverageTrailer(2, ['src/huge.ts'])}`, diffWithFiles(3))
+
+    expect(screen.getAllByText(/aren't included in this review/)).toHaveLength(1)
+    expect(screen.getAllByText('Show omitted files')).toHaveLength(1)
+  })
+})
+
+describe('coverage banner remedy', () => {
+  it('turns on chunked mode from the no-draft banner without starting a review', async () => {
+    const user = userEvent.setup()
+    const cefQuery = installHost()
+    render(<ReviewPane pr={pr} />)
+    loadNoDraft(`${diffWithFiles(1)}\n${coverageTrailer(2, ['src/file-1.ts', 'src/file-2.ts'])}`, diffWithFiles(3))
+
+    const banner = screen.getByText(/aren't included in this review/).closest('[role="alert"]') as HTMLElement
+    expect(banner).not.toHaveTextContent(/single-pass/i)
+    expect(banner).not.toHaveTextContent(/budget/i)
+    expect(within(banner).getAllByRole('button')).toHaveLength(1)
+    await user.click(within(banner).getByRole('button', { name: 'Include them with chunked review' }))
+
+    expect(banner).toHaveTextContent('Chunked review is on. The next review will include 2 more files.')
+    expect(within(banner).queryByRole('button')).not.toBeInTheDocument()
+    expect(outgoingOf(cefQuery, 'generateReview')).toEqual([])
+    await user.click(screen.getByText('Review instructions (optional)'))
+    await user.click(screen.getByText('Advanced review options'))
+    expect(screen.getByRole('checkbox', { name: /Use chunked review mode/ })).toBeChecked()
+  })
+
+  it('offers chunked review for the next regeneration from a saved draft without regenerating', async () => {
+    const user = userEvent.setup()
+    const cefQuery = installHost()
+    render(<ReviewPane pr={pr} />)
+    act(() => {
+      hostMessage({
+        type: 'draftLoaded',
+        prKey: 'acme/widget#42',
+        prState: 'DRAFT_PRESENT',
+        reviewId: 'draft-1',
+        result: { summary: 'Saved review.', verdict: 'COMMENT', lineComments: [] },
+        diff: `${diffWithFiles(1)}\n${coverageTrailer(1, ['src/file-1.ts'])}`,
+        validationDiff: diffWithFiles(2),
+      })
+    })
+
+    expect(screen.getByText(/Chunked review can include 1 of them\./)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Use chunked review for the next regeneration' }))
+
+    expect(screen.getByText(/Chunked review is on\. The next review will include 1 more file\./)).toBeInTheDocument()
+    expect(outgoingOf(cefQuery, 'generateReview')).toEqual([])
+  })
+})
+
+describe('regeneration options placement', () => {
+  it('moves instructions after the diff as Regeneration options and keeps values', async () => {
+    const user = userEvent.setup()
+    installHost()
+    render(<ReviewPane pr={pr} />)
+    loadNoDraft(diffWithFiles(1))
+    await user.click(screen.getByText('Review instructions (optional)'))
+    await user.type(screen.getByLabelText('Focus areas'), 'security')
+
+    act(() => {
+      hostMessage({
+        type: 'draftLoaded',
+        prKey: 'acme/widget#42',
+        prState: 'DRAFT_PRESENT',
+        reviewId: 'draft-1',
+        result: { summary: 'Saved review.', verdict: 'COMMENT', lineComments: [] },
+        diff: diffWithFiles(1),
+        validationDiff: diffWithFiles(1),
+      })
+    })
+
+    const options = screen.getByText('Regeneration options').closest('details')!
+    const summary = screen.getByText('Saved review.')
+    const navigation = screen.getByRole('navigation', { name: 'Review navigation' })
+    expect(summary.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(navigation.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(screen.queryByText('Review instructions (optional)')).not.toBeInTheDocument()
+    expect(screen.getByText('1 override applied')).toBeInTheDocument()
+    expect(screen.getByLabelText('Focus areas')).toHaveValue('security')
+  })
+
+  it('omits the instructions in the submitted and authentication-error states', () => {
+    installHost()
+    render(<ReviewPane pr={pr} />)
+    loadDraftPresent({ summary: 'Saved review.', verdict: 'COMMENT', lineComments: [] })
+    expect(screen.getByText('Regeneration options')).toBeInTheDocument()
+
+    act(() => hostMessage({ type: 'reviewSubmitted', prKey: 'acme/widget#42' }))
+    expect(screen.getByText('Review submitted.')).toBeVisible()
+    expect(screen.queryByTestId('review-overrides-disclosure')).not.toBeInTheDocument()
+
+    act(() => {
+      hostMessage({
+        type: 'draftLoaded',
+        prKey: 'acme/widget#42',
+        prState: 'NO_DRAFT',
+        status: 'GitHub authentication failed. Run gh auth login.',
+        diff: diffWithFiles(1),
+      })
+    })
+    expect(screen.getByText('GitHub authentication failed. Run gh auth login.')).toBeVisible()
+    expect(screen.queryByTestId('review-overrides-disclosure')).not.toBeInTheDocument()
+  })
+})
+
+describe('regenerate confirmation', () => {
+  it('states that regeneration replaces edits and regenerates exactly once on confirm', async () => {
+    const user = userEvent.setup()
+    const cefQuery = installHost()
+    render(<ReviewPane pr={pr} />)
+    loadDraftPresent({ summary: 'Saved review.', verdict: 'COMMENT', lineComments: [] })
+
+    await user.click(screen.getByRole('button', { name: 'Regenerate' }))
+    const dialog = screen.getByRole('alertdialog')
+    expect(within(dialog).getByRole('heading', { name: 'Regenerate review?' })).toBeVisible()
+    expect(dialog).toHaveTextContent(
+      'PR Pilot will generate a new review. When it finishes, it replaces this draft on GitHub, including comments '
+      + 'you edited or added. The current draft stays visible until then.',
+    )
+    await user.click(within(dialog).getByRole('button', { name: 'Keep draft' }))
+    expect(outgoingOf(cefQuery, 'generateReview')).toEqual([])
+
+    await user.click(screen.getByRole('button', { name: 'Regenerate' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Regenerate' }))
+    expect(outgoingOf(cefQuery, 'generateReview')).toHaveLength(1)
+  })
+
+  it('confirms before regenerating an unsaved review too', async () => {
+    const user = userEvent.setup()
+    const onRegenerate = vi.fn()
+    render(
+      <TooltipProvider>
+        <ReviewFooter
+          state={{
+            kind: 'reviewUnsaved',
+            result: { summary: 'Fresh review.', verdict: 'COMMENT', lineComments: [] },
+            diff: '',
+            validationDiff: '',
+          }}
+          saving={false}
+          autosaveDirty
+          submitting={false}
+          deleting={false}
+          onSave={vi.fn()}
+          onSubmit={vi.fn()}
+          onRegenerate={onRegenerate}
+          onDelete={vi.fn()}
+          onRunQualityCheck={vi.fn()}
+          inlineCommentCount={0}
+          publishSections={{ generalNotes: [], unanchored: [], inlineCount: 0 }}
+          commentsMovedToBody={false}
+          summary="Fresh review."
+          qualityReport={null}
+          diffUnavailable={false}
+        />
+      </TooltipProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Regenerate' }))
+    expect(onRegenerate).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: 'Regenerate review?' })).toBeVisible()
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Regenerate' }))
+    expect(onRegenerate).toHaveBeenCalledOnce()
+  })
+})
+
+describe('publish review body', () => {
+  async function openPublish(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: 'Submit review…' }))
+    return screen.getByRole('alertdialog')
+  }
+
+  it('prefills the review body with the summary and publishes the edited text', async () => {
+    const user = userEvent.setup()
+    const cefQuery = installHost()
+    render(<ReviewPane pr={pr} />)
+    loadDraftPresent({ summary: '  Looks good.  ', verdict: 'APPROVE', lineComments: [] })
+
+    const dialog = await openPublish(user)
+    const body = within(dialog).getByRole('textbox', { name: 'Review body' })
+    expect(body).toHaveValue('Looks good.')
+    expect(body).toHaveAccessibleDescription(
+      "Published as the review's main comment. It starts with the generated summary; edit or clear it.",
+    )
+    expect(within(dialog).queryByText('Final review body (optional)')).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Publish as Approve' }))
+
+    expect(outgoingOf(cefQuery, 'submitReview')).toEqual([
+      expect.objectContaining({ verdict: 'APPROVE', comment: 'Looks good.' }),
+    ])
+  })
+
+  it('warns about the canned fallback when the body is cleared and nothing else is published', async () => {
+    const user = userEvent.setup()
+    const cefQuery = installHost()
+    render(<I18nProvider><ReviewPane pr={pr} /></I18nProvider>)
+    loadDraftPresent({ summary: 'Looks good.', verdict: 'APPROVE', lineComments: [] })
+
+    const dialog = await openPublish(user)
+    expect(within(dialog).queryByRole('status')).not.toBeInTheDocument()
+    await user.clear(within(dialog).getByRole('textbox', { name: 'Review body' }))
+    expect(within(dialog).getByRole('status'))
+      .toHaveTextContent('The review body is empty, so PR Pilot will publish “Looks good to me!”.')
+    await user.click(within(dialog).getByRole('radio', { name: 'Request changes' }))
+    expect(within(dialog).getByRole('status'))
+      .toHaveTextContent('The review body is empty, so PR Pilot will publish “Requesting changes.”.')
+    await user.click(within(dialog).getByRole('radio', { name: 'Approve (suggested)' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Publish as Approve' }))
+
+    expect(outgoingOf(cefQuery, 'submitReview')).toEqual([expect.objectContaining({ comment: '' })])
+  })
+
+  it('previews general notes and unanchored comments and counts only inline comments', async () => {
+    const user = userEvent.setup()
+    installHost()
+    render(<ReviewPane pr={pr} />)
+    const diff = diffWithFiles(1)
+    loadDraftPresent({
+      summary: 'Summary.',
+      verdict: 'COMMENT',
+      lineComments: [
+        { file: '', line: 1, type: 'note', body: 'Overall, tidy change.' },
+        { file: 'src/file-0.ts', line: 1, type: 'issue', body: 'Inline finding.' },
+        { file: 'src/missing.ts', line: 99, type: 'issue', body: 'Detached finding.' },
+      ],
+    }, { diff, validationDiff: diff })
+
+    const dialog = await openPublish(user)
+    expect(dialog).toHaveTextContent('This will publish the pending GitHub review with 1 inline comment.')
+    const region = within(dialog).getByRole('region', { name: 'Also published in the review body' })
+    expect(region).toHaveAttribute('tabindex', '0')
+    expect(within(region).getByText('General Notes:')).toBeVisible()
+    expect(within(region).getByText('Overall, tidy change.')).toBeVisible()
+    expect(within(region).getByText('Comments not attached inline (invalid diff positions):')).toBeVisible()
+    expect(within(region).getByText('src/missing.ts:99')).toHaveClass('font-mono')
+    expect(region).toHaveTextContent('Detached finding.')
+    expect(within(dialog).queryByRole('status')).not.toBeInTheDocument()
+    await user.clear(within(dialog).getByRole('textbox', { name: 'Review body' }))
+    expect(within(dialog).queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('discards edits on cancel and prefills the summary again on the next open', async () => {
+    const user = userEvent.setup()
+    installHost()
+    render(<ReviewPane pr={pr} />)
+    loadDraftPresent({ summary: 'Generated summary.', verdict: 'COMMENT', lineComments: [] })
+
+    let dialog = await openPublish(user)
+    const body = within(dialog).getByRole('textbox', { name: 'Review body' })
+    await user.clear(body)
+    await user.type(body, 'My own words')
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    dialog = await openPublish(user)
+    expect(within(dialog).getByRole('textbox', { name: 'Review body' })).toHaveValue('Generated summary.')
+  })
+
+  it('mentions comments moved into the body by a save until a new draft loads', async () => {
+    const user = userEvent.setup()
+    const cefQuery = installHost()
+    render(<ReviewPane pr={pr} />)
+    const diff = diffWithFiles(1)
+    act(() => {
+      hostMessage({
+        type: 'reviewResult',
+        prKey: 'acme/widget#42',
+        result: {
+          summary: 'Summary.',
+          verdict: 'COMMENT',
+          lineComments: [{ file: 'src/file-0.ts', line: 1, type: 'issue', body: 'Inline finding.' }],
+        },
+        diff,
+        validationDiff: diff,
+      })
+    })
+    const save = await waitFor(() => {
+      const [message] = outgoingOf(cefQuery, 'saveDraft')
+      expect(message).toBeDefined()
+      return message
+    })
+    act(() => {
+      hostMessage({
+        type: 'draftSaved',
+        prKey: 'acme/widget#42',
+        saveId: save.saveId,
+        reviewId: 'draft-2',
+        commentsDropped: true,
+      })
+    })
+
+    const dialog = await openPublish(user)
+    expect(within(dialog).getByRole('region', { name: 'Also published in the review body' }))
+      .toHaveTextContent('Comments GitHub could not place inline when this draft was saved are also included.')
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    loadDraftPresent({ summary: 'Summary.', verdict: 'COMMENT', lineComments: [] })
+    const reopened = await openPublish(user)
+    expect(within(reopened).queryByRole('region', { name: 'Also published in the review body' })).not.toBeInTheDocument()
+  })
+
+  it('tells the reviewer that an imported draft keeps its GitHub body text', async () => {
+    const user = userEvent.setup()
+    installHost()
+    render(<ReviewPane pr={pr} />)
+    loadDraftPresent({ summary: '', verdict: 'COMMENT', lineComments: [] }, { importedFromGitHub: true })
+
+    const dialog = await openPublish(user)
+    expect(within(dialog).getByRole('region', { name: 'Also published in the review body' }))
+      .toHaveTextContent("Text already in the GitHub draft's review body is kept.")
+  })
+})
+
+describe('narrow review footer', () => {
+  const originalWidth = window.innerWidth
+
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: originalWidth })
+  })
+
+  function renderNarrow() {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 400 })
+    const cefQuery = installHost()
+    render(<ReviewPane pr={pr} />)
+    loadDraftPresent({ summary: 'Saved review.', verdict: 'COMMENT', lineComments: [] })
+    return cefQuery
+  }
+
+  it('keeps save status and publishing in one row and moves secondary actions into a menu', async () => {
+    const user = userEvent.setup()
+    renderNarrow()
+    const footer = screen.getByTestId('review-footer')
+
+    expect(within(footer).queryByRole('button', { name: 'Regenerate' })).not.toBeInTheDocument()
+    expect(within(footer).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+    expect(within(footer).getByRole('status')).toHaveTextContent('Saved')
+    expect(within(footer).getByRole('button', { name: 'Submit review…' })).toBeVisible()
+
+    await user.click(within(footer).getByRole('button', { name: 'More review actions' }))
+    const items = screen.getAllByRole('menuitem').map((item) => item.textContent)
+    expect(items).toEqual(['Regenerate', 'Review quality · No risks', 'Delete draft'])
+    expect(screen.getByRole('menuitem', { name: 'Delete draft' })).toHaveClass('text-status-issue')
+  })
+
+  it('keeps the regenerate and delete confirmations when opened from the menu', async () => {
+    const user = userEvent.setup()
+    const cefQuery = renderNarrow()
+
+    await user.click(screen.getByRole('button', { name: 'More review actions' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Regenerate' }))
+    expect(await screen.findByRole('heading', { name: 'Regenerate review?' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Keep draft' }))
+    expect(outgoingOf(cefQuery, 'generateReview')).toEqual([])
+
+    await user.click(screen.getByRole('button', { name: 'More review actions' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Delete draft' }))
+    expect(await screen.findByRole('heading', { name: 'Delete draft review?' })).toBeVisible()
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+    expect(outgoingOf(cefQuery, 'deleteDraft')).toHaveLength(1)
   })
 })

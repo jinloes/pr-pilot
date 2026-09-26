@@ -18,6 +18,7 @@ const MESSAGE_TYPES = new Set([
   'deleteDraft',
   'askClaude',
   'clearChat',
+  'cancelChat',
   'openUrl',
   'openSettings',
   'runAuthLogin',
@@ -90,6 +91,7 @@ export function isValidBridgeRequest(msg: AnyMessage | null | undefined): msg is
         && (msg.reviewRequested === undefined || typeof msg.reviewRequested === 'boolean');
     case 'cancelReview':
     case 'clearChat':
+    case 'cancelChat':
     case 'openSettings':
     case 'runAuthLogin':
       return msg.type === 'openSettings' || msg.type === 'runAuthLogin' || isOperationId(msg.operationId);

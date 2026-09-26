@@ -145,9 +145,10 @@ bundled, MIT-licensed IntelliJ connection/code-intelligence skills pinned to ups
 The bundle does not grant builds, terminal writes, dependency installation or inherited MCP.
 
 Retained worktrees survive cancellation, host disposal and restart. To clean one, open
-**Retained IntelliJ review worktrees** from Advanced options (only while the experimental setting
-is on), the review context menu (always available), or the no-PR review pane (**Show review** on a
-narrow window). Refresh the list, close that exact project
+**Retained IntelliJ review worktrees** from Advanced options, the review context menu, or the
+no-PR review pane (**Show review** on a narrow window). Turning the setting off also hides
+retained-worktree maintenance (an active assisted setup still shows it); turn it back on to remove
+retained worktrees. Refresh the list, close that exact project
 in every IDE, explicitly confirm closure, and remove it. Active leases, dirty trees, tampering
 or uncertain identity block cleanup; removal never uses `git worktree remove --force`.
 

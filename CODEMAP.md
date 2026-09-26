@@ -131,8 +131,8 @@ receive GitHub tokens.
 - `sidecar/pr/PrDiffService.java` - Whole-file, UTF-8-safe review/validation diff bounding
   (smallest-first, 250 KB per file, coverage trailer) and HTTP 406 as `diff_too_large`.
 - `sidecar/pr/DraftReviewService.java` - Pending-review lookup and decoding.
-- `sidecar/pr/DraftReviewCodec.java` - PR Pilot review metadata encoding/decoding.
-- `sidecar/pr/DraftReviewMutationService.java` - Save, submit, and delete orchestration.
+- `sidecar/pr/DraftReviewCodec.java` - PR Pilot review metadata encoding/decoding, and `visibleBody`, which strips hidden metadata from a pending body before publishing.
+- `sidecar/pr/DraftReviewMutationService.java` - Save, submit, and delete orchestration; `submit` reads the pending review and publishes the reviewer's text plus its visible sections (`composeSubmitBody`).
 - `sidecar/pr/PrSupplementalService.java` - Raw search, starred repositories, and prompt context.
 - `sidecar/pr/*Result.java` and DTOs - Token-free engine outcomes.
 - `sidecar/repo/RepoDetector.java` - Repository detection orchestration.
@@ -185,7 +185,7 @@ IntelliJ host integration. Depends directly on `core`, `github-engine`, and `rev
 - `settings/PluginSettingsComponent.java` - Provider-aware settings UI.
 - `settings/PluginSettingsConfigurable.java` - Settings lifecycle integration.
 - `settings/GithubBaseUrlValidator.java` - HTTPS GitHub-origin normalization.
-- `ui/PRToolWindowFactory.java` - Tool-window entry point.
+- `ui/PRToolWindowFactory.java` - Tool-window entry point; title actions (Pop Out, Settings) and the gear-menu "Reload PR Pilot View" action, built by package-private helpers covered by `PRToolWindowFactoryTest`.
 - `ui/WebviewPanel.java` - JCEF host and Java/webview bridge.
 - `ui/HostThemeClassifier.java` - Host theme normalization.
 - `ui/ReviewMapper.java` and `WebviewDtos.java` - Core-to-bridge DTO mapping.
@@ -216,6 +216,7 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
   lifecycle/tool activity state and its expandable, privacy-safe timeline.
 - `src/components/ReviewPane/ReviewOverrides.tsx`, `ReviewQuality.tsx`, `ReviewContent.tsx`,
   `ReviewFooter.tsx`, and `OrphanComments.tsx` - Feature-private review presentation modules.
+- `src/components/ReviewPane/publishBody.ts` - Publish-dialog preview model (general notes, unanchored comments, inline count) and the fallback bodies mirrored from `DraftReviewMutationService`; tested by `publishBody.test.ts`.
 - `src/lib/reviewQuality.ts` - Quality heuristics and in-memory repair suggestions.
 - `src/lib/diffCoverage.ts` - Strict mirror of `DiffCoverage.split` plus coverage-gain and budget
   formatting for the coverage banner and chunked-review recommendation.
@@ -229,7 +230,7 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
 - `src/i18n/` - Typed English catalog and test pseudo-localization.
 - `src/theme/hostTheme.ts` - Host theme application.
 - `a11y/` - Playwright and axe end-to-end accessibility scenarios.
-- `visual/` - Deterministic visual-regression scenarios.
+- `visual/` - Deterministic visual-regression scenarios: whole-page baselines plus locator-level pane baselines with a tighter per-locator tolerance and text assertions for text-critical states.
 - Tests: colocated `*.test.ts`/`*.test.tsx` files.
 
 ### Semantic-review lifecycle entry points
@@ -257,11 +258,13 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
   The opt-in controls render only when `draftLoaded.intellijAssistedEnabled` is `true`, set from the
   default-off `PluginSettings.experimentalIntellijAssistedReview` /
   `pr-pilot.experimentalIntellijAssistedReview`; both hosts reject assisted requests while it is off.
+  PR-agnostic retained-worktree maintenance renders only when the latest
+  `prListLoaded.intellijAssistedEnabled` is `true` or an assisted setup is active.
 - `WebviewPanelTest` and `vscode-extension/test/deepReview.test.ts` exercise actual bridge callbacks
   with external effects replaced. They do not stand in for installed-host/provider execution.
 - `webview/visual/app.visual.spec.ts` — ordinary/deep-default assertions and deterministic
-  narrow-finding placement. Reviewed discovery, dark-host toast and narrow-finding snapshots are
-  reconciled; the separate high-contrast toast mismatch remains unresolved.
+  narrow-finding placement. All committed baselines were regenerated and reviewed in the canonical
+  container, and text-critical states also have locator-level snapshots.
 
 ### `vscode-extension/`
 
@@ -287,6 +290,7 @@ VS Code host integration. All GitHub and review generation routes through the Ja
 - `scripts/stage-sidecar.mjs` - Packages the sidecar JAR.
 - `scripts/smoke-sidecar.mjs` - Verifies initialize protocol and capabilities.
 - `test/wireCatalog.test.ts` - Enforces engine declarations against the TypeScript client.
+- `test/hostHandlers.test.ts` - Runs the compiled `extension.ts` bridge handlers with VS Code, the providers, and the sidecar replaced (PR-list payload fields and `cancelChat`).
 - Other tests in `test/` mirror extension helpers and host behavior.
 
 ## Cross-module paths

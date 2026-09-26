@@ -9,6 +9,8 @@ export interface PRListLoadedMessage {
   defaultRepo?: string
   listStatus?: PRListStatus
   providerReadiness?: ProviderReadiness
+  /** Experimental host setting; absent or anything but `true` hides PR-agnostic retained-worktree maintenance. */
+  intellijAssistedEnabled?: boolean
 }
 
 export interface PRListStatus {
@@ -350,6 +352,12 @@ export interface ClearChatRequest {
   operationId: string
 }
 
+/** Cancels the owning chat operation without deleting conversation history. */
+export interface CancelChatRequest {
+  type: 'cancelChat'
+  operationId: string
+}
+
 export interface WebviewLayoutChangedRequest {
   type: 'webviewLayoutChanged'
   reason: string
@@ -371,6 +379,7 @@ export type OutgoingMessage =
   | OpenSettingsRequest
   | RunAuthLoginRequest
   | ClearChatRequest
+  | CancelChatRequest
   | WebviewLayoutChangedRequest
 
 // VS Code injects acquireVsCodeApi() into the webview's global scope.

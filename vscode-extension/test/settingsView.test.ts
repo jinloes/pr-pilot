@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { runInNewContext } from 'node:vm';
 
 import {
     COPILOT_MODEL_SUGGESTIONS,
+    GITHUB_BASE_URL_ERROR,
     buildModelsMessage,
     buildSettingsHtml,
     escapeHtml,
@@ -128,9 +130,9 @@ test('buildSettingsHtml restricts default-src and includes the cspSource for sty
 
 test('buildSettingsHtml renders both provider-specific model fields and the effort field', () => {
     const html = buildSettingsHtml('csp', 'n');
-    assert.match(html, /Review backend/);
+    assert.match(html, /Review provider/);
     assert.match(html, /GitHub connection/);
-    assert.match(html, /Review defaults/);
+    assert.match(html, /Review guidance/);
     assert.match(html, /Notifications/);
     assert.match(html, /id="claudeModelField"/);
     assert.match(html, /id="copilotModelField"/);
@@ -153,7 +155,8 @@ test('buildSettingsHtml renders the Copilot MCP inheritance controls', () => {
 
 test('buildSettingsHtml renders the experimental IntelliJ-assisted toggle under Advanced review options', () => {
     const html = buildSettingsHtml('csp', 'n');
-    assert.match(html, /<summary>Advanced review options<\/summary>[\s\S]*id="experimentalIntellijAssistedReview"/);
+    assert.match(html, /section-title">Advanced review options<\/div>[\s\S]*id="experimentalIntellijAssistedReview"/);
+    assert.match(html, /Turning this off also hides retained-worktree maintenance; turn it back on to remove retained worktrees\./);
     assert.match(html, /Enable IntelliJ-assisted review \(experimental\)/);
     assert.match(html, /save\('experimentalIntellijAssistedReview', \$\('experimentalIntellijAssistedReview'\)\.checked\)/);
     assert.match(html, /\$\('experimentalIntellijAssistedReview'\)\.checked = state\.experimentalIntellijAssistedReview === true/);
@@ -226,4 +229,173 @@ test('buildSettingsHtml validates GitHub base URLs before posting updates', () =
     const html = buildSettingsHtml('csp', 'n');
     assert.match(html, /GitHub base URL must be an HTTPS origin/);
     assert.match(html, /type: 'testConnection'/);
+});
+
+// ── Cross-host vocabulary and order ───────────────────────────────────────────
+
+test('buildSettingsHtml uses the shared section order', () => {
+    const html = buildSettingsHtml('csp', 'n');
+    const titles = [...html.matchAll(/<div class="section-title">([^<]+)<\/div>/g)].map((match) => match[1]);
+    assert.deepEqual(titles, [
+        'GitHub connection',
+        'Review provider',
+        'Review guidance',
+        'Review validation',
+        'Advanced review options',
+        'Notifications',
+    ]);
+});
+
+test('buildSettingsHtml uses the shared labels for settings both hosts expose', () => {
+    const html = buildSettingsHtml('csp', 'n');
+    assert.match(html, /id="inheritMcp"[^>]*>Allow Copilot to use MCP tools from your trusted Copilot config<\/label>/);
+    assert.match(html, /Applies while reviewing untrusted pull request content\. Servers load only from your own Copilot config \(<code>~\/\.copilot\/mcp-config\.json<\/code>\); a pull request's <code>\.mcp\.json<\/code> is never loaded\./);
+    assert.match(html, /id="reviewSelfCritique"[^>]*>Validate findings with a second pass<\/label>/);
+    assert.match(html, /id="notifyStarredRepos"[^>]*>Notify for new PRs in starred repositories<\/label>/);
+    assert.match(html, /<button id="addGuidanceProfile" class="secondary">Save as…<\/button>/);
+    assert.match(html, /<button id="testConnection"[^>]*>Check connection<\/button>/);
+    assert.match(html, /\$\('testConnection'\)\.textContent = 'Check connection'/);
+    assert.match(html, /Enable background PR notifications<\/label>/);
+    for (const old of ['Review backend', 'Review defaults', 'Save current as…', 'Run a self-critique validation pass',
+        'Allow MCP tools from your trusted Copilot config', '>Test<']) {
+        assert.equal(html.includes(old), false, `unexpected legacy label ${old}`);
+    }
+});
+
+// ── Base URL field validation ─────────────────────────────────────────────────
+
+interface FakeElement {
+    id: string;
+    value: string;
+    checked: boolean;
+    disabled: boolean;
+    hidden: boolean;
+    textContent: string;
+    innerHTML: string;
+    className: string;
+    style: Record<string, string>;
+    attributes: Map<string, string>;
+    listeners: Map<string, Array<(event: Record<string, unknown>) => void>>;
+    classList: { toggle: () => void; add: () => void; remove: () => void };
+    setAttribute(name: string, value: string): void;
+    removeAttribute(name: string): void;
+    getAttribute(name: string): string | null;
+    addEventListener(type: string, listener: (event: Record<string, unknown>) => void): void;
+    dispatch(type: string): void;
+    appendChild(): void;
+    focus(): void;
+    select(): void;
+    querySelectorAll(): never[];
+}
+
+function fakeElement(id: string): FakeElement {
+    const element: FakeElement = {
+        id, value: '', checked: false, disabled: false, hidden: false, textContent: '', innerHTML: '', className: '',
+        style: {}, attributes: new Map(), listeners: new Map(),
+        classList: { toggle: () => undefined, add: () => undefined, remove: () => undefined },
+        setAttribute(name, value) { this.attributes.set(name, value); },
+        removeAttribute(name) { this.attributes.delete(name); },
+        getAttribute(name) { return this.attributes.get(name) ?? null; },
+        addEventListener(type, listener) {
+            this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+        },
+        dispatch(type) {
+            for (const listener of this.listeners.get(type) ?? []) listener({ target: this, preventDefault() {} });
+        },
+        appendChild() {},
+        focus() {},
+        select() {},
+        querySelectorAll() { return []; },
+    };
+    return element;
+}
+
+function runSettingsScript() {
+    const html = buildSettingsHtml('csp', 'n');
+    const script = /<script nonce="n">([\s\S]*)<\/script>/.exec(html)?.[1];
+    assert.ok(script, 'settings script not found');
+    const elements = new Map<string, FakeElement>();
+    const posted: Array<Record<string, unknown>> = [];
+    const element = (id: string) => {
+        if (!elements.has(id)) elements.set(id, fakeElement(id));
+        return elements.get(id)!;
+    };
+    const context = {
+        document: {
+            getElementById: element,
+            createElement: () => fakeElement(''),
+            addEventListener: () => undefined,
+            activeElement: null,
+        },
+        window: { addEventListener: () => undefined },
+        acquireVsCodeApi: () => ({ postMessage: (message: Record<string, unknown>) => posted.push(message) }),
+        URL,
+        Number,
+        String,
+        Date,
+    };
+    runInNewContext(script, context);
+    return { element, posted };
+}
+
+test('an invalid base URL shows an error attached to its field and is never saved', () => {
+    const { element, posted } = runSettingsScript();
+    const input = element('baseUrl');
+    const error = element('baseUrlError');
+
+    input.value = 'http://x';
+    input.dispatch('change');
+
+    assert.equal(error.hidden, false);
+    assert.equal(error.textContent, GITHUB_BASE_URL_ERROR);
+    assert.equal(input.getAttribute('aria-invalid'), 'true');
+    assert.equal(input.getAttribute('aria-describedby'), 'baseUrlError');
+    assert.notEqual(element('status').textContent, GITHUB_BASE_URL_ERROR);
+    assert.equal(posted.some((message) => message.type === 'update'), false);
+
+    input.dispatch('input');
+    assert.equal(error.hidden, true);
+    assert.equal(error.textContent, '');
+    assert.equal(input.getAttribute('aria-invalid'), null);
+    assert.equal(input.getAttribute('aria-describedby'), null);
+});
+
+test('Check connection validates the base URL field before contacting the host', () => {
+    const { element, posted } = runSettingsScript();
+    const input = element('baseUrl');
+
+    input.value = 'https://github.example.com/path';
+    element('testConnection').dispatch('click');
+    assert.equal(element('baseUrlError').hidden, false);
+    assert.equal(input.getAttribute('aria-invalid'), 'true');
+    assert.equal(posted.some((message) => message.type === 'testConnection'), false);
+
+    input.value = 'https://github.example.com/';
+    element('testConnection').dispatch('click');
+    assert.equal(element('baseUrlError').hidden, true);
+    assert.equal(input.getAttribute('aria-invalid'), null);
+    assert.equal(element('testConnection').textContent, 'Checking…');
+    assert.equal(JSON.stringify(posted.filter((message) => message.type === 'testConnection')),
+        JSON.stringify([{ type: 'testConnection', githubBaseUrl: 'https://github.example.com' }]));
+});
+
+test('a valid base URL clears a previous field error and saves the normalized origin', () => {
+    const { element, posted } = runSettingsScript();
+    const input = element('baseUrl');
+    input.value = 'nope';
+    input.dispatch('change');
+
+    input.value = 'https://GITHUB.example.com//';
+    input.dispatch('change');
+
+    assert.equal(element('baseUrlError').hidden, true);
+    assert.equal(input.getAttribute('aria-invalid'), null);
+    const update = posted.find((message) => message.type === 'update');
+    assert.equal(update?.key, 'githubBaseUrl');
+    assert.equal(update?.value, 'https://github.example.com');
+});
+
+test('the base URL error sits directly below its input row', () => {
+    const html = buildSettingsHtml('csp', 'n');
+    assert.match(html, /<input type="text" id="baseUrl"[^>]*>\s*<button id="testConnection"[^>]*>Check connection<\/button>\s*<\/div>\s*<p id="baseUrlError" class="field-error" role="alert" hidden><\/p>/);
 });

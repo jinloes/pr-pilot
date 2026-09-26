@@ -120,6 +120,10 @@ export default function App() {
   const [activePane, setActivePane] = useState<'list' | 'review'>('list')
   const [pendingPrSelection, setPendingPrSelection] = useState<PR | null>(null)
   const [selectionBlockedMessage, setSelectionBlockedMessage] = useState('')
+  const [intellijAssistedEnabled, setIntellijAssistedEnabled] = useState(false)
+  // After the first successful list load, a refresh failure is shown inline by PRList instead of
+  // replacing the workspace with the setup screen. PRList applies the identical rule.
+  const listLoadedRef = useRef(false)
   const dragging = useRef(false)
   const dragStartX = useRef(0)
   const dragStartW = useRef(0)
@@ -190,11 +194,14 @@ export default function App() {
 
   useEffect(() => onHostMessage((msg) => {
     if (msg.type === 'setupRequired') {
-      setSetup({ reason: msg.reason, detail: msg.detail, providerReadiness: msg.providerReadiness })
       setSetupRefreshing(false)
+      if (msg.reason === 'load_failed' && listLoadedRef.current) return
+      setSetup({ reason: msg.reason, detail: msg.detail, providerReadiness: msg.providerReadiness })
     } else if (msg.type === 'prLoading') {
       setSetupRefreshing(true)
     } else if (msg.type === 'prListLoaded') {
+      listLoadedRef.current = true
+      setIntellijAssistedEnabled(msg.intellijAssistedEnabled === true)
       setSetup(null)
       setSetupRefreshing(false)
     } else if (msg.type === 'themeChanged') {
@@ -360,6 +367,7 @@ export default function App() {
           pr={selectedPR}
           onDirtyStateChange={handleDirtyStateChange}
           onShowList={() => setActivePane('list')}
+          intellijAssistedEnabled={intellijAssistedEnabled}
         />
       </section>
     </main>

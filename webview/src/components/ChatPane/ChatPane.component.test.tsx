@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import type { VerifyResult } from './structuredResult'
 import type { PR } from '../../bridge/types'
@@ -292,5 +293,128 @@ describe('ChatPane', () => {
     expect(appliedButton).toBeDisabled()
     act(() => appliedButton.click())
     expect(onApplyVerifyAction).toHaveBeenCalledTimes(1)
+  })
+
+  it('exposes the scrollable history as a named keyboard-focusable region', () => {
+    render(<ChatPane pr={pr} />)
+
+    const region = screen.getByRole('region', { name: 'Chat messages' })
+    expect(region).toBe(screen.getByTestId('chat-messages'))
+    expect(region).toHaveAttribute('tabindex', '0')
+    expect(region).toHaveClass('focus-visible:ring-2', 'focus-visible:ring-inset', 'focus-visible:ring-ring')
+  })
+
+  it('auto-scrolls new messages without moving focus into the history', async () => {
+    Object.assign(window, { cefQuery: vi.fn() })
+    render(<ChatPane pr={pr} />)
+    const input = screen.getByRole('textbox', { name: 'Ask about this pull request' })
+    const messages = screen.getByTestId('chat-messages')
+    Object.defineProperty(messages, 'scrollHeight', { configurable: true, value: 300 })
+
+    input.focus()
+    await userEvent.type(input, 'What changed?{Enter}')
+    pushHostMessage({ type: 'chatResponse', response: 'A lot.' })
+
+    await screen.findByText('A lot.')
+    expect(messages.scrollTop).toBe(300)
+    expect(document.activeElement).toBe(input)
+  })
+
+  it('marks chat errors with an icon and readable text instead of destructive-red copy', async () => {
+    Object.assign(window, { cefQuery: vi.fn() })
+    render(<ChatPane pr={pr} />)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Ask about this pull request' }), 'Why?{Enter}')
+    pushHostMessage({ type: 'chatError', message: 'The provider failed.' })
+
+    const bubble = (await screen.findByText('The provider failed.')).parentElement!
+    expect(bubble).toHaveClass('border-status-issue/50', 'bg-status-issue/10', 'text-foreground')
+    expect(bubble).not.toHaveClass('text-destructive')
+    expect(bubble.querySelector('svg[aria-hidden="true"]')).toHaveClass('text-status-issue')
+  })
+
+  describe('stopping a response', () => {
+    function sent(cefQuery: ReturnType<typeof vi.fn>) {
+      return cefQuery.mock.calls.map(([arg]) => JSON.parse((arg as { request: string }).request) as {
+        type: string
+        operationId?: string
+      })
+    }
+
+    it('stops the active response with one cancelChat and keeps the conversation', async () => {
+      const user = userEvent.setup()
+      const cefQuery = vi.fn()
+      Object.assign(window, { cefQuery })
+      render(<ChatPane pr={pr} />)
+      const input = screen.getByRole('textbox', { name: 'Ask about this pull request' })
+
+      await user.type(input, 'First question{Enter}')
+      pushHostMessage({ type: 'chatResponse', response: 'First answer' })
+      await user.type(input, 'Second question{Enter}')
+      const asks = sent(cefQuery).filter((message) => message.type === 'askClaude')
+      const ask = asks[asks.length - 1]
+
+      await user.click(screen.getByRole('button', { name: 'Stop response' }))
+
+      const cancels = sent(cefQuery).filter((message) => message.type === 'cancelChat')
+      expect(cancels).toEqual([expect.objectContaining({ type: 'cancelChat', operationId: ask.operationId })])
+      expect(sent(cefQuery).filter((message) => message.type === 'clearChat')).toEqual([])
+      expect(screen.getByText('First question')).toBeVisible()
+      expect(screen.getByText('First answer')).toBeVisible()
+      expect(screen.getByText('Second question')).toBeVisible()
+      expect(screen.getByText('Response stopped.')).toHaveClass('text-muted-foreground')
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+      expect(screen.queryByRole('button', { name: 'Stop response' })).not.toBeInTheDocument()
+    })
+
+    it('keeps the composer editable while busy but blocks sending until idle', async () => {
+      const user = userEvent.setup()
+      const cefQuery = vi.fn()
+      Object.assign(window, { cefQuery })
+      render(<ChatPane pr={pr} />)
+      const input = screen.getByRole('textbox', { name: 'Ask about this pull request' })
+
+      await user.type(input, 'Question{Enter}')
+      expect(input).toBeEnabled()
+      await user.type(input, 'Draft follow-up{Enter}')
+
+      expect(input).toHaveValue('Draft follow-up')
+      expect(sent(cefQuery).filter((message) => message.type === 'askClaude')).toHaveLength(1)
+      expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument()
+
+      pushHostMessage({ type: 'chatResponse', response: 'Answer' })
+      await user.click(await screen.findByRole('button', { name: 'Send' }))
+      expect(sent(cefQuery).filter((message) => message.type === 'askClaude')).toHaveLength(2)
+    })
+
+    it('ignores late output from a stopped response', async () => {
+      const user = userEvent.setup()
+      Object.assign(window, { cefQuery: vi.fn() })
+      render(<ChatPane pr={pr} />)
+
+      await user.type(screen.getByRole('textbox', { name: 'Ask about this pull request' }), 'Question{Enter}')
+      await user.click(screen.getByRole('button', { name: 'Stop response' }))
+      pushHostMessage({ type: 'chatChunk', chunk: 'LATE_CHUNK_SENTINEL' })
+      pushHostMessage({ type: 'chatResponse', response: 'LATE_RESPONSE_SENTINEL' })
+      pushHostMessage({ type: 'chatError', message: 'LATE_ERROR_SENTINEL' })
+
+      expect(screen.queryByText(/LATE_CHUNK_SENTINEL/)).not.toBeInTheDocument()
+      expect(screen.queryByText('LATE_RESPONSE_SENTINEL')).not.toBeInTheDocument()
+      expect(screen.queryByText('LATE_ERROR_SENTINEL')).not.toBeInTheDocument()
+      expect(screen.getByText('Response stopped.')).toBeVisible()
+    })
+
+    it('reaches Stop from the keyboard', async () => {
+      const user = userEvent.setup()
+      const cefQuery = vi.fn()
+      Object.assign(window, { cefQuery })
+      render(<ChatPane pr={pr} />)
+
+      await user.type(screen.getByRole('textbox', { name: 'Ask about this pull request' }), 'Question{Enter}')
+      await user.tab()
+      expect(screen.getByRole('button', { name: 'Stop response' })).toHaveFocus()
+      await user.keyboard('{Enter}')
+
+      expect(sent(cefQuery).filter((message) => message.type === 'cancelChat')).toHaveLength(1)
+    })
   })
 })

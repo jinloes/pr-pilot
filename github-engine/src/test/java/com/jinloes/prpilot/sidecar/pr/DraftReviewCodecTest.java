@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class DraftReviewCodecTest {
@@ -247,5 +248,67 @@ class DraftReviewCodecTest {
         dropped.put("body", "dropped comment");
         String droppedSection = codec.buildDroppedSection(List.of(dropped));
         assertThat(droppedSection).contains("- `b.java:7`: dropped comment");
+    }
+
+    @Nested
+    class VisibleBody {
+        private DraftReviewCodec.LineComment comment(String file, int line, String body) {
+            return new DraftReviewCodec.LineComment(
+                    file, line, "note", body, null, null, null, null);
+        }
+
+        @Test
+        void visibleBodyStripsV1PayloadAndKeepsSections() {
+            String body =
+                    codec.encodeBody(
+                                    "HIDDEN SUMMARY",
+                                    "COMMENT",
+                                    List.of(
+                                            comment("", 0, "GENERAL"),
+                                            comment("demo.txt", 2, "INLINE")))
+                            + "\n\n"
+                            + codec.buildOrphanSection(List.of(comment("demo.txt", 99, "ORPHAN")))
+                            + "\n\nAdded on GitHub.";
+
+            assertThat(codec.visibleBody(body))
+                    .isEqualTo(
+                            "**General Notes:**\n- GENERAL\n\n"
+                                    + "**Comments not attached inline (invalid diff positions):**\n"
+                                    + "- `demo.txt:99`: ORPHAN\n\n"
+                                    + "Added on GitHub.");
+        }
+
+        @Test
+        void visibleBodyStripsLegacyTags() {
+            String body =
+                    "<!-- claude-summary: LEGACY SUMMARY -->\n"
+                            + "<!-- claude-verdict: APPROVE -->\n"
+                            + "<!-- claude-comments: [{\"f\":\"a.java\",\"l\":2,\"t\":\"issue\",\"b\":\"x -- > y\"}] -->"
+                            + "\n\n**General Notes:**\n- LEGACY NOTE";
+
+            assertThat(codec.visibleBody(body)).isEqualTo("**General Notes:**\n- LEGACY NOTE");
+        }
+
+        @Test
+        void visibleBodyKeepsImportedPlainBody() {
+            String body = "  Text written on GitHub.\n\n- keep <!-- this --> comment\n";
+
+            assertThat(codec.visibleBody(body))
+                    .isEqualTo("Text written on GitHub.\n\n- keep <!-- this --> comment");
+        }
+
+        @Test
+        void visibleBodyOfPayloadOnlyBodyIsEmpty() {
+            assertThat(codec.visibleBody(codec.encodeBody("SUMMARY", "APPROVE", List.of())))
+                    .isEmpty();
+            assertThat(codec.visibleBody(null)).isEmpty();
+        }
+
+        @Test
+        void visibleBodyLeavesUnterminatedTagUntouched() {
+            String body = "<!-- pr-pilot-review:v1:abc\n\nNotes";
+
+            assertThat(codec.visibleBody(body)).isEqualTo(body);
+        }
     }
 }

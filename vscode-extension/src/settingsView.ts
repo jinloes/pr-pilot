@@ -280,7 +280,21 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   </div>
 
   <div class="section">
-    <div class="section-title">Review backend</div>
+    <div class="section-title">GitHub connection</div>
+
+    <div class="field">
+      <label for="baseUrl">GitHub base URL</label>
+      <div class="row">
+        <input type="text" id="baseUrl" placeholder="https://github.com">
+        <button id="testConnection" class="secondary" title="Verify gh authentication for this host">Check connection</button>
+      </div>
+      <p id="baseUrlError" class="field-error" role="alert" hidden></p>
+      <div class="hint">Change for GitHub Enterprise (for example https://github.mycompany.com).</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Review provider</div>
 
     <div class="field">
       <label for="provider">Provider</label>
@@ -317,8 +331,8 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
         </div>
 
         <div class="field" id="mcpField">
-          <label><input type="checkbox" id="inheritMcp" style="width:auto;margin-right:6px;">Allow MCP tools from your trusted Copilot config</label>
-          <div class="hint">Capability elevation: lets Copilot call MCP servers defined in your own Copilot config (<code>~/.copilot/mcp-config.json</code>). A pull request's repo-local <code>.mcp.json</code> is never loaded, since PR content is untrusted.</div>
+          <label><input type="checkbox" id="inheritMcp" style="width:auto;margin-right:6px;">Allow Copilot to use MCP tools from your trusted Copilot config</label>
+          <div class="hint">Applies while reviewing untrusted pull request content. Servers load only from your own Copilot config (<code>~/.copilot/mcp-config.json</code>); a pull request's <code>.mcp.json</code> is never loaded.</div>
           <label style="margin-top:8px;"><input type="checkbox" id="reviewAutoEnableMcp" style="width:auto;margin-right:6px;">Always enable MCP for Copilot reviews</label>
           <div class="hint">Review-only override. Chat still follows the general MCP toggle above.</div>
           <label for="copilotConfigDir" style="margin-top:8px;">Copilot config directory</label>
@@ -330,26 +344,13 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   </div>
 
   <div class="section">
-    <div class="section-title">GitHub connection</div>
-
-    <div class="field">
-      <label for="baseUrl">GitHub base URL</label>
-      <div class="row">
-        <input type="text" id="baseUrl" placeholder="https://github.com">
-        <button id="testConnection" class="secondary" title="Verify gh authentication for this host">Test</button>
-      </div>
-      <div class="hint">Change for GitHub Enterprise (for example https://github.mycompany.com).</div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Review defaults</div>
+    <div class="section-title">Review guidance</div>
 
     <div class="field">
       <label for="guidanceProfile">Guidance profile</label>
       <div class="row wrap">
         <select id="guidanceProfile"></select>
-        <button id="addGuidanceProfile" class="secondary">Save current as…</button>
+        <button id="addGuidanceProfile" class="secondary">Save as…</button>
         <button id="renameGuidanceProfile" class="secondary">Rename</button>
         <button id="deleteGuidanceProfile" class="secondary">Delete</button>
       </div>
@@ -367,9 +368,13 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       <textarea id="customInstructions" rows="3" placeholder="Extra instructions appended to every review prompt (for example team conventions to enforce)."></textarea>
       <div class="hint">Plain text. Use this for conventions or repeated review guidance.</div>
     </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Review validation</div>
 
     <div class="field">
-      <label><input type="checkbox" id="reviewSelfCritique" style="width:auto;margin-right:6px;">Run a self-critique validation pass</label>
+      <label><input type="checkbox" id="reviewSelfCritique" style="width:auto;margin-right:6px;">Validate findings with a second pass</label>
       <div class="hint">Higher precision, but roughly doubles review time.</div>
     </div>
 
@@ -377,16 +382,15 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       <label><input type="checkbox" id="reviewSupervisorEnabled" style="width:auto;margin-right:6px;">Inspect high-risk coverage gaps</label>
       <div class="hint">Runs a bounded coverage check and at most one targeted follow-up. Off by default because it adds latency.</div>
     </div>
+  </div>
 
-    <details id="advancedReview" class="advanced">
-      <summary>Advanced review options</summary>
-      <div class="advanced-fields">
-        <div class="field">
-          <label><input type="checkbox" id="experimentalIntellijAssistedReview" style="width:auto;margin-right:6px;">Enable IntelliJ-assisted review (experimental)</label>
-          <div class="hint">Shows the IntelliJ-assisted option in a review's Advanced review options. Requires a separate IntelliJ IDEA 262+ installation, a hand-written <code>~/.pr-pilot/semantic-review.json</code>, and manually importing a retained worktree per review. Off by default; ordinary reviews are unaffected.</div>
-        </div>
-      </div>
-    </details>
+  <div class="section">
+    <div class="section-title">Advanced review options</div>
+
+    <div class="field">
+      <label><input type="checkbox" id="experimentalIntellijAssistedReview" style="width:auto;margin-right:6px;">Enable IntelliJ-assisted review (experimental)</label>
+      <div class="hint">Shows the IntelliJ-assisted option in a review's Advanced review options. Requires a separate IntelliJ IDEA 262+ installation, a hand-written <code>~/.pr-pilot/semantic-review.json</code>, and manually importing a retained worktree per review. Off by default; ordinary reviews are unaffected. Turning this off also hides retained-worktree maintenance; turn it back on to remove retained worktrees.</div>
+    </div>
   </div>
 
   <div class="section">
@@ -424,6 +428,25 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
     const el = $('status');
     el.textContent = message;
     el.className = kind ? 'status ' + kind : 'status';
+  }
+
+  function showBaseUrlError() {
+    const input = $('baseUrl');
+    const error = $('baseUrlError');
+    error.textContent = '${GITHUB_BASE_URL_ERROR}';
+    error.hidden = false;
+    input.setAttribute('aria-invalid', 'true');
+    input.setAttribute('aria-describedby', 'baseUrlError');
+    setStatus('');
+  }
+
+  function clearBaseUrlError() {
+    const input = $('baseUrl');
+    const error = $('baseUrlError');
+    error.textContent = '';
+    error.hidden = true;
+    input.removeAttribute('aria-invalid');
+    input.removeAttribute('aria-describedby');
   }
 
   function applyProviderVisibility(provider) {
@@ -490,9 +513,10 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
         if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error();
         value = url.origin;
       } catch {
-        setStatus('${GITHUB_BASE_URL_ERROR}', 'error');
+        showBaseUrlError();
         return;
       }
+      clearBaseUrlError();
     }
     setStatus('Saving…');
     const requestId = ++nextSaveRequestId;
@@ -641,6 +665,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   $('reviewAutoEnableMcp').addEventListener('change', () => save('copilotAutoEnableMcpOnReview', $('reviewAutoEnableMcp').checked));
   $('copilotConfigDir').addEventListener('change', () => save('copilotConfigDir', $('copilotConfigDir').value.trim()));
   $('baseUrl').addEventListener('change', () => save('githubBaseUrl', $('baseUrl').value.trim()));
+  $('baseUrl').addEventListener('input', clearBaseUrlError);
   $('guidanceProfile').addEventListener('change', () => {
     activeGuidanceProfileId = $('guidanceProfile').value;
     saveGuidanceState();
@@ -737,10 +762,11 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error();
       normalized = url.origin;
     } catch {
-      setStatus('${GITHUB_BASE_URL_ERROR}', 'error');
+      showBaseUrlError();
       return;
     }
-    $('testConnection').textContent = 'Testing…';
+    clearBaseUrlError();
+    $('testConnection').textContent = 'Checking…';
     setStatus('Checking gh authentication…');
     vscode.postMessage({ type: 'testConnection', githubBaseUrl: normalized });
   });
@@ -784,7 +810,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       if (typeof msg.requestId === 'number' && msg.requestId !== latestSaveRequestId) return;
       setStatus(msg.ok ? (msg.message || 'Saved.') : (msg.message || 'Could not save setting.'), msg.ok ? 'ok' : 'error');
     } else if (msg.type === 'testResult') {
-      $('testConnection').textContent = 'Test';
+      $('testConnection').textContent = 'Check connection';
       setStatus(msg.ok ? (msg.message || 'Connection looks good.') : (msg.message || 'Connection check failed.'), msg.ok ? 'ok' : 'error');
     }
   });

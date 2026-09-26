@@ -110,6 +110,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { LineComment } from '@/bridge/types'
+import { AUTOSAVE_DEBOUNCE_MS } from '@/lib/autosave'
 import { cn } from '@/lib/utils'
 import { parseDiffSafely } from '@/lib/diffParse'
 import {
@@ -124,6 +125,10 @@ import { buildFindingNavItems, findingLabel } from './findingNavigation'
 import './DiffViewer.css'
 
 const MAX_CHANGES = 500
+
+/** Deletions persist through draft autosave, so the copy follows its debounce. */
+export const DELETE_COMMENT_DESCRIPTION = `This comment will be removed from your pending GitHub review at the next `
+  + `autosave (within ${AUTOSAVE_DEBOUNCE_MS / 1000} seconds). Use Save now to update GitHub immediately.`
 
 interface Props {
   diff: string
@@ -764,10 +769,12 @@ function FileView({
   return (
     <section
       ref={onSectionRef}
-      className="diff-file"
+      className="diff-file focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       data-testid={`diff-file-section-${fileIndex}`}
       data-file-path={displayPath}
       aria-labelledby={`diff-file-${CSS.escape(displayPath)}`}
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- A read-only diff has no gutter buttons, so its horizontal scroll needs a keyboard focus target.
+      tabIndex={readOnly ? 0 : undefined}
     >
       <div className="diff-file__header">
         <h2 id={`diff-file-${CSS.escape(displayPath)}`} className="diff-file__path">{displayPath}</h2>
@@ -1077,7 +1084,7 @@ function InlineCommentRow({
                       {onEdit && onDelete && <DropdownMenuSeparator />}
                       {onDelete && (
                         <DropdownMenuItem
-                          className="gap-2 text-xs text-destructive focus:text-destructive"
+                          className="gap-2 text-xs text-status-issue focus:text-status-issue"
                           onSelect={() => setDeleteDialogOpen(true)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -1091,9 +1098,7 @@ function InlineCommentRow({
                   <AlertDialogContent>
                     <AlertDialogHeader>
                       <AlertDialogTitle>Delete this comment?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This comment will be removed. Save the draft to persist the change.
-                      </AlertDialogDescription>
+                      <AlertDialogDescription>{DELETE_COMMENT_DESCRIPTION}</AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>

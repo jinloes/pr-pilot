@@ -21,6 +21,12 @@ async function expectViewportFilled(page: Page) {
   expect(dimensions.mainHeight).toBe(dimensions.viewportHeight)
 }
 
+/**
+ * Text-critical panes also get a tight, region-level comparison: whole-page tolerance alone let copy
+ * and hierarchy changes pass. Never loosen this; use per-locator `maxDiffPixels` for proven noise.
+ */
+const REGION_SCREENSHOT = { maxDiffPixelRatio: 0.002 }
+
 async function expectNoHorizontalOverflow(page: Page, selector: string) {
   const dimensions = await page.locator(selector).evaluate((element) => ({
     clientWidth: element.clientWidth,
@@ -202,7 +208,7 @@ async function openLongestRiskySubmit(page: Page) {
       ],
     },
   })
-  await page.getByRole('button', { name: 'Comment', exact: true }).click()
+  await page.getByRole('button', { name: 'Submit review…' }).click()
 }
 
 test('setup recovery layout', async ({ page }) => {
@@ -313,11 +319,15 @@ test('populated discovery layout', async ({ page }) => {
   await expect(page.locator('nav li > button')).toHaveCount(2)
   await expect(page.getByText(examplePr.title, { exact: true })).toBeVisible()
   await expect(page.getByText('Add long translated review workflow guidance', { exact: true })).toBeVisible()
-  const retained = page.locator('details').filter({ has: page.getByText('Review maintenance', { exact: true }) })
-  await expect(retained.locator('summary')).toBeVisible()
-  await expect(retained).not.toHaveAttribute('open')
+  const reviewPane = page.getByTestId('review-pane-shell')
+  await expect(reviewPane.getByRole('heading', { name: 'Choose a pull request to begin' })).toBeVisible()
+  await expect(reviewPane.getByText('Select a pull request to open its diff and review actions.')).toBeVisible()
+  await expect(page.getByText('Review maintenance', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Retained IntelliJ review worktrees')).toHaveCount(0)
   await expectViewportFilled(page)
   await expect(page).toHaveScreenshot('discovery-light.png')
+  await expect(reviewPane).toHaveScreenshot('discovery-review-pane-light.png', REGION_SCREENSHOT)
+  await expect(page.getByTestId('pr-list-shell')).toHaveScreenshot('discovery-pr-list-light.png', REGION_SCREENSHOT)
 })
 
 test('narrow pseudo-localized layout', async ({ page }) => {
@@ -460,7 +470,13 @@ test('no-draft hierarchy keeps the primary action ahead of optional overrides', 
   expect(disclosureBox).not.toBeNull()
   expect(generateBox!.y).toBeLessThan(disclosureBox!.y)
   await expect(page.locator('#review-focus-areas')).toBeHidden()
+  const reviewPane = page.getByTestId('review-pane-shell')
+  await expect(reviewPane.getByTestId('generation-card')).toContainText('⟦')
+  await expect(reviewPane.getByRole('navigation', { name: /Reeviieew naaviigaatiioon/ })).toBeVisible()
+  await expect(reviewPane.locator('.diff-gutter__button')).toHaveCount(0)
+  await expectNoHorizontalOverflow(page, '[data-testid="review-scroll-body"]')
   await expect(page).toHaveScreenshot('no-draft-narrow-pseudo-high-contrast.png')
+  await expect(reviewPane).toHaveScreenshot('no-draft-review-pane-narrow-pseudo-high-contrast.png', REGION_SCREENSHOT)
 })
 
 test('wide generation stays on a bounded reading rail without exposing provider output', async ({ page }) => {
@@ -491,7 +507,11 @@ test('wide generation stays on a bounded reading rail without exposing provider 
   await expect(page.getByText('PRIVATE_PROVIDER_REASONING_SENTINEL')).toHaveCount(0)
   await expect(page.getByText('RAW_PROVIDER_TEXT_SENTINEL')).toHaveCount(0)
   await expect(activity.getByRole('button', { name: 'Stop generation' })).toBeVisible()
+  await expect(page.getByText(/Keep inspecting the changed files while PR Pilot generates the review/)).toBeVisible()
+  await expect(page.getByTestId('review-overrides-disclosure')).toHaveCount(0)
   await expect(page).toHaveScreenshot('review-generation-wide-dark.png')
+  await expect(page.getByTestId('review-pane-shell'))
+    .toHaveScreenshot('review-generation-review-pane-wide-dark.png', REGION_SCREENSHOT)
 })
 
 test('long generation activity remains usable in a narrow high-contrast host', async ({ page }) => {
@@ -542,9 +562,9 @@ test('longest risky-submit dialog stays inside a 320x568 viewport and traps focu
   await openLongestRiskySubmit(page)
 
   const dialog = page.getByRole('alertdialog')
-  const title = page.getByRole('heading', { name: 'Submit comment?' })
+  const title = page.getByRole('heading', { name: 'Publish review' })
   const cancel = page.getByRole('button', { name: 'Cancel' })
-  const submit = page.getByRole('button', { name: 'Submit Comment' })
+  const submit = page.getByRole('button', { name: 'Publish as Comment' })
   await expect(dialog).toContainText('3 unresolved trust risks')
   const geometry = await dialog.evaluate((element) => {
     const box = element.getBoundingClientRect()
@@ -648,10 +668,18 @@ test('selected review and chat remain usable in a narrow dark host', async ({ pa
   await openDraftReview(page)
   await page.getByRole('button', { name: 'Chat' }).click()
 
-  await expect(page.getByRole('region', { name: 'Chat' })).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'Ask about this pull request' })).toBeVisible()
+  const reviewPane = page.getByTestId('review-pane-shell')
+  await expect(page.getByRole('region', { name: 'Chat', exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Ask about this pull request' })).toBeInViewport({ ratio: 1 })
+  await expect(reviewPane.getByText('Suggested: Comment')).toHaveCount(2)
+  await expect(page.getByTestId('review-footer').getByRole('status')).toHaveText('Saved')
+  await expect(page.getByRole('button', { name: 'Submit review…' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'More review actions' })).toBeVisible()
+  expect((await page.getByTestId('review-footer').boundingBox())!.height).toBeLessThanOrEqual(48)
+  expect((await page.getByTestId('review-scroll-body').boundingBox())!.height).toBeGreaterThanOrEqual(MIN_REVIEW_BODY_HEIGHT)
   await expectNoHorizontalOverflow(page, '[data-testid="review-pane-shell"]')
   await expect(page).toHaveScreenshot('selected-review-chat-narrow-dark.png')
+  await expect(reviewPane).toHaveScreenshot('selected-review-pane-narrow-dark.png', REGION_SCREENSHOT)
 })
 
 test('wide review provides scannable file and finding navigation', async ({ page }) => {
@@ -717,9 +745,9 @@ test('finding actions stay clear in a narrow review', async ({ page }) => {
   await expect(finding.getByRole('button', { name: 'Verify with AI' })).toBeInViewport({ ratio: 1 })
   await expect(finding.getByRole('button', { name: 'Suggest fix with AI' })).toBeInViewport({ ratio: 1 })
   await expectNoHorizontalOverflow(page, '[data-testid="review-scroll-body"]')
-  const footer = page.getByTestId('review-pane-content').locator(':scope > div')
-    .filter({ has: page.getByRole('button', { name: 'Regenerate', exact: true }) })
+  const footer = page.getByTestId('review-footer')
   await expect(footer).toBeInViewport({ ratio: 1 })
+  await expect(footer.getByRole('button', { name: 'More review actions' })).toBeVisible()
   expect(await footer.evaluate(element => !!element.closest('[data-testid="review-scroll-body"]'))).toBe(false)
   await expect(page).toHaveScreenshot('selected-review-finding-actions-narrow-dark.png')
 })
@@ -744,10 +772,10 @@ test('Verify with AI keeps review, chat, and footer usable in a constrained view
     question: expected.question,
   })])
 
-  const chat = page.getByRole('region', { name: 'Chat' })
+  const chat = page.getByRole('region', { name: 'Chat', exact: true })
   const body = page.getByTestId('review-scroll-body')
   const chatPanel = page.getByTestId('chat-panel')
-  const savedStatus = page.getByText('Saved to GitHub')
+  const savedStatus = page.getByTestId('review-footer').getByRole('status')
   await expect(chat).toBeVisible()
   await expect(body).toBeVisible()
   await expect(savedStatus).toBeVisible()
@@ -806,10 +834,12 @@ test('narrow selected review keeps Save and submit controls reachable', async ({
     await page.goto('/')
     await openDraftReview(page)
 
+    const footer = page.getByTestId('review-footer')
+    expect((await footer.boundingBox())!.height).toBeLessThanOrEqual(48)
     for (const control of [
-      page.getByText('Saved to GitHub'),
-      page.getByRole('button', { name: 'Comment', exact: true }),
-      page.getByRole('button', { name: 'More submit options' }),
+      footer.getByRole('status'),
+      page.getByRole('button', { name: 'Submit review…' }),
+      page.getByRole('button', { name: 'More review actions' }),
     ]) {
       const box = await control.boundingBox()
       expect(box).not.toBeNull()

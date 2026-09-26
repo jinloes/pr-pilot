@@ -97,7 +97,7 @@ public class PluginSettingsComponent {
     private final JComboBox<String> copilotModelCombo = new JComboBox<>(COPILOT_MODEL_SUGGESTIONS);
     private final JComboBox<String> copilotEffortCombo = new JComboBox<>(COPILOT_EFFORTS);
     private final JCheckBox copilotInheritMcpBox =
-            new JCheckBox("Allow MCP tools for untrusted PR content");
+            new JCheckBox("Allow Copilot to use MCP tools from your trusted Copilot config");
     private final JCheckBox copilotAutoEnableMcpOnReviewBox =
             new JCheckBox("Always enable MCP for Copilot reviews");
     private final JBTextField copilotConfigDirField = new JBTextField();
@@ -132,7 +132,7 @@ public class PluginSettingsComponent {
     private final JPanel advancedCopilotPanel = new JPanel();
 
     private final JLabel statusLabel = new JBLabel("Checking…");
-    private final JButton checkButton = new JButton("Check Status");
+    private final JButton checkButton = new JButton("Check connection");
     private final AuthCheckCoordinator authChecks;
     private final Supplier<String> pollStatusSupplier;
     private final Consumer<Runnable> backgroundExecutor;
@@ -147,7 +147,7 @@ public class PluginSettingsComponent {
     private final JCheckBox notifyReviewRequestedBox =
             new JCheckBox("Notify when a review is requested from me");
     private final JCheckBox notifyStarredReposBox =
-            new JCheckBox("Notify when a new PR is opened on a starred repo");
+            new JCheckBox("Notify for new PRs in starred repositories");
     private final JSpinner pollIntervalSpinner = new JSpinner(new SpinnerNumberModel(5, 1, 60, 1));
     private final JLabel pollStatusLabel = new JBLabel(" ");
     private JPanel notifSubPanel;
@@ -283,9 +283,10 @@ public class PluginSettingsComponent {
 
         JLabel mcpHint =
                 hintLabel(
-                        "<html><small>When enabled, Copilot inherits MCP servers from your trusted"
-                                + " <code>~/.copilot/mcp-config.json</code>. A pull request's"
-                                + " repo-local <code>.mcp.json</code> is never loaded.</small></html>");
+                        "<html><small>Applies while reviewing untrusted pull request content."
+                                + " Servers load only from your own Copilot config"
+                                + " (<code>~/.copilot/mcp-config.json</code>); a pull request's"
+                                + " <code>.mcp.json</code> is never loaded.</small></html>");
         // BoxLayout centers children by default (alignmentX 0.5) unless each child explicitly opts
         // into LEFT_ALIGNMENT — every direct child added below needs it or the row floats to the
         // middle of the form, which is what was happening to the "Show advanced" checkbox.
@@ -435,7 +436,9 @@ public class PluginSettingsComponent {
                                         + " IDEA 262+ installation, a hand-written"
                                         + " ~/.pr-pilot/semantic-review.json, and manually"
                                         + " importing a retained worktree per review. Off by"
-                                        + " default; ordinary reviews are unaffected.</small></html>"));
+                                        + " default; ordinary reviews are unaffected. Turning this"
+                                        + " off also hides retained-worktree maintenance; turn it"
+                                        + " back on to remove retained worktrees.</small></html>"));
         JPanel providerField = contentField(providerCombo);
 
         mainPanel =

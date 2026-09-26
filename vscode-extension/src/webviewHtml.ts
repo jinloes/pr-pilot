@@ -35,55 +35,6 @@ export function buildMainWebviewHtml(
   return html.replace('<head>', `<head>\n  ${csp}`);
 }
 
-export function buildLauncherHtml(cspSource: string, nonce = createNonce()): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src ${cspSource}; base-uri 'none'; form-action 'none'">
-  <title>PR Pilot</title>
-  <style nonce="${nonce}">
-    body {
-      color: var(--vscode-foreground);
-      background: var(--vscode-sideBar-background);
-      font-family: var(--vscode-font-family);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 8px;
-      padding: 16px;
-      text-align: center;
-    }
-    button {
-      color: var(--vscode-button-foreground);
-      background: var(--vscode-button-background);
-      border: 0;
-      border-radius: 2px;
-      cursor: pointer;
-      padding: 6px 12px;
-    }
-    button:hover { background: var(--vscode-button-hoverBackground); }
-    p {
-      color: var(--vscode-descriptionForeground);
-      line-height: 1.4;
-      margin: 0;
-      font-size: 0.9em;
-    }
-  </style>
-</head>
-<body>
-  <button id="open-pr-pilot" type="button">Open PR Pilot</button>
-  <p>The PR Pilot workspace opens in an editor tab.</p>
-  <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
-    document.getElementById('open-pr-pilot').addEventListener('click', () => {
-      vscode.postMessage({ type: 'open' });
-    });
-  </script>
-</body>
-</html>`;
-}
-
 export function buildErrorHtml(message: string, nonce = createNonce()): string {
   const escapedMessage = message
     .replace(/&/g, '&amp;')

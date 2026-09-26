@@ -118,6 +118,7 @@ export function parseIncomingMessage(value: unknown): IncomingMessage | null {
         && isOptionalString(value.defaultRepo, 512)
         && (value.listStatus === undefined || isListStatus(value.listStatus))
         && (value.providerReadiness === undefined || isProviderReadiness(value.providerReadiness))
+        && (value.intellijAssistedEnabled === undefined || typeof value.intellijAssistedEnabled === 'boolean')
       break
     case 'draftLoaded':
       valid = ['NO_DRAFT', 'DRAFT_PRESENT', 'MERGED'].includes(value.prState as string)

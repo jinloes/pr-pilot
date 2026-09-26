@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewStatus;
@@ -879,6 +880,101 @@ class WebviewPanelTest {
             assertThat(json.has("result")).isFalse();
             assertThat(json.has("diff")).isFalse();
             assertThat(json.has("validationDiff")).isFalse();
+        }
+    }
+
+    @Nested
+    class PrListSerialization {
+
+        @Test
+        void carriesTheIntellijAssistedSettingForPrAgnosticUi() throws Exception {
+            var f = new DeepFixture();
+            for (boolean enabled : new boolean[] {false, true}) {
+                f.assistedEnabled = enabled;
+
+                var json =
+                        MAPPER.valueToTree(
+                                f.panel.prListMessage(List.of(), "acme/widget", null, null));
+
+                assertThat(json.path("type").asText()).isEqualTo("prListLoaded");
+                assertThat(json.path("intellijAssistedEnabled").isBoolean()).isTrue();
+                assertThat(json.path("intellijAssistedEnabled").asBoolean()).isEqualTo(enabled);
+            }
+        }
+    }
+
+    @Nested
+    class CancelChat {
+
+        private final List<ReviewProvider> cancelled = new ArrayList<>();
+        private final IntellijClaudeService chatService =
+                new IntellijClaudeService() {
+                    @Override
+                    public void cancelCurrentRequest(ReviewProvider provider) {
+                        cancelled.add(provider);
+                    }
+                };
+
+        private Object field(DeepFixture f, String name) throws Exception {
+            var field = WebviewPanel.class.getDeclaredField(name);
+            field.setAccessible(true);
+            return field.get(f.panel);
+        }
+
+        private DeepFixture fixtureWithActiveChat(String operationId) throws Exception {
+            var f = new DeepFixture();
+            f.field(
+                    "chatHistory",
+                    List.of(
+                            new ChatMessage(ChatMessage.Role.USER, "Q"),
+                            new ChatMessage(ChatMessage.Role.ASSISTANT, "A")));
+            f.field("activeChatOperationId", operationId);
+            f.field("activeChatService", chatService);
+            f.field("activeChatProvider", ReviewProvider.COPILOT);
+            f.field("activeChatId", 7L);
+            return f;
+        }
+
+        @Test
+        void stopsTheOwningAnswerAndKeepsConversationHistory() throws Exception {
+            var f = fixtureWithActiveChat("chat-1");
+            Object history = field(f, "chatHistory");
+
+            f.send("cancelChat", "chat-1", Map.of());
+
+            assertThat(cancelled).containsExactly(ReviewProvider.COPILOT);
+            assertThat(field(f, "chatHistory")).isSameAs(history);
+            assertThat(field(f, "activeChatOperationId")).isNull();
+            assertThat((long) field(f, "activeChatId")).isNotEqualTo(7L);
+            assertThat(f.messages).isEmpty();
+        }
+
+        @Test
+        void ignoresAStopForAnOperationItDoesNotOwn() throws Exception {
+            var f = fixtureWithActiveChat("chat-1");
+
+            f.send("cancelChat", "other", Map.of());
+
+            assertThat(cancelled).isEmpty();
+            assertThat(field(f, "activeChatOperationId")).isEqualTo("chat-1");
+            assertThat((long) field(f, "activeChatId")).isEqualTo(7L);
+        }
+
+        @Test
+        void validatorAcceptsCancelChatOnlyWithAnOperationId() {
+            ObjectNode valid =
+                    MAPPER.createObjectNode()
+                            .put("protocolVersion", 1)
+                            .put("type", "cancelChat")
+                            .put("operationId", "chat-1");
+            assertThat(BridgeMessageValidator.isValid(valid)).isTrue();
+            ObjectNode missing = valid.deepCopy();
+            missing.remove("operationId");
+            assertThat(BridgeMessageValidator.isValid(missing)).isFalse();
+            ObjectNode blank = valid.deepCopy().put("operationId", "");
+            assertThat(BridgeMessageValidator.isValid(blank)).isFalse();
+            ObjectNode tooLong = valid.deepCopy().put("operationId", "x".repeat(129));
+            assertThat(BridgeMessageValidator.isValid(tooLong)).isFalse();
         }
     }
 

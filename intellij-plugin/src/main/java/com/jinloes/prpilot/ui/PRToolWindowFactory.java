@@ -3,6 +3,7 @@ package com.jinloes.prpilot.ui;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
@@ -64,11 +65,24 @@ public class PRToolWindowFactory implements ToolWindowFactory {
         content.setDisposer(webviewPanel);
         toolWindow.getContentManager().addContent(content);
 
+        toolWindow.setTitleActions(titleActions(toolWindow, project));
+        toolWindow.setAdditionalGearActions(gearActions(webviewPanel));
+    }
+
+    /** Harmless, frequent actions stay in the title bar beside the PR list's own Refresh. */
+    static List<AnAction> titleActions(ToolWindow toolWindow, Project project) {
         List<AnAction> titleActions = new ArrayList<>();
-        titleActions.add(new ReloadAction(webviewPanel));
         titleActions.add(new PopOutAction(toolWindow));
         titleActions.add(new SettingsAction(project));
-        toolWindow.setTitleActions(titleActions);
+        return titleActions;
+    }
+
+    /**
+     * A full webview reload can drop unsaved edits, so it lives in the gear menu, away from the
+     * look-alike PR list Refresh.
+     */
+    static DefaultActionGroup gearActions(WebviewPanel webviewPanel) {
+        return new DefaultActionGroup(new ReloadAction(webviewPanel));
     }
 
     /**
@@ -94,7 +108,10 @@ public class PRToolWindowFactory implements ToolWindowFactory {
         private final WebviewPanel webviewPanel;
 
         ReloadAction(WebviewPanel webviewPanel) {
-            super("Reload", "Reload PR Pilot", AllIcons.Actions.Refresh);
+            super(
+                    "Reload PR Pilot View",
+                    "Reloads the embedded view. Edits not yet saved to GitHub may be lost.",
+                    AllIcons.Actions.ForceRefresh);
             this.webviewPanel = webviewPanel;
         }
 

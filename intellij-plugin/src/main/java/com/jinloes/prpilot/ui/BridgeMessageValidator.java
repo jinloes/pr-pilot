@@ -25,6 +25,7 @@ final class BridgeMessageValidator {
                     "deleteDraft",
                     "askClaude",
                     "clearChat",
+                    "cancelChat",
                     "openUrl",
                     "openSettings",
                     "runAuthLogin",
@@ -55,7 +56,8 @@ final class BridgeMessageValidator {
                                             "reviewRequested"))
                             && optionalBoolean(node.get("assignedToMe"))
                             && optionalBoolean(node.get("reviewRequested"));
-            case "cancelReview", "clearChat" -> validOperationId(node.get("operationId"));
+            case "cancelReview", "clearChat", "cancelChat" ->
+                    validOperationId(node.get("operationId"));
             case "openSettings", "runAuthLogin" -> true;
             case "openUrl" -> boundedText(node.get("url"), 4_096);
             case "webviewLayoutChanged" -> boundedText(node.get("reason"), 4_096);

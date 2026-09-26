@@ -140,6 +140,15 @@ void test('validates PR list metadata', () => {
   }), null)
 })
 
+void test('accepts an optional boolean IntelliJ-assisted flag on PR list messages', () => {
+  const base = { ...version, type: 'prListLoaded', prs: [] }
+  assert.notEqual(parseIncomingMessage(base), null)
+  assert.notEqual(parseIncomingMessage({ ...base, intellijAssistedEnabled: true }), null)
+  assert.notEqual(parseIncomingMessage({ ...base, intellijAssistedEnabled: false }), null)
+  assert.equal(parseIncomingMessage({ ...base, intellijAssistedEnabled: 'true' }), null)
+  assert.equal(parseIncomingMessage({ ...base, intellijAssistedEnabled: 1 }), null)
+})
+
 void test('validates provider setup readiness states', () => {
   assert.notEqual(parseIncomingMessage({
     ...version,

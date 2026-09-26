@@ -366,4 +366,64 @@ describe('PRList', () => {
     expect(notices).toHaveTextContent('opened from a notification')
     expect(notices).toHaveTextContent('Review status is unavailable')
   })
+
+  describe('refresh failures after a successful load', () => {
+    function setupRequired(reason: string, detail = 'GitHub is unreachable.') {
+      hostMessage({ type: 'setupRequired', reason, detail })
+    }
+
+    it('keeps the loaded rows and shows an inline retryable banner for load_failed', async () => {
+      localStorage.setItem('pr-pilot:first-success-coach-shown', '1')
+      const user = userEvent.setup()
+      const sendToHost = vi.spyOn(bridge, 'sendToHost').mockImplementation(() => {})
+      render(<PRList />)
+      load([firstPr], { ...normalStatus, limited: true })
+      await user.click(screen.getByRole('button', { name: 'Refresh pull requests' }))
+      sendToHost.mockClear()
+
+      setupRequired('load_failed')
+
+      const banner = screen.getByRole('alert')
+      expect(banner).toHaveTextContent("Couldn't refresh pull requests. GitHub is unreachable.")
+      expect(screen.getByText('Improve pull request discovery')).toBeVisible()
+      expect(screen.getByRole('button', { name: 'Refresh pull requests' })).toBeEnabled()
+      const filter = screen.getByRole('textbox', { name: 'Filter pull requests' })
+      expect(filter.compareDocumentPosition(banner) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+      expect(banner.compareDocumentPosition(screen.getByTestId('pr-list-notices'))
+        & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+
+      await user.click(within(banner).getByRole('button', { name: 'Retry' }))
+      expect(sendToHost.mock.calls).toEqual([[{ type: 'refreshPRs', state: 'open', searchScope: 'currentRepo' }]])
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('dismisses the banner and clears it when the next list loads', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(bridge, 'sendToHost').mockImplementation(() => {})
+      render(<PRList />)
+      load([firstPr])
+
+      setupRequired('load_failed')
+      await user.click(screen.getByRole('button', { name: 'Dismiss refresh error' }))
+      expect(screen.queryByTestId('pr-list-refresh-error')).not.toBeInTheDocument()
+
+      setupRequired('load_failed')
+      expect(screen.getByTestId('pr-list-refresh-error')).toBeVisible()
+      load([firstPr])
+      expect(screen.queryByTestId('pr-list-refresh-error')).not.toBeInTheDocument()
+    })
+
+    it('leaves the initial load_failed and every other setup reason to the setup screen', () => {
+      render(<PRList />)
+      setupRequired('load_failed')
+      expect(screen.queryByTestId('pr-list-refresh-error')).not.toBeInTheDocument()
+
+      load([firstPr])
+      for (const reason of ['gh_not_installed', 'gh_not_authenticated', 'provider_not_installed',
+        'provider_not_authenticated', 'draft_index_unavailable']) {
+        setupRequired(reason)
+        expect(screen.queryByTestId('pr-list-refresh-error')).not.toBeInTheDocument()
+      }
+    })
+  })
 })

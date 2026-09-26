@@ -8,9 +8,9 @@ interface Props {
 }
 
 const VERDICT_LABEL: Record<ReviewResult['verdict'], string> = {
-  APPROVE: 'Approve',
-  REQUEST_CHANGES: 'Request Changes',
-  COMMENT: 'Comment',
+  APPROVE: 'Suggested: Approve',
+  REQUEST_CHANGES: 'Suggested: Request changes',
+  COMMENT: 'Suggested: Comment',
 }
 
 const VERDICT_CLASS: Record<ReviewResult['verdict'], string> = {

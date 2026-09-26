@@ -218,6 +218,11 @@ class PluginSettingsComponentTest {
         }
 
         @Test
+        void usesTheSharedCrossHostVocabularyAndSectionOrder() throws Exception {
+            runUiProbe("shared-vocabulary");
+        }
+
+        @Test
         void keepsProfileNameCorrectionContextOpenUntilValidOrCancelled() throws Exception {
             runUiProbe("profile-validation");
         }
@@ -241,6 +246,7 @@ class PluginSettingsComponentTest {
                     case "custom-instructions" -> verifyCustomInstructions();
                     case "profile-layout" -> verifyProfileLayout();
                     case "sections-and-hints" -> verifySectionsAndHints();
+                    case "shared-vocabulary" -> verifySharedVocabulary();
                     case "profile-validation" -> verifyProfileNameValidation();
                     case "intellij-assisted-toggle" -> verifyIntellijAssistedToggle();
                     case "intellij-assisted-configurable" -> verifyIntellijAssistedConfigurable();
@@ -607,8 +613,63 @@ class PluginSettingsComponentTest {
 
         JComponent effort = (JComponent) label(panel, "Reasoning effort:").getLabelFor();
         assertFieldWithHint(effort, hintContaining(panel, "Higher effort"));
-        AbstractButton inheritMcp = button(panel, "Allow MCP tools for untrusted PR content");
-        assertFieldWithHint(inheritMcp, hintContaining(panel, "Copilot inherits MCP servers"));
+        AbstractButton inheritMcp =
+                button(panel, "Allow Copilot to use MCP tools from your trusted Copilot config");
+        assertFieldWithHint(
+                inheritMcp,
+                hintContaining(panel, "Applies while reviewing untrusted pull request content."));
+    }
+
+    private static void verifySharedVocabulary() {
+        PluginSettingsComponent component = component();
+        JPanel panel = component.getPanel();
+        List<String> texts =
+                descendants(panel).stream()
+                        .filter(JLabel.class::isInstance)
+                        .map(JLabel.class::cast)
+                        .map(JLabel::getText)
+                        .toList();
+
+        assertThat(
+                        List.of(
+                                        "GitHub connection",
+                                        "Review provider",
+                                        "Review guidance",
+                                        "Review validation",
+                                        "Advanced review options",
+                                        "Notifications")
+                                .stream()
+                                .map(section -> indexContaining(texts, section))
+                                .toList())
+                .doesNotContain(-1)
+                .isSorted();
+        button(panel, "Allow Copilot to use MCP tools from your trusted Copilot config");
+        assertThat(
+                        hintContaining(
+                                        panel,
+                                        "Applies while reviewing untrusted pull request content.")
+                                .getText())
+                .contains("Servers load only from your own Copilot config")
+                .contains("<code>~/.copilot/mcp-config.json</code>")
+                .contains("a pull request's <code>.mcp.json</code> is never loaded.");
+        button(panel, "Validate findings with a second pass");
+        button(panel, "Notify for new PRs in starred repositories");
+        button(panel, "Save as…");
+        button(panel, "Check connection");
+        button(panel, "Enable background PR notifications (experimental)");
+        List<String> buttons =
+                descendants(panel).stream()
+                        .filter(AbstractButton.class::isInstance)
+                        .map(AbstractButton.class::cast)
+                        .map(AbstractButton::getText)
+                        .toList();
+        assertThat(buttons)
+                .doesNotContain(
+                        "Allow MCP tools for untrusted PR content",
+                        "Notify when a new PR is opened on a starred repo",
+                        "Check Status",
+                        "Save current as…",
+                        "Test");
     }
 
     private static void verifyIntellijAssistedToggle() {
@@ -631,7 +692,10 @@ class PluginSettingsComponentTest {
         assertFieldWithHint(toggle, hintContaining(panel, "IntelliJ IDEA 262+"));
         assertThat(hintContaining(panel, "IntelliJ IDEA 262+").getText())
                 .contains("semantic-review.json")
-                .contains("Off by default");
+                .contains("Off by default")
+                .contains(
+                        "Turning this off also hides retained-worktree maintenance; turn it back"
+                                + " on to remove retained worktrees.");
 
         assertThat(toggle.isSelected()).isFalse();
         assertThat(component.isExperimentalIntellijAssistedReview()).isFalse();

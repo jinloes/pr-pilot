@@ -11,6 +11,8 @@ interface ReviewOverridesProps {
   chunkedMode: boolean
   preflight: DiffPreflight | null
   recommendation: ChunkRecommendation
+  /** Changed files chunked review adds over the standard review diff. */
+  coverageGain?: number
   onFocusAreasChange: (value: string) => void
   onCustomInstructionsChange: (value: string) => void
   onChunkedModeChange: (value: boolean) => void
@@ -26,6 +28,7 @@ export function ReviewOverrides({
   chunkedMode,
   preflight,
   recommendation,
+  coverageGain = 0,
   onFocusAreasChange,
   onCustomInstructionsChange,
   onChunkedModeChange,
@@ -117,16 +120,16 @@ export function ReviewOverrides({
                 : 'PR size: loading diff metadata…'}
             </div>
             <div className="mt-1 pl-6 text-[11px]">
-              <span className={cn('font-medium', recommendation.recommendChunked ? 'text-status-suggestion' : 'text-status-approve')}>
-                {recommendation.recommendChunked
-                  ? 'Fallback available: consider chunked mode.'
-                  : 'Recommended: Single-pass mode.'}
+              <span className={cn('font-medium', coverageGain > 0 ? 'text-status-suggestion' : 'text-status-approve')}>
+                {coverageGain > 0
+                  ? 'Recommended for this PR: chunked review.'
+                  : 'Recommended: standard review.'}
               </span>
               <span className="text-muted-foreground"> {recommendation.reason}</span>
             </div>
             <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
-              Chunked reviews process file batches independently, so they can miss cross-file interactions and provide
-              limited synthesis. Enable this fallback explicitly only when a single-pass review cannot cover the diff.
+              Chunked review works in file batches, so it can miss cross-file interactions. Use it when a standard review
+              would leave files out.
             </p>
           </details>
         </div>

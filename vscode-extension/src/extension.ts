@@ -29,7 +29,7 @@ import { BRIDGE_PROTOCOL_VERSION, isValidBridgeRequest } from './bridgeValidatio
 import { classifySetupAuthError } from './authError';
 import { GitHubOperationError, toUserFacingError, providerNotInstalledMessage } from './userFacingError';
 import { resolveWebviewDistPath } from './webviewAssets';
-import { buildErrorHtml, buildLauncherHtml, buildMainWebviewHtml } from './webviewHtml';
+import { buildErrorHtml, buildMainWebviewHtml } from './webviewHtml';
 import { classifyHostTheme, type HostTheme } from './hostTheme';
 import { SidecarClient, resolveSidecarJarPath, type OutcomeComment } from './sidecar';
 import { DraftRecoveryStore } from './draftRecovery';
@@ -106,9 +106,8 @@ export function activate(context: vscode.ExtensionContext) {
     const provider = new ClaudeReviewsViewProvider(context.extensionUri, new DraftRecoveryStore(context.globalState));
     const notificationPoller = new PRNotificationPoller(context, (pr) => provider.openPullRequest(pr));
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider('pr-pilot.main', provider, {
-            webviewOptions: { retainContextWhenHidden: true },
-        }),
+        // An empty tree lets VS Code render the native welcome content contributed in package.json.
+        vscode.window.createTreeView('pr-pilot.main', { treeDataProvider: new EmptyLauncherTree() }),
         vscode.commands.registerCommand('pr-pilot.open', () => provider.openPanel()),
         vscode.commands.registerCommand('pr-pilot.selectCopilotModel', selectCopilotModel),
         vscode.commands.registerCommand('pr-pilot.openSettings', () =>
@@ -344,11 +343,22 @@ interface ActivePR {
     body: string;
 }
 
+/** Has no items, so the Activity Bar view shows only its native `viewsWelcome` content. */
+class EmptyLauncherTree implements vscode.TreeDataProvider<never> {
+    getTreeItem(element: never): vscode.TreeItem {
+        return element;
+    }
+
+    getChildren(): never[] {
+        return [];
+    }
+}
+
 /**
- * Provides the PR Pilot editor tab plus a small Activity Bar launcher.
+ * Provides the PR Pilot editor tab.
  * Serves the pre-built webview/dist/ React app and bridges all messages in the editor tab.
  */
-class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
+class ClaudeReviewsViewProvider {
     private readonly distUri: vscode.Uri;
     private panel: vscode.WebviewPanel | undefined;
     private state: ViewState | undefined;
@@ -391,27 +401,6 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
         if (hadLiveState) {
             this.flushPendingActivation();
         }
-    }
-
-    resolveWebviewView(
-        webviewView: vscode.WebviewView,
-        _context: vscode.WebviewViewResolveContext,
-        _token: vscode.CancellationToken,
-    ): void {
-        webviewView.webview.options = {
-            enableScripts: true,
-        };
-        webviewView.webview.html = buildLauncherHtml(webviewView.webview.cspSource);
-        webviewView.webview.onDidReceiveMessage((message: unknown) => {
-            if (
-                typeof message === 'object'
-                && message !== null
-                && (message as { type?: unknown }).type === 'open'
-            ) {
-                this.openPanel();
-                void vscode.commands.executeCommand('workbench.action.closeSidebar');
-            }
-        });
     }
 
     private initializeWebview(
@@ -567,6 +556,9 @@ class ClaudeReviewsViewProvider implements vscode.WebviewViewProvider {
                     if (key) state.chatHistory.delete(key);
                     break;
                 }
+                case 'cancelChat':
+                    await handleCancelChat(state, msg);
+                    break;
                 case 'openUrl':
                     if (typeof msg.url === 'string' && msg.url.startsWith('https://')) {
                         void vscode.env.openExternal(vscode.Uri.parse(msg.url));
@@ -947,6 +939,7 @@ async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>):
                 reviewStatusAvailable: found.reviewStatusAvailable,
             },
             providerReadiness: readiness,
+            intellijAssistedEnabled: intellijAssistedEnabled(),
         });
     } catch (err) {
         if (state.refreshRevision !== refreshRevision || state.disposed) return;
@@ -1614,6 +1607,17 @@ async function handleDeleteDraft(state: ViewState, msg: Record<string, unknown>)
             message: toUserFacingError(err, 'delete draft review'),
         });
     }
+}
+
+/**
+ * Stops the chat answer the webview is waiting for without deleting conversation history. Only the
+ * operation that owns the provider is cancelled; the revision bump drops its late output silently.
+ */
+async function handleCancelChat(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    const ownsProvider = state.activeProviderOperation?.kind === 'chat'
+        && state.activeProviderOperation.operationId === msg.operationId;
+    if (!ownsProvider) return;
+    await invalidateChatAndCancel(state, () => cancelActiveProvider(msg.operationId as string));
 }
 
 async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): Promise<void> {

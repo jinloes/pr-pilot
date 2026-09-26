@@ -138,6 +138,30 @@ public final class DraftReviewCodec {
     }
 
     /**
+     * Returns the text GitHub renders for a pending review body, with PR Pilot's hidden metadata
+     * removed: the v1 payload (always leading in encoded bodies) and the first occurrence of each
+     * legacy tag. Everything else (General Notes, detached-comment sections, reviewer-added or
+     * imported text) is kept verbatim. Both formats keep the summary only in hidden metadata, so
+     * nothing visible is duplicated. An unterminated tag is left untouched; the encoder cannot
+     * produce one because base64 never contains the terminator and legacy values escaped it.
+     */
+    String visibleBody(String pendingBody) {
+        String visible = pendingBody == null ? "" : pendingBody;
+        for (String metadataTag : List.of(PAYLOAD_TAG, SUMMARY_TAG, VERDICT_TAG, COMMENTS_TAG)) {
+            visible = withoutFirstTag(visible, metadataTag);
+        }
+        return visible.strip();
+    }
+
+    private static String withoutFirstTag(String body, String start) {
+        int index = body.indexOf(start);
+        if (index < 0) return body;
+        int end = body.indexOf(TAG_END, index + start.length());
+        if (end < 0) return body;
+        return body.substring(0, index) + body.substring(end + TAG_END.length());
+    }
+
+    /**
      * Encodes a summary/verdict/comment set into one versioned, reversibly encoded PR Pilot
      * payload, plus a trailing "General Notes" section for comments with no file/line.
      */

@@ -48,6 +48,7 @@ import {
   type ReviewActivity,
 } from './reviewActivity'
 import { buildExampleFixPrompt, buildVerifyCommentPrompt, resolveVerifyTarget } from './verifyPrompt'
+import { publishedBodySections, type PublishedBodySections } from './publishBody'
 
 export interface DiffPreflight {
   fileCount: number
@@ -87,6 +88,12 @@ export interface ReviewViewModel {
   qualityRiskCount: number
   preflight: DiffPreflight | null
   recommendation: ChunkRecommendation
+  /** Changed files chunked review would add over the standard review diff. */
+  coverageGain: number
+  /** What the engine appends below the reviewer's text when publishing. */
+  publishSections: PublishedBodySections
+  /** True once a save this session moved comments GitHub rejected inline into the review body. */
+  commentsMovedToBody: boolean
   focusAreasOverride: string
   customInstructionsOverride: string
   chunkedMode: boolean
@@ -193,6 +200,17 @@ interface WatchdogRef {
 }
 
 export const MUTATION_WATCHDOG_MS = 45_000
+export const SELECTION_CAPTURE_DEBOUNCE_MS = 150
+
+/** Selections inside the chat composer or any text field are typing, not context to attach. */
+function isSelectionInFormField(selection: Selection | null): boolean {
+  const anchor = selection?.anchorNode ?? null
+  const element = anchor instanceof Element ? anchor : anchor?.parentElement ?? null
+  if (!element) return false
+  if (element.closest('.chat-pane__input, input, textarea, [contenteditable="true"]')) return true
+  const active = document.activeElement
+  return active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement
+}
 
 function newOperationId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
@@ -312,6 +330,7 @@ export function useReviewController({
   const maintenanceOperationRef = useRef<string | null>(null)
   const beforeDeepPauseRef = useRef<PaneState>(initialPaneState)
   const [qualityExpanded, setQualityExpanded] = useState(false)
+  const [commentsMovedToBody, setCommentsMovedToBody] = useState(false)
   const [chatHeight, setChatHeightState] = useState(() => loadChatHeight(localStorage, window.innerHeight))
   const [chatAvailableHeight, setChatAvailableHeight] = useState(window.innerHeight)
   const chatHeightRef = useRef(chatHeight)
@@ -366,6 +385,7 @@ export function useReviewController({
     setSelectedContext('')
     setPendingChatMessage(null)
     setQualityExpanded(false)
+    setCommentsMovedToBody(false)
     setDeepSetup(null)
     setDeepBusy(false)
     setIntellijAssisted(false)
@@ -415,6 +435,7 @@ export function useReviewController({
 
         case 'draftLoaded': {
           generatedBaselineRef.current = null
+          setCommentsMovedToBody(false)
           const assistedEnabled = message.intellijAssistedEnabled === true
           setIntellijAssistedEnabled(assistedEnabled)
           if (!assistedEnabled) setIntellijAssisted(false)
@@ -452,6 +473,7 @@ export function useReviewController({
           break
 
         case 'reviewResult': {
+          setCommentsMovedToBody(false)
           setDeepSetup(null)
           setDeepBusy(false)
           const diff = message.diff ?? message.validationDiff ?? ''
@@ -502,6 +524,7 @@ export function useReviewController({
           inFlightSaveRef.current = null
           clearWatchdog(saveWatchdogRef)
           setSaving(false)
+          if (message.commentsDropped) setCommentsMovedToBody(true)
           if (message.commentsDropped && !inFlight.isAuto) {
             toast.warning('Some comments were dropped', {
               description: 'Outdated line references were removed when saving to GitHub.',
@@ -545,6 +568,7 @@ export function useReviewController({
           break
 
         case 'reviewSubmitted':
+          setCommentsMovedToBody(false)
           clearWatchdog(submitWatchdogRef)
           submitInFlightRef.current = false
           setSubmitting(false)
@@ -559,6 +583,7 @@ export function useReviewController({
           break
 
         case 'draftDeleted':
+          setCommentsMovedToBody(false)
           clearWatchdog(deleteWatchdogRef)
           setDeleting(false)
           deleteDraftStateRef.current = null
@@ -627,8 +652,27 @@ export function useReviewController({
       if (text) setSelectedContext(text)
     }
 
+    // Keyboard selections fire no mouseup; capture them once the selection settles.
+    let selectionTimer: ReturnType<typeof setTimeout> | null = null
+    function captureKeyboardSelection() {
+      selectionTimer = null
+      const selection = window.getSelection()
+      if (isSelectionInFormField(selection)) return
+      const text = selection?.toString().trim() ?? ''
+      if (text) setSelectedContext(text)
+    }
+    function handleSelectionChange() {
+      if (selectionTimer !== null) clearTimeout(selectionTimer)
+      selectionTimer = setTimeout(captureKeyboardSelection, SELECTION_CAPTURE_DEBOUNCE_MS)
+    }
+
     document.addEventListener('mouseup', handleMouseUp)
-    return () => document.removeEventListener('mouseup', handleMouseUp)
+    document.addEventListener('selectionchange', handleSelectionChange)
+    return () => {
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('selectionchange', handleSelectionChange)
+      if (selectionTimer !== null) clearTimeout(selectionTimer)
+    }
   }, [pr])
 
   const handleChatResizeMove = useCallback((event: PointerEvent) => {
@@ -675,6 +719,11 @@ export function useReviewController({
   const recommendation = useMemo(
     () => chunkRecommendation(preflight, reviewCoverage, chunkCoverage),
     [preflight, reviewCoverage, chunkCoverage],
+  )
+  const reviewCoverageGain = coverageGain(reviewCoverage, chunkCoverage)
+  const publishSections = useMemo(
+    () => publishedBodySections(result?.lineComments ?? [], partition.orphans),
+    [result?.lineComments, partition.orphans],
   )
   const savableResult = state.kind === 'reviewUnsaved' || state.kind === 'draftPresent'
     ? state.result
@@ -1089,6 +1138,8 @@ export function useReviewController({
   const showReviewOverrides = state.kind !== 'draftLoading'
     && state.kind !== 'generating'
     && state.kind !== 'merged'
+    && state.kind !== 'authError'
+    && state.kind !== 'submitted'
   const contextSummary = chatContextSummary(pr, diff, reviewCoverage, result, selectedContext)
   const statusMessage = state.kind === 'draftLoading'
     ? 'Checking for a saved review draft'
@@ -1123,6 +1174,9 @@ export function useReviewController({
       qualityRiskCount,
       preflight,
       recommendation,
+      coverageGain: reviewCoverageGain,
+      publishSections,
+      commentsMovedToBody,
       focusAreasOverride,
       customInstructionsOverride,
       chunkedMode,

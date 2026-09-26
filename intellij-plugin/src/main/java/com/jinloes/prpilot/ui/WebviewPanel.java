@@ -108,19 +108,20 @@ public class WebviewPanel implements Disposable {
             @JsonProperty("hasReviewDraft") boolean hasReviewDraft,
             @JsonProperty("reviewStatus") ReviewStatus reviewStatus) {}
 
-    private record PrListStatus(
+    record PrListStatus(
             String searchScope,
             String currentRepo,
             int resultLimit,
             boolean limited,
             boolean reviewStatusAvailable) {}
 
-    private record PrListMessage(
+    record PrListMessage(
             String type,
             List<WebviewPr> prs,
             @JsonProperty("defaultRepo") String defaultRepo,
             @JsonProperty("listStatus") PrListStatus listStatus,
-            @JsonProperty("providerReadiness") ProviderReadinessDto providerReadiness) {}
+            @JsonProperty("providerReadiness") ProviderReadinessDto providerReadiness,
+            @JsonProperty("intellijAssistedEnabled") boolean intellijAssistedEnabled) {}
 
     private record DraftLoadingMsg(String type, @JsonProperty("prKey") String prKey) {}
 
@@ -878,6 +879,7 @@ public class WebviewPanel implements Disposable {
                                             }
                                         });
                 case "clearChat" -> clearChat(node.path("operationId").asText());
+                case "cancelChat" -> cancelChat(node.path("operationId").asText());
                 case "askClaude" -> {
                     String question = node.path("question").asText();
                     String context = node.path("context").asText("");
@@ -2387,6 +2389,28 @@ public class WebviewPanel implements Disposable {
         service.cancelCurrentRequest(provider);
     }
 
+    /**
+     * Stops the chat answer that owns {@code operationId} without deleting conversation history.
+     * Advancing the chat id drops the stopped answer's late chunks, response and error silently.
+     */
+    private void cancelChat(String operationId) {
+        IntellijClaudeService service;
+        ReviewProvider provider;
+        synchronized (this) {
+            if (activeChatOperationId == null
+                    || !StringUtils.equals(activeChatOperationId, operationId)) {
+                return;
+            }
+            activeChatId = chatSequence.incrementAndGet();
+            service = activeChatService;
+            provider = activeChatProvider;
+            activeChatService = claudeService;
+            activeChatProvider = ReviewProvider.CLAUDE;
+            activeChatOperationId = null;
+        }
+        if (service != null) service.cancelCurrentRequest(provider);
+    }
+
     static String worktreeKey(int number, String owner, String repo) {
         return owner.toLowerCase(java.util.Locale.ROOT)
                 + "/"
@@ -2783,8 +2807,7 @@ public class WebviewPanel implements Disposable {
                                                                 + pr.getNumber())))
                         .toList();
         pushMessage(
-                new PrListMessage(
-                        "prListLoaded",
+                prListMessage(
                         dtos,
                         defaultRepo,
                         new PrListStatus(
@@ -2794,6 +2817,24 @@ public class WebviewPanel implements Disposable {
                                 limited,
                                 reviewStatusAvailable),
                         providerReadiness));
+    }
+
+    /**
+     * Carries the experimental setting on the session-level list message so PR-agnostic webview
+     * surfaces (retained-worktree maintenance) can honor it before any PR is selected.
+     */
+    PrListMessage prListMessage(
+            List<WebviewPr> prs,
+            String defaultRepo,
+            PrListStatus listStatus,
+            ProviderReadinessDto providerReadiness) {
+        return new PrListMessage(
+                "prListLoaded",
+                prs,
+                defaultRepo,
+                listStatus,
+                providerReadiness,
+                intellijAssistedEnabled.getAsBoolean());
     }
 
     public void setOnPRSelected(Consumer<PullRequest> callback) {
