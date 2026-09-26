@@ -49,6 +49,8 @@ export interface SettingsState {
     reviewGuidanceGlobs: string[];
     reviewGuidanceProfiles: ReviewGuidanceProfile[];
     activeReviewGuidanceProfileId: string;
+    /** Remembered instructions keyed by lowercase `owner/repo`. */
+    repositoryReviewInstructions: Record<string, string>;
     reviewSelfCritique: boolean;
     reviewSupervisorEnabled: boolean;
     experimentalIntellijAssistedReview: boolean;
@@ -368,6 +370,16 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       <textarea id="customInstructions" rows="3" placeholder="Extra instructions appended to every review prompt (for example team conventions to enforce)."></textarea>
       <div class="hint">Plain text. Use this for conventions or repeated review guidance.</div>
     </div>
+
+    <div class="field">
+      <label for="repositoryInstructionsRepo">Remembered repository instructions</label>
+      <div class="row wrap">
+        <select id="repositoryInstructionsRepo"></select>
+        <button id="forgetRepositoryInstructions" class="secondary" type="button">Forget</button>
+      </div>
+      <textarea id="repositoryInstructionsText" rows="3" maxlength="10000" aria-label="Instructions for the selected repository" aria-describedby="repositoryInstructionsHint"></textarea>
+      <div class="hint" id="repositoryInstructionsHint">Added to every review of that repository, together with the instructions above. Add a repository from a review's instructions with “Remember for this repository”.</div>
+    </div>
   </div>
 
   <div class="section">
@@ -418,6 +430,39 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   let state = null;
   let guidanceProfiles = [];
   let activeGuidanceProfileId = '';
+  let repositoryInstructions = {};
+  let selectedRepository = '';
+
+  function renderRepositoryInstructions() {
+    const select = $('repositoryInstructionsRepo');
+    const text = $('repositoryInstructionsText');
+    const repositories = Object.keys(repositoryInstructions).sort();
+    if (!repositories.includes(selectedRepository)) selectedRepository = repositories[0] || '';
+    select.innerHTML = '';
+    if (repositories.length === 0) {
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = 'No remembered repositories';
+      select.appendChild(empty);
+    }
+    for (const repository of repositories) {
+      const option = document.createElement('option');
+      option.value = repository;
+      option.textContent = repository;
+      select.appendChild(option);
+    }
+    select.value = selectedRepository;
+    select.disabled = repositories.length === 0;
+    text.disabled = repositories.length === 0;
+    $('forgetRepositoryInstructions').disabled = repositories.length === 0;
+    text.value = selectedRepository ? repositoryInstructions[selectedRepository] || '' : '';
+  }
+
+  function saveRepositoryInstructions(next) {
+    repositoryInstructions = next;
+    renderRepositoryInstructions();
+    save('repositoryReviewInstructions', repositoryInstructions);
+  }
   let nextSaveRequestId = 0;
   let latestSaveRequestId = 0;
   let profileDialogMode = 'add';
@@ -726,6 +771,24 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   }
   $('focusAreas').addEventListener('change', () => saveGuidanceField('reviewFocusAreas'));
   $('customInstructions').addEventListener('change', () => saveGuidanceField('reviewCustomInstructions'));
+  $('repositoryInstructionsRepo').addEventListener('change', (event) => {
+    selectedRepository = event.target.value;
+    renderRepositoryInstructions();
+  });
+  $('repositoryInstructionsText').addEventListener('change', (event) => {
+    if (!selectedRepository) return;
+    const next = { ...repositoryInstructions };
+    const value = String(event.target.value || '').trim();
+    if (value) next[selectedRepository] = value;
+    else delete next[selectedRepository];
+    saveRepositoryInstructions(next);
+  });
+  $('forgetRepositoryInstructions').addEventListener('click', () => {
+    if (!selectedRepository) return;
+    const next = { ...repositoryInstructions };
+    delete next[selectedRepository];
+    saveRepositoryInstructions(next);
+  });
   $('reviewSelfCritique').addEventListener('change', () => save('reviewSelfCritique', $('reviewSelfCritique').checked));
   $('reviewSupervisorEnabled').addEventListener('change', () => save('reviewSupervisorEnabled', $('reviewSupervisorEnabled').checked));
   $('experimentalIntellijAssistedReview').addEventListener('change', () => save('experimentalIntellijAssistedReview', $('experimentalIntellijAssistedReview').checked));
@@ -786,6 +849,9 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       activeGuidanceProfileId = state.activeReviewGuidanceProfileId || '';
       renderGuidanceProfileOptions();
       loadGuidanceFields();
+      repositoryInstructions = state.repositoryReviewInstructions && typeof state.repositoryReviewInstructions === 'object'
+        ? { ...state.repositoryReviewInstructions } : {};
+      renderRepositoryInstructions();
       $('reviewSelfCritique').checked = state.reviewSelfCritique !== false;
       $('reviewSupervisorEnabled').checked = state.reviewSupervisorEnabled === true;
       $('experimentalIntellijAssistedReview').checked = state.experimentalIntellijAssistedReview === true;

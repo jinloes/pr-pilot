@@ -1030,3 +1030,46 @@ for (const [width, height] of [[320, 568], [1280, 800]] as const) {
     })
   }
 }
+
+for (const theme of ['light', 'dark', 'highContrastDark'] as const) {
+  test(`remembered repository instructions are labelled, keyboard-operable, and announce saves in ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width: 400, height: 900 })
+    await selectExamplePr(page, theme)
+    await pushHostMessage(page, {
+      type: 'draftLoaded', prKey: 'acme/platform#42', prState: 'NO_DRAFT', diff: exampleDiff,
+      providerReadiness: { provider: 'claude', available: true, detail: 'Ready' },
+      repositoryInstructions: 'API-only PRs precede the service PR.',
+    })
+    const pane = page.getByTestId('review-pane-shell')
+    await expect(pane.getByText('Remembered for repository')).toBeVisible()
+    await pane.locator('summary').filter({ hasText: 'Review instructions (optional)' }).press('Enter')
+
+    const field = pane.getByRole('textbox', { name: 'Remembered instructions for acme/platform' })
+    await expect(field).toHaveValue('API-only PRs precede the service PR.')
+    await expect(field).toHaveAccessibleDescription(/Applied to every review of acme\/platform/)
+    const remember = pane.getByRole('button', { name: 'Remember for this repository' })
+    await expect(remember).toBeDisabled()
+    expect(await noHorizontalOverflow(page, 'review-scroll-body')).toBe(true)
+    await expectNoViolations(page, '[data-testid="repository-instructions"]')
+
+    await field.focus()
+    await field.evaluate((element: HTMLTextAreaElement) => {
+      element.setSelectionRange(element.value.length, element.value.length)
+    })
+    await page.keyboard.type(' Skip handler validation requests.')
+    await page.keyboard.press('Tab')
+    await expect(remember).toBeFocused()
+    await page.keyboard.press('Enter')
+    const save = await latestHostRequest(page, 'saveRepositoryInstructions')
+    expect(save).toMatchObject({ owner: 'acme', repo: 'platform', number: 42,
+      instructions: 'API-only PRs precede the service PR. Skip handler validation requests.' })
+
+    await pushHostMessage(page, { type: 'repositoryInstructionsSaved', prKey: 'acme/platform#42',
+      instructions: 'API-only PRs precede the service PR. Skip handler validation requests.' })
+    await expect(pane.getByRole('status').filter({ hasText: 'Remembered for acme/platform.' })).toBeVisible()
+    await pushHostMessage(page, { type: 'repositoryInstructionsSaveError', prKey: 'acme/platform#42',
+      message: 'Could not save PR Pilot settings. Try again.' })
+    await expect(pane.getByRole('status').filter({ hasText: 'Could not save PR Pilot settings.' })).toBeVisible()
+    await expectNoViolations(page, '[data-testid="repository-instructions"]')
+  })
+}

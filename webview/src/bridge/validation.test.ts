@@ -256,3 +256,25 @@ void test('validates host theme messages', () => {
   assert.equal(parseIncomingMessage({ ...version, type: 'themeChanged', theme: 'highContrastDark' })?.type, 'themeChanged')
   assert.equal(parseIncomingMessage({ ...version, type: 'themeChanged', theme: 'sepia' }), null)
 })
+
+void test('bounds remembered repository instructions on draft loads', () => {
+  const base = { ...version, type: 'draftLoaded', prKey: 'acme/widget#1', prState: 'NO_DRAFT' }
+  assert.notEqual(parseIncomingMessage(base), null)
+  assert.notEqual(parseIncomingMessage({ ...base, repositoryInstructions: 'Keep API PRs API-only.' }), null)
+  assert.notEqual(parseIncomingMessage({ ...base, repositoryInstructions: 'x'.repeat(10_000) }), null)
+  assert.equal(parseIncomingMessage({ ...base, repositoryInstructions: 'x'.repeat(10_001) }), null)
+  assert.equal(parseIncomingMessage({ ...base, repositoryInstructions: 7 }), null)
+})
+
+void test('validates PR-scoped repository instruction save replies', () => {
+  const saved = { ...version, type: 'repositoryInstructionsSaved', prKey: 'acme/widget#1', instructions: 'Rule' }
+  assert.equal(parseIncomingMessage(saved)?.type, 'repositoryInstructionsSaved')
+  assert.notEqual(parseIncomingMessage({ ...saved, instructions: '' }), null)
+  assert.equal(parseIncomingMessage({ ...saved, prKey: undefined }), null)
+  assert.equal(parseIncomingMessage({ ...saved, instructions: undefined }), null)
+  assert.equal(parseIncomingMessage({ ...saved, instructions: 'x'.repeat(10_001) }), null)
+  const failed = { ...version, type: 'repositoryInstructionsSaveError', prKey: 'acme/widget#1', message: 'No' }
+  assert.equal(parseIncomingMessage(failed)?.type, 'repositoryInstructionsSaveError')
+  assert.equal(parseIncomingMessage({ ...failed, message: undefined }), null)
+  assert.equal(parseIncomingMessage({ ...failed, prKey: undefined }), null)
+})

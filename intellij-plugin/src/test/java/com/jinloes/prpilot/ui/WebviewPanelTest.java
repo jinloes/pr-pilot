@@ -13,6 +13,7 @@ import com.jinloes.prpilot.review.SemanticWorktreeStore;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.services.PendingReviewIndex;
+import com.jinloes.prpilot.settings.PluginSettings;
 import com.jinloes.prpilot.sidecar.pr.PrDetail;
 import java.awt.BorderLayout;
 import java.awt.Rectangle;
@@ -840,12 +841,15 @@ class WebviewPanelTest {
                             false,
                             "",
                             new WebviewPanel.ProviderReadinessDto("claude", true, "Ready"),
-                            true);
+                            true,
+                            "API PRs precede service PRs.");
 
             var json = MAPPER.valueToTree(message);
 
             assertThat(json.path("intellijAssistedEnabled").isBoolean()).isTrue();
             assertThat(json.path("intellijAssistedEnabled").asBoolean()).isTrue();
+            assertThat(json.path("repositoryInstructions").asText())
+                    .isEqualTo("API PRs precede service PRs.");
 
             assertThat(json.has("reviewId")).isFalse();
             assertThat(json.has("result")).isFalse();
@@ -869,9 +873,11 @@ class WebviewPanelTest {
                             false,
                             "PR is merged.",
                             new WebviewPanel.ProviderReadinessDto("copilot", true, "Ready"),
-                            false);
+                            false,
+                            null);
 
             var json = MAPPER.valueToTree(message);
+            assertThat(json.has("repositoryInstructions")).isFalse();
 
             assertThat(json.path("intellijAssistedEnabled").isBoolean()).isTrue();
             assertThat(json.path("intellijAssistedEnabled").asBoolean()).isFalse();
@@ -1052,6 +1058,82 @@ class WebviewPanelTest {
             parent.setSize(width, height);
             parent.doLayout();
             host.doLayout();
+        }
+    }
+
+    @Nested
+    class SaveRepositoryInstructionsReply {
+        @Test
+        void remembersTrimmedTextAndRepliesWithTheStoredValue() {
+            PluginSettings settings = new PluginSettings();
+            Object reply =
+                    WebviewPanel.saveRepositoryInstructionsReply(
+                            settings, 7, "Acme", "Widget", "  API PRs precede service PRs.  ");
+
+            assertThat(MAPPER.valueToTree(reply).toString())
+                    .isEqualTo(
+                            MAPPER.createObjectNode()
+                                    .put("type", "repositoryInstructionsSaved")
+                                    .put("prKey", "Acme/Widget#7")
+                                    .put("instructions", "API PRs precede service PRs.")
+                                    .toString());
+            assertThat(settings.getRepositoryReviewInstructions("acme", "widget"))
+                    .isEqualTo("API PRs precede service PRs.");
+        }
+
+        @Test
+        void forgetsOnBlankText() {
+            PluginSettings settings = new PluginSettings();
+            settings.rememberRepositoryReviewInstructions("acme", "widget", "Old");
+            Object reply =
+                    WebviewPanel.saveRepositoryInstructionsReply(
+                            settings, 7, "acme", "widget", "   ");
+
+            assertThat(MAPPER.valueToTree(reply).path("instructions").asText("missing")).isEmpty();
+            assertThat(settings.getRepositoryReviewInstructions()).isEmpty();
+        }
+
+        @Test
+        void reportsInvalidNamesAndOversizedTextWithoutSaving() {
+            PluginSettings settings = new PluginSettings();
+            Object invalid =
+                    WebviewPanel.saveRepositoryInstructionsReply(settings, 1, "a b", "w", "Rule");
+            Object oversized =
+                    WebviewPanel.saveRepositoryInstructionsReply(
+                            settings, 1, "acme", "widget", "x".repeat(10_001));
+
+            assertThat(MAPPER.valueToTree(invalid).path("type").asText())
+                    .isEqualTo("repositoryInstructionsSaveError");
+            assertThat(MAPPER.valueToTree(oversized).path("message").asText())
+                    .contains("10,000 characters");
+            assertThat(MAPPER.valueToTree(oversized).path("prKey").asText())
+                    .isEqualTo("acme/widget#1");
+            assertThat(settings.getRepositoryReviewInstructions()).isEmpty();
+        }
+
+        @Test
+        void validatorRequiresPrIdentityAndBoundedInstructions() {
+            ObjectNode valid =
+                    MAPPER.createObjectNode()
+                            .put("protocolVersion", 1)
+                            .put("type", "saveRepositoryInstructions")
+                            .put("number", 7)
+                            .put("owner", "acme")
+                            .put("repo", "widget")
+                            .put("instructions", "Rule");
+            assertThat(BridgeMessageValidator.isValid(valid)).isTrue();
+            assertThat(BridgeMessageValidator.isValid(valid.deepCopy().put("instructions", "")))
+                    .isTrue();
+            ObjectNode missing = valid.deepCopy();
+            missing.remove("instructions");
+            assertThat(BridgeMessageValidator.isValid(missing)).isFalse();
+            assertThat(
+                            BridgeMessageValidator.isValid(
+                                    valid.deepCopy().put("instructions", "x".repeat(10_001))))
+                    .isFalse();
+            ObjectNode noPr = valid.deepCopy();
+            noPr.remove("number");
+            assertThat(BridgeMessageValidator.isValid(noPr)).isFalse();
         }
     }
 }

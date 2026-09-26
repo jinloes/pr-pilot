@@ -9,6 +9,7 @@ const MESSAGE_TYPES = new Set([
   'refreshPRs',
   'selectPR',
   'generateReview',
+  'saveRepositoryInstructions',
   'continueDeepReview',
   'listDeepReviews',
   'cleanupDeepReview',
@@ -113,6 +114,8 @@ export function isValidBridgeRequest(msg: AnyMessage | null | undefined): msg is
         && (msg.intellijAssisted === undefined || typeof msg.intellijAssisted === 'boolean')
         && (msg.focusAreas === undefined || isBoundedString(msg.focusAreas, 10_000))
         && (msg.customInstructions === undefined || isBoundedString(msg.customInstructions, 20_000));
+    case 'saveRepositoryInstructions':
+      return hasValidPrIdentity(msg) && isBoundedString(msg.instructions, 10_000);
     case 'continueDeepReview':
       return hasValidPrIdentity(msg) && isOperationId(msg.operationId)
         && isOperationId(msg.retainedId) && isBoundedString(msg.server, 255) && !!msg.server;

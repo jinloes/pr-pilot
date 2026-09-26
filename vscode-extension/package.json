@@ -195,6 +195,19 @@
           "default": "",
           "description": "Default extra instructions appended to every review prompt (e.g. team conventions to enforce). A per-review override in the PR Pilot view takes precedence when set."
         },
+        "pr-pilot.repositoryReviewInstructions": {
+          "type": "object",
+          "default": {},
+          "maxProperties": 200,
+          "propertyNames": {
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,38})/[a-z0-9._-]{1,100}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 10000
+          },
+          "markdownDescription": "Review instructions PR Pilot remembers per repository, keyed by lowercase `owner/repo`. They are added to every review of that repository, ahead of the per-review or default custom instructions. Add them from a review's instructions with **Remember for this repository**, and edit or forget them in the PR Pilot settings view."
+        },
         "pr-pilot.reviewGuidanceProfiles": {
           "type": "array",
           "default": [],

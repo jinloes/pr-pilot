@@ -14,8 +14,10 @@ import com.jinloes.prpilot.services.PRNotificationService;
 import com.jinloes.prpilot.sidecar.github.CheckAuthResult;
 import java.awt.Component;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -109,6 +111,12 @@ public class PluginSettingsComponent {
     private final JButton addReviewGuidanceProfileButton = new JButton("Save as…");
     private final JButton renameReviewGuidanceProfileButton = new JButton("Rename");
     private final JButton deleteReviewGuidanceProfileButton = new JButton("Delete");
+    private final JComboBox<String> repositoryInstructionsCombo = new JComboBox<>();
+    private final JBTextArea repositoryInstructionsArea = new JBTextArea(3, 0);
+    private final JButton forgetRepositoryInstructionsButton = new JButton("Forget");
+    private Map<String, String> repositoryInstructions = new LinkedHashMap<>();
+    private String selectedRepository = "";
+    private boolean updatingRepositoryInstructions;
     private final ProfileNamePrompt profileNamePrompt;
     private List<PluginSettings.ReviewGuidanceProfile> reviewGuidanceProfiles = new ArrayList<>();
     private String activeReviewGuidanceProfileId = "";
@@ -376,6 +384,14 @@ public class PluginSettingsComponent {
         renameReviewGuidanceProfileButton.addActionListener(e -> renameReviewGuidanceProfile());
         deleteReviewGuidanceProfileButton.addActionListener(e -> deleteReviewGuidanceProfile());
         rebuildReviewGuidanceProfileCombo();
+        boundContentWidth(repositoryInstructionsCombo);
+        repositoryInstructionsArea
+                .getAccessibleContext()
+                .setAccessibleName("Instructions for the selected repository");
+        repositoryInstructionsCombo.addActionListener(e -> selectRepositoryInstructions());
+        forgetRepositoryInstructionsButton.addActionListener(
+                e -> forgetSelectedRepositoryInstructions());
+        rebuildRepositoryInstructionsCombo();
 
         JPanel reviewGuidanceProfileActions =
                 new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
@@ -396,6 +412,18 @@ public class PluginSettingsComponent {
         reviewGuidanceProfilePanel.add(reviewGuidanceProfileActions);
 
         JBScrollPane customInstructionsScrollPane = boundedTextArea(reviewCustomInstructionsArea);
+        JPanel repositoryInstructionsRow =
+                new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+        repositoryInstructionsRow.add(repositoryInstructionsCombo);
+        repositoryInstructionsRow.add(forgetRepositoryInstructionsButton);
+        repositoryInstructionsRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        repositoryInstructionsRow.setMaximumSize(repositoryInstructionsRow.getPreferredSize());
+        JPanel repositoryInstructionsPanel = new JPanel();
+        repositoryInstructionsPanel.setLayout(
+                new BoxLayout(repositoryInstructionsPanel, BoxLayout.Y_AXIS));
+        repositoryInstructionsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        repositoryInstructionsPanel.add(repositoryInstructionsRow);
+        repositoryInstructionsPanel.add(boundedTextArea(repositoryInstructionsArea));
         JPanel baseUrlFieldBlock = fieldWithHint(baseUrlField, note);
         JPanel profileField =
                 fieldWithHint(
@@ -415,6 +443,14 @@ public class PluginSettingsComponent {
                         hintLabel(
                                 "<html><small>Extra instructions appended to every review"
                                         + " prompt, such as team conventions.</small></html>"));
+        JPanel repositoryInstructionsField =
+                fieldWithHint(
+                        repositoryInstructionsPanel,
+                        hintLabel(
+                                "<html><small>Added to every review of that repository, together"
+                                        + " with the instructions above. Add a repository from a"
+                                        + " review's instructions with “Remember for this"
+                                        + " repository”.</small></html>"));
         JPanel validationField =
                 fieldWithHint(
                         reviewSelfCritiqueBox,
@@ -468,6 +504,13 @@ public class PluginSettingsComponent {
                         .addLabeledComponent(
                                 fieldLabel("Custom instructions:", reviewCustomInstructionsArea),
                                 customInstructionsField,
+                                1,
+                                false)
+                        .addLabeledComponent(
+                                fieldLabel(
+                                        "Remembered repository instructions:",
+                                        repositoryInstructionsCombo),
+                                repositoryInstructionsField,
                                 1,
                                 false)
                         .addSeparator(8)
@@ -684,6 +727,85 @@ public class PluginSettingsComponent {
                         ? candidate
                         : "";
         loadActiveReviewGuidanceProfile();
+    }
+
+    /** Normalized remembered instructions, including any edit to the selected repository. */
+    public Map<String, String> getRepositoryReviewInstructions() {
+        syncSelectedRepositoryInstructions();
+        return RepositoryReviewInstructions.normalize(repositoryInstructions);
+    }
+
+    public void setRepositoryReviewInstructions(Map<String, String> instructions) {
+        repositoryInstructions =
+                new LinkedHashMap<>(RepositoryReviewInstructions.normalize(instructions));
+        selectedRepository = "";
+        rebuildRepositoryInstructionsCombo();
+    }
+
+    /** The first repository whose edited instructions exceed the limit, or null when all fit. */
+    public String repositoryWithOversizedInstructions() {
+        syncSelectedRepositoryInstructions();
+        return repositoryInstructions.entrySet().stream()
+                .filter(
+                        entry ->
+                                entry.getValue().trim().length()
+                                        > RepositoryReviewInstructions.MAX_INSTRUCTIONS_LENGTH)
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private void syncSelectedRepositoryInstructions() {
+        if (!selectedRepository.isEmpty()
+                && repositoryInstructions.containsKey(selectedRepository)) {
+            repositoryInstructions.put(selectedRepository, repositoryInstructionsArea.getText());
+        }
+    }
+
+    private void selectRepositoryInstructions() {
+        if (updatingRepositoryInstructions) {
+            return;
+        }
+        syncSelectedRepositoryInstructions();
+        Object selected = repositoryInstructionsCombo.getSelectedItem();
+        selectedRepository = selected instanceof String repository ? repository : "";
+        loadSelectedRepositoryInstructions();
+    }
+
+    private void forgetSelectedRepositoryInstructions() {
+        if (selectedRepository.isEmpty()) {
+            return;
+        }
+        repositoryInstructions.remove(selectedRepository);
+        selectedRepository = "";
+        rebuildRepositoryInstructionsCombo();
+    }
+
+    private void rebuildRepositoryInstructionsCombo() {
+        updatingRepositoryInstructions = true;
+        List<String> repositories = repositoryInstructions.keySet().stream().sorted().toList();
+        if (!repositories.contains(selectedRepository)) {
+            selectedRepository = repositories.isEmpty() ? "" : repositories.get(0);
+        }
+        DefaultComboBoxModel<String> model = new DefaultComboBoxModel<>();
+        if (repositories.isEmpty()) {
+            model.addElement("No remembered repositories");
+        }
+        repositories.forEach(model::addElement);
+        repositoryInstructionsCombo.setModel(model);
+        repositoryInstructionsCombo.setSelectedItem(
+                repositories.isEmpty() ? "No remembered repositories" : selectedRepository);
+        updatingRepositoryInstructions = false;
+        loadSelectedRepositoryInstructions();
+    }
+
+    private void loadSelectedRepositoryInstructions() {
+        boolean hasSelection = !selectedRepository.isEmpty();
+        repositoryInstructionsCombo.setEnabled(hasSelection);
+        repositoryInstructionsArea.setEnabled(hasSelection);
+        forgetRepositoryInstructionsButton.setEnabled(hasSelection);
+        repositoryInstructionsArea.setText(
+                hasSelection ? repositoryInstructions.getOrDefault(selectedRepository, "") : "");
     }
 
     public boolean isReviewSelfCritique() {

@@ -97,6 +97,14 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
       onFocusAreasChange={actions.setFocusAreasOverride}
       onCustomInstructionsChange={actions.setCustomInstructionsOverride}
       onChunkedModeChange={actions.setChunkedMode}
+      repository={model.pr ? `${model.pr.owner}/${model.pr.repo}` : undefined}
+      repositoryInstructions={model.repositoryInstructions}
+      repositoryInstructionsDraft={model.repositoryInstructionsDraft}
+      repositoryInstructionsSaving={model.repositoryInstructionsSaving}
+      repositoryInstructionsError={model.repositoryInstructionsError}
+      repositoryInstructionsSaved={model.repositoryInstructionsSaved}
+      onRepositoryInstructionsDraftChange={actions.setRepositoryInstructionsDraft}
+      onSaveRepositoryInstructions={actions.saveRepositoryInstructions}
       intellijAssisted={model.intellijAssisted}
       onIntellijAssistedChange={model.intellijAssistedEnabled ? actions.setIntellijAssisted : undefined}
       onShowRetained={model.intellijAssistedEnabled ? () => setMaintenanceVisible(true) : undefined}

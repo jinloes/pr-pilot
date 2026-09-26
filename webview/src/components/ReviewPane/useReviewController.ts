@@ -10,6 +10,7 @@ import {
   type DeepReviewPreparedMessage,
   type RetainedDeepReview,
 } from '../../bridge/types'
+import { MAX_REPOSITORY_INSTRUCTIONS } from '../../bridge/validation'
 import { autosaveDelayMs, isReviewDirty, reviewSnapshot } from '@/lib/autosave'
 import { coverageGain, parseDiffCoverage, type DiffCoverage } from '@/lib/diffCoverage'
 import { parseDiffSafely } from '@/lib/diffParse'
@@ -96,6 +97,13 @@ export interface ReviewViewModel {
   commentsMovedToBody: boolean
   focusAreasOverride: string
   customInstructionsOverride: string
+  /** Remembered instructions the host applies to every review of this repository. */
+  repositoryInstructions: string
+  repositoryInstructionsDraft: string
+  repositoryInstructionsSaving: boolean
+  repositoryInstructionsError: string
+  /** True after the host confirmed the latest save, until the draft is edited again. */
+  repositoryInstructionsSaved: boolean
   chunkedMode: boolean
   showReviewOverrides: boolean
   saving: boolean
@@ -124,6 +132,8 @@ export interface ReviewActions {
   cleanupDeepReview: (id: string) => void
   setFocusAreasOverride: (value: string) => void
   setCustomInstructionsOverride: (value: string) => void
+  setRepositoryInstructionsDraft: (value: string) => void
+  saveRepositoryInstructions: () => void
   setChunkedMode: (value: boolean) => void
   generate: () => void
   cancel: () => void
@@ -312,6 +322,14 @@ export function useReviewController({
   const [activity, setReviewActivity] = useState<ReviewActivity>(emptyReviewActivity)
   const [focusAreasOverride, setFocusAreasOverride] = useState('')
   const [customInstructionsOverride, setCustomInstructionsOverride] = useState('')
+  const [repositoryInstructions, setRepositoryInstructions] = useState('')
+  const [repositoryInstructionsDraft, setRepositoryInstructionsDraftState] = useState('')
+  const [repositoryInstructionsSaving, setRepositoryInstructionsSaving] = useState(false)
+  const [repositoryInstructionsError, setRepositoryInstructionsError] = useState('')
+  const [repositoryInstructionsSaved, setRepositoryInstructionsSaved] = useState(false)
+  const repositoryInstructionsRef = useRef('')
+  const repositoryInstructionsDraftRef = useRef('')
+  const repositoryInstructionsWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [saving, setSaving] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -360,6 +378,7 @@ export function useReviewController({
     clearWatchdog(saveWatchdogRef)
     clearWatchdog(submitWatchdogRef)
     clearWatchdog(deleteWatchdogRef)
+    clearWatchdog(repositoryInstructionsWatchdogRef)
   }, [])
 
   useEffect(() => {
@@ -373,6 +392,14 @@ export function useReviewController({
     setReviewActivity(emptyReviewActivity())
     setFocusAreasOverride('')
     setCustomInstructionsOverride('')
+    clearWatchdog(repositoryInstructionsWatchdogRef)
+    repositoryInstructionsRef.current = ''
+    repositoryInstructionsDraftRef.current = ''
+    setRepositoryInstructions('')
+    setRepositoryInstructionsDraftState('')
+    setRepositoryInstructionsSaving(false)
+    setRepositoryInstructionsError('')
+    setRepositoryInstructionsSaved(false)
     setChunkedMode(false)
     pendingSubmitRef.current = null
     submitInFlightRef.current = false
@@ -435,6 +462,16 @@ export function useReviewController({
 
         case 'draftLoaded': {
           generatedBaselineRef.current = null
+          {
+            const remembered = message.repositoryInstructions ?? ''
+            // A reload must not discard instructions the reviewer is still editing.
+            if (repositoryInstructionsDraftRef.current === repositoryInstructionsRef.current) {
+              repositoryInstructionsDraftRef.current = remembered
+              setRepositoryInstructionsDraftState(remembered)
+            }
+            repositoryInstructionsRef.current = remembered
+            setRepositoryInstructions(remembered)
+          }
           setCommentsMovedToBody(false)
           const assistedEnabled = message.intellijAssistedEnabled === true
           setIntellijAssistedEnabled(assistedEnabled)
@@ -588,6 +625,24 @@ export function useReviewController({
           setDeleting(false)
           deleteDraftStateRef.current = null
           dispatch({ type: 'draftDeleted' })
+          break
+
+        case 'repositoryInstructionsSaved':
+          clearWatchdog(repositoryInstructionsWatchdogRef)
+          repositoryInstructionsRef.current = message.instructions
+          repositoryInstructionsDraftRef.current = message.instructions
+          setRepositoryInstructions(message.instructions)
+          setRepositoryInstructionsDraftState(message.instructions)
+          setRepositoryInstructionsSaving(false)
+          setRepositoryInstructionsError('')
+          setRepositoryInstructionsSaved(true)
+          break
+
+        case 'repositoryInstructionsSaveError':
+          clearWatchdog(repositoryInstructionsWatchdogRef)
+          setRepositoryInstructionsSaving(false)
+          setRepositoryInstructionsSaved(false)
+          setRepositoryInstructionsError(message.message)
           break
 
         case 'draftDeleteError':
@@ -924,6 +979,38 @@ export function useReviewController({
     })
   }
 
+  function setRepositoryInstructionsDraft(value: string) {
+    repositoryInstructionsDraftRef.current = value
+    setRepositoryInstructionsDraftState(value)
+    setRepositoryInstructionsSaved(false)
+    setRepositoryInstructionsError('')
+  }
+
+  function handleSaveRepositoryInstructions() {
+    if (!pr || repositoryInstructionsSaving) return
+    const instructions = repositoryInstructionsDraft.trim()
+    if (instructions.length > MAX_REPOSITORY_INSTRUCTIONS) {
+      setRepositoryInstructionsError(
+        `Repository instructions are limited to ${MAX_REPOSITORY_INSTRUCTIONS.toLocaleString()} characters.`,
+      )
+      return
+    }
+    setRepositoryInstructionsSaving(true)
+    setRepositoryInstructionsSaved(false)
+    setRepositoryInstructionsError('')
+    armWatchdog(repositoryInstructionsWatchdogRef, () => {
+      setRepositoryInstructionsSaving(false)
+      setRepositoryInstructionsError('The host did not respond in time. Check your connection and try again.')
+    })
+    sendToHost({
+      type: 'saveRepositoryInstructions',
+      number: pr.number,
+      owner: pr.owner,
+      repo: pr.repo,
+      instructions,
+    })
+  }
+
   function handleCancel() {
     if (!pr) return
     const operationId = activeReviewOperationIdRef.current ?? deepSetup?.operationId
@@ -1179,6 +1266,11 @@ export function useReviewController({
       commentsMovedToBody,
       focusAreasOverride,
       customInstructionsOverride,
+      repositoryInstructions,
+      repositoryInstructionsDraft,
+      repositoryInstructionsSaving,
+      repositoryInstructionsError,
+      repositoryInstructionsSaved,
       chunkedMode,
       showReviewOverrides,
       saving,
@@ -1223,6 +1315,8 @@ export function useReviewController({
       },
       setFocusAreasOverride,
       setCustomInstructionsOverride,
+      setRepositoryInstructionsDraft,
+      saveRepositoryInstructions: handleSaveRepositoryInstructions,
       setChunkedMode,
       generate: () => handleGenerate(),
       cancel: handleCancel,

@@ -26,6 +26,12 @@ import {
     type NotificationHealth,
 } from './notifications';
 import { BRIDGE_PROTOCOL_VERSION, isValidBridgeRequest } from './bridgeValidation';
+import {
+    composeCustomInstructions,
+    normalizeRepositoryInstructions,
+    repositoryKey,
+    withRepositoryInstructions,
+} from './repositoryInstructions';
 import { classifySetupAuthError } from './authError';
 import { GitHubOperationError, toUserFacingError, providerNotInstalledMessage } from './userFacingError';
 import { resolveWebviewDistPath } from './webviewAssets';
@@ -514,6 +520,9 @@ class ClaudeReviewsViewProvider {
                 case 'generateReview':
                     if (msg.intellijAssisted === true) await handlePrepareDeepReview(state, msg);
                     else { state.deepReview.invalidate(); await handleGenerateReview(state, msg); }
+                    break;
+                case 'saveRepositoryInstructions':
+                    await handleSaveRepositoryInstructions(state, msg, (message) => push(state, message));
                     break;
                 case 'continueDeepReview':
                     await handleContinueDeepReview(state, msg);
@@ -1040,7 +1049,8 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
             await state.draftRecoveryStore.clear(key);
             push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: false });
             push(state, { type: 'draftLoaded', prKey: key, prState: 'MERGED', diff, validationDiff, providerReadiness: readiness,
-                intellijAssistedEnabled: intellijAssistedEnabled() });
+                intellijAssistedEnabled: intellijAssistedEnabled(),
+                repositoryInstructions: rememberedRepositoryInstructions(owner, repo) });
         } else if (draft) {
             const staleCommits = hasStaleCommits(draft.commitId, detail.head?.sha ?? '');
             push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: true });
@@ -1057,11 +1067,13 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
                 recoveryPending: draft.recoveryPending,
                 providerReadiness: readiness,
                 intellijAssistedEnabled: intellijAssistedEnabled(),
+                repositoryInstructions: rememberedRepositoryInstructions(owner, repo),
             });
         } else {
             push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: false });
             push(state, { type: 'draftLoaded', prKey: key, prState: 'NO_DRAFT', diff, validationDiff, providerReadiness: readiness,
-                intellijAssistedEnabled: intellijAssistedEnabled() });
+                intellijAssistedEnabled: intellijAssistedEnabled(),
+                repositoryInstructions: rememberedRepositoryInstructions(owner, repo) });
         }
 
         // Comment-position validation benefits from an untruncated diff, but it must not block the
@@ -1092,6 +1104,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
             status: toUserFacingError(err, 'load PR details'),
             providerReadiness: providerReadiness(),
             intellijAssistedEnabled: intellijAssistedEnabled(),
+            repositoryInstructions: rememberedRepositoryInstructions(owner, repo),
         });
     }
 }
@@ -1129,6 +1142,49 @@ async function handleDeepMaintenance(state: ViewState, msg: Record<string, unkno
 /** Experimental opt-in; while off, the webview hides the IntelliJ-assisted controls. */
 function intellijAssistedEnabled(): boolean {
     return config().get<boolean>('experimentalIntellijAssistedReview', false) === true;
+}
+
+/** Instructions the user asked PR Pilot to remember for `owner/repo`; empty when none. */
+function rememberedRepositoryInstructions(owner: string, repo: string): string {
+    const key = repositoryKey(owner, repo);
+    if (!key) return '';
+    return normalizeRepositoryInstructions(config().get<unknown>('repositoryReviewInstructions', {}))[key] ?? '';
+}
+
+export async function handleSaveRepositoryInstructions(
+    state: Pick<ViewState, 'disposed'>,
+    msg: Record<string, unknown>,
+    pushMessage: (message: Record<string, unknown>) => void,
+    configuration: Pick<vscode.WorkspaceConfiguration, 'get' | 'update'> = config(),
+): Promise<void> {
+    const number = msg.number as number;
+    const owner = msg.owner as string;
+    const repo = msg.repo as string;
+    const key = prKeyFromParts(number, owner, repo);
+    const repository = repositoryKey(owner, repo);
+    const fail = (message: string) =>
+        pushMessage({ type: 'repositoryInstructionsSaveError', prKey: key, message });
+    if (!repository) {
+        fail('This repository name cannot be remembered.');
+        return;
+    }
+    const current = normalizeRepositoryInstructions(configuration.get<unknown>('repositoryReviewInstructions', {}));
+    const next = withRepositoryInstructions(
+        current, repository, typeof msg.instructions === 'string' ? msg.instructions : '');
+    if (!next) {
+        fail('Repository instructions are limited to 10,000 characters and 200 repositories.');
+        return;
+    }
+    try {
+        await configuration.update('repositoryReviewInstructions', next, vscode.ConfigurationTarget.Global);
+    } catch (err) {
+        console.warn('[pr-pilot] saving repository instructions failed:', err instanceof Error ? err.message : String(err));
+        if (!state.disposed) fail('Could not save PR Pilot settings. Try again.');
+        return;
+    }
+    if (!state.disposed) {
+        pushMessage({ type: 'repositoryInstructionsSaved', prKey: key, instructions: next[repository] ?? '' });
+    }
 }
 
 const INTELLIJ_ASSISTED_DISABLED_ERROR =
@@ -1233,7 +1289,10 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
     const selectionRevision = state.selectionRevision;
     const generationRevision = ++state.generationRevision;
     const activePr = state.activePR;
-    const settings = snapshotReviewGenerationSettings();
+    const settings = {
+        ...snapshotReviewGenerationSettings(),
+        rememberedRepositoryInstructions: rememberedRepositoryInstructions(owner, repo),
+    };
     const priorReview = formatPriorReview(state.activeReviewResult);
     const isCurrentGeneration = () =>
         !state.disposed
@@ -1341,9 +1400,13 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         const focusAreas = typeof msg.focusAreas === 'string' && msg.focusAreas.trim()
             ? msg.focusAreas.trim()
             : guidance.focusAreas;
-        const customInstructions = typeof msg.customInstructions === 'string' && msg.customInstructions.trim()
-            ? msg.customInstructions.trim()
-            : guidance.customInstructions;
+        const customInstructions = composeCustomInstructions(
+            `${owner}/${repo}`,
+            settings.rememberedRepositoryInstructions,
+            typeof msg.customInstructions === 'string' && msg.customInstructions.trim()
+                ? msg.customInstructions.trim()
+                : guidance.customInstructions,
+        );
 
         // Prompt construction happens sidecar-side (shared review-engine ClaudeService/CopilotService);
         // the extension only supplies raw PR/diff/context fields.

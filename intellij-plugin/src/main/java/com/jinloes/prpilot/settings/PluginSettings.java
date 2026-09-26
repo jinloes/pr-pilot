@@ -7,8 +7,10 @@ import com.intellij.openapi.components.Storage;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.review.RepoGuidelinesReader;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -143,6 +145,13 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
         /** ID of the active named review-guidance profile; blank selects the built-in default. */
         public String activeReviewGuidanceProfileId = "";
+
+        /**
+         * Review instructions remembered per repository, keyed by lowercase {@code owner/repo}.
+         * Applied to every review of that repository ahead of the per-review or default custom
+         * instructions.
+         */
+        public Map<String, String> repositoryReviewInstructions = new LinkedHashMap<>();
 
         /**
          * When true, review generation runs a second self-critique pass that re-validates each
@@ -408,6 +417,44 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
     private static String trim(String value) {
         return value != null ? value.trim() : "";
+    }
+
+    /** Normalized copy of every remembered repository's instructions. */
+    public Map<String, String> getRepositoryReviewInstructions() {
+        return RepositoryReviewInstructions.normalize(myState.repositoryReviewInstructions);
+    }
+
+    /** Replaces all remembered repository instructions (normalized; blanks are forgotten). */
+    public void setRepositoryReviewInstructions(Map<String, String> instructions) {
+        myState.repositoryReviewInstructions = RepositoryReviewInstructions.normalize(instructions);
+    }
+
+    /** Instructions remembered for {@code owner/repo}; empty when none or the name is invalid. */
+    public String getRepositoryReviewInstructions(String owner, String repo) {
+        String key = RepositoryReviewInstructions.repositoryKey(owner, repo);
+        return key == null ? "" : getRepositoryReviewInstructions().getOrDefault(key, "");
+    }
+
+    /**
+     * Remembers (or, when blank, forgets) instructions for {@code owner/repo}.
+     *
+     * @return the stored, trimmed instructions ({@code ""} when forgotten), or {@code null} when
+     *     the name is invalid, the text is over the limit, or the repository cap is reached
+     */
+    public String rememberRepositoryReviewInstructions(
+            String owner, String repo, String instructions) {
+        String key = RepositoryReviewInstructions.repositoryKey(owner, repo);
+        if (key == null) {
+            return null;
+        }
+        Map<String, String> next =
+                RepositoryReviewInstructions.with(
+                        getRepositoryReviewInstructions(), key, instructions);
+        if (next == null) {
+            return null;
+        }
+        myState.repositoryReviewInstructions = next;
+        return next.getOrDefault(key, "");
     }
 
     public boolean isReviewSelfCritique() {

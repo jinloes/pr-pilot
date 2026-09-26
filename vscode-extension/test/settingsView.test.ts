@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
+import { EMPTY_NOTIFICATION_HEALTH } from '../src/notifications';
 
 import {
     COPILOT_MODEL_SUGGESTIONS,
@@ -316,6 +317,7 @@ function runSettingsScript() {
     assert.ok(script, 'settings script not found');
     const elements = new Map<string, FakeElement>();
     const posted: Array<Record<string, unknown>> = [];
+    const messageListeners: Array<(event: { data: unknown }) => void> = [];
     const element = (id: string) => {
         if (!elements.has(id)) elements.set(id, fakeElement(id));
         return elements.get(id)!;
@@ -327,7 +329,11 @@ function runSettingsScript() {
             addEventListener: () => undefined,
             activeElement: null,
         },
-        window: { addEventListener: () => undefined },
+        window: {
+            addEventListener: (type: string, listener: (event: { data: unknown }) => void) => {
+                if (type === 'message') messageListeners.push(listener);
+            },
+        },
         acquireVsCodeApi: () => ({ postMessage: (message: Record<string, unknown>) => posted.push(message) }),
         URL,
         Number,
@@ -335,7 +341,8 @@ function runSettingsScript() {
         Date,
     };
     runInNewContext(script, context);
-    return { element, posted };
+    const deliver = (data: unknown) => { for (const listener of messageListeners) listener({ data }); };
+    return { element, posted, deliver };
 }
 
 test('an invalid base URL shows an error attached to its field and is never saved', () => {
@@ -398,4 +405,67 @@ test('a valid base URL clears a previous field error and saves the normalized or
 test('the base URL error sits directly below its input row', () => {
     const html = buildSettingsHtml('csp', 'n');
     assert.match(html, /<input type="text" id="baseUrl"[^>]*>\s*<button id="testConnection"[^>]*>Check connection<\/button>\s*<\/div>\s*<p id="baseUrlError" class="field-error" role="alert" hidden><\/p>/);
+});
+
+// ── Remembered repository instructions ───────────────────────────────────────
+
+function initState(repositoryReviewInstructions: Record<string, string>): Record<string, unknown> {
+    return {
+        provider: 'claude', reviewModel: '', reviewModelCopilot: '', reviewEffort: 'high',
+        githubBaseUrl: 'https://github.com', copilotInheritMcp: false, copilotAutoEnableMcpOnReview: false,
+        copilotConfigDir: '', reviewFocusAreas: '', reviewCustomInstructions: '', reviewGuidanceGlobs: [],
+        reviewGuidanceProfiles: [], activeReviewGuidanceProfileId: '', repositoryReviewInstructions,
+        reviewSelfCritique: true, reviewSupervisorEnabled: false, experimentalIntellijAssistedReview: false,
+        notificationsEnabled: false, notifyReviewRequested: true, notifyStarredRepos: false,
+        notificationPollMinutes: 5, notificationHealth: EMPTY_NOTIFICATION_HEALTH,
+    };
+}
+
+function postedUpdates(posted: Array<Record<string, unknown>>) {
+    return JSON.parse(JSON.stringify(posted.filter((message) => message.type === 'update'
+        && message.key === 'repositoryReviewInstructions').map((message) => message.value))) as unknown[];
+}
+
+test('buildSettingsHtml renders the remembered repository instructions editor under Review guidance', () => {
+    const html = buildSettingsHtml('csp', 'n');
+    const guidance = html.slice(html.indexOf('>Review guidance<'), html.indexOf('>Review validation<'));
+    assert.match(guidance, /<label for="repositoryInstructionsRepo">Remembered repository instructions<\/label>/);
+    assert.match(guidance, /<textarea id="repositoryInstructionsText"[^>]*maxlength="10000"/);
+    assert.match(guidance, /<button id="forgetRepositoryInstructions"[^>]*>Forget<\/button>/);
+});
+
+test('the repository instructions editor disables itself when nothing is remembered', () => {
+    const { element, deliver } = runSettingsScript();
+    deliver({ type: 'init', state: initState({}) });
+    assert.equal(element('repositoryInstructionsRepo').disabled, true);
+    assert.equal(element('repositoryInstructionsText').disabled, true);
+    assert.equal(element('forgetRepositoryInstructions').disabled, true);
+    assert.equal(element('repositoryInstructionsText').value, '');
+});
+
+test('the repository instructions editor edits, clears, and forgets the selected repository', () => {
+    const { element, posted, deliver } = runSettingsScript();
+    deliver({ type: 'init', state: initState({ 'acme/widget': 'Rule A', 'acme/api': 'Rule B' }) });
+    assert.equal(element('repositoryInstructionsRepo').value, 'acme/api');
+    assert.equal(element('repositoryInstructionsText').value, 'Rule B');
+    assert.equal(element('repositoryInstructionsText').disabled, false);
+
+    element('repositoryInstructionsRepo').value = 'acme/widget';
+    element('repositoryInstructionsRepo').dispatch('change');
+    assert.equal(element('repositoryInstructionsText').value, 'Rule A');
+
+    element('repositoryInstructionsText').value = '  Rule A2  ';
+    element('repositoryInstructionsText').dispatch('change');
+    element('forgetRepositoryInstructions').dispatch('click');
+    assert.deepEqual(postedUpdates(posted), [
+        { 'acme/widget': 'Rule A2', 'acme/api': 'Rule B' },
+        { 'acme/api': 'Rule B' },
+    ]);
+    assert.equal(element('repositoryInstructionsRepo').value, 'acme/api');
+
+    element('repositoryInstructionsText').value = '   ';
+    element('repositoryInstructionsText').dispatch('change');
+    const updates = postedUpdates(posted);
+    assert.deepEqual(updates[updates.length - 1], {});
+    assert.equal(element('repositoryInstructionsText').disabled, true);
 });

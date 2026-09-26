@@ -46,6 +46,9 @@ public class PluginSettingsConfigurable implements Configurable {
                 || !component
                         .getActiveReviewGuidanceProfileId()
                         .equals(s.getActiveReviewGuidanceProfileId())
+                || !component
+                        .getRepositoryReviewInstructions()
+                        .equals(s.getRepositoryReviewInstructions())
                 || component.isReviewSelfCritique() != s.isReviewSelfCritique()
                 || component.isReviewSupervisorEnabled() != s.isReviewSupervisorEnabled()
                 || component.isExperimentalIntellijAssistedReview()
@@ -60,6 +63,16 @@ public class PluginSettingsConfigurable implements Configurable {
             githubBaseUrl = GithubBaseUrlValidator.normalize(component.getGithubBaseUrl());
         } catch (IllegalArgumentException e) {
             throw new ConfigurationException(e.getMessage(), "Invalid GitHub base URL");
+        }
+        String oversizedRepository = component.repositoryWithOversizedInstructions();
+        if (oversizedRepository != null) {
+            throw new ConfigurationException(
+                    "Instructions for "
+                            + oversizedRepository
+                            + " are limited to "
+                            + RepositoryReviewInstructions.MAX_INSTRUCTIONS_LENGTH
+                            + " characters.",
+                    "Remembered repository instructions");
         }
         boolean notificationScopeChanged =
                 !githubBaseUrl.equals(s.getGithubBaseUrl())
@@ -83,6 +96,7 @@ public class PluginSettingsConfigurable implements Configurable {
         s.setReviewGuidanceGlobs(component.getReviewGuidanceGlobs());
         s.setReviewGuidanceProfiles(component.getReviewGuidanceProfiles());
         s.setActiveReviewGuidanceProfileId(component.getActiveReviewGuidanceProfileId());
+        s.setRepositoryReviewInstructions(component.getRepositoryReviewInstructions());
         s.setReviewSelfCritique(component.isReviewSelfCritique());
         s.setReviewSupervisorEnabled(component.isReviewSupervisorEnabled());
         s.setExperimentalIntellijAssistedReview(component.isExperimentalIntellijAssistedReview());
@@ -116,6 +130,7 @@ public class PluginSettingsConfigurable implements Configurable {
         component.setReviewGuidanceGlobs(s.getReviewGuidanceGlobsRaw());
         component.setReviewGuidanceProfiles(s.getReviewGuidanceProfiles());
         component.setActiveReviewGuidanceProfileId(s.getActiveReviewGuidanceProfileId());
+        component.setRepositoryReviewInstructions(s.getRepositoryReviewInstructions());
         component.setReviewSelfCritique(s.isReviewSelfCritique());
         component.setReviewSupervisorEnabled(s.isReviewSupervisorEnabled());
         component.setExperimentalIntellijAssistedReview(s.isExperimentalIntellijAssistedReview());

@@ -45,6 +45,21 @@ export interface DraftLoadedMessage {
   providerReadiness?: ProviderReadiness
   /** Experimental host setting; absent or anything but `true` hides IntelliJ-assisted controls. */
   intellijAssistedEnabled?: boolean
+  /** Remembered review instructions for this PR's repository; applied by the host to every review. */
+  repositoryInstructions?: string
+}
+
+/** The host persisted the repository's remembered instructions (normalized; empty means forgotten). */
+export interface RepositoryInstructionsSavedMessage {
+  type: 'repositoryInstructionsSaved'
+  prKey?: string
+  instructions: string
+}
+
+export interface RepositoryInstructionsSaveErrorMessage {
+  type: 'repositoryInstructionsSaveError'
+  prKey?: string
+  message: string
 }
 
 export interface ReviewGeneratingMessage {
@@ -188,6 +203,8 @@ export type IncomingMessage = { readonly protocolVersion: typeof BRIDGE_PROTOCOL
   | PRLoadingMessage
   | DraftLoadingMessage
   | DraftLoadedMessage
+  | RepositoryInstructionsSavedMessage
+  | RepositoryInstructionsSaveErrorMessage
   | ReviewGeneratingMessage
   | ReviewChunkMessage
   | ReviewResultMessage
@@ -358,6 +375,15 @@ export interface CancelChatRequest {
   operationId: string
 }
 
+/** Persists (or, when blank, forgets) review instructions for the PR's repository. */
+export interface SaveRepositoryInstructionsRequest {
+  type: 'saveRepositoryInstructions'
+  number: number
+  owner: string
+  repo: string
+  instructions: string
+}
+
 export interface WebviewLayoutChangedRequest {
   type: 'webviewLayoutChanged'
   reason: string
@@ -370,6 +396,7 @@ export type OutgoingMessage =
   | SelectPRRequest
   | RefreshPRsRequest
   | GenerateReviewRequest
+  | SaveRepositoryInstructionsRequest
   | AskClaudeRequest
   | SaveDraftRequest
   | SubmitReviewRequest

@@ -16,6 +16,7 @@ final class BridgeMessageValidator {
                     "refreshPRs",
                     "selectPR",
                     "generateReview",
+                    "saveRepositoryInstructions",
                     "continueDeepReview",
                     "listDeepReviews",
                     "cleanupDeepReview",
@@ -74,6 +75,8 @@ final class BridgeMessageValidator {
                             && optionalBoolean(node.get("intellijAssisted"))
                             && optionalText(node.get("focusAreas"), 10_000)
                             && optionalText(node.get("customInstructions"), 20_000);
+            case "saveRepositoryInstructions" ->
+                    hasValidPrIdentity(node) && boundedText(node.get("instructions"), 10_000);
             case "continueDeepReview" ->
                     hasValidPrIdentity(node)
                             && validOperationId(node.get("operationId"))

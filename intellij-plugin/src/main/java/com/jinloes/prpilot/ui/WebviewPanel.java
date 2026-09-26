@@ -41,6 +41,7 @@ import com.jinloes.prpilot.services.PendingReviewIndexNotifications;
 import com.jinloes.prpilot.services.UserFacingErrors;
 import com.jinloes.prpilot.settings.PluginSettings;
 import com.jinloes.prpilot.settings.PluginSettingsConfigurable;
+import com.jinloes.prpilot.settings.RepositoryReviewInstructions;
 import com.jinloes.prpilot.sidecar.pr.PrDetail;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -141,7 +142,11 @@ public class WebviewPanel implements Disposable {
             boolean recoveryPending,
             String status,
             @JsonProperty("providerReadiness") ProviderReadinessDto providerReadiness,
-            @JsonProperty("intellijAssistedEnabled") boolean intellijAssistedEnabled) {}
+            @JsonProperty("intellijAssistedEnabled") boolean intellijAssistedEnabled,
+            @JsonProperty("repositoryInstructions") String repositoryInstructions) {}
+
+    record RepositoryInstructionsSavedMsg(
+            String type, @JsonProperty("prKey") String prKey, String instructions) {}
 
     private record ReviewGeneratingMsg(
             String type, @JsonProperty("prKey") String prKey, String message) {}
@@ -212,7 +217,8 @@ public class WebviewPanel implements Disposable {
             IntellijClaudeService.ReviewRuntimeSettings runtime,
             String focusAreas,
             String customInstructions,
-            List<String> guidanceGlobs) {}
+            List<String> guidanceGlobs,
+            String repositoryInstructions) {}
 
     record GeneratedReview(
             long generationId, ReviewResult result, ReviewOutcomeLog.Metadata metadata) {}
@@ -382,6 +388,8 @@ public class WebviewPanel implements Disposable {
     /** Experimental opt-in; while off, the webview hides the IntelliJ-assisted controls. */
     private final java.util.function.BooleanSupplier intellijAssistedEnabled;
 
+    private final java.util.function.BinaryOperator<String> repositoryInstructionsLookup;
+
     static final String INTELLIJ_ASSISTED_DISABLED_ERROR =
             "IntelliJ-assisted review is disabled; enable it in PR Pilot settings (experimental)";
 
@@ -450,6 +458,9 @@ public class WebviewPanel implements Disposable {
         this.testMessageSink = null;
         this.intellijAssistedEnabled =
                 () -> PluginSettings.getInstance().isExperimentalIntellijAssistedReview();
+        this.repositoryInstructionsLookup =
+                (owner, repo) ->
+                        PluginSettings.getInstance().getRepositoryReviewInstructions(owner, repo);
         this.deepIo =
                 new DeepReviewIo() {
                     public com.jinloes.prpilot.review.SemanticReviewService.Preparation prepare(
@@ -599,6 +610,7 @@ public class WebviewPanel implements Disposable {
         deepSettings = settings;
         testMessageSink = messages;
         this.intellijAssistedEnabled = intellijAssistedEnabled;
+        this.repositoryInstructionsLookup = (owner, repo) -> "";
     }
 
     private void startServerAndLoad() {
@@ -880,6 +892,14 @@ public class WebviewPanel implements Disposable {
                                         });
                 case "clearChat" -> clearChat(node.path("operationId").asText());
                 case "cancelChat" -> cancelChat(node.path("operationId").asText());
+                case "saveRepositoryInstructions" ->
+                        pushMessage(
+                                saveRepositoryInstructionsReply(
+                                        PluginSettings.getInstance(),
+                                        number,
+                                        owner,
+                                        repo,
+                                        node.path("instructions").asText("")));
                 case "askClaude" -> {
                     String question = node.path("question").asText();
                     String context = node.path("context").asText("");
@@ -946,7 +966,8 @@ public class WebviewPanel implements Disposable {
                             false,
                             "Pull request is no longer available. Refresh the pull request list and try again.",
                             currentProviderReadiness(),
-                            intellijAssistedEnabled.getAsBoolean()));
+                            intellijAssistedEnabled.getAsBoolean(),
+                            rememberedRepositoryInstructions(owner, repo)));
             return;
         }
 
@@ -1143,7 +1164,8 @@ public class WebviewPanel implements Disposable {
                                                 false,
                                                 "PR is merged.",
                                                 providerReadiness,
-                                                intellijAssistedEnabled.getAsBoolean()));
+                                                intellijAssistedEnabled.getAsBoolean(),
+                                                rememberedRepositoryInstructions(owner, repo)));
                                 return;
                             }
 
@@ -1189,7 +1211,8 @@ public class WebviewPanel implements Disposable {
                                                         ? "Recovered a local draft snapshot; save is pending."
                                                         : "Loaded pending draft review.",
                                                 providerReadiness,
-                                                intellijAssistedEnabled.getAsBoolean()));
+                                                intellijAssistedEnabled.getAsBoolean(),
+                                                rememberedRepositoryInstructions(owner, repo)));
                                 return;
                             }
 
@@ -1222,7 +1245,8 @@ public class WebviewPanel implements Disposable {
                                             false,
                                             "",
                                             providerReadiness,
-                                            intellijAssistedEnabled.getAsBoolean()));
+                                            intellijAssistedEnabled.getAsBoolean(),
+                                            rememberedRepositoryInstructions(owner, repo)));
                         });
     }
 
@@ -1564,7 +1588,8 @@ public class WebviewPanel implements Disposable {
                         IntellijClaudeService.snapshotReviewRuntimeSettings(),
                         settings.getResolvedReviewFocusAreas(),
                         settings.getResolvedReviewCustomInstructions(),
-                        List.copyOf(settings.getResolvedReviewGuidanceGlobs()));
+                        List.copyOf(settings.getResolvedReviewGuidanceGlobs()),
+                        settings.getRepositoryReviewInstructions(owner, repo));
         long generationId;
         IntellijClaudeService previousReviewService;
         ReviewProvider previousReviewProvider;
@@ -1800,9 +1825,12 @@ public class WebviewPanel implements Disposable {
                                             ? overrideFocusAreas
                                             : generationSettings.focusAreas();
                             final String finalCustomInstructions =
-                                    StringUtils.isNotBlank(overrideCustomInstructions)
-                                            ? overrideCustomInstructions
-                                            : generationSettings.customInstructions();
+                                    RepositoryReviewInstructions.compose(
+                                            owner + "/" + repo,
+                                            generationSettings.repositoryInstructions(),
+                                            StringUtils.isNotBlank(overrideCustomInstructions)
+                                                    ? overrideCustomInstructions
+                                                    : generationSettings.customInstructions());
                             final String finalCiStatus = ciStatus;
                             final List<CiAnnotation> finalCiAnnotations = ciAnnotations;
                             final String finalCommits = commitContext.summary();
@@ -2417,6 +2445,35 @@ public class WebviewPanel implements Disposable {
                 + repo.toLowerCase(java.util.Locale.ROOT)
                 + "#"
                 + number;
+    }
+
+    /** Remembered instructions for the PR's repository, or null so the bridge field is omitted. */
+    private String rememberedRepositoryInstructions(String owner, String repo) {
+        return StringUtils.defaultIfEmpty(repositoryInstructionsLookup.apply(owner, repo), null);
+    }
+
+    /**
+     * Remembers (or forgets, when blank) review instructions for the PR's repository and returns
+     * the bridge reply: the stored text on success, or an error the webview shows beside the field.
+     */
+    static Object saveRepositoryInstructionsReply(
+            PluginSettings settings, int number, String owner, String repo, String instructions) {
+        String key = bridgePrKey(number, owner, repo);
+        if (RepositoryReviewInstructions.repositoryKey(owner, repo) == null) {
+            return new ErrorMsg(
+                    "repositoryInstructionsSaveError",
+                    key,
+                    "This repository name cannot be remembered.");
+        }
+        String stored = settings.rememberRepositoryReviewInstructions(owner, repo, instructions);
+        if (stored == null) {
+            return new ErrorMsg(
+                    "repositoryInstructionsSaveError",
+                    key,
+                    "Repository instructions are limited to 10,000 characters and 200"
+                            + " repositories.");
+        }
+        return new RepositoryInstructionsSavedMsg("repositoryInstructionsSaved", key, stored);
     }
 
     static String bridgePrKey(int number, String owner, String repo) {

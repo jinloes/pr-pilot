@@ -17,6 +17,7 @@ import {
     normalizeReviewGuidanceState,
 } from './reviewGuidanceProfiles';
 import { EMPTY_NOTIFICATION_HEALTH, type NotificationHealth } from './notifications';
+import { normalizeRepositoryInstructions, parseRepositoryInstructionsUpdate } from './repositoryInstructions';
 
 let panel: vscode.WebviewPanel | undefined;
 
@@ -40,6 +41,7 @@ function readState(notificationHealth: NotificationHealth = EMPTY_NOTIFICATION_H
         reviewGuidanceGlobs: normalizeReviewGuidanceGlobs(c.get<unknown>('reviewGuidanceGlobs', [])) ?? [],
         reviewGuidanceProfiles: normalizeReviewGuidanceProfiles(c.get<unknown>('reviewGuidanceProfiles', [])) ?? [],
         activeReviewGuidanceProfileId: c.get<string>('activeReviewGuidanceProfileId', ''),
+        repositoryReviewInstructions: normalizeRepositoryInstructions(c.get<unknown>('repositoryReviewInstructions', {})),
         reviewSelfCritique: c.get<boolean>('reviewSelfCritique', true),
         reviewSupervisorEnabled: c.get<boolean>('reviewSupervisorEnabled', false),
         experimentalIntellijAssistedReview: c.get<boolean>('experimentalIntellijAssistedReview', false),
@@ -55,7 +57,7 @@ const ALLOWED_KEYS = new Set([
     'reviewProvider', 'reviewModel', 'reviewModelCopilot', 'reviewEffort', 'githubBaseUrl',
     'copilotInheritMcp', 'copilotAutoEnableMcpOnReview', 'copilotConfigDir', 'reviewFocusAreas',
     'reviewCustomInstructions', 'reviewGuidanceProfiles',
-    'activeReviewGuidanceProfileId', 'reviewSelfCritique', 'reviewSupervisorEnabled',
+    'activeReviewGuidanceProfileId', 'repositoryReviewInstructions', 'reviewSelfCritique', 'reviewSupervisorEnabled',
     'experimentalIntellijAssistedReview',
     'notificationsEnabled', 'notifyReviewRequested', 'notifyStarredRepos', 'notificationPollMinutes',
 ]);
@@ -145,6 +147,17 @@ async function persistSetting(webview: vscode.Webview, msg: SettingsMessage): Pr
                 return;
             }
             await config().update(key, profiles, vscode.ConfigurationTarget.Global);
+            postSaveResult(webview, msg, key, true, 'Saved.');
+            return;
+        }
+        if (key === 'repositoryReviewInstructions') {
+            const instructions = parseRepositoryInstructionsUpdate(msg.value);
+            if (instructions === null) {
+                postSaveResult(webview, msg, key, false,
+                    'Repository instructions are limited to 10,000 characters and 200 repositories.');
+                return;
+            }
+            await config().update(key, instructions, vscode.ConfigurationTarget.Global);
             postSaveResult(webview, msg, key, true, 'Saved.');
             return;
         }

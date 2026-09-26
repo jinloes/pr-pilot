@@ -182,6 +182,7 @@ IntelliJ host integration. Depends directly on `core`, `github-engine`, and `rev
 - `services/PRNotificationService.java` - PR polling, source labels, and merge behavior.
 - `services/PRNotificationStartup.java` - Notification lifecycle entry point.
 - `settings/PluginSettings.java` - Persisted settings model.
+- `settings/RepositoryReviewInstructions.java` - Remembered per-repository review instructions: key normalization, limits, and composition into `customInstructions` (mirrors `vscode-extension/src/repositoryInstructions.ts`).
 - `settings/PluginSettingsComponent.java` - Provider-aware settings UI.
 - `settings/PluginSettingsConfigurable.java` - Settings lifecycle integration.
 - `settings/GithubBaseUrlValidator.java` - HTTPS GitHub-origin normalization.
@@ -279,6 +280,7 @@ VS Code host integration. All GitHub and review generation routes through the Ja
 - `src/providerSetup.ts` - Conservative Claude authentication probe classification for onboarding.
 - `src/settings.ts` and `settingsView.ts` - Settings controller and pure webview rendering.
 - `src/reviewGuidanceProfiles.ts` - Guidance-profile validation and resolution.
+- `src/repositoryInstructions.ts` - Remembered per-repository review instructions (`pr-pilot.repositoryReviewInstructions`): key normalization, limits, settings-view update validation, and composition into `customInstructions`.
 - `src/operationCorrelation.ts` - Async selection/generation/chat invalidation.
 - `src/notifications.ts` - Notification labeling, deduplication, and merge rules.
 - `src/hostTheme.ts` - Theme classification.

@@ -6,6 +6,8 @@ const MAX_TEXT = 100_000
 const MAX_DIFF = 1_000_000
 const MAX_COMMENTS = 1_000
 const MAX_PRS = 100
+/** Mirrors the hosts' cap on remembered per-repository review instructions. */
+export const MAX_REPOSITORY_INSTRUCTIONS = 10_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -32,7 +34,7 @@ const PR_SCOPED_TYPES = new Set([
   'draftLoading', 'draftLoaded', 'reviewGenerating', 'reviewChunk', 'reviewResult',
   'reviewError', 'validationDiffUpdated', 'draftSaved', 'draftSaveError',
   'reviewSubmitted', 'reviewSubmitError', 'draftDeleted', 'draftDeleteError',
-  'deepReviewPrepared',
+  'deepReviewPrepared', 'repositoryInstructionsSaved', 'repositoryInstructionsSaveError',
 ])
 
 function isLineComment(value: unknown): value is LineComment {
@@ -131,11 +133,16 @@ export function parseIncomingMessage(value: unknown): IncomingMessage | null {
         && (value.recoveryPending === undefined || typeof value.recoveryPending === 'boolean')
         && isOptionalString(value.status)
         && (value.providerReadiness === undefined || isProviderReadiness(value.providerReadiness))
+        && isOptionalString(value.repositoryInstructions, MAX_REPOSITORY_INSTRUCTIONS)
+      break
+    case 'repositoryInstructionsSaved':
+      valid = isString(value.instructions, MAX_REPOSITORY_INSTRUCTIONS)
       break
     case 'reviewGenerating':
     case 'reviewError':
     case 'reviewSubmitError':
     case 'draftDeleteError':
+    case 'repositoryInstructionsSaveError':
     case 'chatError':
       valid = hasMessage(value)
       break

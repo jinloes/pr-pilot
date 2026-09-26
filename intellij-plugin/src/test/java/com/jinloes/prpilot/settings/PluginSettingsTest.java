@@ -6,6 +6,7 @@ import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.review.RepoGuidelinesReader;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -336,6 +337,53 @@ class PluginSettingsTest {
             assertThat(settings.getReviewGuidanceProfiles())
                     .singleElement()
                     .satisfies(profile -> assertThat(profile.name).isEqualTo("Valid"));
+        }
+    }
+
+    @Nested
+    class RememberedRepositoryInstructions {
+        @Test
+        void defaultsToNothingRemembered() {
+            PluginSettings s = new PluginSettings();
+            assertThat(s.getRepositoryReviewInstructions()).isEmpty();
+            assertThat(s.getRepositoryReviewInstructions("acme", "widget")).isEmpty();
+        }
+
+        @Test
+        void remembersUnderTheLowercaseKeyAndLooksUpCaseInsensitively() {
+            PluginSettings s = new PluginSettings();
+            assertThat(s.rememberRepositoryReviewInstructions("Acme", "Widget", "  Rule  "))
+                    .isEqualTo("Rule");
+            assertThat(s.getRepositoryReviewInstructions("acme", "widget")).isEqualTo("Rule");
+            assertThat(s.getRepositoryReviewInstructions("ACME", "WIDGET")).isEqualTo("Rule");
+            assertThat(s.getState().repositoryReviewInstructions)
+                    .containsExactly(Map.entry("acme/widget", "Rule"));
+        }
+
+        @Test
+        void forgetsOnBlankAndRejectsInvalidInput() {
+            PluginSettings s = new PluginSettings();
+            s.rememberRepositoryReviewInstructions("acme", "widget", "Rule");
+            assertThat(s.rememberRepositoryReviewInstructions("acme", "widget", " ")).isEmpty();
+            assertThat(s.getRepositoryReviewInstructions()).isEmpty();
+            assertThat(s.rememberRepositoryReviewInstructions("a b", "widget", "Rule")).isNull();
+            assertThat(s.rememberRepositoryReviewInstructions("acme", "widget", "x".repeat(10_001)))
+                    .isNull();
+            assertThat(s.getRepositoryReviewInstructions()).isEmpty();
+        }
+
+        @Test
+        void normalizesReplacedAndLoadedMaps() {
+            PluginSettings s = new PluginSettings();
+            s.setRepositoryReviewInstructions(
+                    Map.of("Acme/Widget", " Rule ", "bad key", "x", "acme/blank", " "));
+            assertThat(s.getRepositoryReviewInstructions())
+                    .containsExactly(Map.entry("acme/widget", "Rule"));
+
+            PluginSettings.State loaded = new PluginSettings.State();
+            loaded.repositoryReviewInstructions = null;
+            s.loadState(loaded);
+            assertThat(s.getRepositoryReviewInstructions()).isEmpty();
         }
     }
 }
