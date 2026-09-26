@@ -287,6 +287,13 @@ test('parsePrDiffResult accepts complete success and ambiguous 404 results', () 
   assert.equal(parsePrDiffResult({ status: 'unknown', message: 'x', diff: null, truncated: false, limitBytes: 250000 }), null);
 });
 
+test('parsePrDiffResult accepts a diff_too_large result and still rejects unknown statuses', () => {
+  assert.deepEqual(parsePrDiffResult({ status: 'diff_too_large', message: 'Too large.', diff: null, truncated: false, limitBytes: 250000 }),
+    { status: 'diff_too_large', message: 'Too large.', diff: null, truncated: false, limitBytes: 250000 });
+  assert.equal(parsePrDiffResult({ status: 'diff_too_large', message: 'Too large.', diff: 'diff', truncated: false, limitBytes: 250000 }), null);
+  assert.equal(parsePrDiffResult({ status: 'too_large', message: 'x', diff: null, truncated: false, limitBytes: 250000 }), null);
+});
+
 test('parseDraftReviewResult accepts a decoded pending review', () => {
   assert.deepEqual(
     parseDraftReviewResult({

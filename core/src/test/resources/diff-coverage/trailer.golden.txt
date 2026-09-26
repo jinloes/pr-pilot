@@ -1,0 +1,243 @@
+# Shared DiffCoverage trailer fixture.
+#
+# Pins the grammar of core/src/main/java/com/jinloes/prpilot/model/DiffCoverage.java#split and its
+# mirror webview/src/lib/diffCoverage.ts#parseDiffCoverage. Both test suites read this file and
+# must reach the same verdict for every case. Change both parsers together.
+#
+# Format: one block per case.
+#   case <name>
+#   input <escaped>        the full diff text given to the parser
+#   body <escaped>         the expected trailer-free body
+#   coverage none          the trailer was rejected (body must equal input), or
+#   coverage <omitted> <listed> <budget> <complete|incomplete>
+#   path <escaped>         one per listed path, in order
+#   end
+# A keyword alone denotes an empty value. Escapes: \\ \n \r \t \uXXXX. Lines starting with # are
+# comments.
+
+case complete-diff-has-no-trailer
+input diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-x\n+y\n
+body diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-x\n+y\n
+coverage none
+end
+
+case empty-input
+input
+body
+coverage none
+end
+
+case one-omitted-listed
+input diff --git a/a.txt b/a.txt\n+y\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] big.bin\n
+body diff --git a/a.txt b/a.txt\n+y\n
+coverage 1 1 250000 complete
+path big.bin
+end
+
+case some-omitted-unlisted
+input diff --git a/a.txt b/a.txt\n+y\n[pr-pilot:diff-coverage] omitted=5 listed=2 budget=1000000 scan=complete\n[pr-pilot:omitted] src/one.java\n[pr-pilot:omitted] src/two.java\n
+body diff --git a/a.txt b/a.txt\n+y\n
+coverage 5 2 1000000 complete
+path src/one.java
+path src/two.java
+end
+
+case incomplete-scan-with-nothing-omitted
+input diff --git a/a.txt b/a.txt\n+y\n[pr-pilot:diff-coverage] omitted=0 listed=0 budget=250000 scan=incomplete\n
+body diff --git a/a.txt b/a.txt\n+y\n
+coverage 0 0 250000 incomplete
+end
+
+case incomplete-scan-with-omissions
+input diff --git a/a.txt b/a.txt\n+y\n[pr-pilot:diff-coverage] omitted=3 listed=1 budget=250000 scan=incomplete\n[pr-pilot:omitted] huge.txt\n
+body diff --git a/a.txt b/a.txt\n+y\n
+coverage 3 1 250000 incomplete
+path huge.txt
+end
+
+case trailer-only-empty-body
+input [pr-pilot:diff-coverage] omitted=2 listed=2 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt\n[pr-pilot:omitted] b.txt\n
+body
+coverage 2 2 250000 complete
+path a.txt
+path b.txt
+end
+
+case quoted-and-non-ascii-paths-kept-verbatim
+input diff --git a/a b/a\n+y\n[pr-pilot:diff-coverage] omitted=2 listed=2 budget=250000 scan=complete\n[pr-pilot:omitted] "src/caf\\303\\251.txt"\n[pr-pilot:omitted] docs/na\u00efve file \u6587.md\n
+body diff --git a/a b/a\n+y\n
+coverage 2 2 250000 complete
+path "src/caf\\303\\251.txt"
+path docs/na\u00efve file \u6587.md
+end
+
+case crlf-body-is-preserved
+input diff --git a/w.txt b/w.txt\r\n+y\r\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\n
+body diff --git a/w.txt b/w.txt\r\n+y\r\n
+coverage 1 0 250000 complete
+end
+
+case last-line-anchored-header-wins
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\n+more diff\n[pr-pilot:diff-coverage] omitted=4 listed=0 budget=1000000 scan=complete\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\n+more diff\n
+coverage 4 0 1000000 complete
+end
+
+case header-token-inside-a-path-line-is-not-a-header
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] [pr-pilot:diff-coverage] omitted=9 listed=0 budget=1 scan=complete\n
+body +x\n
+coverage 1 1 250000 complete
+path [pr-pilot:diff-coverage] omitted=9 listed=0 budget=1 scan=complete
+end
+
+# Rejections: each leaves the input unchanged with complete coverage.
+
+case mid-body-header-is-not-a-trailer
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\ndiff --git a/b b/b\n+z\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\ndiff --git a/b b/b\n+z\n
+coverage none
+end
+
+case malformed-last-header-hides-nothing
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\n[pr-pilot:diff-coverage] omitted=one\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\n[pr-pilot:diff-coverage] omitted=one\n
+coverage none
+end
+
+case header-not-at-line-start
+input +x [pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\n
+body +x [pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\n
+coverage none
+end
+
+case missing-final-newline
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete
+coverage none
+end
+
+case missing-final-newline-after-path
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt
+coverage none
+end
+
+case listed-exceeds-omitted
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=2 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt\n[pr-pilot:omitted] b.txt\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=2 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt\n[pr-pilot:omitted] b.txt\n
+coverage none
+end
+
+case fewer-path-lines-than-listed
+input +x\n[pr-pilot:diff-coverage] omitted=3 listed=2 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt\n
+body +x\n[pr-pilot:diff-coverage] omitted=3 listed=2 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt\n
+coverage none
+end
+
+case more-path-lines-than-listed
+input +x\n[pr-pilot:diff-coverage] omitted=3 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt\n[pr-pilot:omitted] b.txt\n
+body +x\n[pr-pilot:diff-coverage] omitted=3 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt\n[pr-pilot:omitted] b.txt\n
+coverage none
+end
+
+case text-after-path-lines
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt\n+tail\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt\n+tail\n
+coverage none
+end
+
+case blank-line-after-header
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\n\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\n\n
+coverage none
+end
+
+case complete-scan-with-nothing-omitted
+input +x\n[pr-pilot:diff-coverage] omitted=0 listed=0 budget=250000 scan=complete\n
+body +x\n[pr-pilot:diff-coverage] omitted=0 listed=0 budget=250000 scan=complete\n
+coverage none
+end
+
+case leading-zero-count
+input +x\n[pr-pilot:diff-coverage] omitted=01 listed=0 budget=250000 scan=complete\n
+body +x\n[pr-pilot:diff-coverage] omitted=01 listed=0 budget=250000 scan=complete\n
+coverage none
+end
+
+case count-with-ten-digits
+input +x\n[pr-pilot:diff-coverage] omitted=1000000000 listed=0 budget=250000 scan=complete\n
+body +x\n[pr-pilot:diff-coverage] omitted=1000000000 listed=0 budget=250000 scan=complete\n
+coverage none
+end
+
+case negative-count
+input +x\n[pr-pilot:diff-coverage] omitted=-1 listed=0 budget=250000 scan=complete\n
+body +x\n[pr-pilot:diff-coverage] omitted=-1 listed=0 budget=250000 scan=complete\n
+coverage none
+end
+
+case unknown-scan-value
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=partial\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=partial\n
+coverage none
+end
+
+case extra-header-field
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete extra=1\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete extra=1\n
+coverage none
+end
+
+case reordered-header-fields
+input +x\n[pr-pilot:diff-coverage] listed=0 omitted=1 budget=250000 scan=complete\n
+body +x\n[pr-pilot:diff-coverage] listed=0 omitted=1 budget=250000 scan=complete\n
+coverage none
+end
+
+case crlf-header-line
+input +x\r\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\r\n
+body +x\r\n[pr-pilot:diff-coverage] omitted=1 listed=0 budget=250000 scan=complete\r\n
+coverage none
+end
+
+case wrong-path-line-prefix
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:skipped] a.txt\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:skipped] a.txt\n
+coverage none
+end
+
+case empty-path
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] \n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] \n
+coverage none
+end
+
+case tab-in-path
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a\tb.txt\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a\tb.txt\n
+coverage none
+end
+
+case carriage-return-in-path
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt\r\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a.txt\r\n
+coverage none
+end
+
+case delete-character-in-path
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a\u007fb.txt\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a\u007fb.txt\n
+coverage none
+end
+
+case c1-control-in-path
+input +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a\u0085b.txt\n
+body +x\n[pr-pilot:diff-coverage] omitted=1 listed=1 budget=250000 scan=complete\n[pr-pilot:omitted] a\u0085b.txt\n
+coverage none
+end
+
+case legacy-byte-cut-marker
+input diff --git a/a b/a\n+y\n\n[... diff truncated at 250 KB ...]
+body diff --git a/a b/a\n+y\n\n[... diff truncated at 250 KB ...]
+coverage none
+end

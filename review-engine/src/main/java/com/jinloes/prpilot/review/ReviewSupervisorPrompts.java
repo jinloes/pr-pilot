@@ -169,6 +169,7 @@ final class ReviewSupervisorPrompts {
                 .repoProfile(source.getRepoProfile())
                 .ciAnnotations(source.getCiAnnotations())
                 .semanticContext(source.getSemanticContext())
+                .diffCoverage(source.diffCoverage())
                 .build();
     }
 

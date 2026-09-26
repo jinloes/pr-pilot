@@ -11,11 +11,16 @@ package com.jinloes.prpilot.model;
  *
  * <p>Built through {@link #builder}: the fields are almost all strings, so positional construction
  * would silently accept a wrong argument order.
+ *
+ * <p>A bounded PR diff ends with a {@link DiffCoverage} trailer naming the files it omits. The
+ * builder strips that trailer, so {@link #getDiff()} is always the reviewable body and {@link
+ * #diffCoverage()} says what that body leaves out.
  */
 public final class PRReviewRequest {
 
     private final PullRequest pr;
     private final String diff;
+    private final DiffCoverage diffCoverage;
     private final String priorReview;
     private final String existingReviews;
     private final String repoGuidelines;
@@ -31,6 +36,7 @@ public final class PRReviewRequest {
     private PRReviewRequest(Builder builder) {
         this.pr = builder.pr;
         this.diff = builder.diff;
+        this.diffCoverage = builder.diffCoverage;
         this.priorReview = builder.priorReview;
         this.existingReviews = builder.existingReviews;
         this.repoGuidelines = builder.repoGuidelines;
@@ -60,8 +66,17 @@ public final class PRReviewRequest {
         return pr;
     }
 
+    /** The reviewable diff body, without any coverage trailer. */
     public String getDiff() {
         return diff;
+    }
+
+    /**
+     * The changed files {@link #getDiff()} omits. Never null; {@link DiffCoverage#NONE} when the
+     * diff is complete or carried no well-formed trailer.
+     */
+    public DiffCoverage diffCoverage() {
+        return diffCoverage;
     }
 
     public String getPriorReview() {
@@ -118,7 +133,8 @@ public final class PRReviewRequest {
     }
 
     public PRReviewRequest withSemanticContext(SemanticReviewContext value) {
-        return builder(pr, diff)
+        // Copies the already-split body and coverage verbatim; re-splitting could strip text.
+        return new Builder(pr, diff, diffCoverage)
                 .priorReview(priorReview)
                 .existingReviews(existingReviews)
                 .repoGuidelines(repoGuidelines)
@@ -150,6 +166,7 @@ public final class PRReviewRequest {
     public static final class Builder {
         private final PullRequest pr;
         private final String diff;
+        private DiffCoverage diffCoverage;
         private String priorReview;
         private String existingReviews;
         private String repoGuidelines;
@@ -163,8 +180,25 @@ public final class PRReviewRequest {
         private SemanticReviewContext semanticContext;
 
         private Builder(PullRequest pr, String diff) {
+            DiffCoverage.Split split = DiffCoverage.split(diff);
             this.pr = pr;
-            this.diff = diff;
+            this.diff = split.body();
+            this.diffCoverage = split.coverage();
+        }
+
+        private Builder(PullRequest pr, String body, DiffCoverage coverage) {
+            this.pr = pr;
+            this.diff = body;
+            this.diffCoverage = coverage;
+        }
+
+        /**
+         * Overrides the coverage parsed from the diff, e.g. to carry the full diff's omitted files
+         * onto a request built from one batch of it. Null means complete coverage.
+         */
+        public Builder diffCoverage(DiffCoverage value) {
+            this.diffCoverage = value == null ? DiffCoverage.NONE : value;
+            return this;
         }
 
         public Builder priorReview(String value) {

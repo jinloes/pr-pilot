@@ -15,6 +15,7 @@ type ErrorContext =
 type TemplateKey =
     | 'github_auth_failed'
     | 'github_not_found_or_inaccessible'
+    | 'github_diff_too_large'
     | 'provider_binary_missing'
     | 'provider_not_installed'
     | 'request_timed_out'
@@ -94,6 +95,9 @@ export function toUserFacingError(err: unknown, context: ErrorContext): string {
 
     if (err instanceof GitHubOperationError && err.status === 'not_found_or_inaccessible') {
         return template('github_not_found_or_inaccessible', {});
+    }
+    if (err instanceof GitHubOperationError && err.status === 'diff_too_large') {
+        return template('github_diff_too_large', {});
     }
     if (includesAny(msg, ['no github token configured', 'gh auth', 'authentication', 'unauthorized', 'forbidden'])) {
         return template('github_auth_failed', { auth_command: 'gh auth login' });

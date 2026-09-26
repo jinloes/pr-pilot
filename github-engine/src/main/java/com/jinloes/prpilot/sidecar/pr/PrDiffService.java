@@ -1,19 +1,33 @@
 package com.jinloes.prpilot.sidecar.pr;
 
+import com.jinloes.prpilot.model.DiffCoverage;
 import com.jinloes.prpilot.sidecar.github.GitHubApiBase;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
 import com.jinloes.prpilot.sidecar.github.GitHubHttpClient;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Objects;
+import java.util.PriorityQueue;
 import java.util.regex.Pattern;
 
-/** Retrieves a byte-bounded review diff without exposing GitHub credentials outside the sidecar. */
+/**
+ * Retrieves a review diff bounded to whole files, naming anything omitted, without exposing GitHub
+ * credentials outside the sidecar.
+ */
 public final class PrDiffService {
     static final int REVIEW_LIMIT_BYTES = 250_000;
     static final int VALIDATION_LIMIT_BYTES = 1_000_000;
-    private static final String TRUNCATION_MARKER = "\n\n[... diff truncated at 250 KB ...]";
+    static final int PER_FILE_CAP_BYTES = 250_000;
+    static final long SCAN_CEILING_BYTES = 64L * 1024 * 1024;
+    static final int TRAILER_RESERVE_BYTES = 16_384;
+    private static final String SECTION_START = "diff --git ";
+    private static final int PATH_SCAN_BYTES = 64 * 1024;
     private static final int MAX_ATTEMPTS = 3;
     private static final Pattern SEGMENT = Pattern.compile("[A-Za-z0-9_.-]+");
     private final GitHubAuthService.TokenResolver tokenResolver;
@@ -90,6 +104,11 @@ public final class PrDiffService {
                             "Pull request not found or inaccessible to the active gh account.");
             case API, TRANSIENT_API ->
                     PrDiffResult.failure("api_failed", "GitHub API request failed.");
+            case TOO_LARGE ->
+                    PrDiffResult.failure(
+                            PrDiffResult.STATUS_DIFF_TOO_LARGE,
+                            "GitHub declined to return this pull request's diff (HTTP 406); it"
+                                    + " likely exceeds GitHub's diff size limits.");
         };
     }
 
@@ -122,6 +141,7 @@ public final class PrDiffService {
         NETWORK,
         TRANSIENT_API,
         NOT_FOUND,
+        TOO_LARGE,
         API
     }
 
@@ -141,7 +161,7 @@ public final class PrDiffService {
                             if (statusCode < 200 || statusCode >= 300) {
                                 return Response.of(classifyFailure(statusCode));
                             }
-                            return read(body, limitBytes);
+                            return bound(body, limitBytes, PER_FILE_CAP_BYTES, SCAN_CEILING_BYTES);
                         });
             } catch (IOException e) {
                 return Response.of(Status.NETWORK);
@@ -150,18 +170,219 @@ public final class PrDiffService {
                 return Response.of(Status.NETWORK);
             }
         }
+    }
 
-        private Response read(InputStream input, int limitBytes) throws IOException {
-            byte[] bytes = input.readNBytes(limitBytes + 1);
-            boolean truncated = bytes.length > limitBytes;
-            String diff =
-                    new String(
-                            bytes, 0, Math.min(bytes.length, limitBytes), StandardCharsets.UTF_8);
-            boolean reviewMode = limitBytes == REVIEW_LIMIT_BYTES;
+    /**
+     * Streams a unified diff and keeps whole file sections only, so a bounded diff never splits a
+     * UTF-8 sequence or a hunk. Sections over {@code perFileCap} are dropped as they stream; while
+     * the kept total exceeds {@code limitBytes} the largest kept section is evicted (ties: the
+     * later one), which keeps the maximal smallest-first set and makes a smaller limit's selection
+     * a subset of a larger one's. Anything omitted is named in a {@link DiffCoverage} trailer that
+     * fits a reserve inside the limit. A complete diff comes back byte-identical, with no trailer.
+     */
+    static Response bound(InputStream input, int limitBytes, int perFileCap, long scanCeiling)
+            throws IOException {
+        DiffSections sections = new DiffSections(perFileCap, limitBytes);
+        byte[] buffer = new byte[8192];
+        long remaining = scanCeiling;
+        boolean scanComplete = true;
+        while (true) {
+            if (remaining <= 0) {
+                scanComplete = input.read() < 0;
+                break;
+            }
+            int read = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+            if (read < 0) break;
+            remaining -= read;
+            for (int index = 0; index < read; index++) sections.accept(buffer[index]);
+        }
+        return sections.finish(limitBytes, scanComplete);
+    }
+
+    /**
+     * The changed path a file section names: {@code +++ b/}, else {@code --- a/}, else the last
+     * {@code b/} in its {@code diff --git} header. C-quoted paths stay quoted and escaped. Only the
+     * header area before the first hunk is read, so an added line cannot impersonate a header.
+     */
+    static String pathOf(byte[] section, int length) {
+        String head =
+                new String(section, 0, Math.min(length, PATH_SCAN_BYTES), StandardCharsets.UTF_8);
+        String[] lines = head.split("\n", -1);
+        int headerLine = -1;
+        for (int index = 0; index < lines.length; index++) {
+            if (lines[index].startsWith(SECTION_START)) {
+                headerLine = index;
+                break;
+            }
+        }
+        if (headerLine < 0) return "";
+        String minus = null;
+        String plus = null;
+        for (int index = headerLine + 1; index < lines.length; index++) {
+            if (lines[index].startsWith("@@")) break;
+            String line = trimLineEnd(lines[index]);
+            if (plus == null) plus = headerPath(line, "+++ ", 'b');
+            if (minus == null) minus = headerPath(line, "--- ", 'a');
+        }
+        if (plus != null) return plus;
+        if (minus != null) return minus;
+        String header = trimLineEnd(lines[headerLine]);
+        int plain = header.lastIndexOf(" b/");
+        int quoted = header.lastIndexOf(" \"b/");
+        if (quoted > plain) return "\"" + header.substring(quoted + 4);
+        return plain >= 0 ? header.substring(plain + 3) : "";
+    }
+
+    private static String headerPath(String line, String marker, char side) {
+        String plain = marker + side + "/";
+        String quoted = marker + "\"" + side + "/";
+        String path = null;
+        if (line.startsWith(plain)) path = line.substring(plain.length());
+        else if (line.startsWith(quoted)) path = "\"" + line.substring(quoted.length());
+        return path == null || path.isEmpty() ? null : path;
+    }
+
+    private static String trimLineEnd(String line) {
+        int end = line.length();
+        while (end > 0 && (line.charAt(end - 1) == '\r' || line.charAt(end - 1) == '\t')) end--;
+        return line.substring(0, end);
+    }
+
+    /** Incremental splitter and smallest-first selector for {@link #bound}. */
+    private static final class DiffSections {
+        private static final byte[] START = SECTION_START.getBytes(StandardCharsets.US_ASCII);
+
+        private final int perFileCap;
+        private final int limitBytes;
+        private final PriorityQueue<Section> kept =
+                new PriorityQueue<>(
+                        Comparator.comparingInt((Section section) -> section.bytes().length)
+                                .thenComparingInt(Section::index)
+                                .reversed());
+        private final List<Omission> omitted = new ArrayList<>();
+        private long keptBytes;
+        private int index;
+        private byte[] current = new byte[1024];
+        private int currentLength;
+        private long currentSize;
+        private boolean dropping;
+        private boolean hasHeader;
+        // Bytes of START matched from the current line start; -1 once the line cannot match.
+        private int matched;
+
+        DiffSections(int perFileCap, int limitBytes) {
+            this.perFileCap = perFileCap;
+            this.limitBytes = limitBytes;
+        }
+
+        void accept(byte value) {
+            if (matched >= 0) {
+                if (value == START[matched]) {
+                    if (++matched == START.length) {
+                        matched = -1;
+                        // A header only ends the current section once it has a header of its
+                        // own, so any preamble joins the first section.
+                        if (hasHeader) finishSection();
+                        appendStart(START.length);
+                        hasHeader = true;
+                    }
+                    return;
+                }
+                appendStart(matched);
+                matched = -1;
+            }
+            append(value);
+            if (value == '\n') matched = 0;
+        }
+
+        Response finish(int limit, boolean scanComplete) {
+            if (matched > 0) appendStart(matched);
+            if (currentSize > 0) {
+                if (scanComplete) finishSection();
+                else if (!dropping) omit(index, pathOf(current, currentLength));
+            }
+            List<Section> body = new ArrayList<>(kept);
+            body.sort(Comparator.comparingInt(Section::index));
+            if (omitted.isEmpty() && scanComplete) {
+                return Response.ok(new String(concat(body, false), StandardCharsets.UTF_8), false);
+            }
+            evictTo(Math.max(0, limit - TRAILER_RESERVE_BYTES));
+            body = new ArrayList<>(kept);
+            body.sort(Comparator.comparingInt(Section::index));
+            byte[] bytes = concat(body, true);
+            omitted.sort(Comparator.comparingInt(Omission::index));
+            DiffCoverage coverage =
+                    DiffCoverage.fitted(
+                            omitted.size(),
+                            omitted.stream().map(Omission::path).toList(),
+                            limit,
+                            scanComplete,
+                            Math.min(TRAILER_RESERVE_BYTES, limit - bytes.length));
             return Response.ok(
-                    truncated && reviewMode ? diff + TRUNCATION_MARKER : diff, truncated);
+                    new String(bytes, StandardCharsets.UTF_8) + coverage.trailer(),
+                    !coverage.complete());
+        }
+
+        private void appendStart(int count) {
+            for (int offset = 0; offset < count; offset++) append(START[offset]);
+        }
+
+        private void append(byte value) {
+            currentSize++;
+            if (dropping) return;
+            if (currentLength == current.length) {
+                current = Arrays.copyOf(current, current.length * 2);
+            }
+            current[currentLength++] = value;
+            if (currentLength > perFileCap) {
+                omit(index, pathOf(current, currentLength));
+                dropping = true;
+                current = new byte[0];
+                currentLength = 0;
+            }
+        }
+
+        private void finishSection() {
+            if (!dropping && currentSize > 0) {
+                kept.add(new Section(index, Arrays.copyOf(current, currentLength)));
+                keptBytes += currentLength;
+                evictTo(limitBytes);
+            }
+            index++;
+            current = new byte[1024];
+            currentLength = 0;
+            currentSize = 0;
+            dropping = false;
+            hasHeader = false;
+        }
+
+        private void evictTo(long maxBytes) {
+            while (keptBytes > maxBytes) {
+                Section largest = kept.remove();
+                keptBytes -= largest.bytes().length;
+                omit(largest.index(), pathOf(largest.bytes(), largest.bytes().length));
+            }
+        }
+
+        private void omit(int sectionIndex, String path) {
+            omitted.add(new Omission(sectionIndex, path));
+        }
+
+        private static byte[] concat(List<Section> sections, boolean endWithNewline) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            for (Section section : sections) out.writeBytes(section.bytes());
+            byte[] bytes = out.toByteArray();
+            if (endWithNewline && bytes.length > 0 && bytes[bytes.length - 1] != '\n') {
+                bytes = Arrays.copyOf(bytes, bytes.length + 1);
+                bytes[bytes.length - 1] = '\n';
+            }
+            return bytes;
         }
     }
+
+    private record Section(int index, byte[] bytes) {}
+
+    private record Omission(int index, String path) {}
 
     private static final class ThreadBackoff implements Backoff {
         @Override
@@ -178,6 +399,7 @@ public final class PrDiffService {
         if (statusCode == 401 || statusCode == 403) return Status.UNAUTHENTICATED;
         if (statusCode == 429) return Status.RATE_LIMITED;
         if (statusCode == 404) return Status.NOT_FOUND;
+        if (statusCode == 406) return Status.TOO_LARGE;
         return statusCode >= 500 ? Status.TRANSIENT_API : Status.API;
     }
 

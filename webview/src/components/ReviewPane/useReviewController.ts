@@ -11,6 +11,7 @@ import {
   type RetainedDeepReview,
 } from '../../bridge/types'
 import { autosaveDelayMs, isReviewDirty, reviewSnapshot } from '@/lib/autosave'
+import { coverageGain, parseDiffCoverage, type DiffCoverage } from '@/lib/diffCoverage'
 import { parseDiffSafely } from '@/lib/diffParse'
 import {
   applyReviewQualityRepairs,
@@ -30,7 +31,6 @@ import { adjacentCommentIndex, focusedIndexAfterCommentDeletion } from './commen
 import {
   diffOf,
   initialPaneState,
-  isDiffTruncated,
   normalizeReviewResult,
   resultOf,
   reviewReducer,
@@ -220,11 +220,7 @@ function summarizeDiffPreflight(diff: string): DiffPreflight | null {
   return { fileCount: files.size, changedLines }
 }
 
-function chunkRecommendation(preflight: DiffPreflight | null, truncated: boolean): ChunkRecommendation {
-  if (truncated) return { recommendChunked: true, reason: 'Diff context is truncated.' }
-  if (!preflight) {
-    return { recommendChunked: false, reason: 'Recommendation appears once the diff is loaded.' }
-  }
+function sizeRecommendation(preflight: DiffPreflight): ChunkRecommendation {
   if (preflight.fileCount >= 8) {
     return { recommendChunked: true, reason: 'Many changed files.' }
   }
@@ -234,15 +230,42 @@ function chunkRecommendation(preflight: DiffPreflight | null, truncated: boolean
   return { recommendChunked: false, reason: 'Single-pass review is likely sufficient.' }
 }
 
+/**
+ * Chunked review reads the validation diff, so it only adds coverage when that diff omits fewer
+ * changed files than the single-pass review diff. Never claim a gain that the trailers do not show.
+ */
+function chunkRecommendation(
+  preflight: DiffPreflight | null,
+  reviewCoverage: DiffCoverage | null,
+  chunkCoverage: DiffCoverage | null,
+): ChunkRecommendation {
+  if (!preflight) {
+    return { recommendChunked: false, reason: 'Recommendation appears once the diff is loaded.' }
+  }
+  const gain = coverageGain(reviewCoverage, chunkCoverage)
+  if (gain > 0) {
+    return {
+      recommendChunked: true,
+      reason: `Chunked review includes ${gain} changed file${gain === 1 ? '' : 's'} that single-pass review omits.`,
+    }
+  }
+  const bySize = sizeRecommendation(preflight)
+  if (!reviewCoverage) return bySize
+  return bySize.recommendChunked
+    ? { recommendChunked: true, reason: `${bySize.reason} Chunked review would not add coverage.` }
+    : { recommendChunked: false, reason: 'Chunked review would not add coverage.' }
+}
+
 function chatContextSummary(
   pr: PR | null,
   diff: string,
+  reviewCoverage: DiffCoverage | null,
   result: ReviewResult | null,
   selectedContext: string,
 ): string[] {
   if (!pr) return []
   const items = ['PR title/body']
-  if (diff) items.push(isDiffTruncated(diff) ? 'diff excerpt' : 'diff')
+  if (diff) items.push(reviewCoverage ? 'diff excerpt' : 'diff')
   if (result) items.push('generated review')
   if (selectedContext) items.push('selected text')
   return items
@@ -647,9 +670,11 @@ export function useReviewController({
     ? qualityReport.issues.reduce((count, issue) => count + issue.count, 0)
     : 0
   const preflight = useMemo(() => summarizeDiffPreflight(validationDiff), [validationDiff])
+  const reviewCoverage = useMemo(() => parseDiffCoverage(diff), [diff])
+  const chunkCoverage = useMemo(() => parseDiffCoverage(validationDiff), [validationDiff])
   const recommendation = useMemo(
-    () => chunkRecommendation(preflight, isDiffTruncated(validationDiff) || isDiffTruncated(diff)),
-    [preflight, validationDiff, diff],
+    () => chunkRecommendation(preflight, reviewCoverage, chunkCoverage),
+    [preflight, reviewCoverage, chunkCoverage],
   )
   const savableResult = state.kind === 'reviewUnsaved' || state.kind === 'draftPresent'
     ? state.result
@@ -1064,7 +1089,7 @@ export function useReviewController({
   const showReviewOverrides = state.kind !== 'draftLoading'
     && state.kind !== 'generating'
     && state.kind !== 'merged'
-  const contextSummary = chatContextSummary(pr, diff, result, selectedContext)
+  const contextSummary = chatContextSummary(pr, diff, reviewCoverage, result, selectedContext)
   const statusMessage = state.kind === 'draftLoading'
     ? 'Checking for a saved review draft'
     : state.kind === 'generating'

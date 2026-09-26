@@ -31,6 +31,88 @@ class PRReviewRequestTest {
     }
 
     @Nested
+    class DiffCoverageSplit {
+        private static final String BODY = "diff --git a/a.txt b/a.txt\n+y\n";
+        private static final String TRAILER =
+                "[pr-pilot:diff-coverage] omitted=2 listed=1 budget=250000 scan=complete\n"
+                        + "[pr-pilot:omitted] big.bin\n";
+
+        @Test
+        void builderExposesTheTrailerFreeBodyAndTheParsedCoverage() {
+            PRReviewRequest request = PRReviewRequest.builder(pr(), BODY + TRAILER).build();
+
+            assertThat(request.getDiff()).isEqualTo(BODY);
+            assertThat(request.diffCoverage())
+                    .isEqualTo(new DiffCoverage(2, List.of("big.bin"), 250_000, true));
+        }
+
+        @Test
+        void aDiffWithoutATrailerHasCompleteCoverage() {
+            PRReviewRequest request = new PRReviewRequest(pr(), BODY);
+
+            assertThat(request.getDiff()).isEqualTo(BODY);
+            assertThat(request.diffCoverage()).isSameAs(DiffCoverage.NONE);
+        }
+
+        @Test
+        void nullDiffHasCompleteCoverage() {
+            PRReviewRequest request = PRReviewRequest.builder(pr(), null).build();
+
+            assertThat(request.getDiff()).isNull();
+            assertThat(request.diffCoverage()).isSameAs(DiffCoverage.NONE);
+        }
+
+        /** Negative control: a non-terminal trailer is diff text and must stay visible. */
+        @Test
+        void aMalformedOrNonTerminalTrailerStaysInTheDiff() {
+            String nonTerminal = BODY + TRAILER + "diff --git a/b b/b\n+z\n";
+            String malformed = BODY + TRAILER.replace("listed=1", "listed=3");
+
+            assertThat(PRReviewRequest.builder(pr(), nonTerminal).build())
+                    .satisfies(
+                            request -> {
+                                assertThat(request.getDiff()).isEqualTo(nonTerminal);
+                                assertThat(request.diffCoverage()).isSameAs(DiffCoverage.NONE);
+                            });
+            assertThat(PRReviewRequest.builder(pr(), malformed).build())
+                    .satisfies(
+                            request -> {
+                                assertThat(request.getDiff()).isEqualTo(malformed);
+                                assertThat(request.diffCoverage()).isSameAs(DiffCoverage.NONE);
+                            });
+        }
+
+        @Test
+        void explicitCoverageOverridesTheParsedCoverageAndNullMeansComplete() {
+            DiffCoverage validation = new DiffCoverage(1, List.of("huge.txt"), 1_000_000, true);
+
+            PRReviewRequest overridden =
+                    PRReviewRequest.builder(pr(), BODY + TRAILER).diffCoverage(validation).build();
+            PRReviewRequest cleared =
+                    PRReviewRequest.builder(pr(), BODY + TRAILER).diffCoverage(null).build();
+
+            assertThat(overridden.getDiff()).isEqualTo(BODY);
+            assertThat(overridden.diffCoverage()).isEqualTo(validation);
+            assertThat(cleared.getDiff()).isEqualTo(BODY);
+            assertThat(cleared.diffCoverage()).isSameAs(DiffCoverage.NONE);
+        }
+
+        @Test
+        void withSemanticContextPreservesBodyAndCoverageWithoutResplitting() {
+            // The body itself ends in a lookalike trailer; only the last one was the real trailer.
+            String stacked = BODY + TRAILER + TRAILER.replace("omitted=2", "omitted=5");
+            PRReviewRequest request = PRReviewRequest.builder(pr(), stacked).build();
+
+            PRReviewRequest deep = request.withSemanticContext(new SemanticReviewContext());
+
+            assertThat(request.getDiff()).isEqualTo(BODY + TRAILER);
+            assertThat(deep.getDiff()).isEqualTo(BODY + TRAILER);
+            assertThat(deep.diffCoverage()).isEqualTo(request.diffCoverage());
+            assertThat(deep.diffCoverage().omitted()).isEqualTo(5);
+        }
+    }
+
+    @Nested
     class Builder {
 
         /**

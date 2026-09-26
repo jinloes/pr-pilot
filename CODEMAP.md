@@ -57,7 +57,11 @@ Plain Java 17 shared models with no host dependencies.
 - `model/ReviewResult.java` - Review summary, verdict, and line comments.
 - `model/LineComment.java` - Inline comment anchor and quality metadata.
 - `model/ChatMessage.java` - Immutable chat role and content.
-- `model/PRReviewRequest.java` - Immutable review-generation parameter object.
+- `model/PRReviewRequest.java` - Immutable review-generation parameter object; its builder strips a
+  diff-coverage trailer from the diff into a never-null `diffCoverage`.
+- `model/DiffCoverage.java` - Engine-authored diff-coverage trailer: omitted/listed counts, budget,
+  scan completeness, up to 200 omitted paths, strict end-anchored `split`, and escaped prompt text.
+  Pinned with its webview mirror by `core/src/test/resources/diff-coverage/trailer.golden.txt`.
 - `model/ReviewProvider.java` - Claude/Copilot provider enum.
 - `model/SourceInventory.java` - Strict required/nullable wire shapes, canonical identities,
   source manifest digest and shared protocol limits; no READY state.
@@ -124,7 +128,8 @@ receive GitHub tokens.
 - `sidecar/pr/PrReviewStatusService.java` - Viewer lookup plus one GraphQL freshness query for at
   most 50 list results.
 - `sidecar/pr/PrDetailService.java` - PR metadata and worktree-head lookup.
-- `sidecar/pr/PrDiffService.java` - Byte-bounded review diff retrieval.
+- `sidecar/pr/PrDiffService.java` - Whole-file, UTF-8-safe review/validation diff bounding
+  (smallest-first, 250 KB per file, coverage trailer) and HTTP 406 as `diff_too_large`.
 - `sidecar/pr/DraftReviewService.java` - Pending-review lookup and decoding.
 - `sidecar/pr/DraftReviewCodec.java` - PR Pilot review metadata encoding/decoding.
 - `sidecar/pr/DraftReviewMutationService.java` - Save, submit, and delete orchestration.
@@ -212,6 +217,8 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
 - `src/components/ReviewPane/ReviewOverrides.tsx`, `ReviewQuality.tsx`, `ReviewContent.tsx`,
   `ReviewFooter.tsx`, and `OrphanComments.tsx` - Feature-private review presentation modules.
 - `src/lib/reviewQuality.ts` - Quality heuristics and in-memory repair suggestions.
+- `src/lib/diffCoverage.ts` - Strict mirror of `DiffCoverage.split` plus coverage-gain and budget
+  formatting for the coverage banner and chunked-review recommendation.
 - `src/lib/autosave.ts` - Draft dirty-check, snapshot, and debounce decisions.
 - `src/lib/validateComments.ts` - Inline-comment validation.
 - `src/lib/keyboard.ts`, `layout.ts`, `motion.ts` - Shared interaction/layout policies.

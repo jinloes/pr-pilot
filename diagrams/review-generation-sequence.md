@@ -19,7 +19,9 @@ sequenceDiagram
     Host->>GitHubEngine: Load detail, review diff, validation diff, and draft
     GitHubEngine->>GitHub: Authenticated read requests
     GitHub-->>GitHubEngine: PR metadata, diffs, and draft
-    GitHubEngine-->>Host: Token-free results
+    GitHubEngine->>GitHubEngine: Bound each diff by whole files (review 250 KB, validation 1 MB, 250 KB per file)
+    GitHubEngine-->>Host: Token-free results, with a DiffCoverage trailer appended only when a diff omits files or its scan is incomplete
+    Note over GitHubEngine,Host: A complete diff is returned byte-identical with no trailer.<br/>The trailer declares omitted/listed counts, the budget, scan completeness, and up to 200 omitted paths.<br/>HTTP 406 from GitHub becomes diff_too_large with non-retryable size-limit copy.
     Host->>Worktree: Find repository root and create PR-head worktree
     Worktree-->>Host: Exact or failed worktree result
     Note over Host,Worktree: IntelliJ calls in-process while VS Code routes these calls through the sidecar.
@@ -28,7 +30,7 @@ sequenceDiagram
     UI->>Host: generateReview(prKey, options)
     Host->>Host: Snapshot generation ID, settings, provider, and guidance
     opt Explicit IntelliJ-assisted opt-in
-        Host->>GitHubEngine: Refetch remote head and bounded diff
+        Host->>GitHubEngine: Refetch remote head and bounded 1 MB validation diff
         Host->>ReviewEngine: prepareDeepReview(exact head)
         ReviewEngine->>Worktree: Retain exact-head worktree
         ReviewEngine-->>UI: Correlated manual setup instructions
@@ -64,11 +66,13 @@ sequenceDiagram
         Sidecar->>ReviewEngine: generate(params)
         ReviewEngine->>Pipeline: review(request, options)
     end
+    Note over Host,Pipeline: PRReviewRequest strips any trailer into DiffCoverage, so pr_diff never contains it.<br/>Incomplete coverage adds an escaped omitted_files section to review and critique prompts.
 
     alt Direct review
-        Pipeline->>Provider: Primary review with read-only worktree tools
+        Pipeline->>Provider: Primary review with read-only worktree tools, of the 250 KB review diff for single-pass or the 1 MB validation diff for IntelliJ-assisted deep review
         Provider-->>Pipeline: Review JSON and inspection ledger
     else Chunked review
+        Note over Pipeline,Provider: Chunked review uses the 1 MB validation diff, and every batch copy keeps its coverage.
         loop Each bounded file batch
             Pipeline->>Provider: Review batch and record contract signals
             Provider-->>Pipeline: Batch review and inspection ledger
@@ -120,6 +124,10 @@ sequenceDiagram
 ## Failure behavior
 
 - Missing optional GitHub context omits that prompt section without failing the review.
+- A diff over the review budget is not cut mid-file: whole files are omitted, the trailer and
+  `<omitted_files>` name them, and the webview banner states the review coverage.
+- GitHub HTTP 406 for a diff is attempted once and surfaces as `diff_too_large`, not a retryable
+  API failure.
 - Primary provider failure is terminal.
 - Ordinary supervisor selection, targeted follow-up, and final critique failures keep the best
   valid review. Deep fallback candidates additionally require current engine-owned authority;

@@ -1,6 +1,7 @@
 templates:
   github_auth_failed: "GitHub authentication failed. Run '{auth_command}', then retry."
   github_not_found_or_inaccessible: "GitHub returned 404 for this pull request. It may not exist, or the active gh account may not have access. Verify the PR URL; if it exists, run 'gh auth status' and switch accounts if needed."
+  github_diff_too_large: "Pull request diff is too large. GitHub will not return this pull request's diff because it exceeds GitHub's size limits. Review smaller pull requests or split this one."
   provider_binary_missing: "'{binary}' is not available on PATH. Install {provider_cli} and retry."
   provider_not_installed: "Can't generate a review: the {provider_cli} ('{binary}') isn't installed or isn't on this app's PATH. Install it, confirm '{binary}' runs in your terminal, then try again."
   request_timed_out: "The request timed out while trying to {operation}. Retry, or try a smaller diff / lower reasoning effort."

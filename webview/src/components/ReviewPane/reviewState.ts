@@ -88,10 +88,6 @@ export type ReviewStateEvent =
 
 export const initialPaneState: PaneState = { kind: 'idle' }
 
-export function isDiffTruncated(diff?: string): boolean {
-  return Boolean(diff?.includes('[... diff truncated at 250 KB ...]'))
-}
-
 export function sortedComments(comments: LineComment[]): LineComment[] {
   return [...comments].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
 }

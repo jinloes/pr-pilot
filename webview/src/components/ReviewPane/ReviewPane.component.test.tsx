@@ -29,6 +29,11 @@ function diffWithFiles(count: number): string {
   ].join('\n')).join('\n')
 }
 
+function coverageTrailer(omitted: number, paths: string[], scan: 'complete' | 'incomplete' = 'complete'): string {
+  return `[pr-pilot:diff-coverage] omitted=${omitted} listed=${paths.length} budget=250000 scan=${scan}\n`
+    + paths.map((path) => `[pr-pilot:omitted] ${path}\n`).join('')
+}
+
 function hostMessage(message: object) {
   const handler = (window as unknown as { __handleMessage?: (payload: object) => void }).__handleMessage
   if (!handler) throw new Error('ReviewPane did not register the JCEF bridge handler')
@@ -276,13 +281,17 @@ describe('ReviewPane review submission', () => {
 
   describe('ReviewPane chunked review fallback', () => {
     function loadReviewableDiff(diff: string) {
+      loadDiffs(diff, diff)
+    }
+
+    function loadDiffs(diff: string, validationDiff: string) {
       act(() => {
         hostMessage({
           type: 'draftLoaded',
           prKey: 'acme/widget#42',
           prState: 'NO_DRAFT',
           diff,
-          validationDiff: diff,
+          validationDiff,
           providerReadiness: { provider: 'claude', available: true, detail: 'Ready.' },
         })
       })
@@ -510,17 +519,151 @@ describe('ReviewPane review submission', () => {
       expect(screen.getByRole('button', { name: 'Try Again' })).toBeVisible()
     })
 
-    it('keeps chunking off when the diff is truncated', async () => {
+    it('names the coverage gain only when chunked review includes files single-pass review omits', async () => {
       const user = userEvent.setup()
       ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
       render(<ReviewPane pr={pr} />)
-      loadReviewableDiff(`${diffWithFiles(1)}\n[... diff truncated at 250 KB ...]`)
+      loadDiffs(
+        `${diffWithFiles(1)}\n${coverageTrailer(2, ['src/file-1.ts', 'src/file-2.ts'])}`,
+        diffWithFiles(3),
+      )
 
       await openAdvanced(user)
 
       expect(screen.getByRole('checkbox', { name: /Use chunked review mode/ })).not.toBeChecked()
       expect(screen.getByText('Fallback available: consider chunked mode.')).toBeInTheDocument()
-      expect(screen.getByText('Diff context is truncated.')).toBeInTheDocument()
+      expect(screen.getByText('Chunked review includes 2 changed files that single-pass review omits.'))
+        .toBeInTheDocument()
+      expect(screen.queryByText(/would not add coverage/)).not.toBeInTheDocument()
+    })
+
+    it('says chunked review would not add coverage when both diffs omit the same files', async () => {
+      const user = userEvent.setup()
+      ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
+      render(<ReviewPane pr={pr} />)
+      loadReviewableDiff(`${diffWithFiles(1)}\n${coverageTrailer(2, ['src/huge.ts'])}`)
+
+      await openAdvanced(user)
+
+      expect(screen.getByRole('checkbox', { name: /Use chunked review mode/ })).not.toBeChecked()
+      expect(screen.getByText('Recommended: Single-pass mode.')).toBeInTheDocument()
+      expect(screen.getByText('Chunked review would not add coverage.')).toBeInTheDocument()
+      expect(screen.queryByText(/Chunked review includes/)).not.toBeInTheDocument()
+    })
+
+    it('keeps the size heuristics when an incomplete diff gains no coverage from chunking', async () => {
+      const user = userEvent.setup()
+      ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
+      render(<ReviewPane pr={pr} />)
+      loadReviewableDiff(`${diffWithFiles(8)}\n${coverageTrailer(1, ['src/huge.ts'])}`)
+
+      await openAdvanced(user)
+
+      expect(screen.getByRole('checkbox', { name: /Use chunked review mode/ })).not.toBeChecked()
+      expect(screen.getByText('Fallback available: consider chunked mode.')).toBeInTheDocument()
+      expect(screen.getByText('Many changed files. Chunked review would not add coverage.')).toBeInTheDocument()
+    })
+
+    it('explains which changed files the bounded review diff omits', () => {
+      ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
+      render(<ReviewPane pr={pr} />)
+      loadDiffs(
+        `${diffWithFiles(1)}\n${coverageTrailer(5, ['src/huge.ts', 'data/generated.json'])}`,
+        diffWithFiles(6),
+      )
+
+      expect(screen.getByText(
+        "5 changed files were left out of this PR's diff because it exceeds the 250 KB review budget. "
+        + 'Single-pass review input and the diff view omit these files, and chat uses a diff excerpt.',
+      )).toBeInTheDocument()
+      const omitted = screen.getByText('Show omitted files').closest('details')!
+      expect(within(omitted).getByText('src/huge.ts')).toBeInTheDocument()
+      expect(within(omitted).getByText('data/generated.json')).toBeInTheDocument()
+      expect(within(omitted).getByText('+3 more not listed')).toBeInTheDocument()
+      expect(screen.queryByText(/\[pr-pilot:/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/Diff display and chat context are/)).not.toBeInTheDocument()
+    })
+
+    it('says at least when the source diff was too large to scan completely', () => {
+      ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
+      render(<ReviewPane pr={pr} />)
+      loadReviewableDiff(`${diffWithFiles(1)}\n${coverageTrailer(3, ['src/huge.ts'], 'incomplete')}`)
+
+      expect(screen.getByText(
+        "At least 3 changed files were left out of this PR's diff because it exceeds the 250 KB review budget "
+        + 'and was too large to scan completely. Single-pass review input and the diff view omit these files, '
+        + 'and chat uses a diff excerpt.',
+      )).toBeInTheDocument()
+      expect(screen.getByText('+2 more not listed')).toBeInTheDocument()
+    })
+
+    it('shows no coverage banner and keeps the single-pass recommendation for a complete diff', async () => {
+      const user = userEvent.setup()
+      ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
+      render(<ReviewPane pr={pr} />)
+      loadDiffs(diffWithFiles(1), diffWithFiles(1))
+
+      await openAdvanced(user)
+
+      expect(screen.queryByText(/left out of this PR's diff/)).not.toBeInTheDocument()
+      expect(screen.queryByText('Show omitted files')).not.toBeInTheDocument()
+      expect(screen.getByText('Single-pass review is likely sufficient.')).toBeInTheDocument()
+    })
+
+    it('keeps the banner beside a saved review and never renders trailer lines in the diff view', () => {
+      render(<ReviewPane pr={pr} />)
+      const diff = `${diffWithFiles(1)}\n${coverageTrailer(1, ['src/huge.ts'])}`
+      act(() => {
+        hostMessage({
+          type: 'draftLoaded',
+          prKey: 'acme/widget#42',
+          prState: 'DRAFT_PRESENT',
+          reviewId: 'draft-1',
+          result: { summary: 'Saved review.', verdict: 'COMMENT', lineComments: [] },
+          diff,
+          validationDiff: diff,
+        })
+      })
+
+      expect(screen.getByText(
+        "1 changed file was left out of this PR's diff because it exceeds the 250 KB review budget. "
+        + 'Single-pass review input and the diff view omit this file, and chat uses a diff excerpt.',
+      )).toBeInTheDocument()
+      expect(screen.getAllByText(/src\/file-0\.ts/).length).toBeGreaterThan(0)
+      expect(screen.queryByText(/\[pr-pilot:/)).not.toBeInTheDocument()
+      expect(screen.getByTitle('Context: PR title/body, diff excerpt, generated review')).toBeInTheDocument()
+    })
+
+    it('shows only the banner when every changed file was omitted', () => {
+      render(<ReviewPane pr={pr} />)
+      const diff = coverageTrailer(2, [])
+      act(() => {
+        hostMessage({
+          type: 'draftLoaded',
+          prKey: 'acme/widget#42',
+          prState: 'DRAFT_PRESENT',
+          reviewId: 'draft-1',
+          result: { summary: 'Saved review.', verdict: 'COMMENT', lineComments: [] },
+          diff,
+          validationDiff: diff,
+        })
+      })
+
+      expect(screen.getByText(/^2 changed files were left out of this PR's diff/)).toBeInTheDocument()
+      expect(screen.getByText('2 omitted files are not listed.')).toBeInTheDocument()
+      expect(screen.queryByText(/\[pr-pilot:/)).not.toBeInTheDocument()
+    })
+
+    it('warns that files may be missing when the scan stopped before finding an omission', () => {
+      render(<ReviewPane pr={pr} />)
+      loadDiffs(`${diffWithFiles(1)}\n${coverageTrailer(0, [], 'incomplete')}`, diffWithFiles(1))
+
+      expect(screen.getByText(
+        "This PR's diff was too large to scan completely within the 250 KB review budget, so some changed files "
+        + 'may be missing. Single-pass review input and the diff view omit any such files, and chat uses a diff excerpt.',
+      )).toBeInTheDocument()
+      expect(screen.queryByText('Show omitted files')).not.toBeInTheDocument()
+      expect(screen.queryByText(/not listed/)).not.toBeInTheDocument()
     })
 
     it('keeps chunking off for a small PR', async () => {

@@ -227,7 +227,7 @@ The sidecar's `prs/list` capability owns its `gh auth token` lookup and GitHub `
 
 The sidecar's `prs/getDetail` capability owns its `gh auth token` lookup and GitHub pull-request metadata request. It validates owner/repository path segments, maps malformed GitHub JSON to `api_failed`, and returns only title/body, merged status, and nullable head/base repository metadata needed for fork-aware worktrees. No token, HTTP response body, or raw exception becomes protocol output.
 
-The sidecar's `prs/getDiff` supports both review mode (250,000-byte limit with a visible truncation marker) and validation mode (1,000,000-byte limit without a marker, used for inline-comment position validation and draft anchoring). The stdio JSON-RPC frame ceiling is 8 MiB in both Java and TypeScript so an escaped validation diff remains bounded while fitting safely in a response.
+The sidecar's `prs/getDiff` supports both review mode (250,000-byte budget) and validation mode (1,000,000-byte budget, used for chunked review, IntelliJ-assisted deep review, inline-comment position validation, and draft anchoring). Both modes run the same `PrDiffService.bound` selection described under "Complete review diff coverage": whole files only, never a byte cut, with an engine-authored `DiffCoverage` trailer whenever a file is omitted. GitHub HTTP 406 maps to the non-retryable `diff_too_large` status. The stdio JSON-RPC frame ceiling is 8 MiB in both Java and TypeScript so an escaped validation diff remains bounded while fitting safely in a response.
 
 The sidecar's `prs/getDraftReview` capability owns its `gh auth token` lookup and the GitHub pending-review lookup (`GET .../pulls/{number}/reviews` filtered to `state == PENDING`, plus that review's inline comments). `DraftReviewCodec` decodes the PR Pilot `claude-verdict`/`claude-summary`/`claude-comments` HTML-comment tags embedded in the review body, falling back to raw GitHub inline comments (with an `importedFromGitHub` flag) when those tags are absent or malformed. `none` (no pending review exists) is a normal domain result, not a failure; other token-free domain statuses (`invalid_request`, `invalid_base_url`, `not_installed`, `not_authenticated`, `rate_limited`, `network_error`, `api_failed`) are returned the same way `prs/getDetail` does. No token is ever logged, serialized, or included in an error message.
 
@@ -357,7 +357,7 @@ Three parts of the pipeline previously treated `"confidence": "low"` as a way to
 
 The self-critique directive is keyed on `confidence`, not on type, for a related reason: its input is `draftReviewJson` over an already-parsed draft, so by then no low-confidence `"issue"` exists and the old "drop a low-confidence issue" rule could never match anything. It now requires each surviving low-confidence comment to be confirmed and raised, or dropped.
 
-`PROMPT_VERSION` is `2026-09-supervised-coverage`. Outcome logging appends
+`PROMPT_VERSION` is `2026-09-diff-coverage`. Outcome logging appends
 `-supervisor-on` or `-supervisor-off`, so supervised and baseline results are not pooled.
 
 ### Prompt-injection hardening
@@ -366,7 +366,20 @@ When wrapping untrusted payloads in XML-like tags, escape matching closing tags 
 Review prompts permit only evidence supplied in the prompt and require a fixed JSON contract. Both provider parsers reject unknown fields, incomplete line comments, invalid enums, oversized values, low-confidence issues, low-confidence comments with no stated rationale, and verdict/comment mismatches before review data reaches the UI. Verify-comment and example-fix prompts use tagged reference data and strict JSON response shapes for the same reason.
 
 ### Diff acquisition model
-Hosts fetch and bound the GitHub diff before provider execution and embed it in `<pr_diff>`. Review providers run with read-only tools scoped to the PR-branch worktree, so they *can* open files there to confirm a finding or resolve a symbol the diff omits — but they cannot reach the network or any path outside it, so the embedded diff remains the primary evidence. The separate full validation diff is retained host-side/webview-side for comment anchoring and is not sent to the provider. In VS Code, that validation diff is capped at 1 MB to match the webview bridge validator; a larger payload is rejected before the review pane receives `draftLoaded` or `reviewResult`. It is fetched only after the draft-status response so a slow large-diff download cannot leave the review pane stuck in draft loading.
+Hosts fetch and bound the GitHub diff before provider execution and embed it in `<pr_diff>`. Review providers run with read-only tools scoped to the PR-branch worktree, so they *can* open files there to confirm a finding or resolve a symbol the diff omits — but they cannot reach the network or any path outside it, so the embedded diff remains the primary evidence. Single-pass review sends the 250 KB review diff. The separate 1 MB validation diff is retained host-side/webview-side for comment anchoring and is also the provider input for chunked review and IntelliJ-assisted deep review; it is not part of a single-pass prompt. When either diff omits files, `PRReviewRequest` strips its trailer into `DiffCoverage` so `<pr_diff>` never contains it, and review and critique prompts gain an escaped `<omitted_files>` section (see "Complete review diff coverage"). In VS Code, that validation diff is capped at 1 MB to match the webview bridge validator; a larger payload is rejected before the review pane receives `draftLoaded` or `reviewResult`. It is fetched only after the draft-status response so a slow large-diff download cannot leave the review pane stuck in draft loading.
+
+### Complete review diff coverage
+Single-pass review keeps its 250,000-byte diff budget, and the 1,000,000-byte validation budget is unchanged. What changed is how a diff over budget is bounded and disclosed. A byte-prefix cut could split a hunk or a UTF-8 sequence and silently dropped the files after it. Raising the limit would still be a silent cut, and would grow every single-pass prompt, the diff view, and the bridge payloads. Large PRs instead get explicit coverage disclosure plus the existing opt-in chunked path over the larger validation diff.
+
+`PrDiffService.bound` streams the GitHub diff and splits it into per-file sections at `diff --git ` boundaries:
+- In every mode, a section over 250,000 bytes is dropped, so it can never be anchored or partially reviewed.
+- While the kept total exceeds the budget, the largest kept section is evicted, leaving the maximal smallest-first whole-file subset (ties keep original order). Smallest-first, unlike first-fit, is monotonic in the budget, so the review diff's kept files are always a subset of the validation diff's. That is what makes a chunked-review coverage-gain claim true.
+- Reading stops at a 64 MiB scan ceiling, which marks the scan incomplete (`scan=incomplete`). When anything was omitted, the kept set is re-fitted to the budget minus a 16,384-byte trailer reserve, so body plus trailer never exceed the budget.
+- Kept sections are emitted in original order, followed by the trailer.
+
+The trailer (`DiffCoverage` in `core`, mirrored by `webview/src/lib/diffCoverage.ts` and pinned by the shared golden fixture `core/src/test/resources/diff-coverage/trailer.golden.txt`) is one `[pr-pilot:diff-coverage] omitted=… listed=… budget=… scan=…` line plus up to 200 `[pr-pilot:omitted] <path>` lines. Both parsers are strict and end-anchored and accept only a trailer the engine could have written; anything else is ordinary diff text with complete coverage. The trailer rides in-band so RPC, host, and bridge shapes stay unchanged. `PRReviewRequest` strips it into `diffCoverage`, and every request copy (semantic context, chunk batches, reconciliation, supervisor follow-up) preserves it. Review and critique prompts for both providers then add an escaped `<omitted_files>` section, listed as untrusted reference data. Its trusted preface states the count and budget, says those files were not reviewed, and forbids comments on them. It also requires the summary to state the unreviewed count; the posted review body is not edited deterministically. Comments the model still places on omitted files become orphans through the normal validation path.
+
+GitHub answers HTTP 406 when a diff exceeds its own size limits. The engine attempts that request once and returns `diff_too_large`, which both hosts render as non-retryable "Pull request diff is too large" copy rather than a generic retry. There is no files-API or local `git diff` fallback. Chat keeps its 12,000-character excerpt, and the display keeps the 250 KB review diff; the banner and chat label describe those limits instead of claiming a full diff.
 
 ### Worktree-based PR context
 When the PR's repo matches the open project/workspace and a git root is found, both hosts create a temporary git worktree checked out to the exact PR head commit and reuse it for both review and chat. This gives the model accurate local file context (correct branch state) for type lookups and cross-file references across the full PR session. Cleanup runs when the active PR changes or the view is disposed. If worktree creation fails or the PR is from an unrelated repo, review and PR chat stop with an actionable error; they never expose the open project/workspace directory to a provider. Fork PRs fetch the fork branch only to obtain the supplied exact head commit.
@@ -395,7 +408,7 @@ The setup screen is a guided in-app wizard with host detection. Both hosts expos
 After the first successful load (or a recovery from `setupRequired`), the shared PR list shows a one-time success coach banner that points users at scope switching and the `PR-DRAFT` vs `REV-DRAFT` mental model.
 
 ### PR chat scope
-Chat is available after PR selection, before and after review generation. Hosts build chat context from the active PR title/body, the full diff (already capped at 250 KB by the diff fetch), and the generated review when one exists; both hosts send the same full diff so chat answers do not diverge by host. The webview displays which context buckets are attached and adds selected text when the user right-clicks or verifies a comment. Chat reuses the PR worktree when available. The VS Code host sources the active PR's title/body from `getPRDetail` on select (the webview `selectPR` message carries only number/owner/repo), so the review prompt and chat context always include the real PR description.
+Chat is available after PR selection, before and after review generation. Hosts build chat context from the active PR title/body, the bounded 250 KB review diff, and the generated review when one exists; both hosts send the same diff so chat answers do not diverge by host. The engine then keeps a 12,000-character head-and-tail excerpt of that PR context (`MAX_CHAT_CONTEXT_CHARS` in `ClaudeService` and `vscode-extension/src/claude.ts`), so chat never sees a whole large diff. The webview displays which context buckets are attached, labels the diff bucket "diff excerpt" when the review diff omits files, and adds selected text when the user right-clicks or verifies a comment. Chat reuses the PR worktree when available. The VS Code host sources the active PR's title/body from `getPRDetail` on select (the webview `selectPR` message carries only number/owner/repo), so the review prompt and chat context always include the real PR description.
 
 ### DTO mapping in IntelliJ webview bridge
 `WebviewPanel` model-to-DTO conversion uses MapStruct (`ReviewMapper`) instead of hand-rolled mappers so field drift fails at compile time.
@@ -427,7 +440,7 @@ PR switch. Dirty state is snapshot equality against the last acknowledged save; 
 correlated by `saveId`, and submit saves first when necessary.
 
 ### Large diff visibility
-GitHub diffs are truncated at 250 KB in both hosts. The webview detects the truncation marker and warns that diff display and chat context are incomplete, while `DiffViewer` still lazily limits rendered changed lines for browser performance.
+The review diff is bounded to 250 KB by whole files (see "Complete review diff coverage"). When its `DiffCoverage` trailer is present, the webview shows a coverage banner above the review and diff view, and in the no-draft state before generation. The banner states how many changed files were left out (or "at least" that many when the scan was incomplete) and the budget. It also says that single-pass review input and the diff view omit those files and that chat uses a diff excerpt, and it lists the reported paths plus "+K more not listed". `DiffViewer` receives the diff body without the trailer and still lazily limits rendered changed lines for browser performance.
 
 The shared diff viewer also owns file-level navigation: it keeps a sticky “currently viewing” file indicator visible while the review body scrolls and renders a GitHub-style changed-files tree for jumping between files. If a reviewer jumps to a file outside the initial 500 changed-line preview, `DiffViewer` expands the full diff before scrolling so navigation and comment focus never strand hidden files.
 
@@ -435,13 +448,18 @@ The shared diff viewer also owns file-level navigation: it keeps a sticky “cur
 The webview runs a `Review Quality Check` pass automatically over the current draft and validation diff to flag trust risks (unanchored comments, low-evidence high-severity findings, and missing rationale metadata). When risks are present it surfaces a non-blocking badge (`N trust risks detected — Review`) that expands to a panel with one-click in-memory repairs (`remove unanchored`, `add rationale placeholders`, `downgrade high-risk issues`); a clean draft shows no nag. The check remains non-blocking, but the submit dialog now requires an explicit reviewer acknowledgement checkbox whenever unresolved trust risks remain.
 
 For larger PRs, reviewers can explicitly enable chunked mode in per-review overrides. The webview
-sends the complete loaded diff once with `chunkedReview: true`; `ChunkedReviewService` in the shared
+sends the loaded validation diff (1 MB whole-file budget, or the review diff while the validation diff has not loaded) once with `chunkedReview: true`; `ChunkedReviewService` in the shared
 review engine owns file batching, invokes the selected provider for every bounded batch, then performs
 a mandatory final provider reconciliation over every batch result plus a bounded changed-file/contract
-index. Both IDE hosts therefore use the same global-synthesis behavior. A reconciliation I/O failure
+index. Every batch and reconciliation request copies the source `DiffCoverage`, so each prompt
+names the files that even the validation diff omitted. Both IDE hosts therefore use the same global-synthesis behavior. A reconciliation I/O failure
 returns complete, visibly marked degraded batch summaries rather than silently presenting a locally
-sliced merge as globally synthesized output. Truncated or large diffs recommend chunking but never
-enable it without the reviewer selecting the option.
+sliced merge as globally synthesized output. The recommendation is honest about coverage: it cites
+"Chunked review includes N changed file(s) that single-pass review omits." only when the validation
+diff omits fewer files than the review diff, and says "Chunked review would not add coverage." when
+the review diff is incomplete but chunking gains nothing. The unchanged file-count and changed-line
+size heuristics can still recommend chunking. No recommendation ever enables chunked mode without
+the reviewer selecting the option.
 
 ### Bounded review supervision
 

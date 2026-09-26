@@ -190,7 +190,7 @@ export interface SidecarWorktreeResult {
 }
 
 export interface SidecarPrDiffResult {
-    status: 'ok' | 'not_installed' | 'not_authenticated' | 'invalid_base_url' | 'invalid_request' | 'rate_limited' | 'network_error' | 'not_found_or_inaccessible' | 'api_failed';
+    status: 'ok' | 'not_installed' | 'not_authenticated' | 'invalid_base_url' | 'invalid_request' | 'rate_limited' | 'network_error' | 'not_found_or_inaccessible' | 'diff_too_large' | 'api_failed';
     message: string;
     diff: string | null;
     truncated: boolean;
@@ -418,6 +418,7 @@ const PR_DETAIL_STATUSES = new Set<SidecarPrDetailResult['status']>([
 const PR_DIFF_STATUSES = new Set<SidecarPrDiffResult['status']>([
     ...PR_DETAIL_STATUSES,
     'not_found_or_inaccessible',
+    'diff_too_large',
 ]);
 
 const DRAFT_REVIEW_STATUSES = new Set<SidecarDraftReviewResult['status']>([

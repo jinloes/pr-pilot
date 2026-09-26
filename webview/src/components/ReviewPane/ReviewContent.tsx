@@ -12,11 +12,12 @@ import {
 import type { LineComment, ReviewResult } from '../../bridge/types'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { formatBudget, splitDiffCoverage, unlistedCount, type DiffCoverage } from '@/lib/diffCoverage'
 import { cn } from '@/lib/utils'
 import { DiffViewer } from '../DiffViewer'
 import { ReviewDisplay } from '../ReviewDisplay'
 import { OrphanCommentsSection } from './OrphanComments'
-import { isDiffTruncated, type PaneState } from './reviewState'
+import type { PaneState } from './reviewState'
 
 export interface EditCommentHandlers {
   onEditComment: (index: number, body: string) => void
@@ -54,6 +55,48 @@ function formatElapsed(seconds: number): string {
 function formatGenerationSummary(elapsedSec?: number): string | null {
   if (elapsedSec == null || elapsedSec < 0) return null
   return `Generated in ${formatElapsed(elapsedSec)}`
+}
+
+function coverageSummary(coverage: DiffCoverage): string {
+  const budget = formatBudget(coverage.budget)
+  const consequence = 'Single-pass review input and the diff view omit'
+  if (coverage.omitted === 0) {
+    return `This PR's diff was too large to scan completely within the ${budget} review budget, so some changed `
+      + `files may be missing. ${consequence} any such files, and chat uses a diff excerpt.`
+  }
+  const count = coverage.omitted
+  const files = `${count} changed file${count === 1 ? '' : 's'}`
+  const lead = coverage.scanComplete ? files : `At least ${files}`
+  const scan = coverage.scanComplete ? '' : ' and was too large to scan completely'
+  return `${lead} ${count === 1 ? 'was' : 'were'} left out of this PR's diff because it exceeds the ${budget} review `
+    + `budget${scan}. ${consequence} ${count === 1 ? 'this file' : 'these files'}, and chat uses a diff excerpt.`
+}
+
+/** Shown whenever the single-pass review diff omits changed files, as declared by its trailer. */
+function DiffCoverageBanner({ coverage }: { coverage: DiffCoverage }) {
+  const unlisted = unlistedCount(coverage)
+  return (
+    <Alert className="mx-4 mt-3 mb-0 border-status-suggestion/40 bg-status-suggestion/5">
+      <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
+      <AlertDescription className="text-xs text-status-suggestion">
+        <p>{coverageSummary(coverage)}</p>
+        {coverage.paths.length > 0 && (
+          <details className="mt-1">
+            <summary className="cursor-pointer">Show omitted files</summary>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {coverage.paths.map((path, index) => (
+                <li key={`${index}:${path}`} className="break-all font-mono text-[11px]">{path}</li>
+              ))}
+              {unlisted > 0 && <li className="list-none">{`+${unlisted} more not listed`}</li>}
+            </ul>
+          </details>
+        )}
+        {coverage.paths.length === 0 && coverage.omitted > 0 && (
+          <p className="mt-1">{`${coverage.omitted} omitted file${coverage.omitted === 1 ? ' is' : 's are'} not listed.`}</p>
+        )}
+      </AlertDescription>
+    </Alert>
+  )
 }
 
 function ReviewAndDiff({
@@ -96,6 +139,8 @@ function ReviewAndDiff({
   generationMessage?: string
 }) {
   const generationSummary = formatGenerationSummary(generationElapsedSec)
+  // The diff view renders only the kept files; the coverage trailer is metadata, not diff text.
+  const { body: displayDiff, coverage } = splitDiffCoverage(diff)
   return (
     <>
       {generationMessage && (
@@ -135,14 +180,7 @@ function ReviewAndDiff({
           </AlertDescription>
         </Alert>
       )}
-      {isDiffTruncated(diff) && (
-        <Alert className="mx-4 mt-3 mb-0 border-status-suggestion/40 bg-status-suggestion/5">
-          <AlertTriangle className="h-3.5 w-3.5 text-status-suggestion" />
-          <AlertDescription className="text-xs text-status-suggestion">
-            Diff display and chat context are truncated at 250 KB. Use smaller focused questions for large PRs.
-          </AlertDescription>
-        </Alert>
-      )}
+      {coverage && <DiffCoverageBanner coverage={coverage} />}
       {generationSummary && (
         <p className="px-4 pt-3 text-xs text-muted-foreground">{generationSummary}</p>
       )}
@@ -161,10 +199,10 @@ function ReviewAndDiff({
           />
         </div>
       )}
-      {diff && (
+      {displayDiff && (
         <div key="review-diff" className="px-4 pb-4">
           <DiffViewer
-            diff={diff}
+            diff={displayDiff}
             comments={inlineComments}
             orphanComments={orphanComments}
             focusedCommentIdx={focusedCommentIdx}
@@ -271,33 +309,38 @@ export function PaneContent({
         </div>
       )
 
-    case 'noDraft':
+    case 'noDraft': {
+      const coverage = splitDiffCoverage(state.diff).coverage
       return (
-        <div className="flex flex-col items-center justify-center gap-4 p-8">
-          <p className="text-sm text-muted-foreground">No pending draft for this PR.</p>
-          {state.providerReadiness && (
-            <p
-              className={cn('text-xs font-medium', state.providerReadiness.available ? 'text-status-approve' : 'text-status-issue')}
-              role="status"
+        <>
+          {coverage && <DiffCoverageBanner coverage={coverage} />}
+          <div className="flex flex-col items-center justify-center gap-4 p-8">
+            <p className="text-sm text-muted-foreground">No pending draft for this PR.</p>
+            {state.providerReadiness && (
+              <p
+                className={cn('text-xs font-medium', state.providerReadiness.available ? 'text-status-approve' : 'text-status-issue')}
+                role="status"
+              >
+                {state.providerReadiness.available
+                  ? `${state.providerReadiness.provider === 'claude' ? 'Claude' : 'Copilot'} ready`
+                  : state.providerReadiness.detail}
+              </p>
+            )}
+            <Button
+              data-testid="generate-review"
+              onClick={onGenerate}
+              className="gap-2"
+              disabled={state.providerReadiness?.available === false}
             >
-              {state.providerReadiness.available
-                ? `${state.providerReadiness.provider === 'claude' ? 'Claude' : 'Copilot'} ready`
-                : state.providerReadiness.detail}
-            </p>
-          )}
-          <Button
-            data-testid="generate-review"
-            onClick={onGenerate}
-            className="gap-2"
-            disabled={state.providerReadiness?.available === false}
-          >
-            Generate Review
-          </Button>
-          {state.providerReadiness?.available === false && (
-            <Button variant="outline" size="sm" onClick={onOpenSettings}>Open Settings</Button>
-          )}
-        </div>
+              Generate Review
+            </Button>
+            {state.providerReadiness?.available === false && (
+              <Button variant="outline" size="sm" onClick={onOpenSettings}>Open Settings</Button>
+            )}
+          </div>
+        </>
       )
+    }
 
     case 'authError':
       return (

@@ -2,6 +2,7 @@ package com.jinloes.prpilot.review;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jinloes.prpilot.model.DiffCoverage;
 import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.PullRequest;
@@ -207,6 +208,97 @@ class ChunkedReviewServiceTest {
                             "OLD 1 | -void call(String old) {}",
                             "NEW 2 | +call();")
                     .doesNotContain("diff --git");
+        }
+    }
+
+    @Nested
+    class DiffCoverageCopies {
+        private final DiffCoverage omitted =
+                new DiffCoverage(2, List.of("Big.java", "Huge.java"), 1_000_000, true);
+
+        @Test
+        void everyBatchAndTheReconciliationCarryTheValidationOmittedList() throws Exception {
+            PRReviewRequest request =
+                    PRReviewRequest.builder(pr(), sevenFileSignatureDiff() + omitted.trailer())
+                            .build();
+            List<PRReviewRequest> requests = new ArrayList<>();
+
+            new ChunkedReviewService()
+                    .review(
+                            request,
+                            ignored -> {},
+                            current -> {
+                                requests.add(current);
+                                return new ReviewResult("ok", "APPROVE", List.of());
+                            });
+
+            assertThat(request.diffCoverage()).isEqualTo(omitted);
+            assertThat(requests).hasSize(3);
+            assertThat(requests)
+                    .allSatisfy(
+                            current -> {
+                                assertThat(current.diffCoverage()).isEqualTo(omitted);
+                                assertThat(current.getDiff()).doesNotContain("[pr-pilot:");
+                                assertThat(ClaudeService.buildPrompt(current))
+                                        .contains("<omitted_files>\n", "- Big.java", "- Huge.java")
+                                        .doesNotContain("[pr-pilot:");
+                            });
+        }
+
+        @Test
+        void batchesTogetherCoverEveryKeptFile() {
+            PRReviewRequest request =
+                    PRReviewRequest.builder(pr(), sevenFileSignatureDiff() + omitted.trailer())
+                            .build();
+
+            List<ChunkedReviewService.DiffBatch> batches =
+                    ChunkedReviewService.buildBatches(request.getDiff());
+
+            assertThat(batches).hasSizeGreaterThan(1);
+            assertThat(batches.stream().flatMap(batch -> batch.files().stream()).toList())
+                    .containsExactlyInAnyOrder(
+                            "Api.java",
+                            "File1.java",
+                            "File2.java",
+                            "File3.java",
+                            "File4.java",
+                            "File5.java",
+                            "Caller.java");
+        }
+
+        @Test
+        void finalValidationKeepsTheOmittedList() {
+            PRReviewRequest request =
+                    PRReviewRequest.builder(pr(), sevenFileSignatureDiff() + omitted.trailer())
+                            .build();
+
+            PRReviewRequest validation = new ChunkedReviewService().finalValidationRequest(request);
+
+            assertThat(validation.diffCoverage()).isEqualTo(omitted);
+            assertThat(validation.getDiff()).doesNotContain("[pr-pilot:");
+        }
+
+        @Test
+        void completeCoverageAddsNoSectionToAnyBatch() throws Exception {
+            List<PRReviewRequest> requests = new ArrayList<>();
+
+            new ChunkedReviewService()
+                    .review(
+                            PRReviewRequest.builder(pr(), sevenFileSignatureDiff()).build(),
+                            ignored -> {},
+                            current -> {
+                                requests.add(current);
+                                return new ReviewResult("ok", "APPROVE", List.of());
+                            });
+
+            assertThat(requests)
+                    .hasSize(3)
+                    .allSatisfy(
+                            current -> {
+                                assertThat(current.diffCoverage()).isEqualTo(DiffCoverage.NONE);
+                                assertThat(ClaudeService.buildPrompt(current))
+                                        .doesNotContain("<omitted_files>\n");
+                            });
         }
     }
 

@@ -19,6 +19,7 @@ public final class UserFacingErrors {
     private static final String TEMPLATE_GITHUB_AUTH_FAILED = "github_auth_failed";
     private static final String TEMPLATE_GITHUB_NOT_FOUND_OR_INACCESSIBLE =
             "github_not_found_or_inaccessible";
+    private static final String TEMPLATE_GITHUB_DIFF_TOO_LARGE = "github_diff_too_large";
     private static final String TEMPLATE_PROVIDER_BINARY_MISSING = "provider_binary_missing";
     private static final String TEMPLATE_PROVIDER_NOT_INSTALLED = "provider_not_installed";
     private static final String TEMPLATE_REQUEST_TIMED_OUT = "request_timed_out";
@@ -81,6 +82,10 @@ public final class UserFacingErrors {
                 && PrDiffResult.STATUS_NOT_FOUND_OR_INACCESSIBLE.equals(
                         operationException.status())) {
             return template(TEMPLATE_GITHUB_NOT_FOUND_OR_INACCESSIBLE, Map.of());
+        }
+        if (e instanceof IntellijGitHubService.GitHubOperationException operationException
+                && PrDiffResult.STATUS_DIFF_TOO_LARGE.equals(operationException.status())) {
+            return template(TEMPLATE_GITHUB_DIFF_TOO_LARGE, Map.of());
         }
         if (containsAny(
                 msg,

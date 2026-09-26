@@ -154,6 +154,7 @@ public final class ChunkedReviewService {
                 .repoProfile(source.getRepoProfile())
                 .ciAnnotations(source.getCiAnnotations())
                 .semanticContext(source.getSemanticContext())
+                .diffCoverage(source.diffCoverage())
                 .build();
     }
 

@@ -56,6 +56,35 @@ class UserFacingErrorsTest {
 
             assertThat(msg).isEqualTo("Couldn't load the PR diff. Please retry.");
         }
+
+        @Test
+        void diffTooLargeStatusUsesTheSizeLimitCopyInsteadOfRetry() {
+            String msg =
+                    UserFacingErrors.forGitHub(
+                            new IntellijGitHubService.GitHubOperationException(
+                                    PrDiffResult.STATUS_DIFF_TOO_LARGE,
+                                    "GitHub declined to return this pull request's diff (HTTP"
+                                            + " 406); it likely exceeds GitHub's diff size limits."),
+                            "load the PR diff");
+
+            assertThat(msg)
+                    .isEqualTo(
+                            "Pull request diff is too large. GitHub will not return this pull"
+                                    + " request's diff because it exceeds GitHub's size limits."
+                                    + " Review smaller pull requests or split this one.");
+            assertThat(msg).doesNotContainIgnoringCase("retry");
+        }
+
+        @Test
+        void apiFailedStatusStillUsesTheGenericRetryCopy() {
+            String msg =
+                    UserFacingErrors.forGitHub(
+                            new IntellijGitHubService.GitHubOperationException(
+                                    "api_failed", "GitHub API request failed."),
+                            "load the PR diff");
+
+            assertThat(msg).isEqualTo("Couldn't load the PR diff. Please retry.");
+        }
     }
 
     @Nested
