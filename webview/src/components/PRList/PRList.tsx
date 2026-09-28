@@ -112,6 +112,14 @@ export function PRList({ onSelect, selectedPr }: Props) {
               : pr,
           ),
         )
+      } else if (msg.type === 'reviewSubmitted') {
+        // The host only confirms the publish; freshness is recomputed on the next list refresh.
+        if (!msg.prKey) return
+        setPRs((prev) =>
+          prev.map((pr) =>
+            prKey(pr) === msg.prKey ? { ...pr, hasReviewDraft: false, reviewStatus: 'REVIEWED' } : pr,
+          ),
+        )
       } else if (msg.type === 'activatePR') {
         const key = prKey(msg.pr)
         const nextSpotlightedKey = msg.source === 'notification' ? key : null

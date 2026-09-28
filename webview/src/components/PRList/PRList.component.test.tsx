@@ -302,6 +302,32 @@ describe('PRList', () => {
     expect(notices).toHaveTextContent('Review status is unavailable')
   })
 
+  it('marks only the submitted pull request as reviewed after publishing', () => {
+    localStorage.setItem('pr-pilot:first-success-coach-shown', '1')
+    render(<PRList />)
+    load([
+      { ...firstPr, hasReviewDraft: true, reviewStatus: 'UPDATED_SINCE_REVIEW' },
+      { ...firstPr, number: 43, title: 'Other change', reviewStatus: 'UNREVIEWED' },
+    ])
+    expect(screen.getByText('Updated since your review')).toBeVisible()
+
+    hostMessage({ type: 'reviewSubmitted', prKey: 'acme/platform#42' })
+
+    expect(screen.queryByText('Updated since your review')).not.toBeInTheDocument()
+    expect(screen.queryByText('Review draft')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Reviewed')).toHaveLength(1)
+  })
+
+  it('ignores a submission without a pull request key', () => {
+    localStorage.setItem('pr-pilot:first-success-coach-shown', '1')
+    render(<PRList />)
+    load([{ ...firstPr, reviewStatus: 'UNREVIEWED' }])
+
+    hostMessage({ type: 'reviewSubmitted' })
+
+    expect(screen.queryByText('Reviewed')).not.toBeInTheDocument()
+  })
+
   it('does not replace a known review status with notification-only unavailable data', () => {
     localStorage.setItem('pr-pilot:first-success-coach-shown', '1')
     render(<PRList />)
