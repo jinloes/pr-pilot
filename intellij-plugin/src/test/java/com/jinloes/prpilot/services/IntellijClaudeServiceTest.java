@@ -3,6 +3,7 @@ package com.jinloes.prpilot.services;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jinloes.prpilot.model.ReviewProvider;
+import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.settings.PluginSettings;
 import java.io.IOException;
 import org.junit.jupiter.api.Nested;
@@ -30,6 +31,37 @@ class IntellijClaudeServiceTest {
             assertThat(snapshot.provider()).isEqualTo(ReviewProvider.COPILOT);
             assertThat(snapshot.model()).isEqualTo("generation-model");
             assertThat(snapshot.supervisorEnabled()).isTrue();
+        }
+
+        @Test
+        void identityChangesWithTheSecondReviewerModel() {
+            PluginSettings settings = new PluginSettings();
+            Object before =
+                    IntellijClaudeService.snapshotReviewRuntimeSettings(settings).identity();
+
+            settings.setReviewSecondReviewerModel("gpt-5.4");
+            IntellijClaudeService.ReviewRuntimeSettings after =
+                    IntellijClaudeService.snapshotReviewRuntimeSettings(settings);
+
+            assertThat(after.secondReviewerModel()).isEqualTo("gpt-5.4");
+            assertThat(after.identity()).isNotEqualTo(before);
+        }
+
+        @Test
+        void secondReviewerEffortOnlyFollowsACopilotPrimary() {
+            PluginSettings settings = new PluginSettings();
+            settings.setReviewProvider(ReviewProvider.CLAUDE);
+            assertThat(
+                            IntellijClaudeService.snapshotReviewRuntimeSettings(settings)
+                                    .secondReviewerEffort())
+                    .isEqualTo(CopilotService.DEFAULT_REASONING_EFFORT);
+
+            PluginSettings.State copilot = new PluginSettings.State();
+            copilot.reviewProvider = "copilot";
+            settings.loadState(copilot);
+            IntellijClaudeService.ReviewRuntimeSettings snapshot =
+                    IntellijClaudeService.snapshotReviewRuntimeSettings(settings);
+            assertThat(snapshot.secondReviewerEffort()).isEqualTo(settings.getReviewEffort());
         }
     }
 

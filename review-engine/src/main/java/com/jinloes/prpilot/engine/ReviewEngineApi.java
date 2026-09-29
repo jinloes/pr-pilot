@@ -86,7 +86,61 @@ public interface ReviewEngineApi {
             String repoProfile,
             List<CiAnnotationParam> ciAnnotations,
             boolean chunkedReview,
-            DeepReviewParams deepReview) {
+            DeepReviewParams deepReview,
+            String baseSha,
+            String secondReviewerModel) {
+        public GenerateReviewParams(
+                String operationId,
+                String provider,
+                String projectDir,
+                String model,
+                String effort,
+                boolean inheritMcp,
+                String configDir,
+                boolean selfCritique,
+                boolean reviewSupervisorEnabled,
+                PrParams pr,
+                String diff,
+                String priorReview,
+                String existingReviews,
+                String repoGuidelines,
+                String focusAreas,
+                String customInstructions,
+                String ciStatus,
+                String commits,
+                String linkedIssue,
+                String repoProfile,
+                List<CiAnnotationParam> ciAnnotations,
+                boolean chunkedReview,
+                DeepReviewParams deepReview) {
+            this(
+                    operationId,
+                    provider,
+                    projectDir,
+                    model,
+                    effort,
+                    inheritMcp,
+                    configDir,
+                    selfCritique,
+                    reviewSupervisorEnabled,
+                    pr,
+                    diff,
+                    priorReview,
+                    existingReviews,
+                    repoGuidelines,
+                    focusAreas,
+                    customInstructions,
+                    ciStatus,
+                    commits,
+                    linkedIssue,
+                    repoProfile,
+                    ciAnnotations,
+                    chunkedReview,
+                    deepReview,
+                    null,
+                    null);
+        }
+
         public GenerateReviewParams(
                 String operationId,
                 String provider,
@@ -133,6 +187,8 @@ public interface ReviewEngineApi {
                     repoProfile,
                     ciAnnotations,
                     chunkedReview,
+                    null,
+                    null,
                     null);
         }
     }

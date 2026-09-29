@@ -12,6 +12,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -162,8 +163,18 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
          */
         public boolean reviewSelfCritique = true;
 
-        /** Enables bounded coverage supervision and at most one targeted follow-up review pass. */
-        public boolean reviewSupervisorEnabled = false;
+        /**
+         * Enables bounded coverage supervision and at most one targeted follow-up review pass over
+         * uninspected high-risk hunks and changed files. On by default: the follow-up only runs
+         * when the primary pass left a coverage gap.
+         */
+        public boolean reviewSupervisorEnabled = true;
+
+        /**
+         * Optional Copilot model that reviews the same diff in parallel with the primary provider.
+         * Its candidates are merged and cross-validated with the primary's. Blank disables it.
+         */
+        public String reviewSecondReviewerModel = "";
 
         /**
          * Experimental: shows the IntelliJ-assisted review controls in the webview and lets the
@@ -471,6 +482,14 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
     public void setReviewSupervisorEnabled(boolean value) {
         myState.reviewSupervisorEnabled = value;
+    }
+
+    public String getReviewSecondReviewerModel() {
+        return StringUtils.defaultString(myState.reviewSecondReviewerModel).trim();
+    }
+
+    public void setReviewSecondReviewerModel(String value) {
+        myState.reviewSecondReviewerModel = StringUtils.defaultString(value).trim();
     }
 
     public boolean isExperimentalIntellijAssistedReview() {

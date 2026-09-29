@@ -20,7 +20,13 @@ final class ReviewPassParser {
 
     static ReviewPassResult parse(String raw, InspectionManifest manifest, File workingDir)
             throws IOException {
-        ReviewResult review = ClaudeService.parseReview(raw);
+        return parse(raw, manifest, workingDir, ClaudeService.MAX_LINE_COMMENTS);
+    }
+
+    static ReviewPassResult parse(
+            String raw, InspectionManifest manifest, File workingDir, int maxComments)
+            throws IOException {
+        ReviewResult review = ClaudeService.parseReview(raw, maxComments);
         JsonNode root = parseRoot(raw);
         JsonNode inspection = root.path("inspection");
         if (!inspection.isObject()) {

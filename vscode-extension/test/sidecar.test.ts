@@ -267,9 +267,30 @@ test('parsePrDetailResult accepts nullable repository metadata', () => {
         body: '',
         head: { sha: 'abc', ref: 'feature', repoFullName: null, cloneUrl: null },
         baseRepoFullName: null,
+        baseSha: null,
       },
     },
   );
+});
+
+test('parsePrDetailResult carries a string baseSha and rejects a non-string one', () => {
+  const detail = {
+    merged: false,
+    title: 'Example',
+    body: '',
+    head: null,
+    baseRepoFullName: 'acme/widgets',
+  };
+  const base = 'c'.repeat(40);
+  assert.equal(
+    parsePrDetailResult({ status: 'ok', message: 'x', detail: { ...detail, baseSha: base } })?.detail?.baseSha,
+    base,
+  );
+  assert.equal(
+    parsePrDetailResult({ status: 'ok', message: 'x', detail: { ...detail, baseSha: null } })?.detail?.baseSha,
+    null,
+  );
+  assert.equal(parsePrDetailResult({ status: 'ok', message: 'x', detail: { ...detail, baseSha: 42 } }), null);
 });
 
 test('parsePrDetailResult rejects malformed successful and unknown results', () => {

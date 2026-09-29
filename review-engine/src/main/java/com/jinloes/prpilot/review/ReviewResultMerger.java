@@ -9,27 +9,59 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** Merges candidate findings from a bounded follow-up without replacing the primary summary. */
+/**
+ * Merges candidate findings from a bounded follow-up or second reviewer without replacing the
+ * primary summary, and applies the final published-review limits.
+ */
 final class ReviewResultMerger {
-    private static final int MAX_COMMENTS = 20;
+    static final int MAX_COMMENTS = 20;
+    private static final Comparator<LineComment> BY_PRIORITY =
+            Comparator.comparingInt(ReviewResultMerger::priority)
+                    .reversed()
+                    .thenComparing(LineComment::getFile)
+                    .thenComparingInt(LineComment::getLine);
 
     private ReviewResultMerger() {}
 
     static ReviewResult merge(ReviewResult baseline, ReviewResult followUp) {
+        return merge(baseline, followUp, MAX_COMMENTS);
+    }
+
+    /** Merges and deduplicates, keeping at most {@code cap} findings in priority order. */
+    static ReviewResult merge(ReviewResult baseline, ReviewResult followUp, int cap) {
         Map<String, LineComment> unique = new LinkedHashMap<>();
         baseline.getLineComments().forEach(comment -> unique.put(key(comment), comment));
         followUp.getLineComments().forEach(comment -> unique.putIfAbsent(key(comment), comment));
 
         List<LineComment> comments = new ArrayList<>(unique.values());
-        comments.sort(
-                Comparator.comparingInt(ReviewResultMerger::priority)
-                        .reversed()
-                        .thenComparing(LineComment::getFile)
-                        .thenComparingInt(LineComment::getLine));
-        if (comments.size() > MAX_COMMENTS) {
-            comments = new ArrayList<>(comments.subList(0, MAX_COMMENTS));
+        comments.sort(BY_PRIORITY);
+        if (comments.size() > cap) {
+            comments = new ArrayList<>(comments.subList(0, cap));
         }
         return new ReviewResult(baseline.getSummary(), verdict(comments), comments);
+    }
+
+    /**
+     * Drops low-confidence recall candidates that no validator confirmed and recomputes the verdict
+     * from the surviving comments.
+     */
+    static ReviewResult withoutLowConfidence(ReviewResult result) {
+        List<LineComment> kept =
+                result.getLineComments().stream()
+                        .filter(comment -> !"low".equals(comment.getConfidence()))
+                        .toList();
+        return new ReviewResult(result.getSummary(), verdict(kept), new ArrayList<>(kept));
+    }
+
+    /** Caps the published review at the standard limit, keeping the highest-priority findings. */
+    static ReviewResult capFinal(ReviewResult result) {
+        if (result.getLineComments().size() <= MAX_COMMENTS) {
+            return result;
+        }
+        List<LineComment> comments = new ArrayList<>(result.getLineComments());
+        comments.sort(BY_PRIORITY);
+        comments = new ArrayList<>(comments.subList(0, MAX_COMMENTS));
+        return new ReviewResult(result.getSummary(), verdict(comments), comments);
     }
 
     private static String key(LineComment comment) {

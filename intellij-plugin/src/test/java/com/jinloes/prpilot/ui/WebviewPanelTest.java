@@ -535,7 +535,8 @@ class WebviewPanelTest {
                             "Detailed title",
                             "Closes #42",
                             new PrDetail.Head("sha", "branch", "acme/platform", "clone"),
-                            "acme/platform");
+                            "acme/platform",
+                            null);
 
             PullRequest hydrated = WebviewPanel.hydratePullRequest(summary, detail);
 

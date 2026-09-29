@@ -25,6 +25,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.text.StringEscapeUtils;
 
 public class PluginSettingsComponent {
@@ -104,6 +105,8 @@ public class PluginSettingsComponent {
             new JCheckBox("Always enable MCP for Copilot reviews");
     private final JBTextField copilotConfigDirField = new JBTextField();
     private final JBTextField reviewFocusAreasField = new JBTextField();
+    private final JComboBox<String> secondReviewerModelCombo =
+            new JComboBox<>(COPILOT_MODEL_SUGGESTIONS);
     private final JBTextArea reviewCustomInstructionsArea = new JBTextArea(4, 0);
     private final JBTextArea reviewGuidanceGlobsArea = new JBTextArea(3, 0);
     private final JComboBox<PluginSettings.ReviewGuidanceProfile> reviewGuidanceProfileCombo =
@@ -126,7 +129,7 @@ public class PluginSettingsComponent {
     private boolean updatingReviewGuidanceProfile;
     private final JCheckBox reviewSelfCritiqueBox =
             new JCheckBox("Validate findings with a second pass");
-    private final JCheckBox reviewSupervisorBox = new JCheckBox("Inspect high-risk coverage gaps");
+    private final JCheckBox reviewSupervisorBox = new JCheckBox("Re-inspect coverage gaps");
     private final JCheckBox experimentalIntellijAssistedBox =
             new JCheckBox("Enable IntelliJ-assisted review (experimental)");
     private final JComboBox<ReviewProvider> providerCombo =
@@ -245,6 +248,23 @@ public class PluginSettingsComponent {
         copilotModelCombo.setEditable(true);
         boundContentWidth(copilotModelCombo);
         boundContentWidth(claudeModelCombo);
+        secondReviewerModelCombo.setEditable(true);
+        secondReviewerModelCombo.setRenderer(
+                new DefaultListCellRenderer() {
+                    @Override
+                    public Component getListCellRendererComponent(
+                            JList<?> list,
+                            Object value,
+                            int index,
+                            boolean isSelected,
+                            boolean cellHasFocus) {
+                        super.getListCellRendererComponent(
+                                list, value, index, isSelected, cellHasFocus);
+                        if (value == null || value.toString().isBlank()) setText("Off");
+                        return this;
+                    }
+                });
+        boundContentWidth(secondReviewerModelCombo);
         // BoxLayout centers children unless told otherwise. Force LEFT_ALIGNMENT on every child of
         // copilotModelCard or the hint floats to the middle/right of the row.
         copilotModelHint.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -461,8 +481,17 @@ public class PluginSettingsComponent {
                 fieldWithHint(
                         reviewSupervisorBox,
                         hintLabel(
-                                "<html><small>Runs a bounded coverage check and at most one targeted"
-                                        + " follow-up. Off by default because it adds latency.</small></html>"));
+                                "<html><small>Runs a bounded coverage check and at most one"
+                                        + " targeted follow-up over uninspected high-risk hunks"
+                                        + " and changed files. Only adds latency when the review"
+                                        + " left a gap.</small></html>"));
+        JPanel secondReviewerField =
+                fieldWithHint(
+                        secondReviewerModelCombo,
+                        hintLabel(
+                                "<html><small>Optional. Runs a second Copilot model in parallel"
+                                        + " with either provider; findings are cross-validated."
+                                        + " Choose Off to disable.</small></html>"));
         JPanel intellijAssistedField =
                 fieldWithHint(
                         experimentalIntellijAssistedBox,
@@ -488,6 +517,11 @@ public class PluginSettingsComponent {
                         .addLabeledComponent(
                                 fieldLabel("Provider:", providerCombo), providerField, 1, false)
                         .addLabeledComponent(modelLabel, modelComboPanel, 1, false)
+                        .addLabeledComponent(
+                                fieldLabel("Second reviewer:", secondReviewerModelCombo),
+                                secondReviewerField,
+                                1,
+                                false)
                         .addComponentToRightColumn(advancedCopilotSection, 1)
                         .addSeparator(8)
                         .addComponent(sectionTitle("Review guidance"), 1)
@@ -816,6 +850,17 @@ public class PluginSettingsComponent {
         reviewSelfCritiqueBox.setSelected(v);
     }
 
+    public String getReviewSecondReviewerModel() {
+        Object editorValue = secondReviewerModelCombo.getEditor().getItem();
+        return editorValue != null ? editorValue.toString().trim() : "";
+    }
+
+    public void setReviewSecondReviewerModel(String value) {
+        String id = StringUtils.trimToEmpty(value);
+        secondReviewerModelCombo.setSelectedItem(id);
+        secondReviewerModelCombo.getEditor().setItem(id);
+    }
+
     public boolean isReviewSupervisorEnabled() {
         return reviewSupervisorBox.isSelected();
     }
@@ -1129,9 +1174,17 @@ public class PluginSettingsComponent {
     }
 
     List<String> getCopilotModelOptions() {
+        return comboItems(copilotModelCombo);
+    }
+
+    List<String> getSecondReviewerModelOptions() {
+        return comboItems(secondReviewerModelCombo);
+    }
+
+    private static List<String> comboItems(JComboBox<String> combo) {
         List<String> options = new ArrayList<>();
-        for (int i = 0; i < copilotModelCombo.getItemCount(); i++) {
-            options.add(copilotModelCombo.getItemAt(i));
+        for (int i = 0; i < combo.getItemCount(); i++) {
+            options.add(combo.getItemAt(i));
         }
         return options;
     }
@@ -1150,7 +1203,12 @@ public class PluginSettingsComponent {
      * empty-string entry first (it represents "CLI default routing").
      */
     private void mergeCopilotModelOptions(List<String> discovered) {
-        Object currentEditorValue = copilotModelCombo.getEditor().getItem();
+        mergeModelOptions(copilotModelCombo, discovered);
+        mergeModelOptions(secondReviewerModelCombo, discovered);
+    }
+
+    private static void mergeModelOptions(JComboBox<String> combo, List<String> discovered) {
+        Object currentEditorValue = combo.getEditor().getItem();
         String currentText = currentEditorValue != null ? currentEditorValue.toString() : "";
 
         LinkedHashSet<String> merged = new LinkedHashSet<>();
@@ -1160,9 +1218,9 @@ public class PluginSettingsComponent {
         if (!currentText.isBlank() && !merged.contains(currentText)) merged.add(currentText);
 
         List<String> ordered = new ArrayList<>(merged);
-        copilotModelCombo.setModel(new DefaultComboBoxModel<>(ordered.toArray(new String[0])));
-        copilotModelCombo.setSelectedItem(currentText);
-        copilotModelCombo.getEditor().setItem(currentText);
+        combo.setModel(new DefaultComboBoxModel<>(ordered.toArray(new String[0])));
+        combo.setSelectedItem(currentText);
+        combo.getEditor().setItem(currentText);
     }
 
     private static String selectedId(JComboBox<String> combo, List<ModelOption> options) {

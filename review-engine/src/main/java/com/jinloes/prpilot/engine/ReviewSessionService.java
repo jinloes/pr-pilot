@@ -81,19 +81,7 @@ public class ReviewSessionService implements ReviewEngineApi {
         throwIfInterrupted();
         requireValidGenerateParams(params);
         boolean copilot = "copilot".equals(params.provider());
-        PRReviewRequest request =
-                PRReviewRequest.builder(toPullRequest(params.pr()), params.diff())
-                        .priorReview(params.priorReview())
-                        .existingReviews(params.existingReviews())
-                        .repoGuidelines(params.repoGuidelines())
-                        .focusAreas(params.focusAreas())
-                        .customInstructions(params.customInstructions())
-                        .ciStatus(params.ciStatus())
-                        .commits(params.commits())
-                        .linkedIssue(params.linkedIssue())
-                        .repoProfile(params.repoProfile())
-                        .ciAnnotations(toCiAnnotations(params.ciAnnotations()))
-                        .build();
+        PRReviewRequest request = toReviewRequest(params);
         if (params.deepReview() != null) return generateDeep(params, request, onStatus, onChunk);
         if (copilot) {
             CancellationToken cancellationToken = new CancellationToken();
@@ -102,12 +90,14 @@ public class ReviewSessionService implements ReviewEngineApi {
                     startOperation(
                             params.operationId(), cancellationToken, service::cancelCurrentRequest);
             try {
-                return ReviewPipelineService.forCopilot(
-                                service,
-                                params.model(),
-                                params.effort(),
-                                params.inheritMcp(),
-                                params.configDir())
+                return withSecondReviewer(
+                                ReviewPipelineService.forCopilot(
+                                        service,
+                                        params.model(),
+                                        params.effort(),
+                                        params.inheritMcp(),
+                                        params.configDir()),
+                                params)
                         .review(
                                 request,
                                 params.chunkedReview(),
@@ -125,7 +115,8 @@ public class ReviewSessionService implements ReviewEngineApi {
                 startOperation(
                         params.operationId(), cancellationToken, service::cancelCurrentRequest);
         try {
-            return ReviewPipelineService.forClaude(service, params.model())
+            return withSecondReviewer(
+                            ReviewPipelineService.forClaude(service, params.model()), params)
                     .review(
                             request,
                             params.chunkedReview(),
@@ -136,6 +127,41 @@ public class ReviewSessionService implements ReviewEngineApi {
         } finally {
             activeOperations.finish(operation);
         }
+    }
+
+    static PRReviewRequest toReviewRequest(GenerateReviewParams params) {
+        return PRReviewRequest.builder(toPullRequest(params.pr()), params.diff())
+                .priorReview(params.priorReview())
+                .existingReviews(params.existingReviews())
+                .repoGuidelines(params.repoGuidelines())
+                .focusAreas(params.focusAreas())
+                .customInstructions(params.customInstructions())
+                .ciStatus(params.ciStatus())
+                .commits(params.commits())
+                .linkedIssue(params.linkedIssue())
+                .repoProfile(params.repoProfile())
+                .ciAnnotations(toCiAnnotations(params.ciAnnotations()))
+                .baseSha(params.baseSha())
+                .build();
+    }
+
+    /**
+     * Attaches the opt-in second Copilot reviewer for ordinary reviews. The reasoning effort is
+     * only meaningful for Copilot, so a Claude primary's effort is not forwarded.
+     */
+    static ReviewPipelineService withSecondReviewer(
+            ReviewPipelineService pipeline, GenerateReviewParams params) {
+        if (StringUtils.isBlank(params.secondReviewerModel())) {
+            return pipeline;
+        }
+        return pipeline.withSecondReviewer(
+                params.secondReviewerModel(), secondReviewerEffort(params), params.configDir());
+    }
+
+    static String secondReviewerEffort(GenerateReviewParams params) {
+        return "copilot".equals(params.provider())
+                ? params.effort()
+                : CopilotService.DEFAULT_REASONING_EFFORT;
     }
 
     private ReviewResult generateDeep(

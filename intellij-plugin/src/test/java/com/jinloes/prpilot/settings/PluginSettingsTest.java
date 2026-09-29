@@ -141,12 +141,25 @@ class PluginSettingsTest {
     }
 
     @Test
-    void reviewSupervisorDefaultsToFalseAndRoundTrips() {
+    void reviewSupervisorDefaultsToTrueAndRoundTrips() {
         PluginSettings settings = new PluginSettings();
 
+        assertThat(settings.isReviewSupervisorEnabled()).isTrue();
+        settings.setReviewSupervisorEnabled(false);
         assertThat(settings.isReviewSupervisorEnabled()).isFalse();
         settings.setReviewSupervisorEnabled(true);
         assertThat(settings.isReviewSupervisorEnabled()).isTrue();
+    }
+
+    @Test
+    void reviewSecondReviewerModelDefaultsToBlankAndRoundTripsTrimmed() {
+        PluginSettings settings = new PluginSettings();
+
+        assertThat(settings.getReviewSecondReviewerModel()).isEmpty();
+        settings.setReviewSecondReviewerModel("  gpt-5.4  ");
+        assertThat(settings.getReviewSecondReviewerModel()).isEqualTo("gpt-5.4");
+        settings.setReviewSecondReviewerModel(null);
+        assertThat(settings.getReviewSecondReviewerModel()).isEmpty();
     }
 
     @Test

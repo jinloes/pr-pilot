@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 /** Loads pull-request metadata without exposing GitHub credentials outside the sidecar process. */
 public final class PrDetailService {
     private static final Pattern REPOSITORY_SEGMENT = Pattern.compile("[A-Za-z0-9_.-]+");
+    private static final Pattern HEX_OBJECT_NAME = Pattern.compile("(?i)[0-9a-f]{40}|[0-9a-f]{64}");
 
     private final GitHubAuthService.TokenResolver tokenResolver;
     private final DetailClient detailClient;
@@ -154,7 +155,8 @@ public final class PrDetailService {
                             title,
                             description,
                             head,
-                            baseRepoFullName));
+                            baseRepoFullName,
+                            parseBaseSha(root.path("base"))));
         } catch (IOException exception) {
             return DetailResponse.of(DetailStatus.API_FAILED);
         }
@@ -194,6 +196,13 @@ public final class PrDetailService {
                 : repo.isObject() && repo.path("full_name").isTextual()
                         ? repo.path("full_name").textValue()
                         : null;
+    }
+
+    private static String parseBaseSha(JsonNode base) {
+        JsonNode sha = base.path("sha");
+        return sha.isTextual() && HEX_OBJECT_NAME.matcher(sha.textValue()).matches()
+                ? sha.textValue()
+                : null;
     }
 
     private static String nullableText(JsonNode node, String field) {

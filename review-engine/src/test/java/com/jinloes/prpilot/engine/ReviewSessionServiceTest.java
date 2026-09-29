@@ -4,16 +4,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.review.CancellationToken;
 import com.jinloes.prpilot.review.ClaudeService;
+import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
+import com.jinloes.prpilot.review.ReviewPipelineService;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -109,6 +115,84 @@ class ReviewSessionServiceTest {
 
             assertThatIllegalArgumentException()
                     .isThrownBy(() -> service.chat(bothForms, ignored -> {}));
+        }
+    }
+
+    @Nested
+    class ToReviewRequest {
+        private final ObjectMapper json = new ObjectMapper();
+
+        private Map<String, Object> params() {
+            Map<String, Object> pr = new LinkedHashMap<>();
+            pr.put("title", "T");
+            pr.put("htmlUrl", "https://github.com/o/r/pull/1");
+            pr.put("owner", "o");
+            pr.put("repo", "r");
+            pr.put("number", 1);
+            pr.put("body", "");
+            pr.put("author", "a");
+            pr.put("createdAt", "2024-01-01");
+            pr.put("isDraft", false);
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("operationId", "op-1");
+            params.put("provider", "claude");
+            params.put("projectDir", "");
+            params.put("pr", pr);
+            params.put("diff", "diff --git a/A b/A");
+            params.put("repoGuidelines", "host guidance");
+            return params;
+        }
+
+        private ReviewEngineApi.GenerateReviewParams decode(Map<String, Object> params) {
+            return json.convertValue(params, ReviewEngineApi.GenerateReviewParams.class);
+        }
+
+        @Test
+        void carriesTheBaseShaIntoTheReviewRequest() {
+            Map<String, Object> params = params();
+            params.put("baseSha", "b".repeat(40));
+            params.put("secondReviewerModel", "gpt-5");
+
+            ReviewEngineApi.GenerateReviewParams decoded = decode(params);
+            PRReviewRequest request = ReviewSessionService.toReviewRequest(decoded);
+
+            assertThat(decoded.secondReviewerModel()).isEqualTo("gpt-5");
+            assertThat(request.getBaseSha()).isEqualTo("b".repeat(40));
+            assertThat(request.getRepoGuidelines()).isEqualTo("host guidance");
+            assertThat(request.getPr().getNumber()).isEqualTo(1);
+        }
+
+        @Test
+        void olderHostsWithoutTheNewFieldsStillDeserialize() {
+            ReviewEngineApi.GenerateReviewParams decoded = decode(params());
+
+            assertThat(decoded.baseSha()).isNull();
+            assertThat(decoded.secondReviewerModel()).isNull();
+            assertThat(ReviewSessionService.toReviewRequest(decoded).getBaseSha()).isNullOrEmpty();
+        }
+
+        @Test
+        void secondReviewerEffortOnlyFollowsACopilotPrimary() {
+            Map<String, Object> copilot = params();
+            copilot.put("provider", "copilot");
+            copilot.put("effort", "low");
+            Map<String, Object> claude = params();
+            claude.put("effort", "max");
+
+            assertThat(ReviewSessionService.secondReviewerEffort(decode(copilot))).isEqualTo("low");
+            assertThat(ReviewSessionService.secondReviewerEffort(decode(claude)))
+                    .isEqualTo(CopilotService.DEFAULT_REASONING_EFFORT);
+        }
+
+        @Test
+        void aBlankSecondReviewerModelLeavesThePipelineUnchanged() {
+            ReviewPipelineService pipeline =
+                    ReviewPipelineService.forClaude(new ClaudeService(""), "");
+            Map<String, Object> params = params();
+            params.put("secondReviewerModel", "  ");
+
+            assertThat(ReviewSessionService.withSecondReviewer(pipeline, decode(params)))
+                    .isSameAs(pipeline);
         }
     }
 

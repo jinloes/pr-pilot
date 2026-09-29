@@ -243,8 +243,13 @@
         },
         "pr-pilot.reviewSupervisorEnabled": {
           "type": "boolean",
-          "default": false,
-          "description": "Run bounded coverage supervision and at most one targeted follow-up pass for high-risk changes the first pass did not inspect. Off by default because it adds latency."
+          "default": true,
+          "description": "Re-inspect coverage gaps: run bounded coverage supervision and at most one targeted follow-up pass for changed hunks and files the first pass did not record as inspected. On by default; turn it off to save latency."
+        },
+        "pr-pilot.reviewSecondReviewerModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Copilot model that reviews the same PR in parallel with the primary reviewer; its findings are cross-validated and merged. Leave blank to disable. Requires GitHub Copilot CLI and adds cost."
         },
         "pr-pilot.experimentalIntellijAssistedReview": {
           "type": "boolean",

@@ -54,10 +54,25 @@ test('reviewSelfCritique reader fallback matches the contribution default', () =
     assert.equal(readerFallback('reviewSelfCritique'), String(property.default));
 });
 
-test('reviewSupervisorEnabled defaults to off and matches the reader fallback', () => {
+test('reviewSupervisorEnabled defaults to on and matches the reader fallback', () => {
     const property = packageJsonDefaults()['pr-pilot.reviewSupervisorEnabled'] as { default: boolean };
-    assert.equal(property.default, false);
+    assert.equal(property.default, true);
     assert.equal(readerFallback('reviewSupervisorEnabled'), String(property.default));
+});
+
+test('reviewSecondReviewerModel defaults to blank in the contribution and both readers', () => {
+    const property = packageJsonDefaults()['pr-pilot.reviewSecondReviewerModel'] as { type: string; default: string };
+    assert.equal(property.type, 'string');
+    assert.equal(property.default, '');
+    for (const file of ['extension.ts', 'settings.ts']) {
+        const source = fs.readFileSync(path.join(extensionRoot, 'src', file), 'utf8');
+        assert.match(source, /c\.get<string>\('reviewSecondReviewerModel', ''\)\.trim\(\)/, file);
+    }
+});
+
+test('reviewSupervisorEnabled settings reader fallback matches the contribution default', () => {
+    const source = fs.readFileSync(path.join(extensionRoot, 'src', 'settings.ts'), 'utf8');
+    assert.match(source, /c\.get<boolean>\('reviewSupervisorEnabled', true\)/);
 });
 
 test('experimentalIntellijAssistedReview defaults to off and matches the reader fallback', () => {

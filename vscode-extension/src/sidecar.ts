@@ -206,6 +206,8 @@ export interface SidecarPrDetailResult {
         body: string;
         head: SidecarPrDetailHead | null;
         baseRepoFullName: string | null;
+        /** Full base commit SHA; null when GitHub omitted it or it was not a hex object id. */
+        baseSha: string | null;
     } | null;
 }
 
@@ -280,6 +282,10 @@ export interface SidecarGenerateReviewParams {
     configDir?: string;
     selfCritique: boolean;
     reviewSupervisorEnabled: boolean;
+    /** Optional Copilot model run as a parallel second reviewer; blank or absent disables it. */
+    secondReviewerModel?: string;
+    /** PR base commit; the engine reads trusted guidance and file history from it. */
+    baseSha?: string;
     chunkedReview: boolean;
     pr: SidecarPrInput;
     diff: string;
@@ -627,7 +633,8 @@ export function parsePrDetailResult(value: unknown): SidecarPrDetailResult | nul
     if (typeof detail.merged !== 'boolean'
         || typeof detail.title !== 'string'
         || typeof detail.body !== 'string'
-        || (detail.baseRepoFullName !== null && typeof detail.baseRepoFullName !== 'string')) {
+        || (detail.baseRepoFullName !== null && typeof detail.baseRepoFullName !== 'string')
+        || (detail.baseSha !== undefined && detail.baseSha !== null && typeof detail.baseSha !== 'string')) {
         return null;
     }
     let head: SidecarPrDetailHead | null = null;
@@ -656,6 +663,7 @@ export function parsePrDetailResult(value: unknown): SidecarPrDetailResult | nul
             body: detail.body,
             head,
             baseRepoFullName: typeof detail.baseRepoFullName === 'string' ? detail.baseRepoFullName : null,
+            baseSha: typeof detail.baseSha === 'string' ? detail.baseSha : null,
         },
     };
 }

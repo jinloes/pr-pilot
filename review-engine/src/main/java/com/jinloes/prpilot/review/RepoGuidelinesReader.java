@@ -236,7 +236,7 @@ public final class RepoGuidelinesReader {
         }
     }
 
-    private static String truncateUtf8(String content, int maxBytes) {
+    static String truncateUtf8(String content, int maxBytes) {
         int markerBytes = utf8Length(TRUNCATION_MARKER);
         if (maxBytes <= markerBytes) {
             return "";

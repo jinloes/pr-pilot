@@ -198,7 +198,8 @@ class IntellijGitHubServiceTest {
                             "Detailed title",
                             "Closes #7",
                             new PrDetail.Head("sha", "branch", "acme/widgets", "clone"),
-                            "acme/widgets");
+                            "acme/widgets",
+                            null);
             IntellijGitHubService service =
                     serviceOver(
                             new StubEngine() {
@@ -210,6 +211,47 @@ class IntellijGitHubServiceTest {
                             });
 
             assertThat(service.getPRDetail("acme", "widgets", 42)).isEqualTo(detail);
+        }
+    }
+
+    @Nested
+    class GetPRRevisions {
+
+        private IntellijGitHubService serviceReturning(PrDetail detail) {
+            return serviceOver(
+                    new StubEngine() {
+                        @Override
+                        public PrDetailResult getPullRequestDetail(
+                                PrDetailService.PrDetailParams params) {
+                            return new PrDetailResult("ok", "loaded", detail);
+                        }
+                    });
+        }
+
+        @Test
+        void returnsHeadAndBaseFromOneDetail() throws IOException {
+            String base = "c".repeat(40);
+            IntellijGitHubService service =
+                    serviceReturning(
+                            new PrDetail(
+                                    false,
+                                    "t",
+                                    "",
+                                    new PrDetail.Head("head-sha", "b", "acme/widgets", "clone"),
+                                    "acme/widgets",
+                                    base));
+
+            assertThat(service.getPRRevisions("acme", "widgets", 42))
+                    .isEqualTo(new IntellijGitHubService.PRRevisions("head-sha", base));
+        }
+
+        @Test
+        void missingBaseAndHeadBecomeBlank() throws IOException {
+            IntellijGitHubService service =
+                    serviceReturning(new PrDetail(false, "t", "", null, "acme/widgets", null));
+
+            assertThat(service.getPRRevisions("acme", "widgets", 42))
+                    .isEqualTo(new IntellijGitHubService.PRRevisions("", ""));
         }
     }
 

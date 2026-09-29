@@ -32,6 +32,9 @@ public final class PRReviewRequest {
     private final String repoProfile;
     private final java.util.List<CiAnnotation> ciAnnotations;
     private final SemanticReviewContext semanticContext;
+    private final String baseSha;
+    private final String fileHistory;
+    private final boolean candidateRecall;
 
     private PRReviewRequest(Builder builder) {
         this.pr = builder.pr;
@@ -47,6 +50,9 @@ public final class PRReviewRequest {
         this.linkedIssue = builder.linkedIssue;
         this.repoProfile = builder.repoProfile;
         this.semanticContext = copySemanticContext(builder.semanticContext);
+        this.baseSha = builder.baseSha;
+        this.fileHistory = builder.fileHistory;
+        this.candidateRecall = builder.candidateRecall;
         this.ciAnnotations =
                 builder.ciAnnotations == null
                         ? java.util.List.of()
@@ -132,10 +138,58 @@ public final class PRReviewRequest {
         return copySemanticContext(semanticContext);
     }
 
+    /**
+     * The PR's base commit SHA. The engine reads trusted repository guidance and file history from
+     * this commit, never from the author-controlled head. Null when unknown.
+     */
+    public String getBaseSha() {
+        return baseSha;
+    }
+
+    /** Rendered recent commit history of the changed files, reachable from the base commit. */
+    public String getFileHistory() {
+        return fileHistory;
+    }
+
+    /**
+     * Whether the primary pass should surface unconfirmed candidate findings as low-confidence
+     * notes. Only set when a validation pass will confirm or drop them.
+     */
+    public boolean isCandidateRecall() {
+        return candidateRecall;
+    }
+
     public PRReviewRequest withSemanticContext(SemanticReviewContext value) {
-        // Copies the already-split body and coverage verbatim; re-splitting could strip text.
-        return new Builder(pr, diff, diffCoverage)
-                .priorReview(priorReview)
+        return toBuilder().semanticContext(value).build();
+    }
+
+    /** Copies this request, replacing guidance and file history resolved from the base commit. */
+    public PRReviewRequest withBaseCommitContext(String guidelines, String history) {
+        return toBuilder().repoGuidelines(guidelines).fileHistory(history).build();
+    }
+
+    public PRReviewRequest withCandidateRecall(boolean value) {
+        return toBuilder().candidateRecall(value).build();
+    }
+
+    /**
+     * A builder pre-populated with every field of this request. Copies the already-split body and
+     * coverage verbatim; re-splitting could strip text.
+     */
+    public Builder toBuilder() {
+        return copyInto(new Builder(pr, diff, diffCoverage));
+    }
+
+    /**
+     * A builder pre-populated with every field of this request but a different diff. The new diff's
+     * trailer is stripped, and this request's coverage is carried over.
+     */
+    public Builder toBuilder(String newDiff) {
+        return copyInto(new Builder(pr, newDiff)).diffCoverage(diffCoverage);
+    }
+
+    private Builder copyInto(Builder builder) {
+        return builder.priorReview(priorReview)
                 .existingReviews(existingReviews)
                 .repoGuidelines(repoGuidelines)
                 .focusAreas(focusAreas)
@@ -145,8 +199,10 @@ public final class PRReviewRequest {
                 .linkedIssue(linkedIssue)
                 .repoProfile(repoProfile)
                 .ciAnnotations(ciAnnotations)
-                .semanticContext(value)
-                .build();
+                .semanticContext(semanticContext)
+                .baseSha(baseSha)
+                .fileHistory(fileHistory)
+                .candidateRecall(candidateRecall);
     }
 
     private static SemanticReviewContext copySemanticContext(SemanticReviewContext value) {
@@ -178,6 +234,9 @@ public final class PRReviewRequest {
         private String repoProfile;
         private java.util.List<CiAnnotation> ciAnnotations = java.util.List.of();
         private SemanticReviewContext semanticContext;
+        private String baseSha;
+        private String fileHistory;
+        private boolean candidateRecall;
 
         private Builder(PullRequest pr, String diff) {
             DiffCoverage.Split split = DiffCoverage.split(diff);
@@ -258,6 +317,21 @@ public final class PRReviewRequest {
 
         public Builder semanticContext(SemanticReviewContext value) {
             this.semanticContext = copySemanticContext(value);
+            return this;
+        }
+
+        public Builder baseSha(String value) {
+            this.baseSha = value;
+            return this;
+        }
+
+        public Builder fileHistory(String value) {
+            this.fileHistory = value;
+            return this;
+        }
+
+        public Builder candidateRecall(boolean value) {
+            this.candidateRecall = value;
             return this;
         }
     }

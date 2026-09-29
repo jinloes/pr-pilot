@@ -171,6 +171,17 @@ test('buildSettingsHtml renders reusable review-guidance profile controls', () =
     assert.match(html, /id="deleteGuidanceProfile"/);
     assert.match(html, /id="reviewSelfCritique"/);
     assert.match(html, /id="reviewSupervisorEnabled"/);
+    assert.match(html, /Re-inspect coverage gaps/);
+    assert.match(html, /<label for="reviewSecondReviewerModel">Second reviewer<\/label>/);
+    assert.match(html, /<select id="reviewSecondReviewerModel" aria-describedby="reviewSecondReviewerModelHint"><\/select>/);
+    assert.ok(
+        html.indexOf('id="reviewSecondReviewerModel"') > html.indexOf('id="copilotModelField"')
+            && html.indexOf('id="reviewSecondReviewerModel"') < html.indexOf('Review guidance</div>'),
+        'second reviewer sits in the Review provider section, after the model selector',
+    );
+    assert.match(html, /renderModelSelect\(\$\('reviewSecondReviewerModel'\), models, secondReviewer, 'Off'\)/);
+    assert.match(html, /save\('reviewSecondReviewerModel', secondReviewerValue\(\)\)/);
+    assert.match(html, /state\.reviewModelCopilot, \(state\.reviewSecondReviewerModel \|\| ''\)\.trim\(\)/);
     assert.match(html, /type: 'updateReviewGuidanceState'/);
     assert.match(html, /profiles: guidanceProfiles/);
     assert.match(html, /activeProfileId: activeGuidanceProfileId/);
@@ -415,7 +426,8 @@ function initState(repositoryReviewInstructions: Record<string, string>): Record
         githubBaseUrl: 'https://github.com', copilotInheritMcp: false, copilotAutoEnableMcpOnReview: false,
         copilotConfigDir: '', reviewFocusAreas: '', reviewCustomInstructions: '', reviewGuidanceGlobs: [],
         reviewGuidanceProfiles: [], activeReviewGuidanceProfileId: '', repositoryReviewInstructions,
-        reviewSelfCritique: true, reviewSupervisorEnabled: false, experimentalIntellijAssistedReview: false,
+        reviewSelfCritique: true, reviewSupervisorEnabled: true, reviewSecondReviewerModel: '',
+        experimentalIntellijAssistedReview: false,
         notificationsEnabled: false, notifyReviewRequested: true, notifyStarredRepos: false,
         notificationPollMinutes: 5, notificationHealth: EMPTY_NOTIFICATION_HEALTH,
     };

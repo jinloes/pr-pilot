@@ -68,6 +68,10 @@ sequenceDiagram
     end
     Note over Host,Pipeline: PRReviewRequest strips any trailer into DiffCoverage, so pr_diff never contains it.<br/>Incomplete coverage adds an escaped omitted_files section to review and critique prompts.
 
+    opt baseSha supplied
+        Pipeline->>Pipeline: BaseCommitContext reads guidance and changed-file history from base-commit git objects only (fetch by SHA if missing; fail-open)
+    end
+
     alt Direct review
         Pipeline->>Provider: Primary review with read-only worktree tools, of the 250 KB review diff for single-pass or the 1 MB validation diff for IntelliJ-assisted deep review
         Provider-->>Pipeline: Review JSON and inspection ledger
@@ -81,23 +85,31 @@ sequenceDiagram
         Provider-->>Pipeline: Complete reconciled review
     end
 
+    opt Second reviewer model configured (non-deep)
+        Note over Pipeline,Provider: Started in parallel with the primary; cancelled with it.
+        Pipeline->>Provider: Same request to the second Copilot model
+        Provider-->>Pipeline: Second review (errors and timeouts are ignored)
+        Pipeline->>Pipeline: Merge and deduplicate with the primary findings
+    end
+
     Note over Pipeline,Provider: Deep execution brackets every stage with authority checks.<br/>All request copies retain evidence and separate pinned skill instructions.<br/>Invalid authority fails the whole deep result, including earlier candidates.
     opt Supervisor enabled and high-risk gaps remain
         Pipeline->>Pipeline: Validate anchors and analyze inspection coverage
         opt More than three candidate gaps
             Pipeline->>Provider: Tool-free prioritization of supplied gap IDs
-            Provider-->>Pipeline: At most three selected targets
+            Provider-->>Pipeline: At most five selected targets
         end
-        Pipeline->>Provider: One targeted read-only follow-up with MCP disabled
+        Pipeline->>Provider: One targeted read-only follow-up with MCP disabled (gap hunks and uninspected files)
         Provider-->>Pipeline: Follow-up review and inspection ledger
         Pipeline->>Pipeline: Merge and deduplicate findings
     end
 
     opt Self-critique enabled
         Pipeline->>Pipeline: Build contract index from changed files, even for direct/single-batch reviews
-        Pipeline->>Provider: Validate findings against bounded context and contract index
+        Pipeline->>Provider: Validate findings against bounded context and contract index; confirm or drop recall candidates
         Provider-->>Pipeline: Refined review
     end
+    Pipeline->>Pipeline: Drop unconfirmed low-confidence candidates and cap the final comment count
 
     Pipeline->>Pipeline: Validate changed-line anchors and suppress CI duplicates
     opt IntelliJ-assisted execution
@@ -129,6 +141,8 @@ sequenceDiagram
 - GitHub HTTP 406 for a diff is attempted once and surfaces as `diff_too_large`, not a retryable
   API failure.
 - Primary provider failure is terminal.
+- Base-commit enrichment failures (unreachable commit, timeout, non-git directory) review without
+  base guidance or history. Second-reviewer failures are ignored.
 - Ordinary supervisor selection, targeted follow-up, and final critique failures keep the best
   valid review. Deep fallback candidates additionally require current engine-owned authority;
   stale native/physical evidence never becomes a success-shaped deep response.

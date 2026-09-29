@@ -180,7 +180,13 @@ Selection transitions atomically invalidate generation and chat IDs, detach the 
 
 ### Repository guidance confinement
 
-`RepoGuidelinesReader` treats configured paths and globs as untrusted input. It resolves from the repository's real root, rejects absolute and escaping paths, never follows symbolic-link path segments, and accepts only physically contained regular files. Its prompt cap is measured in UTF-8 bytes and truncation stops at a Unicode code-point boundary; host code must not replace these checks with `File.isFile`, string-prefix containment, or UTF-16 `String.length()` accounting. Guidance from a PR-head worktree is also author-controlled, so both hosts currently omit it from provider prompts. A future engine capability must resolve guidance from the GitHub-reported base commit before profiles/default guidance are re-enabled; PR guidance changes remain review evidence, never policy instructions.
+`RepoGuidelinesReader` treats configured paths and globs as untrusted input. It resolves from the repository's real root, rejects absolute and escaping paths, never follows symbolic-link path segments, and accepts only physically contained regular files. Its prompt cap is measured in UTF-8 bytes and truncation stops at a Unicode code-point boundary; host code must not replace these checks with `File.isFile`, string-prefix containment, or UTF-16 `String.length()` accounting. Guidance from a PR-head worktree is also author-controlled, so hosts never read it and always send `repoGuidelines` blank.
+
+### Review guidance and file history come from the base commit
+Hosts pass the GitHub-reported `baseSha` (`PrDetail.baseSha`, validated as a full hex object ID) on `PRReviewRequest`. Before the first provider call, `ReviewPipelineService` asks `BaseCommitContext` to resolve trusted guidance (root and changed-directory-scoped `AGENTS.md`/`CLAUDE.md`, `.linkedin/ai-agent/review_guidelines.md`, and contributing/PR-template files) and the recent commit history of each changed file, reading only base-commit git objects through read-only plumbing (`cat-file`, `ls-tree`, `log`) with per-command and overall time bounds. A missing base commit is fetched once from `origin` by SHA. Guidance is never read from the worktree or the head tree, so a PR cannot inject policy by editing guidance files — those edits remain review evidence only. Any failure (not a git work tree, malformed SHA, unreachable commit, timeout) degrades to an unenriched review; only cancellation propagates. Resolved base-commit guidance replaces host-supplied `repoGuidelines`; the host value (always blank today) is kept only when the base commit yields none.
+
+### Recall: second reviewer and candidate validation
+Recall is traded for precision in one place only: the final critique. When self-critique is on or a second reviewer is configured, the review prompt allows a bounded number of low-confidence `candidate` findings that the critique must confirm or drop; unconfirmed candidates never reach the user, even when critique itself fails. An optional second reviewer (`reviewSecondReviewerModel`, always a Copilot model) runs the same request in parallel with the primary; its findings are merged and deduplicated with the primary's before critique, it can never fail the review (its errors and timeouts are logged and ignored), and cancelling the primary cancels it. Its progress (started, still running, finished/failed) is reported only from the primary's thread, because host status sinks such as the sidecar's stdout are not thread-safe. The final comment count is capped after merging. The outcome log does not yet distinguish reviews that used a second reviewer.
 
 ### Chat pane structured verify/fix results
 The "Verify" and "Suggest fix" per-comment actions (`buildVerifyCommentPrompt`/`buildExampleFixPrompt` in `ReviewPane/verifyPrompt.ts`) instruct the model to return only a bare JSON object (no prose) matching one of two fixed schemas. Verification treats the supplied diff excerpt as primary evidence but may use provider read-only file tools against the detached PR-head worktree when the excerpt is insufficient; it must not use shell, write, network, or paths outside that worktree. The response records inspected repository-relative files/lines or symbols in `evidence`, which the UI renders so the reviewer can see what was checked without exposing tool arguments or file contents. `ChatPane` treats every assistant reply as potentially structured: `structuredResult.ts`'s `parseStructuredResult` tries to parse the content (tolerating a stray ```` ```json ```` fence some models add despite instructions) against the verify schema (`verdict`/`why`/`evidence`/`action`/`replacementComment`) and the example-fix schema (`approach`/`examplePatch`/`why`/`risks`/`testUpdates`/`missingContext`); a match renders a dedicated card (verdict badge, why, evidence, suggested replacement, etc.) instead of the raw JSON string being passed through the Markdown renderer, which previously showed the reviewer a wall of escaped-quote JSON text. Ordinary free-form chat replies simply fail both schema checks and fall back to the normal Markdown bubble. `parseStructuredResult` is applied both to finalized `chatResponse` messages and to the live `streaming` buffer (accumulated from `chatChunk` notifications) — without the latter, a completed structured JSON reply would render as raw escaped JSON text (with the streaming cursor still attached) for the entire duration the chunks are arriving, since the buffer only becomes valid JSON once the last chunk lands. If either prompt's JSON schema changes, `structuredResult.ts`'s parser and field rendering must be updated in lockstep.
@@ -357,7 +363,7 @@ Three parts of the pipeline previously treated `"confidence": "low"` as a way to
 
 The self-critique directive is keyed on `confidence`, not on type, for a related reason: its input is `draftReviewJson` over an already-parsed draft, so by then no low-confidence `"issue"` exists and the old "drop a low-confidence issue" rule could never match anything. It now requires each surviving low-confidence comment to be confirmed and raised, or dropped.
 
-`PROMPT_VERSION` is `2026-09-diff-coverage`. Outcome logging appends
+`PROMPT_VERSION` is `2026-10-recall`. Outcome logging appends
 `-supervisor-on` or `-supervisor-off`, so supervised and baseline results are not pooled.
 
 ### Prompt-injection hardening
@@ -468,18 +474,19 @@ the reviewer selecting the option.
 `primary/chunk batches -> reconciliation -> coverage analysis -> optional prioritization ->
 one targeted follow-up -> final self-critique -> deterministic CI suppression`.
 
-The persisted `reviewSupervisorEnabled` setting defaults to `false`. The base review emits an
+The persisted `reviewSupervisorEnabled` setting defaults to `true`. The base review emits an
 engine-internal inspection ledger in both modes so the output contract stays stable; when the
 setting is off, the engine does not analyze that ledger, make supervisor/follow-up calls, or filter
 anchors. When enabled:
 
 - `InspectionManifest` assigns stable IDs to changed files and hunks and records changed new-side
   lines. `ReviewPassParser` accepts only manifest IDs and repository-confined evidence paths.
-- `ReviewCoverageAnalyzer` deterministically identifies uninspected high-risk hunks. It does not
-  infer gaps when the provider omitted its ledger and caps candidates at 12.
+- `ReviewCoverageAnalyzer` deterministically identifies uninspected high-risk hunks, plus changed
+  files whose file ID and hunk IDs are all absent from the ledger (ranked below high-risk hunks). It
+  does not infer gaps when the provider omitted its ledger and caps candidates at 12.
 - Three or fewer gaps are prioritized deterministically. Larger sets get one tool-free,
   90-second provider call that sees only gap metadata and baseline finding locations and may select
-  at most three supplied IDs.
+  at most five supplied IDs.
 - The engine authors the follow-up objectives and allows one six-minute, read-only worktree pass
   with MCP disabled. Baseline and follow-up findings are merged and deduplicated.
 - `ReviewAnchorValidator` removes findings not attached to changed new-side lines before the
@@ -555,8 +562,14 @@ The `.vscode/launch.json` config `Run PR Pilot Extension Against Target Repo` pr
 - `repositoryReviewInstructions` (default `{}`; VS Code `pr-pilot.repositoryReviewInstructions`) — review instructions remembered per repository, keyed by lowercase `owner/repo` (at most 200 repositories and 10,000 characters each; `RepositoryReviewInstructions` in IntelliJ, `repositoryInstructions.ts` in VS Code). At generation each host prepends the entry for the PR's repository to the engine's existing `customInstructions` input under an `Instructions remembered for owner/repo:` heading, ahead of the per-review override or the resolved profile/default, so no engine or wire field exists for it. Hosts send the entry on every `draftLoaded` as `repositoryInstructions`; the review pane's "Remember for this repository" posts `saveRepositoryInstructions` and receives `repositoryInstructionsSaved` (normalized text, empty when forgotten) or `repositoryInstructionsSaveError`. Both settings UIs list remembered repositories for editing and Forget. Keys ignore the GitHub host, so same-named repositories on github.com and an enterprise host share an entry.
 - `activeReviewGuidanceProfileId` (default `""`) — selected profile ID; blank selects the built-in defaults stored in `reviewFocusAreas`, `reviewCustomInstructions`, and `reviewGuidanceGlobs`. Keeping those fields as the built-in profile makes upgrades migration-free.
 - `reviewSelfCritique` (default `true`) — runs a second validation pass (`ClaudeService.buildCritiquePrompt`) that re-checks every finding against a contract index derived from the changed files and the same context sections the first pass saw, dropping misattributed, unsupported, and CI-duplicated comments. On by default because a misattributed comment costs the reviewer more than the extra pass does; disabling it roughly halves review latency. Shared by both providers.
-- `reviewSupervisorEnabled` (default `false`) — checks the primary inspection ledger for unreviewed
-  high-risk hunks and may run one bounded, targeted read-only follow-up. Shared by both providers.
+- `reviewSupervisorEnabled` (default `true`; labeled "Re-inspect coverage gaps") — checks the primary
+  inspection ledger for unreviewed high-risk hunks and uninspected files and may run one bounded,
+  targeted read-only follow-up. Shared by both providers.
+- `reviewSecondReviewerModel` (default `""`; VS Code `pr-pilot.reviewSecondReviewerModel`) — optional
+  Copilot model run in parallel as a second reviewer whose findings are merged and cross-validated.
+  Blank disables it. Uses the primary's effort when the primary is Copilot, otherwise Copilot's
+  default effort. Sent to the engine as `secondReviewerModel`; ignored for IntelliJ-assisted deep
+  review. Shared by both hosts.
 - `experimentalIntellijAssistedReview` (default `false`; VS Code `pr-pilot.experimentalIntellijAssistedReview`) —
   experimental opt-in for IntelliJ-assisted review. Each host sends it to the webview as
   `intellijAssistedEnabled` on every `draftLoaded` and `prListLoaded` message. Anything other than
@@ -569,7 +582,7 @@ The `.vscode/launch.json` config `Run PR Pilot Extension Against Target Repo` pr
   review. Shared by both hosts.
 - `reviewGuidanceGlobs` (legacy, hidden) — retained in existing host settings and profiles for compatibility. It is not contributed as a public VS Code setting, rendered in either settings UI, or sent to a provider because the existing `reviews/readGuidelines` capability reads only the untrusted PR worktree.
 
-Profiles are host-owned settings/UI state, not an engine capability. Each host resolves the active profile into the existing engine inputs; focus areas and custom instructions remain active, while guidance globs wait for the base-commit capability. Per-review non-empty focus/custom-instruction overrides still take precedence over the resolved active profile.
+Profiles are host-owned settings/UI state, not an engine capability. Each host resolves the active profile into the existing engine inputs; focus areas and custom instructions remain active, while guidance globs stay inactive — base-commit guidance is discovered by the engine, not selected by globs. Per-review non-empty focus/custom-instruction overrides still take precedence over the resolved active profile.
 
 The VS Code equivalents live in `vscode-extension/package.json` under `contributes.configuration`. Each is declared twice — once as the contribution default, once as the fallback in `extension.ts`'s reader — and VS Code only honors the former, so a mismatch is silent. `vscode-extension/test/settingDefaults.test.ts` asserts the two agree for every boolean setting.
 

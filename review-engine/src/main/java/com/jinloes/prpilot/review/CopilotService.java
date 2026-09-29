@@ -63,6 +63,7 @@ public class CopilotService {
     public static final String DEFAULT_REASONING_EFFORT = "high";
 
     private final File workingDir;
+    private final File projectDir;
     private RuntimeFactory runtimeFactory = new SdkRuntimeFactory();
     private final AtomicReference<ActiveRun> activeRun = new AtomicReference<>();
     private final CancellationToken cancellationToken;
@@ -76,9 +77,10 @@ public class CopilotService {
     }
 
     public CopilotService(String projectDir, CancellationToken cancellationToken) {
+        this.projectDir = StringUtils.isNotBlank(projectDir) ? new File(projectDir) : null;
         this.workingDir =
-                StringUtils.isNotBlank(projectDir)
-                        ? new File(projectDir)
+                this.projectDir != null
+                        ? this.projectDir
                         : new File(System.getProperty("user.home", "/"));
         this.cancellationToken = Objects.requireNonNull(cancellationToken);
     }
@@ -171,7 +173,8 @@ public class CopilotService {
         }
         onStatus.accept(STATUS_PARSING);
         try {
-            return ReviewPassParser.parse(raw, manifest, workingDir);
+            return ReviewPassParser.parse(
+                    raw, manifest, workingDir, ClaudeService.maxComments(request));
         } catch (Exception parseEx) {
             log.warn("Failed to parse Copilot review JSON (output chars: {})", raw.length());
             throw new IOException("Failed to parse review JSON from Copilot output.", parseEx);
@@ -198,6 +201,11 @@ public class CopilotService {
                 timeoutMillis,
                 onStatus,
                 null);
+    }
+
+    /** The PR checkout this service reviews, or null when it was built without one. */
+    File projectDir() {
+        return projectDir;
     }
 
     void throwIfCancelled() throws InterruptedException {

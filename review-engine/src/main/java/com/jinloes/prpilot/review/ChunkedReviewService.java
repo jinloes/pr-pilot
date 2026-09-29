@@ -142,20 +142,7 @@ public final class ChunkedReviewService {
 
     private static PRReviewRequest copyRequest(
             PRReviewRequest source, String diff, String customInstructions) {
-        return PRReviewRequest.builder(source.getPr(), diff)
-                .priorReview(source.getPriorReview())
-                .existingReviews(source.getExistingReviews())
-                .repoGuidelines(source.getRepoGuidelines())
-                .focusAreas(source.getFocusAreas())
-                .customInstructions(customInstructions)
-                .ciStatus(source.getCiStatus())
-                .commits(source.getCommits())
-                .linkedIssue(source.getLinkedIssue())
-                .repoProfile(source.getRepoProfile())
-                .ciAnnotations(source.getCiAnnotations())
-                .semanticContext(source.getSemanticContext())
-                .diffCoverage(source.diffCoverage())
-                .build();
+        return source.toBuilder(diff).customInstructions(customInstructions).build();
     }
 
     static ReviewResult mergeFallback(List<ReviewResult> results) {

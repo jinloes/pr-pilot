@@ -36,6 +36,7 @@ import com.jinloes.prpilot.sidecar.repo.DetectStatus;
 import java.io.IOException;
 import java.util.List;
 import java.util.function.Supplier;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * IntelliJ adapter over the shared Java GitHub engine. All calls execute in the IDE JVM.
@@ -200,6 +201,18 @@ public final class IntellijGitHubService {
         return head == null ? "" : head.sha();
     }
 
+    /**
+     * Head and base commit SHAs from one PR-detail fetch. Either may be blank when GitHub omits it;
+     * the base SHA is only ever a validated full hex object id.
+     */
+    public PRRevisions getPRRevisions(String owner, String repo, int number) throws IOException {
+        PrDetail detail = getPRDetail(owner, repo, number);
+        PrDetail.Head head = detail.head();
+        return new PRRevisions(
+                head == null ? "" : StringUtils.defaultString(head.sha()),
+                StringUtils.defaultString(detail.baseSha()));
+    }
+
     public PRHeadInfo getPRHeadInfo(String owner, String repo, int number) throws IOException {
         PrDetail detail = getPRDetail(owner, repo, number);
         PrDetail.Head head = detail.head();
@@ -361,6 +374,8 @@ public final class IntellijGitHubService {
      * agent.
      */
     public record PRHeadInfo(String ref, String sha, boolean isFork, String forkCloneUrl) {}
+
+    public record PRRevisions(String headSha, String baseSha) {}
 
     public record PullRequestList(
             List<PullRequest> pullRequests,

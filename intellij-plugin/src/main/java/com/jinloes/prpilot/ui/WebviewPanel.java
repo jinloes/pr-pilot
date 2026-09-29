@@ -1714,8 +1714,12 @@ public class WebviewPanel implements Disposable {
                             // diff none of them abort the flow.
                             String ciStatus = "";
                             List<CiAnnotation> ciAnnotations = List.of();
+                            String baseSha = "";
                             try {
-                                String headSha = ghSvc.getPRHeadSha(owner, repo, number);
+                                IntellijGitHubService.PRRevisions revisions =
+                                        ghSvc.getPRRevisions(owner, repo, number);
+                                baseSha = revisions.baseSha();
+                                String headSha = revisions.headSha();
                                 if (StringUtils.isNotBlank(headSha)) {
                                     IntellijGitHubService.CheckContext checks =
                                             ghSvc.getCheckContext(owner, repo, headSha);
@@ -1815,10 +1819,11 @@ public class WebviewPanel implements Disposable {
                                     generationId,
                                     new ReviewGeneratingMsg(
                                             "reviewGenerating", key, "Sending review request…"));
-                            // Guidance in the PR worktree is authored by the change under review.
-                            // Do not treat it as provider instructions until the engine can resolve
-                            // it from the trusted base commit.
+                            // Guidance in the PR worktree is authored by the change under review,
+                            // so the host never reads it. The engine resolves guidance and file
+                            // history from the trusted base commit identified by baseSha.
                             final String finalGuidelines = "";
+                            final String finalBaseSha = baseSha;
                             final String finalPriorReview = formatPriorReview(priorResult);
                             final String finalFocusAreas =
                                     StringUtils.isNotBlank(overrideFocusAreas)
@@ -1852,6 +1857,7 @@ public class WebviewPanel implements Disposable {
                                             .linkedIssue(finalLinkedIssue)
                                             .repoProfile(finalRepoProfile)
                                             .ciAnnotations(finalCiAnnotations)
+                                            .baseSha(finalBaseSha)
                                             .build(),
                                     generationSettings.runtime(),
                                     chunkedReview,

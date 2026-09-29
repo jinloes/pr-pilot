@@ -2,8 +2,12 @@ package com.jinloes.prpilot.sidecar.pr;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class PrDetailServiceTest {
@@ -139,6 +143,50 @@ class PrDetailServiceTest {
                 .isEqualTo(PrDetailService.DetailStatus.API_FAILED);
     }
 
+    @Nested
+    class BaseSha {
+        private final ObjectMapper json = new ObjectMapper();
+
+        private String payload(Object baseSha) throws Exception {
+            Map<String, Object> base = new LinkedHashMap<>();
+            base.put("repo", Map.of("full_name", "acme/widgets"));
+            if (baseSha != NO_SHA) base.put("sha", baseSha);
+            Map<String, Object> root = new LinkedHashMap<>();
+            root.put("merged", false);
+            root.put("title", "t");
+            root.put("body", "b");
+            root.put("head", null);
+            root.put("base", base);
+            return json.writeValueAsString(root);
+        }
+
+        private static final Object NO_SHA = new Object();
+
+        @Test
+        void keepsA40Or64HexBaseSha() throws Exception {
+            String sha1 = "0123456789abcdefABCDEF0123456789abcdef01";
+            String sha256 = "c".repeat(64);
+
+            assertThat(PrDetailService.parseDetailResponse(payload(sha1)).detail().baseSha())
+                    .isEqualTo(sha1);
+            assertThat(PrDetailService.parseDetailResponse(payload(sha256)).detail().baseSha())
+                    .isEqualTo(sha256);
+        }
+
+        @Test
+        void missingOrMalformedBaseShaIsNullWithoutFailingTheDetail() throws Exception {
+            for (Object value :
+                    new Object[] {NO_SHA, null, 42, "abc", "g".repeat(40), "a".repeat(41)}) {
+                PrDetailService.DetailResponse response =
+                        PrDetailService.parseDetailResponse(payload(value));
+
+                assertThat(response.status()).isEqualTo(PrDetailService.DetailStatus.OK);
+                assertThat(response.detail().baseSha()).isNull();
+                assertThat(response.detail().baseRepoFullName()).isEqualTo("acme/widgets");
+            }
+        }
+    }
+
     private PrDetailService.PrDetailParams params(String baseUrl) {
         return new PrDetailService.PrDetailParams(baseUrl, "acme", "widgets", 42);
     }
@@ -150,6 +198,7 @@ class PrDetailServiceTest {
                 "Description",
                 new PrDetail.Head(
                         "abc", "feature", "acme/widgets", "https://github.com/acme/widgets.git"),
-                "acme/widgets");
+                "acme/widgets",
+                "b".repeat(40));
     }
 }

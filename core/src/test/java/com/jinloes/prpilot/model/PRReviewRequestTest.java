@@ -205,4 +205,94 @@ class PRReviewRequestTest {
                     .isInstanceOf(NullPointerException.class);
         }
     }
+
+    @Nested
+    class ToBuilder {
+        private static final String SHA = "a".repeat(40);
+
+        private PRReviewRequest full() {
+            SemanticReviewContext semantic = new SemanticReviewContext();
+            semantic.setEvidence("evidence");
+            return PRReviewRequest.builder(pr(), "diff")
+                    .priorReview("prior")
+                    .existingReviews("existing")
+                    .repoGuidelines("guidelines")
+                    .focusAreas("focus")
+                    .customInstructions("custom")
+                    .ciStatus("ci")
+                    .commits("commits")
+                    .linkedIssue("issue")
+                    .repoProfile("profile")
+                    .ciAnnotations(List.of(new CiAnnotation()))
+                    .semanticContext(semantic)
+                    .baseSha(SHA)
+                    .fileHistory("history")
+                    .candidateRecall(true)
+                    .diffCoverage(new DiffCoverage(1, List.of("x"), 10, true))
+                    .build();
+        }
+
+        @Test
+        void roundTripsEveryField() {
+            PRReviewRequest source = full();
+            PRReviewRequest copy = source.toBuilder().build();
+
+            assertThat(copy).usingRecursiveComparison().isEqualTo(source);
+            assertThat(copy.getBaseSha()).isEqualTo(SHA);
+            assertThat(copy.getFileHistory()).isEqualTo("history");
+            assertThat(copy.isCandidateRecall()).isTrue();
+        }
+
+        @Test
+        void aNewDiffKeepsEveryOtherFieldAndTheSourceCoverage() {
+            PRReviewRequest source = full();
+            PRReviewRequest copy = source.toBuilder("other").customInstructions("new").build();
+
+            assertThat(copy.getDiff()).isEqualTo("other");
+            assertThat(copy.getCustomInstructions()).isEqualTo("new");
+            assertThat(copy.diffCoverage()).isEqualTo(source.diffCoverage());
+            assertThat(copy.getBaseSha()).isEqualTo(SHA);
+            assertThat(copy.getFileHistory()).isEqualTo("history");
+            assertThat(copy.isCandidateRecall()).isTrue();
+            assertThat(copy.getSemanticContext().getEvidence()).isEqualTo("evidence");
+        }
+
+        @Test
+        void newFieldsDefaultToAbsent() {
+            PRReviewRequest request = new PRReviewRequest(pr(), "diff");
+
+            assertThat(request.getBaseSha()).isNull();
+            assertThat(request.getFileHistory()).isNull();
+            assertThat(request.isCandidateRecall()).isFalse();
+        }
+
+        @Test
+        void withSemanticContextPreservesTheNewFields() {
+            PRReviewRequest deep = full().withSemanticContext(new SemanticReviewContext());
+
+            assertThat(deep.getBaseSha()).isEqualTo(SHA);
+            assertThat(deep.getFileHistory()).isEqualTo("history");
+            assertThat(deep.isCandidateRecall()).isTrue();
+        }
+
+        @Test
+        void withBaseCommitContextReplacesGuidanceAndHistoryOnly() {
+            PRReviewRequest source = full();
+            PRReviewRequest enriched = source.withBaseCommitContext("base rules", "base history");
+
+            assertThat(enriched.getRepoGuidelines()).isEqualTo("base rules");
+            assertThat(enriched.getFileHistory()).isEqualTo("base history");
+            assertThat(enriched.getCustomInstructions()).isEqualTo("custom");
+            assertThat(source.getRepoGuidelines()).isEqualTo("guidelines");
+        }
+
+        @Test
+        void withCandidateRecallTogglesOnlyTheFlag() {
+            PRReviewRequest off = full().withCandidateRecall(false);
+
+            assertThat(off.isCandidateRecall()).isFalse();
+            assertThat(off.getBaseSha()).isEqualTo(SHA);
+            assertThat(off.withCandidateRecall(true).isCandidateRecall()).isTrue();
+        }
+    }
 }

@@ -77,14 +77,17 @@ guidance.
 - `review/ClaudeService.java` - Claude CLI execution, canonical review/chat prompts, and review category parsing including compatibility findings.
 - `review/CopilotService.java` - Copilot SDK execution with the same review API.
 - `review/ChunkedReviewService.java` - Shared diff batching, contract-index generation, and mandatory global reconciliation.
-- `review/ReviewPipelineService.java` - Shared primary/chunked orchestration, bounded supervision,
-  final critique, cancellation checkpoints, fallback behavior, and final CI suppression.
+- `review/ReviewPipelineService.java` - Shared primary/chunked orchestration, base-commit context
+  enrichment, optional parallel Copilot second reviewer, bounded supervision, recall-candidate
+  critique, cancellation checkpoints, fallback behavior, final CI suppression, and the final comment cap.
+- `review/BaseCommitContext.java` - Trusted guidance files and changed-file commit history read only
+  from the PR base commit's git objects, time-bounded and fail-open. Tests: `BaseCommitContextTest`.
 - `review/InspectionManifest.java`, `ReviewPassParser.java`, `InspectionLedger.java`, and
   `EvidenceRef.java` - Stable changed targets plus validated inspection/evidence accounting.
 - `review/ReviewCoverageAnalyzer.java`, `CoverageGap.java`, `ReviewSupervisorPrompts.java`, and
   `FollowUpDirective.java` - High-risk gap detection and bounded follow-up selection.
-- `review/ReviewAnchorValidator.java` and `ReviewResultMerger.java` - Changed-line filtering and
-  baseline/follow-up deduplication.
+- `review/ReviewAnchorValidator.java` and `ReviewResultMerger.java` - Changed-line filtering,
+  baseline/follow-up/second-reviewer deduplication, low-confidence candidate removal, and the final cap.
 - `review/CancellationToken.java` - Shared cancellation state.
 - `review/BoundedProcessRunner.java` - Bounded subprocess lifecycle and output draining;
   opt-in owned-tree termination/waiting and separate stderr rejection for inventory launches.
@@ -300,7 +303,8 @@ VS Code host integration. All GitHub and review generation routes through the Ja
 ### Review generation
 
 `ReviewPane`/`App.tsx` -> host bridge -> `ReviewEngineApi` -> `ReviewSessionService` ->
-`ReviewPipelineService` -> direct or chunked primary pass -> optional bounded supervisor/follow-up ->
+`ReviewPipelineService` -> base-commit guidance/history enrichment -> direct or chunked primary pass
+(plus optional parallel second reviewer, merged) -> optional bounded supervisor/follow-up ->
 contract-index-backed final critique/CI suppression -> status/chunk notifications -> host bridge -> shared webview.
 
 ### GitHub operations

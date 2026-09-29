@@ -42,11 +42,13 @@ flowchart LR
         subgraph ReviewEngine["review-engine/"]
             ReviewApi["ReviewEngineApi"]
             Session["ReviewSessionService"]
-            Pipeline["ReviewPipelineService<br/>primary or chunked review,<br/>bounded supervision,<br/>critique, CI suppression"]
+            Pipeline["ReviewPipelineService<br/>primary or chunked review,<br/>optional second reviewer,<br/>bounded supervision,<br/>critique, CI suppression"]
+            BaseContext["BaseCommitContext<br/>base-commit guidance and history"]
             Worktrees["GitWorktreeService"]
             Outcomes["ReviewOutcomeLog"]
             ReviewApi --> Session
             Session --> Pipeline
+            Pipeline --> BaseContext
             Session --> Worktrees
             Session --> Outcomes
         end
@@ -72,6 +74,7 @@ flowchart LR
     GitHubServices --> GhCli
     GitHubServices <--> GitHub
     Worktrees <--> Checkout
+    BaseContext -. read-only base-commit git objects .-> Checkout
     Pipeline <--> Provider
     Outcomes --> OutcomeData
     ToolWindow --> HostState

@@ -302,6 +302,76 @@ class ChunkedReviewServiceTest {
         }
     }
 
+    @Nested
+    class RecallContextCopies {
+        private static final String BASE_SHA = "a".repeat(40);
+
+        private PRReviewRequest recallRequest() {
+            return PRReviewRequest.builder(pr(), sevenFileSignatureDiff())
+                    .baseSha(BASE_SHA)
+                    .fileHistory("## Api.java\nabc1234 2026-01-01 Tighten the contract")
+                    .candidateRecall(true)
+                    .build();
+        }
+
+        @Test
+        void batchAndReconciliationRequestsKeepRecallHistoryAndBaseSha() throws Exception {
+            List<PRReviewRequest> requests = new ArrayList<>();
+
+            new ChunkedReviewService()
+                    .review(
+                            recallRequest(),
+                            ignored -> {},
+                            current -> {
+                                requests.add(current);
+                                return new ReviewResult("ok", "APPROVE", List.of());
+                            });
+
+            assertThat(requests)
+                    .hasSize(3)
+                    .allSatisfy(
+                            current -> {
+                                assertThat(current.isCandidateRecall()).isTrue();
+                                assertThat(current.getBaseSha()).isEqualTo(BASE_SHA);
+                                assertThat(current.getFileHistory())
+                                        .contains("Tighten the contract");
+                            });
+        }
+
+        @Test
+        void finalValidationKeepsRecallHistoryAndBaseSha() {
+            PRReviewRequest validation =
+                    new ChunkedReviewService().finalValidationRequest(recallRequest());
+
+            assertThat(validation.isCandidateRecall()).isTrue();
+            assertThat(validation.getBaseSha()).isEqualTo(BASE_SHA);
+            assertThat(validation.getFileHistory()).contains("Tighten the contract");
+        }
+
+        @Test
+        void defaultRequestsKeepRecallOffAndContextBlank() throws Exception {
+            List<PRReviewRequest> requests = new ArrayList<>();
+
+            new ChunkedReviewService()
+                    .review(
+                            PRReviewRequest.builder(pr(), sevenFileSignatureDiff()).build(),
+                            ignored -> {},
+                            current -> {
+                                requests.add(current);
+                                return new ReviewResult("ok", "APPROVE", List.of());
+                            });
+
+            assertThat(requests)
+                    .hasSize(3)
+                    .allSatisfy(
+                            current -> {
+                                assertThat(current.isCandidateRecall()).isFalse();
+                                assertThat(current.getBaseSha()).isNullOrEmpty();
+                                assertThat(current.getFileHistory()).isNullOrEmpty();
+                            });
+        }
+    }
+
     private static PullRequest pr() {
         return new PullRequest(
                 "Change API",

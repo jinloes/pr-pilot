@@ -832,6 +832,8 @@ interface ReviewGenerationSettings {
     configDir: string;
     selfCritique: boolean;
     supervisorEnabled: boolean;
+    /** Optional parallel Copilot reviewer; blank disables it. */
+    secondReviewerModel: string;
     githubBaseUrl: string;
     guidance: ResolvedReviewGuidance;
 }
@@ -864,7 +866,8 @@ function snapshotReviewGenerationSettings(): ReviewGenerationSettings {
             : false,
         configDir: selectedProvider === 'copilot' ? c.get<string>('copilotConfigDir', '').trim() : '',
         selfCritique: c.get<boolean>('reviewSelfCritique', true),
-        supervisorEnabled: c.get<boolean>('reviewSupervisorEnabled', false),
+        supervisorEnabled: c.get<boolean>('reviewSupervisorEnabled', true),
+        secondReviewerModel: c.get<string>('reviewSecondReviewerModel', '').trim(),
         githubBaseUrl: c.get<string>('githubBaseUrl', 'https://github.com'),
         guidance,
     };
@@ -1373,10 +1376,13 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         // Phase 1 prompt context. Fetched in parallel and best-effort: every one of these degrades
         // to an omitted prompt section rather than failing the review, so none is awaited
         // individually or allowed to reject. Mirrors WebviewPanel's context block.
-        const headSha = await sidecarClient
+        const revisions = await sidecarClient
             .getPullRequestDetail(base, owner, repo, number)
-            .then((d) => (d.status === 'ok' ? d.detail?.head?.sha ?? '' : ''))
-            .catch(() => '');
+            .then((d) => (d.status === 'ok'
+                ? { headSha: d.detail?.head?.sha ?? '', baseSha: d.detail?.baseSha ?? '' }
+                : { headSha: '', baseSha: '' }))
+            .catch(() => ({ headSha: '', baseSha: '' }));
+        const headSha = revisions.headSha;
         const commitsPromise = sidecarClient.getCommits(base, owner, repo, number);
         const [checkStatus, commits, linkedIssue, repoProfile] = await Promise.all([
             headSha
@@ -1424,6 +1430,8 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 configDir: isCopilot ? settings.configDir : undefined,
                 selfCritique: settings.selfCritique,
                 reviewSupervisorEnabled: settings.supervisorEnabled,
+                secondReviewerModel: settings.secondReviewerModel || undefined,
+                baseSha: revisions.baseSha || undefined,
                 chunkedReview: msg.chunkedReview === true,
                 pr: {
                     title,
@@ -1443,8 +1451,8 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 diff,
                 priorReview,
                 existingReviews,
-                // Guidance in the PR worktree is authored by the change under review. Do not treat
-                // it as provider instructions until the engine can resolve it from the base commit.
+                // Guidance in the PR worktree is authored by the change under review, so the host
+                // never reads it; the engine resolves guidance and file history from baseSha.
                 repoGuidelines: '',
                 focusAreas,
                 customInstructions,

@@ -53,6 +53,7 @@ export interface SettingsState {
     repositoryReviewInstructions: Record<string, string>;
     reviewSelfCritique: boolean;
     reviewSupervisorEnabled: boolean;
+    reviewSecondReviewerModel: string;
     experimentalIntellijAssistedReview: boolean;
     notificationsEnabled: boolean;
     notifyReviewRequested: boolean;
@@ -322,6 +323,12 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       <div class="hint">Pick a discovered model. Choose "CLI default" to use the Copilot CLI's own routing.</div>
     </div>
 
+    <div class="field">
+      <label for="reviewSecondReviewerModel">Second reviewer</label>
+      <select id="reviewSecondReviewerModel" aria-describedby="reviewSecondReviewerModelHint"></select>
+      <div class="hint" id="reviewSecondReviewerModelHint">Optional. Runs a second Copilot model in parallel with either provider; findings are cross-validated. Choose Off to disable.</div>
+    </div>
+
     <details id="advancedCopilot" class="advanced hidden">
       <summary>Advanced Copilot options</summary>
       <div class="hint">Optional controls for reasoning depth, MCP access, and Copilot config discovery.</div>
@@ -391,8 +398,8 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
     </div>
 
     <div class="field">
-      <label><input type="checkbox" id="reviewSupervisorEnabled" style="width:auto;margin-right:6px;">Inspect high-risk coverage gaps</label>
-      <div class="hint">Runs a bounded coverage check and at most one targeted follow-up. Off by default because it adds latency.</div>
+      <label><input type="checkbox" id="reviewSupervisorEnabled" style="width:auto;margin-right:6px;">Re-inspect coverage gaps</label>
+      <div class="hint">Runs a bounded coverage check and at most one targeted follow-up for changed code the first pass did not inspect. On by default; turn off to save latency.</div>
     </div>
   </div>
 
@@ -526,21 +533,30 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
         : 'Notification polling failed: ' + (health.message || 'Unknown error.') + when;
   }
 
-  function renderCopilotModels(models, current) {
-    const sel = $('copilotModel');
+  function renderModelSelect(sel, models, current, blankLabel) {
     sel.innerHTML = '';
     const def = document.createElement('option');
     def.value = CLI_DEFAULT;
-    def.textContent = 'CLI default (unset)';
+    def.textContent = blankLabel;
     sel.appendChild(def);
-    for (const id of models) {
+    const ids = current && !models.includes(current) ? [...models, current] : models;
+    for (const id of ids) {
       const o = document.createElement('option');
       o.value = id;
       o.textContent = id;
       sel.appendChild(o);
     }
-    // The host appends the currently saved ID to the option list when needed.
     sel.value = current || CLI_DEFAULT;
+  }
+
+  function renderCopilotModels(models, current, secondReviewer) {
+    renderModelSelect($('copilotModel'), models, current, 'CLI default (unset)');
+    renderModelSelect($('reviewSecondReviewerModel'), models, secondReviewer, 'Off');
+  }
+
+  function secondReviewerValue() {
+    const sel = $('reviewSecondReviewerModel').value;
+    return sel === CLI_DEFAULT ? '' : sel;
   }
 
   function copilotModelValue() {
@@ -791,6 +807,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   });
   $('reviewSelfCritique').addEventListener('change', () => save('reviewSelfCritique', $('reviewSelfCritique').checked));
   $('reviewSupervisorEnabled').addEventListener('change', () => save('reviewSupervisorEnabled', $('reviewSupervisorEnabled').checked));
+  $('reviewSecondReviewerModel').addEventListener('change', () => save('reviewSecondReviewerModel', secondReviewerValue()));
   $('experimentalIntellijAssistedReview').addEventListener('change', () => save('experimentalIntellijAssistedReview', $('experimentalIntellijAssistedReview').checked));
   $('notificationsEnabled').addEventListener('change', () => {
     state.notificationsEnabled = $('notificationsEnabled').checked;
@@ -861,12 +878,12 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       $('notificationPollMinutes').value = String(state.notificationPollMinutes || 5);
       applyNotificationVisibility(state.notificationsEnabled);
       renderNotificationHealth(state.notificationHealth);
-      renderCopilotModels(msg.copilotModels || [], state.reviewModelCopilot);
+      renderCopilotModels(msg.copilotModels || [], state.reviewModelCopilot, (state.reviewSecondReviewerModel || '').trim());
       if (msg.refreshingModels === true) setModelsRefreshing(true);
       applyProviderVisibility(state.provider);
     } else if (msg.type === 'models') {
       setModelsRefreshing(false);
-      renderCopilotModels(msg.copilotModels || [], copilotModelValue());
+      renderCopilotModels(msg.copilotModels || [], copilotModelValue(), secondReviewerValue());
       // The automatic refresh on open stays silent when it succeeds; failures always explain why
       // the list may be stale.
       if (msg.quiet !== true || msg.ok === false) {

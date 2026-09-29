@@ -13,6 +13,7 @@ import com.jinloes.prpilot.settings.PluginSettings;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * IntelliJ adapter that fronts both the Claude and Copilot CLI backends. The active provider is
@@ -42,6 +43,7 @@ public class IntellijClaudeService {
         private final String configDir;
         private final boolean selfCritique;
         private final boolean supervisorEnabled;
+        private final String secondReviewerModel;
 
         private ReviewRuntimeSettings(
                 ReviewProvider provider,
@@ -51,7 +53,8 @@ public class IntellijClaudeService {
                 boolean forceMcpOnReview,
                 String configDir,
                 boolean selfCritique,
-                boolean supervisorEnabled) {
+                boolean supervisorEnabled,
+                String secondReviewerModel) {
             this.provider = provider;
             this.model = model;
             this.effort = effort;
@@ -60,6 +63,7 @@ public class IntellijClaudeService {
             this.configDir = configDir;
             this.selfCritique = selfCritique;
             this.supervisorEnabled = supervisorEnabled;
+            this.secondReviewerModel = StringUtils.defaultString(secondReviewerModel);
         }
 
         public ReviewProvider provider() {
@@ -74,6 +78,20 @@ public class IntellijClaudeService {
             return supervisorEnabled;
         }
 
+        public String secondReviewerModel() {
+            return secondReviewerModel;
+        }
+
+        /**
+         * Reasoning effort for the second Copilot reviewer: the configured effort only applies when
+         * the primary is Copilot, since Claude efforts are not Copilot values.
+         */
+        String secondReviewerEffort() {
+            return provider == ReviewProvider.COPILOT
+                    ? effort
+                    : CopilotService.DEFAULT_REASONING_EFFORT;
+        }
+
         public Object identity() {
             return java.util.Arrays.asList(
                     provider,
@@ -83,7 +101,8 @@ public class IntellijClaudeService {
                     forceMcpOnReview,
                     configDir,
                     selfCritique,
-                    supervisorEnabled);
+                    supervisorEnabled,
+                    secondReviewerModel);
         }
     }
 
@@ -257,6 +276,13 @@ public class IntellijClaudeService {
                                                     settings.inheritMcp, settings.forceMcpOnReview),
                                             settings.configDir)
                                     : ReviewPipelineService.forClaude(claude, settings.model);
+                    if (StringUtils.isNotBlank(settings.secondReviewerModel)) {
+                        pipeline =
+                                pipeline.withSecondReviewer(
+                                        settings.secondReviewerModel,
+                                        settings.secondReviewerEffort(),
+                                        settings.configDir);
+                    }
                     return pipeline.review(
                             request,
                             chunkedReview,
@@ -423,7 +449,8 @@ public class IntellijClaudeService {
                 settings.isCopilotAutoEnableMcpOnReview(),
                 settings.getCopilotConfigDir(),
                 settings.isReviewSelfCritique(),
-                settings.isReviewSupervisorEnabled());
+                settings.isReviewSupervisorEnabled(),
+                settings.getReviewSecondReviewerModel());
     }
 
     private static <T> void runOnPooledThread(

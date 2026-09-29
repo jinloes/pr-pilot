@@ -363,6 +363,7 @@ class PluginSettingsComponentTest {
         PluginSettingsComponent component = harness.component();
         harness.runBackground();
         component.setReviewModelCopilot("custom-model");
+        component.setReviewSecondReviewerModel("m2");
         catalog.next = account("m1", "m2");
 
         component.getRefreshModelsButton().doClick();
@@ -372,6 +373,8 @@ class PluginSettingsComponentTest {
         assertThat(component.getCopilotModelOptions())
                 .containsExactly("", "m1", "m2", "custom-model");
         assertThat(component.getReviewModelCopilot()).isEqualTo("custom-model");
+        assertThat(component.getSecondReviewerModelOptions()).containsExactly("", "m1", "m2");
+        assertThat(component.getReviewSecondReviewerModel()).isEqualTo("m2");
     }
 
     private static void verifyModelsFailedRefresh() {
@@ -590,6 +593,25 @@ class PluginSettingsComponentTest {
                         .toList();
         assertThat(sectionOrder).isSorted();
 
+        AbstractButton supervisor = button(panel, "Re-inspect coverage gaps");
+        assertFieldWithHint(supervisor, hintContaining(panel, "bounded coverage check"));
+        JComponent secondReviewer = (JComponent) label(panel, "Second reviewer:").getLabelFor();
+        assertThat(secondReviewer).isInstanceOf(JComboBox.class);
+        assertThat(indexContaining(texts, "Second reviewer:"))
+                .isGreaterThan(indexContaining(texts, "Review provider"))
+                .isLessThan(indexContaining(texts, "Review guidance"));
+        JLabel secondReviewerHint = hintContaining(panel, "Runs a second Copilot model");
+        assertFieldWithHint(secondReviewer, secondReviewerHint);
+        assertThat(secondReviewerHint.getText())
+                .contains("in parallel with either provider")
+                .contains("Choose Off to disable.");
+        assertThat(component.getReviewSecondReviewerModel()).isEmpty();
+        component.setReviewSecondReviewerModel(" gpt-5.4 ");
+        assertThat(((JComboBox<?>) secondReviewer).getEditor().getItem()).isEqualTo("gpt-5.4");
+        assertThat(component.getReviewSecondReviewerModel()).isEqualTo("gpt-5.4");
+        component.setReviewSecondReviewerModel(null);
+        assertThat(component.getReviewSecondReviewerModel()).isEmpty();
+
         AbstractButton validation = button(panel, "Validate findings with a second pass");
         JLabel validationHint = hintContaining(panel, "roughly doubles review time");
         assertThat(validationHint.getText()).contains("improve precision");
@@ -774,6 +796,16 @@ class PluginSettingsComponentTest {
         configurable.apply();
         assertThat(settings.isExperimentalIntellijAssistedReview()).isFalse();
         assertThat(configurable.isModified()).isFalse();
+
+        assertThat(component.isReviewSupervisorEnabled()).isTrue();
+        component.setReviewSecondReviewerModel("gpt-5.4");
+        assertThat(configurable.isModified()).isTrue();
+        configurable.apply();
+        assertThat(settings.getReviewSecondReviewerModel()).isEqualTo("gpt-5.4");
+        assertThat(configurable.isModified()).isFalse();
+        component.setReviewSecondReviewerModel("");
+        configurable.reset();
+        assertThat(component.getReviewSecondReviewerModel()).isEqualTo("gpt-5.4");
         assertThat(home.resolve(".pr-pilot")).doesNotExist();
     }
 
