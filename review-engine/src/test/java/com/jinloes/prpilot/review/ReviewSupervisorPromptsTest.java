@@ -115,7 +115,7 @@ class ReviewSupervisorPromptsTest {
                     PRReviewRequest.builder(pr(), DIFF)
                             .baseSha("a".repeat(40))
                             .build()
-                            .withBaseCommitContext("guidance", "history")
+                            .withBaseCommitContext("guidance", "history", "sites")
                             .withCandidateRecall(true);
 
             PRReviewRequest followUp = followUpFor(original);
@@ -123,6 +123,7 @@ class ReviewSupervisorPromptsTest {
             assertThat(followUp.getBaseSha()).isEqualTo("a".repeat(40));
             assertThat(followUp.getRepoGuidelines()).isEqualTo("guidance");
             assertThat(followUp.getFileHistory()).isEqualTo("history");
+            assertThat(followUp.getCallSites()).isEqualTo("sites");
             assertThat(followUp.isCandidateRecall()).isTrue();
         }
 

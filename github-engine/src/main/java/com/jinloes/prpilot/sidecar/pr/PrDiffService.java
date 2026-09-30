@@ -173,6 +173,16 @@ public final class PrDiffService {
     }
 
     /**
+     * Bounds a locally rendered unified diff exactly as a review-mode fetch would, so offline tools
+     * such as the review benchmark hand the model the same diff shape the hosts do.
+     */
+    public static PrDiffResult boundReviewDiff(InputStream input) throws IOException {
+        Response response =
+                bound(input, REVIEW_LIMIT_BYTES, PER_FILE_CAP_BYTES, SCAN_CEILING_BYTES);
+        return PrDiffResult.success(response.diff(), response.truncated(), REVIEW_LIMIT_BYTES);
+    }
+
+    /**
      * Streams a unified diff and keeps whole file sections only, so a bounded diff never splits a
      * UTF-8 sequence or a hunk. Sections over {@code perFileCap} are dropped as they stream; while
      * the kept total exceeds {@code limitBytes} the largest kept section is evicted (ties: the

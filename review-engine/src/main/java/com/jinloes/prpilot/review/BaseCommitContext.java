@@ -16,7 +16,8 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Reads trusted review context from a pull request's <b>base</b> commit: repository guidance
- * documents and the recent history of each changed file.
+ * documents, the recent history of each changed file, and textual call sites of the declarations
+ * the diff changes.
  *
  * <p>Guidance at the PR head is author-controlled, so it is never read from the worktree or the
  * head tree. Every read goes through read-only git plumbing against the base commit's objects, with
@@ -30,6 +31,12 @@ final class BaseCommitContext {
     static final int MAX_HISTORY_BYTES = 4_000;
     static final int MAX_HISTORY_FILES = 20;
     static final int MAX_BLOB_BYTES = 64 * 1024;
+    static final int MAX_CALL_SITES_BYTES = 6_000;
+    static final int MAX_CALL_SITE_FILES = 10;
+    static final int MAX_CALL_SITES_PER_SYMBOL = 8;
+    static final int MAX_LISTED_REFERENCES = 40;
+    static final int MAX_CALL_SITE_LINE_CHARS = 160;
+    private static final long CALL_SITES_TIMEOUT_SECONDS = 30;
     private static final int HISTORY_COMMITS_PER_FILE = 3;
     private static final long COMMAND_TIMEOUT_SECONDS = 15;
     private static final long FETCH_TIMEOUT_SECONDS = 60;
@@ -45,9 +52,9 @@ final class BaseCommitContext {
                     "docs/CONTRIBUTING.md",
                     ".github/pull_request_template.md");
 
-    /** Resolved context; either part is empty when unavailable. */
-    record Result(String guidelines, String fileHistory) {
-        static final Result EMPTY = new Result("", "");
+    /** Resolved context; any part is empty when unavailable. */
+    record Result(String guidelines, String fileHistory, String callSites) {
+        static final Result EMPTY = new Result("", "", "");
     }
 
     /** Checked before every git command so a cancelled review stops promptly. */
@@ -128,9 +135,12 @@ final class BaseCommitContext {
             log.warn("Could not resolve base commit {}; reviewing without guidance", baseSha, e);
             return Result.EMPTY;
         }
+        String guidelines = guidelines(repoDir, baseSha, changedPaths, deadline);
+        String fileHistory = fileHistory(repoDir, baseSha, changedPaths, deadline);
         return new Result(
-                guidelines(repoDir, baseSha, changedPaths, deadline),
-                fileHistory(repoDir, baseSha, changedPaths, deadline));
+                guidelines,
+                fileHistory,
+                callSites(repoDir, baseSha, changedPaths, manifest, deadline));
     }
 
     private boolean commitExists(File repoDir, String sha, Deadline deadline)
@@ -320,6 +330,143 @@ final class BaseCommitContext {
             return "";
         }
         return sb.toString();
+    }
+
+    /**
+     * Lists base-commit lines outside the changed files that mention each changed declaration by
+     * whole word. The matches are textual, so they can include unrelated symbols that share a name;
+     * the prompt says so. Runs last, with its own sub-budget, so a large repository cannot starve
+     * guidance or history.
+     */
+    private String callSites(
+            File repoDir,
+            String baseSha,
+            List<String> changedPaths,
+            InspectionManifest manifest,
+            Deadline overall)
+            throws InterruptedException {
+        List<ChangedSymbols.Symbol> symbols = ChangedSymbols.extract(manifest);
+        if (symbols.isEmpty()) return "";
+        Deadline deadline =
+                new Deadline(
+                        Math.min(
+                                overall.deadlineNanos(),
+                                System.nanoTime()
+                                        + TimeUnit.SECONDS.toNanos(CALL_SITES_TIMEOUT_SECONDS)),
+                        overall.cancellation());
+        Set<String> changed = Set.copyOf(changedPaths);
+        String prefix = baseSha + ":";
+        StringBuilder sb = new StringBuilder();
+        int total = 0;
+        for (ChangedSymbols.Symbol symbol : symbols) {
+            String section;
+            try {
+                section = callSiteSection(repoDir, baseSha, prefix, changed, symbol, deadline);
+            } catch (IOException e) {
+                log.debug("Skipping call sites for {}: {}", symbol.name(), e.getMessage());
+                continue;
+            } catch (TimeoutException e) {
+                log.warn("Call-site search ran out of time; using the sites found so far");
+                break;
+            }
+            if (section.isEmpty()) continue;
+            String block = (sb.length() == 0 ? "" : "\n\n") + section;
+            int bytes = utf8Length(block);
+            if (total + bytes > MAX_CALL_SITES_BYTES) break;
+            sb.append(block);
+            total += bytes;
+        }
+        return sb.toString();
+    }
+
+    private String callSiteSection(
+            File repoDir,
+            String baseSha,
+            String prefix,
+            Set<String> changed,
+            ChangedSymbols.Symbol symbol,
+            Deadline deadline)
+            throws IOException, TimeoutException, InterruptedException {
+        GitOutput counts =
+                git(
+                        repoDir,
+                        deadline,
+                        "grep",
+                        "-z",
+                        "-c",
+                        "-I",
+                        "-w",
+                        "-F",
+                        "-e",
+                        symbol.name(),
+                        baseSha);
+        if (counts.exitCode() != 0) return "";
+        List<String> files = new ArrayList<>();
+        int references = 0;
+        for (String line : counts.output().split("\n")) {
+            int separator = line.indexOf('\0');
+            if (separator < 0 || !line.startsWith(prefix)) continue;
+            String path = line.substring(prefix.length(), separator);
+            if (changed.contains(path)) continue;
+            try {
+                references += Integer.parseInt(line.substring(separator + 1).trim());
+            } catch (NumberFormatException e) {
+                continue;
+            }
+            files.add(path);
+        }
+        if (files.isEmpty()) return "";
+        String header =
+                "## "
+                        + symbol.name()
+                        + " ("
+                        + (symbol.declarationChanged() ? "declaration" : "body")
+                        + " changed in "
+                        + symbol.path()
+                        + ")";
+        if (references > MAX_LISTED_REFERENCES) {
+            return header
+                    + "\n"
+                    + references
+                    + " references in "
+                    + files.size()
+                    + " files outside the changed files; too many to list";
+        }
+        List<String> args =
+                new ArrayList<>(
+                        List.of(
+                                "grep",
+                                "-z",
+                                "-n",
+                                "-I",
+                                "-w",
+                                "-F",
+                                "-e",
+                                symbol.name(),
+                                baseSha,
+                                "--"));
+        args.addAll(files.stream().limit(MAX_CALL_SITE_FILES).toList());
+        GitOutput matches = git(repoDir, deadline, args.toArray(String[]::new));
+        if (matches.exitCode() != 0) return "";
+        StringBuilder sb = new StringBuilder(header);
+        int listed = 0;
+        for (String line : matches.output().split("\n")) {
+            if (listed == MAX_CALL_SITES_PER_SYMBOL) break;
+            String[] parts = line.split("\0", 3);
+            if (parts.length < 3 || !parts[0].startsWith(prefix)) continue;
+            String content = parts[2].strip();
+            if (content.length() > MAX_CALL_SITE_LINE_CHARS) {
+                content = content.substring(0, MAX_CALL_SITE_LINE_CHARS) + "...";
+            }
+            sb.append('\n')
+                    .append(parts[0].substring(prefix.length()))
+                    .append(':')
+                    .append(parts[1])
+                    .append(": ")
+                    .append(content);
+            listed++;
+        }
+        return listed == 0 ? "" : sb.toString();
     }
 
     private GitOutput git(File dir, Deadline deadline, String... args)

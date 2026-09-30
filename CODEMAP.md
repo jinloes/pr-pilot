@@ -18,6 +18,7 @@ Lookup guide for implementation work. Read this file when locating code or tests
 | Change notifications | `intellij-plugin/.../PRNotificationService.java` | `vscode-extension/src/notifications.ts`, both host lifecycle entry points | Notification tests in both hosts |
 | Change local draft/index persistence | `PendingReviewIndex.java`, `DraftRecoveryStore.java`, `SeenPRSet.java`, `vscode-extension/src/draftRecovery.ts` | Both host lifecycle callers; persistence contract in `ARCHITECTURE.md` | Matching IntelliJ and VS Code service tests |
 | Change packaging or releases | `.github/workflows/`, module build files | VS Code staging scripts, root Gradle configuration | CI workflow commands and sidecar smoke test |
+| Measure review recall against Mae | `review-benchmark/.../benchmark/ReviewBenchmark.java` | `MaeComments.java`, `LocalCheckout.java`, `FindingMatcher.java`, `LlmJudge.java`, `BenchmarkReport.java` | `review-benchmark/src/test/.../benchmark/` |
 | Select a local IntelliJ sandbox without changing the compile SDK | `gradle/intellij-sandbox.gradle`, `intellij-plugin/build.gradle` | `runIdeLocal`, `printSandboxIdeSelection` | `gradle/intellij-sandbox-tests.gradle` / `:intellij-plugin:testSandboxIdeSelection` |
 
 Paths below omit `src/main/java/com/jinloes/prpilot/` and equivalent test roots where the module
@@ -76,12 +77,16 @@ guidance.
 - `engine/ReviewSessionService.java` - Provider dispatch and operation-scoped cancellation.
 - `review/ClaudeService.java` - Claude CLI execution, canonical review/chat prompts, and review category parsing including compatibility findings.
 - `review/CopilotService.java` - Copilot SDK execution with the same review API.
+- `review/PromptCompleter.java` - One-shot provider-neutral prompt completion used by development tools such as the recall benchmark.
 - `review/ChunkedReviewService.java` - Shared diff batching, contract-index generation, and mandatory global reconciliation.
 - `review/ReviewPipelineService.java` - Shared primary/chunked orchestration, base-commit context
   enrichment, optional parallel Copilot second reviewer, bounded supervision, recall-candidate
   critique, cancellation checkpoints, fallback behavior, final CI suppression, and the final comment cap.
-- `review/BaseCommitContext.java` - Trusted guidance files and changed-file commit history read only
-  from the PR base commit's git objects, time-bounded and fail-open. Tests: `BaseCommitContextTest`.
+- `review/BaseCommitContext.java` - Trusted guidance files, changed-file commit history and textual
+  call sites read only from the PR base commit's git objects, time-bounded and fail-open. Tests:
+  `BaseCommitContextTest`.
+- `review/ChangedSymbols.java` - Extracts the existing declarations a diff changes (removed-line
+  declarations, then hunk-header context) for the call-site search. Tests: `ChangedSymbolsTest`.
 - `review/InspectionManifest.java`, `ReviewPassParser.java`, `InspectionLedger.java`, and
   `EvidenceRef.java` - Stable changed targets plus validated inspection/evidence accounting.
 - `review/ReviewCoverageAnalyzer.java`, `CoverageGap.java`, `ReviewSupervisorPrompts.java`, and
@@ -156,6 +161,21 @@ Thin Java 17, non-web Spring Boot stdio JSON-RPC adapter used only by VS Code.
 - `src/main/resources/logback-spring.xml` - Stderr logging; stdout remains protocol-only.
 - `EngineCapabilityCoverageTest.java` - Enforces declaration, registration, and advertisement parity.
 - Other tests mirror the frame codec and RPC server.
+
+### `review-benchmark/`
+
+Developer-only CLI (`./gradlew :review-benchmark:reviewBenchmark`) that measures PR Pilot's recall
+against Mae's GitHub review comments. It is not shipped with either host.
+
+- `benchmark/ReviewBenchmark.java` - Entry point and per-PR orchestration.
+- `benchmark/BenchmarkOptions.java` - Argument parsing, defaults, and usage.
+- `benchmark/PrRef.java` - `owner/repo#N` and PR-URL parsing.
+- `benchmark/MaeComments.java` - Paginated review-comment fetch, Mae filtering, and first-reviewed-commit baseline.
+- `benchmark/LocalCheckout.java` - Worktree at the reviewed commit and a locally rendered, bounded diff.
+- `benchmark/FindingMatcher.java` - Same-file/nearby-line candidate pairing and one-to-one assignment.
+- `benchmark/LlmJudge.java` - Model judge prompt and JSON verdict parsing for candidate pairs.
+- `benchmark/BenchmarkReport.java` - Totals and Markdown/JSON report rendering.
+- Tests mirror each class; `LocalCheckoutTest` uses real git in temp directories.
 
 ### `intellij-plugin/`
 

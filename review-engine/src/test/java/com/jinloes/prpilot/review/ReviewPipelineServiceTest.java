@@ -1010,7 +1010,9 @@ class ReviewPipelineServiceTest {
                                 resolvedShas.add(sha);
                                 return new BaseCommitContext.Result(
                                         "## AGENTS.md\nBase rule.",
-                                        "## src/Api.java\nabc1234 2026-01-01 Keep it stable");
+                                        "## src/Api.java\nabc1234 2026-01-01 Keep it stable",
+                                        "## save (declaration changed in src/Api.java)\n"
+                                                + "src/Caller.java:7: api.save(x);");
                             })
                     .review(
                             request(oneRiskyHunk()).toBuilder().baseSha(BASE_SHA).build(),
@@ -1026,7 +1028,9 @@ class ReviewPipelineServiceTest {
             assertThat(reviewed.getRepoGuidelines()).isEqualTo("## AGENTS.md\nBase rule.");
             assertThat(reviewed.getFileHistory()).contains("Keep it stable");
             assertThat(provider.completeCalls.get(0).prompt())
-                    .contains("<file_history>", "Keep it stable");
+                    .contains("<file_history>", "Keep it stable")
+                    .contains("<call_sites>", "src/Caller.java:7: api.save(x);");
+            assertThat(reviewed.getCallSites()).contains("api.save(x)");
         }
 
         @Test

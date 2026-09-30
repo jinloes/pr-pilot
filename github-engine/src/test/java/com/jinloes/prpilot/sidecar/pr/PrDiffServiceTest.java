@@ -315,6 +315,36 @@ class PrDiffServiceTest {
             assertThat(split.coverage().paths()).containsExactly("a.txt");
         }
 
+        @Test
+        void boundReviewDiffAppliesTheReviewLimitToALocalDiff() throws IOException {
+            String small = section("small.txt", 1_000);
+            String large = section("large.txt", REVIEW);
+
+            PrDiffResult result =
+                    PrDiffService.boundReviewDiff(
+                            new ByteArrayInputStream(
+                                    (small + large).getBytes(StandardCharsets.UTF_8)));
+
+            assertThat(result.status()).isEqualTo("ok");
+            assertThat(result.truncated()).isTrue();
+            assertThat(result.limitBytes()).isEqualTo(REVIEW);
+            DiffCoverage.Split split = DiffCoverage.split(result.diff());
+            assertThat(split.body()).isEqualTo(small);
+            assertThat(split.coverage().paths()).containsExactly("large.txt");
+        }
+
+        @Test
+        void boundReviewDiffReturnsASmallLocalDiffUnchanged() throws IOException {
+            String diff = section("a.txt", 2_000);
+
+            PrDiffResult result =
+                    PrDiffService.boundReviewDiff(
+                            new ByteArrayInputStream(diff.getBytes(StandardCharsets.UTF_8)));
+
+            assertThat(result.diff()).isEqualTo(diff);
+            assertThat(result.truncated()).isFalse();
+        }
+
         private static PrDiffService.Response bound(String diff, int limit) throws IOException {
             return PrDiffService.bound(
                     new ByteArrayInputStream(diff.getBytes(StandardCharsets.UTF_8)),

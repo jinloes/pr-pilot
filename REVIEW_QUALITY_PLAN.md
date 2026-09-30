@@ -49,7 +49,7 @@ a `java.io.File` (`WebviewPanel.java:929-930`).
 | Base-branch file contents | ❌ Diff only |
 | Repo language / build system | ❌ Not collected |
 | Static analysis results | ❌ None |
-| Callers / callees of changed code | ❌ None |
+| Callers / callees of changed code | ✅ Textual base-commit call sites (`<call_sites>`); PSI enrichment not built |
 
 ### 2.3 Dead and mis-defaulted machinery — ✅ all resolved
 

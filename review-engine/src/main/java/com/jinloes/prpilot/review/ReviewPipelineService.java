@@ -269,7 +269,8 @@ public final class ReviewPipelineService {
                 StringUtils.isBlank(resolved.guidelines())
                         ? request.getRepoGuidelines()
                         : resolved.guidelines();
-        return request.withBaseCommitContext(guidelines, resolved.fileHistory());
+        return request.withBaseCommitContext(
+                guidelines, resolved.fileHistory(), resolved.callSites());
     }
 
     private ReviewPassResult reviewPasses(

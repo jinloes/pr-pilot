@@ -227,6 +227,7 @@ class PRReviewRequestTest {
                     .semanticContext(semantic)
                     .baseSha(SHA)
                     .fileHistory("history")
+                    .callSites("sites")
                     .candidateRecall(true)
                     .diffCoverage(new DiffCoverage(1, List.of("x"), 10, true))
                     .build();
@@ -253,6 +254,7 @@ class PRReviewRequestTest {
             assertThat(copy.diffCoverage()).isEqualTo(source.diffCoverage());
             assertThat(copy.getBaseSha()).isEqualTo(SHA);
             assertThat(copy.getFileHistory()).isEqualTo("history");
+            assertThat(copy.getCallSites()).isEqualTo("sites");
             assertThat(copy.isCandidateRecall()).isTrue();
             assertThat(copy.getSemanticContext().getEvidence()).isEqualTo("evidence");
         }
@@ -263,6 +265,7 @@ class PRReviewRequestTest {
 
             assertThat(request.getBaseSha()).isNull();
             assertThat(request.getFileHistory()).isNull();
+            assertThat(request.getCallSites()).isNull();
             assertThat(request.isCandidateRecall()).isFalse();
         }
 
@@ -278,10 +281,12 @@ class PRReviewRequestTest {
         @Test
         void withBaseCommitContextReplacesGuidanceAndHistoryOnly() {
             PRReviewRequest source = full();
-            PRReviewRequest enriched = source.withBaseCommitContext("base rules", "base history");
+            PRReviewRequest enriched =
+                    source.withBaseCommitContext("base rules", "base history", "base sites");
 
             assertThat(enriched.getRepoGuidelines()).isEqualTo("base rules");
             assertThat(enriched.getFileHistory()).isEqualTo("base history");
+            assertThat(enriched.getCallSites()).isEqualTo("base sites");
             assertThat(enriched.getCustomInstructions()).isEqualTo("custom");
             assertThat(source.getRepoGuidelines()).isEqualTo("guidelines");
         }

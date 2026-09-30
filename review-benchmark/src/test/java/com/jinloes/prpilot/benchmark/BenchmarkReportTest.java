@@ -1,0 +1,136 @@
+package com.jinloes.prpilot.benchmark;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import org.apache.commons.io.file.PathUtils;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+
+class BenchmarkReportTest {
+    private static final PrRef PR_A = new PrRef("https://github.com", "o", "a", 1);
+    private static final PrRef PR_B = new PrRef("https://github.com", "o", "b", 2);
+    private static final Finding M1 = new Finding("M1", "A.java", 3, "Null | deref");
+    private static final Finding M2 = new Finding("M2", "B.java", 0, "Missing test");
+    private static final Finding P1 = new Finding("P1", "A.java", 4, "null");
+    private static final Finding P2 = new Finding("P2", "C.java", 1, "extra");
+    private static final BenchmarkReport.Settings SETTINGS =
+            new BenchmarkReport.Settings("copilot", "", "", "", true, false, "llm", "", 10);
+
+    private static BenchmarkReport.PrResult scored(
+            PrRef pr,
+            int mae,
+            List<BenchmarkReport.Match> matches,
+            List<BenchmarkReport.Miss> misses,
+            List<Finding> extras) {
+        return new BenchmarkReport.PrResult(
+                pr.label(),
+                "https://github.com/x",
+                "scored",
+                "",
+                "c".repeat(40),
+                61_000,
+                false,
+                mae,
+                matches.size() + extras.size(),
+                matches,
+                misses,
+                extras);
+    }
+
+    private static BenchmarkReport report() {
+        return BenchmarkReport.of(
+                "2024-01-01T00:00:00Z",
+                SETTINGS,
+                List.of(
+                        scored(
+                                PR_A,
+                                2,
+                                List.of(new BenchmarkReport.Match(M1, P1)),
+                                List.of(
+                                        new BenchmarkReport.Miss(
+                                                M2, FindingMatcher.NO_NEARBY_FINDING)),
+                                List.of(P2)),
+                        scored(
+                                PR_B,
+                                1,
+                                List.of(),
+                                List.of(
+                                        new BenchmarkReport.Miss(
+                                                M1, FindingMatcher.JUDGED_DIFFERENT)),
+                                List.of()),
+                        BenchmarkReport.PrResult.notScored(PR_B, "u", "skipped", "none"),
+                        BenchmarkReport.PrResult.notScored(PR_A, "u", "failed", "boom")));
+    }
+
+    @Nested
+    class Totals {
+        @Test
+        void countsOnlyScoredPrsTowardRecall() {
+            BenchmarkReport.Totals totals = report().totals();
+            assertThat(totals.prs()).isEqualTo(4);
+            assertThat(totals.scored()).isEqualTo(2);
+            assertThat(totals.skipped()).isEqualTo(1);
+            assertThat(totals.failed()).isEqualTo(1);
+            assertThat(totals.maeFindings()).isEqualTo(3);
+            assertThat(totals.matched()).isEqualTo(1);
+            assertThat(totals.prPilotFindings()).isEqualTo(2);
+            assertThat(totals.recall()).isEqualTo(1.0 / 3);
+            assertThat(totals.meanPrRecall()).isEqualTo(0.25);
+        }
+
+        @Test
+        void recallIsZeroWithNothingScored() {
+            assertThat(BenchmarkReport.Totals.of(List.of()).recall()).isZero();
+        }
+    }
+
+    @Nested
+    class Markdown {
+        @Test
+        void summarizesRecallAndListsMissesWithReasons() {
+            String md = report().markdown();
+            assertThat(md)
+                    .contains("| Recall (matched / Mae findings) | 33.3% (1 / 3) |")
+                    .contains("| PRs scored / skipped / failed | 2 / 1 / 1 |")
+                    .contains(
+                            "| [o/a#1](https://github.com/x) | scored | 2 | 1 | 50.0% | 2 | 61s |")
+                    .contains("- `B.java` — no PR Pilot finding nearby: Missing test")
+                    .contains("- `A.java:3` — nearby finding judged different: Null \\| deref")
+                    .contains("- o/a#1 (failed): boom");
+        }
+    }
+
+    @Nested
+    class Write {
+        private Path dir;
+
+        @BeforeEach
+        void setUp() throws Exception {
+            dir = Files.createTempDirectory("benchmark-report");
+        }
+
+        @AfterEach
+        void tearDown() throws Exception {
+            PathUtils.deleteDirectory(dir);
+        }
+
+        @Test
+        void writesMarkdownAndJson() throws Exception {
+            ObjectMapper mapper = new ObjectMapper();
+            Path md = report().write(dir.resolve("out"), "benchmark-x", mapper);
+
+            assertThat(md).hasFileName("benchmark-x.md").isRegularFile();
+            JsonNode json = mapper.readTree(dir.resolve("out/benchmark-x.json").toFile());
+            assertThat(json.path("totals").path("matched").asInt()).isEqualTo(1);
+            assertThat(json.path("prs").get(0).path("prPilotOnly").get(0).path("id").asText())
+                    .isEqualTo("P2");
+        }
+    }
+}

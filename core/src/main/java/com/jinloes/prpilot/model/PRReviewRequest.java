@@ -34,6 +34,7 @@ public final class PRReviewRequest {
     private final SemanticReviewContext semanticContext;
     private final String baseSha;
     private final String fileHistory;
+    private final String callSites;
     private final boolean candidateRecall;
 
     private PRReviewRequest(Builder builder) {
@@ -52,6 +53,7 @@ public final class PRReviewRequest {
         this.semanticContext = copySemanticContext(builder.semanticContext);
         this.baseSha = builder.baseSha;
         this.fileHistory = builder.fileHistory;
+        this.callSites = builder.callSites;
         this.candidateRecall = builder.candidateRecall;
         this.ciAnnotations =
                 builder.ciAnnotations == null
@@ -152,6 +154,14 @@ public final class PRReviewRequest {
     }
 
     /**
+     * Rendered base-commit references to symbols whose declarations or bodies the diff changes.
+     * Candidates found textually, so some may be unrelated same-name symbols.
+     */
+    public String getCallSites() {
+        return callSites;
+    }
+
+    /**
      * Whether the primary pass should surface unconfirmed candidate findings as low-confidence
      * notes. Only set when a validation pass will confirm or drop them.
      */
@@ -163,9 +173,17 @@ public final class PRReviewRequest {
         return toBuilder().semanticContext(value).build();
     }
 
-    /** Copies this request, replacing guidance and file history resolved from the base commit. */
-    public PRReviewRequest withBaseCommitContext(String guidelines, String history) {
-        return toBuilder().repoGuidelines(guidelines).fileHistory(history).build();
+    /**
+     * Copies this request, replacing guidance, file history, and call sites resolved from the base
+     * commit.
+     */
+    public PRReviewRequest withBaseCommitContext(
+            String guidelines, String history, String callSites) {
+        return toBuilder()
+                .repoGuidelines(guidelines)
+                .fileHistory(history)
+                .callSites(callSites)
+                .build();
     }
 
     public PRReviewRequest withCandidateRecall(boolean value) {
@@ -202,6 +220,7 @@ public final class PRReviewRequest {
                 .semanticContext(semanticContext)
                 .baseSha(baseSha)
                 .fileHistory(fileHistory)
+                .callSites(callSites)
                 .candidateRecall(candidateRecall);
     }
 
@@ -236,6 +255,7 @@ public final class PRReviewRequest {
         private SemanticReviewContext semanticContext;
         private String baseSha;
         private String fileHistory;
+        private String callSites;
         private boolean candidateRecall;
 
         private Builder(PullRequest pr, String diff) {
@@ -327,6 +347,11 @@ public final class PRReviewRequest {
 
         public Builder fileHistory(String value) {
             this.fileHistory = value;
+            return this;
+        }
+
+        public Builder callSites(String value) {
+            this.callSites = value;
             return this;
         }
 

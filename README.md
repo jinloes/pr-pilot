@@ -166,6 +166,7 @@ code, or sensitive pull-request content.
 - `core/` - Plain Java 17 shared models and diff parser used by both hosts
 - `github-engine/` - Plain Java 17 GitHub/repository/review engine shared by both hosts
 - `intellij-plugin/` - IntelliJ host integration
+- `review-benchmark/` - Developer CLI that measures review recall against Mae's comments
 - `sidecar/` - Thin stdio JSON-RPC process adapter used by the VS Code extension
 - `vscode-extension/` - VS Code host integration
 - `webview/` - Shared React webview UI
@@ -236,6 +237,19 @@ pinned-SDK runner. Neither task is launched automatically by build/check.
 Output:
 
 - `intellij-plugin/build/distributions/*.zip`
+
+### Measure review recall against Mae
+
+List PRs (`owner/repo#N` or PR URLs, one per line) in a file and keep local clones under
+`<repos-root>/<repo>`. The benchmark reviews the commit Mae first reviewed and writes Markdown and
+JSON reports under `build/review-benchmark/<timestamp>/`.
+
+```bash
+./gradlew :review-benchmark:reviewBenchmark \
+  --args="--prs prs.txt --repos-root ~/src --provider copilot --model <model>"
+```
+
+Run with `--args="--help"` for the matching window, judge, and output options.
 
 ### Build webview assets
 

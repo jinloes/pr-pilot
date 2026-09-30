@@ -1,0 +1,48 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.jinloes.prpilot'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+}
+
+dependencies {
+    implementation project(':github-engine')
+    implementation project(':review-engine')
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
+    implementation 'org.apache.commons:commons-lang3:3.18.0'
+    runtimeOnly 'org.slf4j:slf4j-simple:2.0.13'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'org.assertj:assertj-core:3.27.7'
+    testImplementation 'commons-io:commons-io:2.16.1'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+// Developer tool: measures review recall against Mae's review comments.
+//   ./gradlew :review-benchmark:reviewBenchmark --args="--prs prs.txt --repos-root ~/src --provider copilot"
+tasks.register('reviewBenchmark', JavaExec) {
+    group = 'verification'
+    description = 'Runs PR Pilot reviews on PRs Mae reviewed and reports recall.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.jinloes.prpilot.benchmark.ReviewBenchmark'
+    workingDir = rootProject.projectDir
+    standardInput = System.in
+    systemProperty 'org.slf4j.simpleLogger.defaultLogLevel', 'warn'
+}
