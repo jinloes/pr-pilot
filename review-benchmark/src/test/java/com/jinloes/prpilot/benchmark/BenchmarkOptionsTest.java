@@ -26,6 +26,8 @@ class BenchmarkOptionsTest {
             assertThat(options.provider()).isEqualTo("copilot");
             assertThat(options.prsFile()).isEqualTo(Path.of("prs.txt"));
             assertThat(options.selfCritique()).isTrue();
+            assertThat(options.chunked()).isFalse();
+            assertThat(options.callSites()).isTrue();
             assertThat(options.judge()).isEqualTo(BenchmarkOptions.JUDGE_LLM);
             assertThat(options.lineWindow()).isEqualTo(10);
             assertThat(options.maeLoginPrefix()).isEqualTo("svc-mae");
@@ -45,6 +47,8 @@ class BenchmarkOptionsTest {
                             "--no-self-critique",
                             "--supervisor",
                             "--verbose",
+                            "--chunked",
+                            "--no-call-sites",
                             "--judge",
                             "location",
                             "--line-window",
@@ -54,6 +58,8 @@ class BenchmarkOptionsTest {
             assertThat(options.selfCritique()).isFalse();
             assertThat(options.supervisor()).isTrue();
             assertThat(options.verbose()).isTrue();
+            assertThat(options.chunked()).isTrue();
+            assertThat(options.callSites()).isFalse();
             assertThat(options.judge()).isEqualTo("location");
             assertThat(options.lineWindow()).isEqualTo(3);
             assertThat(options.secondReviewerModel()).isEqualTo("m2");

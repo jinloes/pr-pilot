@@ -225,6 +225,57 @@ class BaseCommitContextTest {
         }
 
         @Test
+        void skipsCallSitesWhenDisabledByProperty() throws Exception {
+            write("src/Billing.java", "class Billing {\n  public int chargeCard(String a) {}\n}\n");
+            write(
+                    "src/Checkout.java",
+                    "class Checkout {\n  int x = billing.chargeCard(acct);\n}\n");
+            String base = commit("base");
+
+            String previous = System.getProperty(BaseCommitContext.CALL_SITES_PROPERTY);
+            System.setProperty(BaseCommitContext.CALL_SITES_PROPERTY, "false");
+            try {
+                BaseCommitContext.Result result =
+                        context.resolve(
+                                repo,
+                                base,
+                                changedDeclaration(
+                                        "src/Billing.java", "  public int chargeCard(String a) {"),
+                                () -> {});
+
+                assertThat(result.callSites()).isEmpty();
+                assertThat(result.fileHistory()).isNotEmpty();
+            } finally {
+                if (previous == null) {
+                    System.clearProperty(BaseCommitContext.CALL_SITES_PROPERTY);
+                } else {
+                    System.setProperty(BaseCommitContext.CALL_SITES_PROPERTY, previous);
+                }
+            }
+        }
+
+        @Test
+        void callSitesEnabledUnlessPropertyIsFalse() {
+            String previous = System.getProperty(BaseCommitContext.CALL_SITES_PROPERTY);
+            try {
+                System.clearProperty(BaseCommitContext.CALL_SITES_PROPERTY);
+                assertThat(BaseCommitContext.callSitesEnabled()).isTrue();
+                System.setProperty(BaseCommitContext.CALL_SITES_PROPERTY, "true");
+                assertThat(BaseCommitContext.callSitesEnabled()).isTrue();
+                System.setProperty(BaseCommitContext.CALL_SITES_PROPERTY, "garbage");
+                assertThat(BaseCommitContext.callSitesEnabled()).isTrue();
+                System.setProperty(BaseCommitContext.CALL_SITES_PROPERTY, " FALSE ");
+                assertThat(BaseCommitContext.callSitesEnabled()).isFalse();
+            } finally {
+                if (previous == null) {
+                    System.clearProperty(BaseCommitContext.CALL_SITES_PROPERTY);
+                } else {
+                    System.setProperty(BaseCommitContext.CALL_SITES_PROPERTY, previous);
+                }
+            }
+        }
+
+        @Test
         void omitsSymbolsWithNoCallersOutsideTheChangedFiles() throws Exception {
             write("src/Billing.java", "class Billing {\n  public int chargeCard(String a) {}\n}\n");
             String base = commit("base");

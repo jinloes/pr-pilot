@@ -24,6 +24,8 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
             String secondReviewerModel,
             boolean selfCritique,
             boolean supervisor,
+            boolean chunked,
+            boolean callSites,
             String judge,
             String judgeModel,
             int lineWindow) {}
@@ -116,6 +118,8 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
         if (StringUtils.isNotBlank(settings.secondReviewerModel())) {
             md.append(", second reviewer `").append(settings.secondReviewerModel()).append('`');
         }
+        if (settings.chunked()) md.append(", chunked review");
+        if (!settings.callSites()) md.append(", no call sites");
         md.append(", judge `").append(settings.judge());
         if ("llm".equals(settings.judge())) {
             md.append(" (").append(orDefault(settings.judgeModel())).append(')');

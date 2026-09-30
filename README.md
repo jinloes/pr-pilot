@@ -249,7 +249,9 @@ JSON reports under `build/review-benchmark/<timestamp>/`.
   --args="--prs prs.txt --repos-root ~/src --provider copilot --model <model>"
 ```
 
-Run with `--args="--help"` for the matching window, judge, and output options.
+Run with `--args="--help"` for the matching window, judge, and output options. Add `--chunked` to
+review large diffs file by file, or `--no-call-sites` to measure recall without base-commit
+call-site context.
 
 ### Build webview assets
 

@@ -41,6 +41,13 @@ final class BaseCommitContext {
     private static final long COMMAND_TIMEOUT_SECONDS = 15;
     private static final long FETCH_TIMEOUT_SECONDS = 60;
     private static final long OVERALL_TIMEOUT_SECONDS = 90;
+
+    /**
+     * Diagnostic switch for measuring what call-site context contributes to recall. Only the review
+     * benchmark sets it; hosts leave it unset so call sites are always gathered.
+     */
+    static final String CALL_SITES_PROPERTY = "prpilot.review.callSites";
+
     private static final String REVIEW_GUIDELINES_PATH = ".linkedin/ai-agent/review_guidelines.md";
     private static final Pattern COMMIT_SHA = Pattern.compile("(?i)[0-9a-f]{40}|[0-9a-f]{64}");
     private static final Pattern BLOB_SHA = Pattern.compile("(?i)[0-9a-f]{40}|[0-9a-f]{64}");
@@ -140,7 +147,13 @@ final class BaseCommitContext {
         return new Result(
                 guidelines,
                 fileHistory,
-                callSites(repoDir, baseSha, changedPaths, manifest, deadline));
+                callSitesEnabled()
+                        ? callSites(repoDir, baseSha, changedPaths, manifest, deadline)
+                        : "");
+    }
+
+    static boolean callSitesEnabled() {
+        return !"false".equalsIgnoreCase(System.getProperty(CALL_SITES_PROPERTY, "").strip());
     }
 
     private boolean commitExists(File repoDir, String sha, Deadline deadline)

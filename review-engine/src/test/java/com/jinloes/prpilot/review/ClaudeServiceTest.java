@@ -527,6 +527,34 @@ class ClaudeServiceTest {
         }
 
         @Test
+        void primaryInstructionsIncludeHygienePass() {
+            String prompt = ClaudeService.buildPrompt(fakeRequest());
+
+            assertThat(prompt)
+                    .contains("Review in three explicit passes")
+                    .contains(ClaudeService.HYGIENE_PASS)
+                    .contains("Pass C — hygiene checks on changed lines only")
+                    .contains("Sensitive logging")
+                    .contains("Hot-path logging")
+                    .contains("demote it to DEBUG")
+                    .contains("Comment hygiene")
+                    .contains("\"reserved\" statement")
+                    .contains("merge all three passes");
+        }
+
+        @Test
+        void critiqueKeepsHygieneFindings() {
+            String critique =
+                    ClaudeService.buildCritiquePrompt(
+                            fakeRequest(), new ReviewResult("s", "APPROVE", List.of()));
+
+            assertThat(critique)
+                    .contains("Pass C hygiene finding")
+                    .contains("is not a style finding: keep it")
+                    .doesNotContain(ClaudeService.HYGIENE_PASS);
+        }
+
+        @Test
         void fileHistoryIsAnUntrustedSectionInReviewAndCritiquePrompts() {
             PRReviewRequest request =
                     PRReviewRequest.builder(fakePr(), "")
@@ -651,7 +679,7 @@ class ClaudeServiceTest {
 
         @Test
         void promptVersionSegmentsContextConformanceChanges() {
-            assertThat(ClaudeService.PROMPT_VERSION).isEqualTo("2026-10-recall");
+            assertThat(ClaudeService.PROMPT_VERSION).isEqualTo("2026-10-hygiene");
         }
 
         @Test

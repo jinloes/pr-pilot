@@ -17,6 +17,8 @@ record BenchmarkOptions(
         String secondReviewerModel,
         boolean selfCritique,
         boolean supervisor,
+        boolean chunked,
+        boolean callSites,
         String judge,
         String judgeModel,
         int lineWindow,
@@ -60,6 +62,8 @@ record BenchmarkOptions(
               --second-reviewer ID    Also run a second reviewer with this model
               --no-self-critique      Skip the self-critique pass
               --supervisor            Enable the review supervisor
+              --chunked               Review large diffs in per-file chunks
+              --no-call-sites         Omit base-commit call-site context
               --judge llm|location    How matches are decided (default llm)
               --judge-model ID        Judge model (defaults to --model)
               --line-window N         Max line distance for a candidate match (default 10)
@@ -79,6 +83,8 @@ record BenchmarkOptions(
         String second = "";
         boolean selfCritique = true;
         boolean supervisor = false;
+        boolean chunked = false;
+        boolean callSites = true;
         String judge = JUDGE_LLM;
         String judgeModel = "";
         int window = DEFAULT_LINE_WINDOW;
@@ -99,6 +105,8 @@ record BenchmarkOptions(
                             "",
                             true,
                             false,
+                            false,
+                            true,
                             JUDGE_LLM,
                             "",
                             DEFAULT_LINE_WINDOW,
@@ -109,6 +117,8 @@ record BenchmarkOptions(
                 }
                 case "--no-self-critique" -> selfCritique = false;
                 case "--supervisor" -> supervisor = true;
+                case "--chunked" -> chunked = true;
+                case "--no-call-sites" -> callSites = false;
                 case "--verbose" -> verbose = true;
                 default -> {
                     String value = value(args, ++i, arg);
@@ -148,6 +158,8 @@ record BenchmarkOptions(
                 second,
                 selfCritique,
                 supervisor,
+                chunked,
+                callSites,
                 judge,
                 StringUtils.defaultIfBlank(judgeModel, model),
                 window,

@@ -92,7 +92,7 @@ public class ClaudeService {
      *
      * <p>Not a compatibility version: nothing parses it, and old log lines keep their old value.
      */
-    public static final String PROMPT_VERSION = "2026-10-recall";
+    public static final String PROMPT_VERSION = "2026-10-hygiene";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -317,13 +317,43 @@ public class ClaudeService {
                     + " intent or approach — nothing blocking\n";
 
     /**
-     * Splits the first pass into a guideline-compliance pass and an exhaustive bug hunt. A single
-     * undifferentiated pass tends to stop at the first salient finding; naming both passes and
-     * requiring the bug hunt to walk every manifest target is what keeps later files from being
-     * skimmed.
+     * Built-in hygiene rules that production reviewers such as Mae enforce but a bug hunt skips
+     * because nothing is broken. On the recall benchmark they were most of the missed findings, so
+     * they get their own pass with fixed type, category and severity to keep them from crowding out
+     * real defects.
      */
-    private static final String TWO_PASS_INSTRUCTIONS =
-            "Review in two explicit passes before writing the JSON.\n"
+    static final String HYGIENE_PASS =
+            "Pass C — hygiene checks on changed lines only, applied after A and B:\n"
+                    + "- Sensitive logging: a log statement that writes personal data (email"
+                    + " addresses, names, phone numbers), credentials or tokens, or a whole"
+                    + " request, response, payload, or body. Report type \"issue\", category"
+                    + " \"security\", severity \"major\" for credentials and \"minor\" otherwise;"
+                    + " tell the author to log a non-reversible identifier instead.\n"
+                    + "- Hot-path logging: an INFO or higher log that runs once per request,"
+                    + " message, event, or loop item on a routine path, including routine"
+                    + " rejections and other expected negative outcomes. Report type"
+                    + " \"suggestion\", category \"performance\", severity \"minor\"; tell the"
+                    + " author to demote it to DEBUG or log one aggregate. Do not flag logs on"
+                    + " error paths, at startup, or once per batch or job run.\n"
+                    + "- Comment hygiene: a changed comment or doc comment that narrates history"
+                    + " instead of current behavior (\"revived from\", \"previously\","
+                    + " \"matches the earlier\", \"as of <date>\"), or a TODO with no tracking"
+                    + " reference. Report type \"suggestion\", category \"maintainability\","
+                    + " severity \"nit\"; tell the author to state the current behavior.\n"
+                    + "- Schema evolution: a removed protobuf field whose number and name are not"
+                    + " added to a \"reserved\" statement. Report type \"issue\", category"
+                    + " \"compatibility\", severity \"minor\".\n"
+                    + "Report every occurrence, one comment per changed line. An explicit"
+                    + " repository rule overrides these defaults.\n";
+
+    /**
+     * Splits the first pass into a guideline-compliance pass, an exhaustive bug hunt, and the
+     * {@link #HYGIENE_PASS}. A single undifferentiated pass tends to stop at the first salient
+     * finding; naming the passes and requiring the bug hunt to walk every manifest target is what
+     * keeps later files from being skimmed.
+     */
+    private static final String REVIEW_PASS_INSTRUCTIONS =
+            "Review in three explicit passes before writing the JSON.\n"
                     + "Pass A — guideline compliance: when <repo_guidelines> is present, check"
                     + " every changed hunk against each applicable rule. For a violation, cite the"
                     + " exact rule and its `## <path>` source in \"rationale\".\n"
@@ -332,11 +362,12 @@ public class ClaudeService {
                     + " error-handling, and compatibility defects. Do not stop after the first"
                     + " finding, and do not skip a file because an earlier one had issues. Record"
                     + " every target you inspect in \"inspection\".\n"
-                    + "Then merge both passes into a single \"lineComments\" list without"
+                    + HYGIENE_PASS
+                    + "Then merge all three passes into a single \"lineComments\" list without"
                     + " duplicates.\n\n";
 
     private static final String REVIEW_INSTRUCTIONS =
-            REVIEW_PREAMBLE + TWO_PASS_INSTRUCTIONS + OUTPUT_CONTRACT;
+            REVIEW_PREAMBLE + REVIEW_PASS_INSTRUCTIONS + OUTPUT_CONTRACT;
 
     /**
      * Candidate-recall mode, used only when a validation pass will re-check the output. It
@@ -1398,7 +1429,10 @@ public class ClaudeService {
                     + " defect. When a repo guideline is the basis, require \"rationale\" to name"
                     + " its `## <path>` source and rule. Drop the finding if that source, rule, or"
                     + " concrete impact is unsupported, or if it merely enforces style,"
-                    + " formatting, or a tooling-enforced rule. Prefer an explicit repository rule"
+                    + " formatting, or a tooling-enforced rule. A confirmed Pass C hygiene finding"
+                    + " (sensitive or hot-path logging, a history-narrating comment or untracked"
+                    + " TODO, an unreserved removed protobuf field) is not a style finding: keep"
+                    + " it. Prefer an explicit repository rule"
                     + " over a conflicting generic heuristic. For a comment justified by"
                     + " <linked_issue>, re-confirm the mismatch against the requirement named in"
                     + " \"rationale\"; drop it if either side is unsupported. Drop a finding that"

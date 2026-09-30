@@ -43,6 +43,9 @@ import org.apache.commons.lang3.StringUtils;
  * replies to them, which would leak the answers.
  */
 public final class ReviewBenchmark {
+    /** Mirrors {@code BaseCommitContext.CALL_SITES_PROPERTY}, which is package-private. */
+    static final String CALL_SITES_PROPERTY = "prpilot.review.callSites";
+
     private static final DateTimeFormatter STEM =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
 
@@ -93,6 +96,7 @@ public final class ReviewBenchmark {
         Instant started = Instant.now();
         Path outDir = options.outDir().resolve(STEM.format(started));
         Files.createDirectories(outDir);
+        System.setProperty(CALL_SITES_PROPERTY, Boolean.toString(options.callSites()));
         reviews = new ReviewSessionService(new ReviewOutcomeLog(outDir.resolve("outcomes.jsonl")));
 
         List<BenchmarkReport.PrResult> results = new ArrayList<>();
@@ -269,7 +273,7 @@ public final class ReviewBenchmark {
                 StringUtils.defaultString(linkedIssue),
                 StringUtils.defaultString(profile),
                 annotations,
-                false,
+                options.chunked(),
                 null,
                 StringUtils.defaultString(detail.baseSha()),
                 options.secondReviewerModel());
@@ -346,6 +350,8 @@ public final class ReviewBenchmark {
                 options.secondReviewerModel(),
                 options.selfCritique(),
                 options.supervisor(),
+                options.chunked(),
+                options.callSites(),
                 options.judge(),
                 options.judgeModel(),
                 options.lineWindow());

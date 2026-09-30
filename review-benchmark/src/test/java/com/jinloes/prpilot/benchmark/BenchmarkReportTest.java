@@ -21,7 +21,8 @@ class BenchmarkReportTest {
     private static final Finding P1 = new Finding("P1", "A.java", 4, "null");
     private static final Finding P2 = new Finding("P2", "C.java", 1, "extra");
     private static final BenchmarkReport.Settings SETTINGS =
-            new BenchmarkReport.Settings("copilot", "", "", "", true, false, "llm", "", 10);
+            new BenchmarkReport.Settings(
+                    "copilot", "", "", "", true, false, false, true, "llm", "", 10);
 
     private static BenchmarkReport.PrResult scored(
             PrRef pr,
@@ -104,6 +105,20 @@ class BenchmarkReportTest {
                     .contains("- `B.java` — no PR Pilot finding nearby: Missing test")
                     .contains("- `A.java:3` — nearby finding judged different: Null \\| deref")
                     .contains("- o/a#1 (failed): boom");
+        }
+
+        @Test
+        void headerNamesChunkedAndCallSiteSettingsOnlyWhenNonDefault() {
+            assertThat(report().markdown())
+                    .doesNotContain("chunked review")
+                    .doesNotContain("no call sites");
+
+            BenchmarkReport.Settings varied =
+                    new BenchmarkReport.Settings(
+                            "copilot", "", "", "", true, false, true, false, "llm", "", 10);
+            String md = BenchmarkReport.of("now", varied, report().prs()).markdown();
+
+            assertThat(md).contains(", chunked review, no call sites, judge `llm");
         }
     }
 
