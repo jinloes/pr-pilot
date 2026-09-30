@@ -539,7 +539,8 @@ class ClaudeServiceTest {
                     .contains("demote it to DEBUG")
                     .contains("Comment hygiene")
                     .contains("\"reserved\" statement")
-                    .contains("merge all three passes");
+                    .contains("merge all three passes")
+                    .contains("keep one comment per affected line");
         }
 
         @Test
@@ -607,7 +608,9 @@ class ClaudeServiceTest {
                     .contains("starts with \"Verify:\" is an unconfirmed candidate")
                     .contains("or drop it")
                     .contains("several reviewers' output")
-                    .contains("describe the same defect keep only the better-supported one");
+                    .contains("describe the same defect keep only the better-supported one")
+                    .contains("separate code sites")
+                    .contains("keep one comment per site");
         }
 
         @Test
@@ -679,7 +682,7 @@ class ClaudeServiceTest {
 
         @Test
         void promptVersionSegmentsContextConformanceChanges() {
-            assertThat(ClaudeService.PROMPT_VERSION).isEqualTo("2026-10-hygiene");
+            assertThat(ClaudeService.PROMPT_VERSION).isEqualTo("2026-10-per-site");
         }
 
         @Test

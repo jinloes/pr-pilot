@@ -92,7 +92,7 @@ public class ClaudeService {
      *
      * <p>Not a compatibility version: nothing parses it, and old log lines keep their old value.
      */
-    public static final String PROMPT_VERSION = "2026-10-hygiene";
+    public static final String PROMPT_VERSION = "2026-10-per-site";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -364,7 +364,8 @@ public class ClaudeService {
                     + " every target you inspect in \"inspection\".\n"
                     + HYGIENE_PASS
                     + "Then merge all three passes into a single \"lineComments\" list without"
-                    + " duplicates.\n\n";
+                    + " duplicates. The same problem on different lines is not a duplicate: keep"
+                    + " one comment per affected line.\n\n";
 
     private static final String REVIEW_INSTRUCTIONS =
             REVIEW_PREAMBLE + REVIEW_PASS_INSTRUCTIONS + OUTPUT_CONTRACT;
@@ -1423,7 +1424,9 @@ public class ClaudeService {
                     + " the correct type, \"medium\" or \"high\" confidence, and concrete evidence,"
                     + " or drop it. The draft may merge several reviewers' output, so when two"
                     + " comments describe the same defect keep only the better-supported one,"
-                    + " even if their lines or wording differ. For a finding justified"
+                    + " even if their lines or wording differ. The same kind of problem at separate"
+                    + " code sites, such as several hot-path log statements, is separate defects:"
+                    + " keep one comment per site. For a finding justified"
                     + " by a repo guideline, focus area, or custom instruction, re-confirm concrete"
                     + " impact on changed code; these establish intended behavior, not proof of a"
                     + " defect. When a repo guideline is the basis, require \"rationale\" to name"
