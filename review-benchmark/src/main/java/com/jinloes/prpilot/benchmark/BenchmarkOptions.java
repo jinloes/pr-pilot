@@ -63,7 +63,7 @@ record BenchmarkOptions(
               --judge llm|location    How matches are decided (default llm)
               --judge-model ID        Judge model (defaults to --model)
               --line-window N         Max line distance for a candidate match (default 10)
-              --mae-login-prefix P    Reviewer login prefix (default svc-mae-review)
+              --mae-login-prefix P    Reviewer login prefix (default svc-mae)
               --out DIR               Report directory (default build/review-benchmark)
               --verbose               Print review status updates
               --help                  Show this help

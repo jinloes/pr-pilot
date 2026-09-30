@@ -18,7 +18,7 @@ import java.util.Locale;
  * PR Pilot never sees. Replies are ignored because they are conversation, not findings.
  */
 final class MaeComments {
-    static final String DEFAULT_LOGIN_PREFIX = "svc-mae-review";
+    static final String DEFAULT_LOGIN_PREFIX = "svc-mae";
     private static final int PAGE_SIZE = 100;
     private static final int MAX_PAGES = 30;
 

@@ -28,7 +28,7 @@ class BenchmarkOptionsTest {
             assertThat(options.selfCritique()).isTrue();
             assertThat(options.judge()).isEqualTo(BenchmarkOptions.JUDGE_LLM);
             assertThat(options.lineWindow()).isEqualTo(10);
-            assertThat(options.maeLoginPrefix()).isEqualTo("svc-mae-review");
+            assertThat(options.maeLoginPrefix()).isEqualTo("svc-mae");
             assertThat(options.outDir()).isEqualTo(Path.of("build", "review-benchmark"));
         }
 

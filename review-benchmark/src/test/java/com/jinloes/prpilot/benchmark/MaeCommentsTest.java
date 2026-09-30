@@ -52,6 +52,17 @@ class MaeCommentsTest {
         }
 
         @Test
+        void defaultPrefixMatchesEveryMaeAccountNaming() {
+            ArrayNode array = MAPPER.createArrayNode();
+            array.add(comment(1, "svc-mae-review-1_LinkedIn", "A.java", 10));
+            array.add(comment(2, "svc-maereview-10_LinkedIn", "A.java", 11));
+
+            assertThat(MaeComments.parse(array, MaeComments.DEFAULT_LOGIN_PREFIX))
+                    .extracting(MaeComments.Comment::id)
+                    .containsExactly(1L, 2L);
+        }
+
+        @Test
         void fallsBackFromOriginalLineToLineThenZero() {
             ObjectNode usesLine = comment(1, "svc-mae-review", "A.java", null);
             usesLine.put("line", 5);
