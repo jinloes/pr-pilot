@@ -37,6 +37,7 @@ class RepeatSummaryTest {
                 matched,
                 matches,
                 List.of(),
+                List.of(),
                 List.of());
     }
 

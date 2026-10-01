@@ -221,6 +221,8 @@ public final class ReviewPipelineService {
         provider.checkCancelled();
 
         if (recall) {
+            int draftCount = candidate.getLineComments().size();
+            onStatus.accept(draftStatus(draftCount));
             onStatus.accept(ClaudeService.STATUS_REFINING);
             validateAuthority();
             try {
@@ -243,6 +245,7 @@ public final class ReviewPipelineService {
             }
             // Unconfirmed recall candidates never reach the user, even if validation failed.
             candidate = ReviewResultMerger.withoutLowConfidence(candidate);
+            onStatus.accept(validatedStatus(candidate.getLineComments().size(), draftCount));
         }
         provider.checkCancelled();
         if (supervisorEnabled) {
@@ -325,8 +328,19 @@ public final class ReviewPipelineService {
     }
 
     private static String findings(ReviewPassResult pass) {
-        int count = pass.review().getLineComments().size();
+        return findings(pass.review().getLineComments().size());
+    }
+
+    private static String findings(int count) {
         return count + (count == 1 ? " finding" : " findings");
+    }
+
+    static String draftStatus(int count) {
+        return "Draft review has " + findings(count) + " before validation";
+    }
+
+    static String validatedStatus(int kept, int draft) {
+        return "Validation kept " + kept + " of " + findings(draft);
     }
 
     private String secondReviewerStatus(String state) {

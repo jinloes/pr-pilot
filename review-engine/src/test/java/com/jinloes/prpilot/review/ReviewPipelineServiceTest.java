@@ -687,6 +687,14 @@ class ReviewPipelineServiceTest {
             assertThat(ReviewPipelineService.reviewerStatus("Second", null, "done"))
                     .isEqualTo("Second reviewer done");
         }
+
+        @Test
+        void reportsDraftAndValidatedCounts() {
+            assertThat(ReviewPipelineService.draftStatus(1))
+                    .isEqualTo("Draft review has 1 finding before validation");
+            assertThat(ReviewPipelineService.validatedStatus(0, 3))
+                    .isEqualTo("Validation kept 0 of 3 findings");
+        }
     }
 
     @Nested
@@ -737,7 +745,10 @@ class ReviewPipelineServiceTest {
                             "Second reviewer (gpt-5.5) started in parallel",
                             "Primary reviewer (claude-opus) finished with 1 finding",
                             "Second reviewer (gpt-5.5) finished with 1 finding",
-                            "Merged reviewers into 2 findings");
+                            "Merged reviewers into 2 findings",
+                            "Draft review has 2 findings before validation",
+                            ClaudeService.STATUS_REFINING,
+                            "Validation kept 2 of 2 findings");
 
             assertThat(provider.primaryRequests.get(0).isCandidateRecall()).isTrue();
             assertThat(secondary.requests.get(0).isCandidateRecall()).isTrue();

@@ -256,7 +256,10 @@ recall on complete diffs only, since a finding in a file the size limit dropped 
 Pull requests over GitHub's 300-file diff limit cannot be opened in the hosts at all, so treat
 their benchmark score as an upper bound. Model output varies between runs, so pass `--repeat N` to
 run the whole set N times; a `-summary.md` report gives recall per run with the mean, minimum, and
-maximum, plus matched findings per pull request in each run.
+maximum, plus matched findings per pull request in each run. A "Pipeline stages" section records
+each status line that carries a finding count, such as the draft count before validation and how
+many findings validation kept, so a low score shows whether findings were never raised or were
+dropped during validation.
 
 ### Build webview assets
 

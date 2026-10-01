@@ -198,6 +198,7 @@ public final class ReviewBenchmark {
 
             say.accept("reviewing");
             long start = System.nanoTime();
+            List<String> stages = new ArrayList<>();
             ReviewResult review =
                     reviews.generate(
                             reviewParams(
@@ -210,6 +211,7 @@ public final class ReviewBenchmark {
                                     profile,
                                     mae.commitId()),
                             status -> {
+                                if (isStage(status)) stages.add(status);
                                 if (options.verbose()) say.accept(status);
                             },
                             (a, b) -> {});
@@ -249,8 +251,14 @@ public final class ReviewBenchmark {
                     outcome.misses().stream()
                             .map(m -> new BenchmarkReport.Miss(m.expected(), m.reason()))
                             .toList(),
-                    outcome.extras());
+                    outcome.extras(),
+                    List.copyOf(stages));
         }
+    }
+
+    /** Status lines that carry a finding count, so the report shows where findings are lost. */
+    static boolean isStage(String status) {
+        return StringUtils.containsIgnoreCase(status, "finding");
     }
 
     private GenerateReviewParams reviewParams(

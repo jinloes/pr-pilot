@@ -92,7 +92,7 @@ public class ClaudeService {
      *
      * <p>Not a compatibility version: nothing parses it, and old log lines keep their old value.
      */
-    public static final String PROMPT_VERSION = "2026-10-anchor";
+    public static final String PROMPT_VERSION = "2026-10-log-subject";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -337,6 +337,18 @@ public class ClaudeService {
                     + " \"suggestion\", category \"performance\", severity \"minor\"; tell the"
                     + " author to demote it to DEBUG or log one aggregate. Do not flag logs on"
                     + " error paths, at startup, or once per batch or job run.\n"
+                    + "- Failure log without its subject: a WARN or ERROR log on a failure path"
+                    + " that does not include the identifier of the request, row, entity, or"
+                    + " input that failed (for example an ID, URN, or key already in scope), so"
+                    + " the failure cannot be traced. Report type \"suggestion\", category"
+                    + " \"maintainability\", severity \"minor\"; name the in-scope identifier to"
+                    + " add.\n"
+                    + "- Exception not attached: a log on a catch or failure path that has the"
+                    + " exception in scope but logs only its class name or message (for example"
+                    + " getClass().getSimpleName() or getMessage()) or omits it, discarding the"
+                    + " stack trace and cause chain. Report type \"suggestion\", category"
+                    + " \"maintainability\", severity \"minor\"; tell the author to pass the"
+                    + " exception as the final logger argument.\n"
                     + "- Comment hygiene: a changed comment or doc comment that narrates history"
                     + " instead of current behavior (\"revived from\", \"previously\","
                     + " \"matches the earlier\", \"as of <date>\"), or a TODO with no tracking"
@@ -358,7 +370,12 @@ public class ClaudeService {
             "Review in three explicit passes before writing the JSON.\n"
                     + "Pass A — guideline compliance: when <repo_guidelines> is present, check"
                     + " every changed hunk against each applicable rule. For a violation, cite the"
-                    + " exact rule and its `## <path>` source in \"rationale\".\n"
+                    + " exact rule and its `## <path>` source in \"rationale\". Also check each"
+                    + " new type against the established sibling it mirrors — an existing file"
+                    + " in the same package with the same role or naming suffix: read that"
+                    + " sibling and flag annotations, serialization configuration, or"
+                    + " conventions it applies that the new type omits. Cite the sibling's path"
+                    + " in \"rationale\".\n"
                     + "Pass B — bug hunt: walk every file and hunk listed in <inspection_manifest>,"
                     + " in order, looking for correctness, security, concurrency, resource,"
                     + " error-handling, and compatibility defects. Do not stop after the first"

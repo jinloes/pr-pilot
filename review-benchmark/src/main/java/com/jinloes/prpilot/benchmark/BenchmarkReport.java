@@ -46,7 +46,8 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
             int prPilotFindings,
             List<Match> matches,
             List<Miss> misses,
-            List<Finding> prPilotOnly) {
+            List<Finding> prPilotOnly,
+            List<String> stages) {
 
         static PrResult notScored(PrRef pr, String url, String status, String message) {
             return new PrResult(
@@ -59,6 +60,7 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
                     false,
                     0,
                     0,
+                    List.of(),
                     List.of(),
                     List.of(),
                     List.of());
@@ -206,6 +208,15 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
             }
         }
         if (!anyMiss) md.append("\nNone.\n");
+
+        List<PrResult> staged = prs.stream().filter(pr -> !pr.stages().isEmpty()).toList();
+        if (!staged.isEmpty()) {
+            md.append("\n## Pipeline stages\n");
+            for (PrResult pr : staged) {
+                md.append("\n### ").append(pr.pr()).append("\n\n");
+                pr.stages().forEach(stage -> md.append("- ").append(stage).append('\n'));
+            }
+        }
 
         List<PrResult> notScored =
                 prs.stream().filter(pr -> !STATUS_SCORED.equals(pr.status())).toList();

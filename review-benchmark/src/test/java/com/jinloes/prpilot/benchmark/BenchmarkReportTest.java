@@ -42,7 +42,8 @@ class BenchmarkReportTest {
                 matches.size() + extras.size(),
                 matches,
                 misses,
-                extras);
+                extras,
+                List.of("Validation kept 1 of 3 findings"));
     }
 
     private static BenchmarkReport report() {
@@ -116,7 +117,8 @@ class BenchmarkReportTest {
                             base.prPilotFindings(),
                             base.matches(),
                             base.misses(),
-                            base.prPilotOnly());
+                            base.prPilotOnly(),
+                            base.stages());
 
             BenchmarkReport.Totals totals = BenchmarkReport.Totals.of(List.of(complete, truncated));
 
@@ -147,6 +149,29 @@ class BenchmarkReportTest {
                     .contains("- `B.java` — no PR Pilot finding nearby: Missing test")
                     .contains("- `A.java:3` — nearby finding judged different: Null \\| deref")
                     .contains("- o/a#1 (failed): boom");
+        }
+
+        @Test
+        void listsPipelineStagesForScoredPrsOnly() {
+            String md = report().markdown();
+
+            assertThat(md)
+                    .contains("## Pipeline stages")
+                    .contains("### o/a#1\n\n- Validation kept 1 of 3 findings\n");
+        }
+
+        @Test
+        void omitsPipelineStagesWhenNoneRecorded() {
+            String md =
+                    BenchmarkReport.of(
+                                    "now",
+                                    SETTINGS,
+                                    List.of(
+                                            BenchmarkReport.PrResult.notScored(
+                                                    PR_A, "u", "failed", "boom")))
+                            .markdown();
+
+            assertThat(md).doesNotContain("## Pipeline stages");
         }
 
         @Test

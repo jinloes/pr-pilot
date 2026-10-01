@@ -523,7 +523,9 @@ class ClaudeServiceTest {
                     .contains("`## <path>` source")
                     .contains("Pass B — bug hunt")
                     .contains("every file and hunk listed in <inspection_manifest>")
-                    .contains("Do not stop after the first finding");
+                    .contains("Do not stop after the first finding")
+                    .contains("established sibling it mirrors")
+                    .contains("Cite the sibling's path");
         }
 
         @Test
@@ -537,6 +539,9 @@ class ClaudeServiceTest {
                     .contains("Sensitive logging")
                     .contains("Hot-path logging")
                     .contains("demote it to DEBUG")
+                    .contains("Failure log without its subject")
+                    .contains("Exception not attached")
+                    .contains("pass the exception as the final logger argument")
                     .contains("Comment hygiene")
                     .contains("\"reserved\" statement")
                     .contains("merge all three passes")
@@ -683,7 +688,7 @@ class ClaudeServiceTest {
 
         @Test
         void promptVersionSegmentsContextConformanceChanges() {
-            assertThat(ClaudeService.PROMPT_VERSION).isEqualTo("2026-10-anchor");
+            assertThat(ClaudeService.PROMPT_VERSION).isEqualTo("2026-10-log-subject");
         }
 
         @Test
