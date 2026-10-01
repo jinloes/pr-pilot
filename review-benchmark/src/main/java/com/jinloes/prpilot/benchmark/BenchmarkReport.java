@@ -74,7 +74,10 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
             int matched,
             int prPilotFindings,
             double recall,
-            double meanPrRecall) {
+            double meanPrRecall,
+            int completeDiffMaeFindings,
+            int completeDiffMatched,
+            double completeDiffRecall) {
 
         static Totals of(List<PrResult> prs) {
             List<PrResult> scored =
@@ -87,6 +90,9 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
                             .mapToDouble(pr -> (double) pr.matches().size() / pr.maeFindings())
                             .average()
                             .orElse(0);
+            List<PrResult> complete = scored.stream().filter(pr -> !pr.diffTruncated()).toList();
+            int completeMae = complete.stream().mapToInt(PrResult::maeFindings).sum();
+            int completeMatched = complete.stream().mapToInt(pr -> pr.matches().size()).sum();
             return new Totals(
                     prs.size(),
                     scored.size(),
@@ -96,7 +102,10 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
                     matched,
                     scored.stream().mapToInt(PrResult::prPilotFindings).sum(),
                     mae == 0 ? 0 : (double) matched / mae,
-                    mean);
+                    mean,
+                    completeMae,
+                    completeMatched,
+                    completeMae == 0 ? 0 : (double) completeMatched / completeMae);
         }
 
         private static int count(List<PrResult> prs, String status) {
@@ -135,6 +144,15 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
                         + totals.matched()
                         + " / "
                         + totals.maeFindings()
+                        + ")");
+        row(
+                md,
+                "Recall on complete diffs (truncated PRs excluded)",
+                percent(totals.completeDiffRecall())
+                        + " ("
+                        + totals.completeDiffMatched()
+                        + " / "
+                        + totals.completeDiffMaeFindings()
                         + ")");
         row(md, "Mean per-PR recall", percent(totals.meanPrRecall()));
         row(md, "PR Pilot findings", Integer.toString(totals.prPilotFindings()));

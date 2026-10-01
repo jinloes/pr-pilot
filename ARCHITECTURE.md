@@ -366,12 +366,14 @@ Three parts of the pipeline previously treated `"confidence": "low"` as a way to
 
 The self-critique directive is keyed on `confidence`, not on type, for a related reason: its input is `draftReviewJson` over an already-parsed draft, so by then no low-confidence `"issue"` exists and the old "drop a low-confidence issue" rule could never match anything. It now requires each surviving low-confidence comment to be confirmed and raised, or dropped.
 
-`PROMPT_VERSION` is `2026-10-per-site`. The review prompt now has a third pass of built-in
+`PROMPT_VERSION` is `2026-10-anchor`. The review prompt now has a third pass of built-in
 hygiene rules (sensitive or per-request logging, history-narrating comments, unreserved removed
 protobuf fields) with fixed type, category and severity. On the Mae benchmark these were most of
 the misses, and the self-critique pass is told they are not style findings so it keeps them.
 Both the merge instruction and the self-critique dedupe rule treat the same problem at separate code
 sites as separate findings; without that, a repeated rule violation collapsed to one comment.
+The output contract tells the model to anchor each comment on the exact offending statement rather
+than the enclosing method or hunk start, because inline comments are matched and shown by line.
 Outcome logging appends
 `-supervisor-on` or `-supervisor-off`, so supervised and baseline results are not pooled.
 

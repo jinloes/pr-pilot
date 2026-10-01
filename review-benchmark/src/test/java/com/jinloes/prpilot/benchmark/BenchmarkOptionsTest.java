@@ -30,6 +30,7 @@ class BenchmarkOptionsTest {
             assertThat(options.callSites()).isTrue();
             assertThat(options.judge()).isEqualTo(BenchmarkOptions.JUDGE_LLM);
             assertThat(options.lineWindow()).isEqualTo(10);
+            assertThat(options.repeat()).isEqualTo(1);
             assertThat(options.maeLoginPrefix()).isEqualTo("svc-mae");
             assertThat(options.outDir()).isEqualTo(Path.of("build", "review-benchmark"));
         }
@@ -53,6 +54,8 @@ class BenchmarkOptionsTest {
                             "location",
                             "--line-window",
                             "3",
+                            "--repeat",
+                            "2",
                             "--second-reviewer",
                             "m2");
             assertThat(options.selfCritique()).isFalse();
@@ -62,6 +65,7 @@ class BenchmarkOptionsTest {
             assertThat(options.callSites()).isFalse();
             assertThat(options.judge()).isEqualTo("location");
             assertThat(options.lineWindow()).isEqualTo(3);
+            assertThat(options.repeat()).isEqualTo(2);
             assertThat(options.secondReviewerModel()).isEqualTo("m2");
         }
 
@@ -80,6 +84,8 @@ class BenchmarkOptionsTest {
         void rejectsInvalidValues() {
             assertThatThrownBy(() -> parse("--line-window", "-1"))
                     .hasMessageContaining("non-negative");
+            assertThatThrownBy(() -> parse("--repeat", "0")).hasMessageContaining("positive");
+            assertThatThrownBy(() -> parse("--repeat", "x")).hasMessageContaining("--repeat");
             assertThatThrownBy(() -> parse("--judge", "vibes")).hasMessageContaining("--judge");
             assertThatThrownBy(
                             () ->

@@ -540,7 +540,8 @@ class ClaudeServiceTest {
                     .contains("Comment hygiene")
                     .contains("\"reserved\" statement")
                     .contains("merge all three passes")
-                    .contains("keep one comment per affected line");
+                    .contains("keep one comment per affected line")
+                    .contains("Anchor each comment on the exact line of the offending statement");
         }
 
         @Test
@@ -682,7 +683,7 @@ class ClaudeServiceTest {
 
         @Test
         void promptVersionSegmentsContextConformanceChanges() {
-            assertThat(ClaudeService.PROMPT_VERSION).isEqualTo("2026-10-per-site");
+            assertThat(ClaudeService.PROMPT_VERSION).isEqualTo("2026-10-anchor");
         }
 
         @Test

@@ -22,6 +22,7 @@ record BenchmarkOptions(
         String judge,
         String judgeModel,
         int lineWindow,
+        int repeat,
         String maeLoginPrefix,
         Path outDir,
         boolean verbose,
@@ -43,6 +44,7 @@ record BenchmarkOptions(
                     "--judge",
                     "--judge-model",
                     "--line-window",
+                    "--repeat",
                     "--mae-login-prefix",
                     "--out");
 
@@ -67,6 +69,7 @@ record BenchmarkOptions(
               --judge llm|location    How matches are decided (default llm)
               --judge-model ID        Judge model (defaults to --model)
               --line-window N         Max line distance for a candidate match (default 10)
+              --repeat N              Run the whole benchmark N times and summarize (default 1)
               --mae-login-prefix P    Reviewer login prefix (default svc-mae)
               --out DIR               Report directory (default build/review-benchmark)
               --verbose               Print review status updates
@@ -88,6 +91,7 @@ record BenchmarkOptions(
         String judge = JUDGE_LLM;
         String judgeModel = "";
         int window = DEFAULT_LINE_WINDOW;
+        int repeat = 1;
         String prefix = MaeComments.DEFAULT_LOGIN_PREFIX;
         Path out = Path.of("build", "review-benchmark");
         boolean verbose = false;
@@ -110,6 +114,7 @@ record BenchmarkOptions(
                             JUDGE_LLM,
                             "",
                             DEFAULT_LINE_WINDOW,
+                            1,
                             prefix,
                             out,
                             false,
@@ -133,6 +138,7 @@ record BenchmarkOptions(
                         case "--judge" -> judge = value;
                         case "--judge-model" -> judgeModel = value;
                         case "--line-window" -> window = lineWindow(value);
+                        case "--repeat" -> repeat = repeat(value);
                         case "--mae-login-prefix" -> prefix = value;
                         case "--out" -> out = Path.of(value);
                         default -> throw new IllegalArgumentException("Unknown option: " + arg);
@@ -163,6 +169,7 @@ record BenchmarkOptions(
                 judge,
                 StringUtils.defaultIfBlank(judgeModel, model),
                 window,
+                repeat,
                 prefix,
                 out,
                 verbose,
@@ -187,5 +194,15 @@ record BenchmarkOptions(
             // Reported below with the option name.
         }
         throw new IllegalArgumentException("--line-window must be a non-negative integer.");
+    }
+
+    private static int repeat(String value) {
+        try {
+            int repeat = Integer.parseInt(value);
+            if (repeat >= 1) return repeat;
+        } catch (NumberFormatException ignored) {
+            // Reported below with the option name.
+        }
+        throw new IllegalArgumentException("--repeat must be a positive integer.");
     }
 }

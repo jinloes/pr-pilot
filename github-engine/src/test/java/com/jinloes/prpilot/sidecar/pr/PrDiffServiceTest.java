@@ -334,6 +334,22 @@ class PrDiffServiceTest {
         }
 
         @Test
+        void boundValidationDiffKeepsFilesTheReviewLimitWouldDrop() throws IOException {
+            String small = section("small.txt", 1_000);
+            String large = section("large.txt", REVIEW);
+
+            PrDiffResult result =
+                    PrDiffService.boundValidationDiff(
+                            new ByteArrayInputStream(
+                                    (small + large).getBytes(StandardCharsets.UTF_8)));
+
+            assertThat(result.status()).isEqualTo("ok");
+            assertThat(result.truncated()).isFalse();
+            assertThat(result.limitBytes()).isEqualTo(PrDiffService.VALIDATION_LIMIT_BYTES);
+            assertThat(result.diff()).isEqualTo(small + large);
+        }
+
+        @Test
         void boundReviewDiffReturnsASmallLocalDiffUnchanged() throws IOException {
             String diff = section("a.txt", 2_000);
 

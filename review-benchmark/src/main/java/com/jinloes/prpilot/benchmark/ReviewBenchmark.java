@@ -98,11 +98,33 @@ public final class ReviewBenchmark {
         Files.createDirectories(outDir);
         System.setProperty(CALL_SITES_PROPERTY, Boolean.toString(options.callSites()));
         reviews = new ReviewSessionService(new ReviewOutcomeLog(outDir.resolve("outcomes.jsonl")));
+        String stem = "benchmark-" + STEM.format(started);
+        if (options.repeat() == 1) return runOnce(prs, started, outDir, stem, "").path();
 
+        List<BenchmarkReport> reports = new ArrayList<>();
+        for (int run = 1; run <= options.repeat(); run++) {
+            String label = "run " + run + "/" + options.repeat() + " ";
+            Report report = runOnce(prs, Instant.now(), outDir, stem + "-run" + run, label);
+            log.println(
+                    label
+                            + "recall "
+                            + BenchmarkReport.percent(report.report().totals().recall())
+                            + ": "
+                            + report.path());
+            reports.add(report.report());
+        }
+        return new RepeatSummary(reports).write(outDir, stem + "-summary");
+    }
+
+    private record Report(BenchmarkReport report, Path path) {}
+
+    private Report runOnce(
+            List<PrRef> prs, Instant started, Path outDir, String stem, String runLabel)
+            throws IOException, InterruptedException {
         List<BenchmarkReport.PrResult> results = new ArrayList<>();
         for (int i = 0; i < prs.size(); i++) {
             PrRef pr = prs.get(i);
-            String prefix = "[" + (i + 1) + "/" + prs.size() + "] " + pr.label() + ": ";
+            String prefix = runLabel + "[" + (i + 1) + "/" + prs.size() + "] " + pr.label() + ": ";
             BenchmarkReport.PrResult result;
             try {
                 result = benchmark(pr, status -> log.println(prefix + status));
@@ -115,7 +137,7 @@ public final class ReviewBenchmark {
             results.add(result);
         }
         BenchmarkReport report = BenchmarkReport.of(started.toString(), settings(), results);
-        return report.write(outDir, "benchmark-" + STEM.format(started), mapper);
+        return new Report(report, report.write(outDir, stem, mapper));
     }
 
     private BenchmarkReport.PrResult benchmark(PrRef pr, Consumer<String> say)
@@ -149,7 +171,12 @@ public final class ReviewBenchmark {
         say.accept("checking out " + StringUtils.left(mae.commitId(), 12));
         try (LocalCheckout checkout =
                 LocalCheckout.open(
-                        worktrees, repoDir, pr.number(), detail.baseSha(), mae.commitId())) {
+                        worktrees,
+                        repoDir,
+                        pr.number(),
+                        detail.baseSha(),
+                        mae.commitId(),
+                        options.chunked())) {
             if (!"ok".equals(checkout.diff().status())) {
                 throw new IOException("Diff unavailable: " + checkout.diff().message());
             }

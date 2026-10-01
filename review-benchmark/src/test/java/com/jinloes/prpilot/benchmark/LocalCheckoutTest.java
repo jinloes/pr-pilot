@@ -57,7 +57,9 @@ class LocalCheckoutTest {
         void checksOutTheReviewedCommitAndRendersItsDiff() throws Exception {
             GitWorktreeService worktrees = new GitWorktreeService();
             File worktree;
-            try (LocalCheckout checkout = LocalCheckout.open(worktrees, clone, 1, baseSha, prSha)) {
+            try (LocalCheckout checkout =
+                    LocalCheckout.open(worktrees, clone, 1, baseSha, prSha, false)) {
+                assertThat(checkout.diff().limitBytes()).isEqualTo(250_000);
                 worktree = checkout.worktreeDir();
                 assertThat(git(worktree.toPath(), "rev-parse", "HEAD")).isEqualTo(prSha);
                 assertThat(checkout.diff().status()).isEqualTo("ok");
@@ -70,11 +72,25 @@ class LocalCheckoutTest {
         }
 
         @Test
+        void boundsAtTheValidationLimitForChunkedReviews() throws Exception {
+            try (LocalCheckout checkout =
+                    LocalCheckout.open(new GitWorktreeService(), clone, 1, baseSha, prSha, true)) {
+                assertThat(checkout.diff().limitBytes()).isEqualTo(1_000_000);
+                assertThat(checkout.diff().diff()).contains("+class A { int x; }");
+            }
+        }
+
+        @Test
         void rejectsAMalformedCommit() {
             assertThatThrownBy(
                             () ->
                                     LocalCheckout.open(
-                                            new GitWorktreeService(), clone, 1, baseSha, "HEAD"))
+                                            new GitWorktreeService(),
+                                            clone,
+                                            1,
+                                            baseSha,
+                                            "HEAD",
+                                            false))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("reviewed commit");
         }
@@ -85,7 +101,12 @@ class LocalCheckoutTest {
             assertThatThrownBy(
                             () ->
                                     LocalCheckout.open(
-                                            new GitWorktreeService(), clone, 1, missing, prSha))
+                                            new GitWorktreeService(),
+                                            clone,
+                                            1,
+                                            missing,
+                                            prSha,
+                                            false))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("is not available");
         }

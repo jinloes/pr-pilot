@@ -84,6 +84,46 @@ class BenchmarkReportTest {
             assertThat(totals.prPilotFindings()).isEqualTo(2);
             assertThat(totals.recall()).isEqualTo(1.0 / 3);
             assertThat(totals.meanPrRecall()).isEqualTo(0.25);
+            assertThat(totals.completeDiffRecall()).isEqualTo(1.0 / 3);
+        }
+
+        @Test
+        void completeDiffRecallExcludesTruncatedPrs() {
+            BenchmarkReport.PrResult complete =
+                    scored(
+                            PR_A,
+                            2,
+                            List.of(new BenchmarkReport.Match(M1, P1)),
+                            List.of(),
+                            List.of());
+            BenchmarkReport.PrResult base =
+                    scored(
+                            PR_B,
+                            4,
+                            List.of(),
+                            List.of(new BenchmarkReport.Miss(M2, FindingMatcher.NO_NEARBY_FINDING)),
+                            List.of());
+            BenchmarkReport.PrResult truncated =
+                    new BenchmarkReport.PrResult(
+                            base.pr(),
+                            base.url(),
+                            base.status(),
+                            base.message(),
+                            base.reviewedCommit(),
+                            base.reviewMillis(),
+                            true,
+                            base.maeFindings(),
+                            base.prPilotFindings(),
+                            base.matches(),
+                            base.misses(),
+                            base.prPilotOnly());
+
+            BenchmarkReport.Totals totals = BenchmarkReport.Totals.of(List.of(complete, truncated));
+
+            assertThat(totals.recall()).isEqualTo(1.0 / 6);
+            assertThat(totals.completeDiffMaeFindings()).isEqualTo(2);
+            assertThat(totals.completeDiffMatched()).isEqualTo(1);
+            assertThat(totals.completeDiffRecall()).isEqualTo(0.5);
         }
 
         @Test
@@ -99,6 +139,8 @@ class BenchmarkReportTest {
             String md = report().markdown();
             assertThat(md)
                     .contains("| Recall (matched / Mae findings) | 33.3% (1 / 3) |")
+                    .contains(
+                            "| Recall on complete diffs (truncated PRs excluded) | 33.3% (1 / 3) |")
                     .contains("| PRs scored / skipped / failed | 2 / 1 / 1 |")
                     .contains(
                             "| [o/a#1](https://github.com/x) | scored | 2 | 1 | 50.0% | 2 | 61s |")

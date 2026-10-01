@@ -36,10 +36,17 @@ final class LocalCheckout implements AutoCloseable {
     /**
      * Fetches the PR head ref and both commits, then creates the worktree at {@code commit}. The
      * base and commit are fetched by object name as well, so a later force push that dropped Mae's
-     * commit from the PR head does not by itself fail the checkout.
+     * commit from the PR head does not by itself fail the checkout. {@code validationDiff} bounds
+     * the diff at the validation limit the hosts use for chunked reviews instead of the review
+     * limit.
      */
     static LocalCheckout open(
-            GitWorktreeService worktrees, File repoDir, int prNumber, String baseSha, String commit)
+            GitWorktreeService worktrees,
+            File repoDir,
+            int prNumber,
+            String baseSha,
+            String commit,
+            boolean validationDiff)
             throws IOException, InterruptedException {
         requireSha(baseSha, "base");
         requireSha(commit, "reviewed");
@@ -56,14 +63,18 @@ final class LocalCheckout implements AutoCloseable {
         worktrees.createWorktree(repoDir, "refs/pull/" + prNumber + "/head", commit, worktreeDir);
         try {
             return new LocalCheckout(
-                    worktrees, repoDir, worktreeDir, renderDiff(repoDir, baseSha, commit));
+                    worktrees,
+                    repoDir,
+                    worktreeDir,
+                    renderDiff(repoDir, baseSha, commit, validationDiff));
         } catch (IOException | InterruptedException | RuntimeException failure) {
             worktrees.removeWorktree(repoDir, worktreeDir);
             throw failure;
         }
     }
 
-    static PrDiffResult renderDiff(File repoDir, String baseSha, String commit)
+    static PrDiffResult renderDiff(
+            File repoDir, String baseSha, String commit, boolean validationDiff)
             throws IOException, InterruptedException {
         Process process =
                 new ProcessBuilder(
@@ -77,7 +88,10 @@ final class LocalCheckout implements AutoCloseable {
                         .redirectError(ProcessBuilder.Redirect.DISCARD)
                         .start();
         try {
-            PrDiffResult result = PrDiffService.boundReviewDiff(process.getInputStream());
+            PrDiffResult result =
+                    validationDiff
+                            ? PrDiffService.boundValidationDiff(process.getInputStream())
+                            : PrDiffService.boundReviewDiff(process.getInputStream());
             // Bounding may stop reading at the scan ceiling; git would then block on the pipe.
             if (result.truncated()) return result;
             if (!process.waitFor(DIFF_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {

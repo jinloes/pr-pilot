@@ -18,7 +18,7 @@ Lookup guide for implementation work. Read this file when locating code or tests
 | Change notifications | `intellij-plugin/.../PRNotificationService.java` | `vscode-extension/src/notifications.ts`, both host lifecycle entry points | Notification tests in both hosts |
 | Change local draft/index persistence | `PendingReviewIndex.java`, `DraftRecoveryStore.java`, `SeenPRSet.java`, `vscode-extension/src/draftRecovery.ts` | Both host lifecycle callers; persistence contract in `ARCHITECTURE.md` | Matching IntelliJ and VS Code service tests |
 | Change packaging or releases | `.github/workflows/`, module build files | VS Code staging scripts, root Gradle configuration | CI workflow commands and sidecar smoke test |
-| Measure review recall against Mae | `review-benchmark/.../benchmark/ReviewBenchmark.java` | `MaeComments.java`, `LocalCheckout.java`, `FindingMatcher.java`, `LlmJudge.java`, `BenchmarkReport.java` | `review-benchmark/src/test/.../benchmark/` |
+| Measure review recall against Mae | `review-benchmark/.../benchmark/ReviewBenchmark.java` | `MaeComments.java`, `LocalCheckout.java`, `FindingMatcher.java`, `LlmJudge.java`, `BenchmarkReport.java`, `RepeatSummary.java` | `review-benchmark/src/test/.../benchmark/` |
 | Select a local IntelliJ sandbox without changing the compile SDK | `gradle/intellij-sandbox.gradle`, `intellij-plugin/build.gradle` | `runIdeLocal`, `printSandboxIdeSelection` | `gradle/intellij-sandbox-tests.gradle` / `:intellij-plugin:testSandboxIdeSelection` |
 
 Paths below omit `src/main/java/com/jinloes/prpilot/` and equivalent test roots where the module
@@ -171,10 +171,11 @@ against Mae's GitHub review comments. It is not shipped with either host.
 - `benchmark/BenchmarkOptions.java` - Argument parsing, defaults, and usage.
 - `benchmark/PrRef.java` - `owner/repo#N` and PR-URL parsing.
 - `benchmark/MaeComments.java` - Paginated review-comment fetch, Mae filtering, and first-reviewed-commit baseline.
-- `benchmark/LocalCheckout.java` - Worktree at the reviewed commit and a locally rendered, bounded diff.
+- `benchmark/LocalCheckout.java` - Worktree at the reviewed commit and a locally rendered diff, bounded at the review limit or, for `--chunked`, the validation limit.
 - `benchmark/FindingMatcher.java` - Same-file/nearby-line candidate pairing and one-to-one assignment.
 - `benchmark/LlmJudge.java` - Model judge prompt and JSON verdict parsing for candidate pairs.
-- `benchmark/BenchmarkReport.java` - Totals and Markdown/JSON report rendering.
+- `benchmark/BenchmarkReport.java` - Totals (including complete-diff recall) and Markdown/JSON report rendering.
+- `benchmark/RepeatSummary.java` - Per-run recall spread and per-PR matched counts for `--repeat`.
 - Tests mirror each class; `LocalCheckoutTest` uses real git in temp directories.
 
 ### `intellij-plugin/`

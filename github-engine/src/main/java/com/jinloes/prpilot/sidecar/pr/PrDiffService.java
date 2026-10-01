@@ -183,6 +183,16 @@ public final class PrDiffService {
     }
 
     /**
+     * Bounds a locally rendered unified diff exactly as a validation-mode fetch would. Hosts send
+     * this larger diff to chunked reviews, so offline tools use it to mirror chunked mode.
+     */
+    public static PrDiffResult boundValidationDiff(InputStream input) throws IOException {
+        Response response =
+                bound(input, VALIDATION_LIMIT_BYTES, PER_FILE_CAP_BYTES, SCAN_CEILING_BYTES);
+        return PrDiffResult.success(response.diff(), response.truncated(), VALIDATION_LIMIT_BYTES);
+    }
+
+    /**
      * Streams a unified diff and keeps whole file sections only, so a bounded diff never splits a
      * UTF-8 sequence or a hunk. Sections over {@code perFileCap} are dropped as they stream; while
      * the kept total exceeds {@code limitBytes} the largest kept section is evicted (ties: the

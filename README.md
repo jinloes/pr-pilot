@@ -250,8 +250,13 @@ JSON reports under `build/review-benchmark/<timestamp>/`.
 ```
 
 Run with `--args="--help"` for the matching window, judge, and output options. Add `--chunked` to
-review large diffs file by file, or `--no-call-sites` to measure recall without base-commit
-call-site context.
+review large diffs file by file with the hosts' larger 1 MB chunked-review diff, or
+`--no-call-sites` to measure recall without base-commit call-site context. The report also gives
+recall on complete diffs only, since a finding in a file the size limit dropped cannot be matched.
+Pull requests over GitHub's 300-file diff limit cannot be opened in the hosts at all, so treat
+their benchmark score as an upper bound. Model output varies between runs, so pass `--repeat N` to
+run the whole set N times; a `-summary.md` report gives recall per run with the mean, minimum, and
+maximum, plus matched findings per pull request in each run.
 
 ### Build webview assets
 

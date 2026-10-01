@@ -92,7 +92,7 @@ public class ClaudeService {
      *
      * <p>Not a compatibility version: nothing parses it, and old log lines keep their old value.
      */
-    public static final String PROMPT_VERSION = "2026-10-per-site";
+    public static final String PROMPT_VERSION = "2026-10-anchor";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -224,7 +224,9 @@ public class ClaudeService {
                     + "Line numbering: every line in <pr_diff> is prefixed with its new-file"
                     + " line number followed by \"| \" (deleted lines have no number, just"
                     + " \"| \"). Use that prefixed number directly as the \"line\" value; do not"
-                    + " recompute it from @@ headers.\n\n"
+                    + " recompute it from @@ headers. Anchor each comment on the exact line of"
+                    + " the offending statement, call, or expression, not on the enclosing method"
+                    + " signature, block opening, or the first line of the hunk.\n\n"
                     + "Schema (emit exactly this structure — no extra fields, no comments, no"
                     + " trailing text):\n"
                     + "{\n"
