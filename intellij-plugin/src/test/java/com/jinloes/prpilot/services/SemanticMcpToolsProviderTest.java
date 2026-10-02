@@ -77,7 +77,7 @@ class SemanticMcpToolsProviderTest {
         }
 
         private CoroutineContext context(
-                SemanticSnapshotServiceTest.NativeFixture fixture, McpToolDescriptor descriptor)
+                SemanticSnapshotTestFixtures.NativeFixture fixture, McpToolDescriptor descriptor)
                 throws Exception {
             var empty = SourceInventoryMcpProvider.json(Map.of());
             return new McpCallAdditionalDataElement(
@@ -143,7 +143,7 @@ class SemanticMcpToolsProviderTest {
         }
 
         private SemanticReviewContext.Snapshot dispatch(
-                SemanticSnapshotServiceTest.NativeFixture fixture,
+                SemanticSnapshotTestFixtures.NativeFixture fixture,
                 McpToolDescriptor descriptor,
                 SemanticReviewContext.Request request)
                 throws Exception {
@@ -160,7 +160,7 @@ class SemanticMcpToolsProviderTest {
         }
 
         private void rejectsWithoutStateEffects(
-                SemanticSnapshotServiceTest.NativeFixture fixture,
+                SemanticSnapshotTestFixtures.NativeFixture fixture,
                 McpToolDescriptor descriptor,
                 ObjectNode wire)
                 throws Exception {
@@ -187,7 +187,7 @@ class SemanticMcpToolsProviderTest {
         @Test
         void otherwiseValidRequestsRejectUnknownFieldsWithoutArmingCaptureOrBaselineEffects()
                 throws Exception {
-            try (var fixture = new SemanticSnapshotServiceTest.NativeFixture(true)) {
+            try (var fixture = new SemanticSnapshotTestFixtures.NativeFixture(true)) {
                 var descriptor = descriptor();
                 var mapper = new ObjectMapper();
                 var status = fixture.requestFor(SemanticReviewContext.Operation.STATUS);
@@ -268,7 +268,7 @@ class SemanticMcpToolsProviderTest {
                     tool(descriptor)
                             .call(
                                     SourceInventoryMcpProvider.json(
-                                            SemanticSnapshotServiceTest.request(
+                                            SemanticSnapshotTestFixtures.request(
                                                     SemanticReviewContext.Operation.STATUS)),
                                     callback);
             assertThat(result).isInstanceOf(McpToolCallResult.class);
@@ -281,11 +281,12 @@ class SemanticMcpToolsProviderTest {
         @Test
         void actualScheduledToolInvokesServiceWithNativeProjectAndRejectsWrongRequestedPath()
                 throws Exception {
-            try (var fixture = new SemanticSnapshotServiceTest.NativeFixture()) {
+            try (var fixture = new SemanticSnapshotTestFixtures.NativeFixture()) {
                 var descriptor = descriptor();
                 var callback = new Callback(context(fixture, descriptor));
                 var request =
-                        SemanticSnapshotServiceTest.request(SemanticReviewContext.Operation.STATUS);
+                        SemanticSnapshotTestFixtures.request(
+                                SemanticReviewContext.Operation.STATUS);
                 request.setProjectPath("/request-cannot-select-this-project");
                 tool(descriptor)
                         .call(
@@ -310,7 +311,7 @@ class SemanticMcpToolsProviderTest {
 
         @Test
         void scheduledCaptureVerifyAndSourceRejectionUseTheNativeProjectService() throws Exception {
-            try (var fixture = new SemanticSnapshotServiceTest.NativeFixture(true)) {
+            try (var fixture = new SemanticSnapshotTestFixtures.NativeFixture(true)) {
                 fixture.establish();
                 var descriptor = descriptor();
                 var tool = tool(descriptor);
@@ -361,7 +362,7 @@ class SemanticMcpToolsProviderTest {
 
         @Test
         void actualCoroutineCancellationPreventsQueuedSnapshotExecution() throws Exception {
-            try (var fixture = new SemanticSnapshotServiceTest.NativeFixture(true)) {
+            try (var fixture = new SemanticSnapshotTestFixtures.NativeFixture(true)) {
                 fixture.establish();
                 var descriptor = descriptor();
                 var job = new JobImpl(null);
@@ -383,7 +384,7 @@ class SemanticMcpToolsProviderTest {
 
         @Test
         void actualScheduledDecodeRejectsUnexpectedFieldsBeforeService() throws Exception {
-            try (var fixture = new SemanticSnapshotServiceTest.NativeFixture()) {
+            try (var fixture = new SemanticSnapshotTestFixtures.NativeFixture()) {
                 var descriptor = descriptor();
                 var callback = new Callback(context(fixture, descriptor));
                 tool(descriptor)

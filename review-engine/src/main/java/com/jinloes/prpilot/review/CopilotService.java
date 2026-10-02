@@ -123,7 +123,7 @@ public class CopilotService {
         try {
             return CiFindingSuppressor.suppress(
                     runReview(
-                            ClaudeService.buildCritiquePrompt(request, draft),
+                            ReviewPrompts.buildCritiquePrompt(request, draft),
                             model,
                             effort,
                             inheritMcp,
@@ -149,7 +149,7 @@ public class CopilotService {
             String configDir)
             throws IOException, InterruptedException {
         InspectionManifest manifest = InspectionManifest.fromDiff(request.getDiff());
-        String prompt = ClaudeService.buildPrompt(request, manifest);
+        String prompt = ReviewPrompts.buildPrompt(request, manifest);
         log.info(
                 "Copilot review prompt: {} chars — diff {} chars, CI {} chars, commits {} chars",
                 prompt.length(),
@@ -174,7 +174,7 @@ public class CopilotService {
         onStatus.accept(STATUS_PARSING);
         try {
             return ReviewPassParser.parse(
-                    raw, manifest, workingDir, ClaudeService.maxComments(request));
+                    raw, manifest, workingDir, ReviewResultParser.maxComments(request));
         } catch (Exception parseEx) {
             log.warn("Failed to parse Copilot review JSON (output chars: {})", raw.length());
             throw new IOException("Failed to parse review JSON from Copilot output.", parseEx);
@@ -256,7 +256,7 @@ public class CopilotService {
         }
         onStatus.accept(STATUS_PARSING);
         try {
-            return ClaudeService.parseReview(raw);
+            return ReviewResultParser.parseReview(raw);
         } catch (Exception parseEx) {
             log.warn("Failed to parse Copilot review JSON (output chars: {})", raw.length());
             throw new IOException("Failed to parse review JSON from Copilot output.", parseEx);
@@ -272,7 +272,7 @@ public class CopilotService {
             boolean inheritMcp,
             String configDir)
             throws IOException, InterruptedException {
-        String prompt = ClaudeService.buildChatPrompt(prContext, history, userMessage);
+        String prompt = ReviewPrompts.buildChatPrompt(prContext, history, userMessage);
         return runSession(
                 prompt,
                 "",
@@ -297,8 +297,8 @@ public class CopilotService {
 
     /**
      * Sends a pre-built prompt directly to Copilot without wrapping it in {@link
-     * ClaudeService#buildChatPrompt}. Use this when the caller has already assembled the full
-     * prompt (e.g. via {@link ClaudeService#buildFocusedChatPrompt}) and does not want any
+     * ReviewPrompts#buildChatPrompt}. Use this when the caller has already assembled the full
+     * prompt (e.g. via {@link ReviewPrompts#buildFocusedChatPrompt}) and does not want any
      * additional wrapping.
      */
     public String chatWithPrompt(

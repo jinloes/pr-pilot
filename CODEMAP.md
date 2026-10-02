@@ -8,11 +8,11 @@ Lookup guide for implementation work. Read this file when locating code or tests
 | Task | Start here | Follow through | Primary tests |
 |---|---|---|---|
 | Inspect internal source coverage (not readiness) | `model/SourceInventory.java`, `review/SourceInventoryClient.java` | `SourceInventoryFiles.java`, IntelliJ `SourceInventoryService.java` and `SourceInventoryMcpProvider.java` | `SourceInventoryTest`, `SourceInventoryFilesTest`, `SourceInventoryClientTest`, `SourceInventoryServiceTest`, `SourceInventoryMcpProviderTest`; manual protocol recipe in `docs/intellij-assisted-review.md` |
-| Change review generation or prompts | `review-engine/.../ClaudeService.java`, `CopilotService.java` | `ReviewEngineApi.java`, `ReviewSessionService.java`, host request wiring | Matching `review-engine` service tests; prompt mirrors listed in `AGENTS.md` |
+| Change review generation or prompts | `review-engine/.../ReviewPrompts.java`, `ReviewResultParser.java`, `ClaudeService.java`, `CopilotService.java` | `ReviewEngineApi.java`, `ReviewSessionService.java`, host request wiring | Matching `review-engine` service tests; prompt mirrors listed in `AGENTS.md` |
 | Add an engine capability | `GitHubEngineApi.java` or `ReviewEngineApi.java` | `StdioJsonRpcServer.java`, `SidecarBootstrapService.java`, `vscode-extension/src/sidecar.ts` | `EngineCapabilityCoverageTest.java`, `wireCatalog.test.ts` |
 | Change PR discovery, metadata, diff, or draft mutations | `github-engine/.../sidecar/pr/` | `GitHubEngine.java`, both host bridges, shared webview messages | Matching `github-engine` service test plus host bridge tests |
 | Change the shared review UI | `webview/src/App.tsx`, `webview/src/components/` | `webview/src/bridge/types.ts`, both host bridge handlers | Component tests plus accessibility/visual suites when behavior or layout changes |
-| Change IntelliJ host behavior | `intellij-plugin/.../ui/WebviewPanel.java` | `services/`, `settings/`, shared webview bridge | Matching IntelliJ JUnit tests |
+| Change IntelliJ host behavior | `intellij-plugin/.../ui/WebviewPanel.java`, `PrChatController.java`, `DeepReviewController.java` | `services/`, `settings/`, shared webview bridge | Matching IntelliJ JUnit tests |
 | Change VS Code host behavior | `vscode-extension/src/extension.ts` | `sidecar.ts`, `settings.ts`, `settingsView.ts` | `vscode-extension/test/` |
 | Change settings | `intellij-plugin/.../settings/PluginSettings.java` | Both settings UIs, `vscode-extension/package.json`, host readers | IntelliJ settings tests and VS Code settings tests |
 | Change notifications | `intellij-plugin/.../PRNotificationService.java` | `vscode-extension/src/notifications.ts`, both host lifecycle entry points | Notification tests in both hosts |
@@ -31,7 +31,11 @@ context makes them unambiguous.
 - `README.md` - User setup, development, checks, and release flow.
 - `docs/intellij-assisted-review.md` - Experimental IntelliJ-assisted review, native readiness and source-inventory protocol.
 - `AGENTS.md` - Agent workflow, testing rules, and cross-host obligations.
-- `ARCHITECTURE.md` - Stable design constraints, settings persistence, and local data.
+- `ARCHITECTURE.md` - Design-constraint index, settings persistence, and local data.
+- `docs/architecture/*.md` - Full design-constraint sections by topic (review pipeline, providers,
+  semantic review, hosts and sidecar, GitHub drafts and worktrees, webview).
+- `REVIEW_QUALITY_PLAN.md` - Active review-quality plan; completed phases are archived verbatim in
+  `docs/archive/review-quality-plan-completed.md`.
 - `diagrams/` - Mermaid architecture and PR review-generation sequence diagrams.
 - `.github/workflows/ci.yml` - Push/PR checks, Java 17 sidecar smoke test, and packaged-VSIX assertion.
 - `.github/workflows/release.yml` - Tag-driven IntelliJ ZIP and VSIX GitHub releases.
@@ -75,7 +79,11 @@ guidance.
 
 - `engine/ReviewEngineApi.java` - Complete review capability surface and JSON-RPC wire-name map.
 - `engine/ReviewSessionService.java` - Provider dispatch and operation-scoped cancellation.
-- `review/ClaudeService.java` - Claude CLI execution, canonical review/chat prompts, and review category parsing including compatibility findings.
+- `review/ClaudeService.java` - Claude CLI execution, tool-use status, and process lifecycle.
+- `review/ReviewPrompts.java` - Canonical review, chat, focused-chat, hygiene and critique prompts,
+  prompt version, and prompt-content helpers. Tests: `ReviewPromptsTest`.
+- `review/ReviewResultParser.java` - Review JSON parsing, comment repair, and category validation
+  including compatibility findings. Tests: `ReviewResultParserTest`.
 - `review/CopilotService.java` - Copilot SDK execution with the same review API.
 - `review/PromptCompleter.java` - One-shot provider-neutral prompt completion used by development tools such as the recall benchmark.
 - `review/ChunkedReviewService.java` - Shared diff batching, contract-index generation, and mandatory global reconciliation.
@@ -162,6 +170,8 @@ Thin Java 17, non-web Spring Boot stdio JSON-RPC adapter used only by VS Code.
 - `sidecar/SidecarConfiguration.java` - Engine composition.
 - `sidecar/StdioFrameCodec.java` - Bounded Content-Length UTF-8 framing.
 - `sidecar/StdioJsonRpcServer.java` - Validation, dispatch, errors, and async notifications.
+  Tests: `StdioJsonRpcServerTest` (protocol), `StdioJsonRpcServerGitHubParamsTest`,
+  `StdioJsonRpcServerReviewsTest`, sharing `StdioJsonRpcServerTestBase`.
 - `sidecar/SidecarBootstrapService.java` - Initialize response and advertised capability groups.
 - `src/main/resources/logback-spring.xml` - Stderr logging; stdout remains protocol-only.
 - `EngineCapabilityCoverageTest.java` - Enforces declaration, registration, and advertisement parity.
@@ -198,7 +208,8 @@ IntelliJ host integration. Depends directly on `core`, `github-engine`, and `rev
   baselines, settings document/VFS/list invalidation and bounded PSI declaration limitations.
 - `services/SemanticMcpToolsProvider.java` - Strict snapshot decoder using the shared
   native-project/coroutine cancellation dispatcher and optional 262 ABI boundary.
-- `SemanticSnapshotServiceTest` and `SemanticMcpToolsProviderTest` - Real service rejection paths,
+- `SemanticSnapshotServiceTest` and `SemanticMcpToolsProviderTest` (shared fixtures in
+  `SemanticSnapshotTestFixtures`) - Real service rejection paths,
   subscribed document/reload/disposal callbacks, queued tool dispatch/cancellation and model
   limitations. These bounded tests do not claim a live successful import or ready capture.
 - `src/main/resources/META-INF/prpilot-mcp.xml` - Optional project service and MCP provider
@@ -216,7 +227,16 @@ IntelliJ host integration. Depends directly on `core`, `github-engine`, and `rev
 - `settings/PluginSettingsConfigurable.java` - Settings lifecycle integration.
 - `settings/GithubBaseUrlValidator.java` - HTTPS GitHub-origin normalization.
 - `ui/PRToolWindowFactory.java` - Tool-window entry point; title actions (Pop Out, Settings) and the gear-menu "Reload PR Pilot View" action, built by package-private helpers covered by `PRToolWindowFactoryTest`.
-- `ui/WebviewPanel.java` - JCEF host and Java/webview bridge.
+- `ui/WebviewPanel.java` - JCEF host and Java/webview bridge dispatch.
+- `ui/WebviewBridgeMessages.java` - Java records for bridge message payloads.
+- `ui/PrChatController.java` - PR chat state, ask/clear/cancel, and chat reset.
+- `ui/DeepReviewController.java` - IntelliJ-assisted review setup, continuation, maintenance, and
+  generation-failure restore.
+- `ui/WorktreeCoordinator.java` - Active-PR worktree ownership and leases.
+- `ui/WebviewResourceServer.java` - Local webview resource server lifecycle and path resolution.
+- `ui/WebviewPrSupport.java` - Pure PR/draft/worktree-key helpers used by the panel.
+- Tests: `WebviewPanelTest` (bridge-driven), `WebviewPrSupportTest`, `WorktreeCoordinatorTest`,
+  `WebviewResourceServerTest`.
 - `ui/HostThemeClassifier.java` - Host theme normalization.
 - `ui/ReviewMapper.java` and `WebviewDtos.java` - Core-to-bridge DTO mapping.
 - Tests: `intellij-plugin/src/test/java/com/jinloes/prpilot/`, mirroring production packages.
@@ -271,7 +291,8 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
   CAPTURE/VERIFY and cancellation. These tests do not replace installed SDK/import evidence.
 - `review-engine/.../review/SemanticReviewService.java` — prepare, collect, query bracketing,
   engine-owned execution authority, and final validation. `SemanticReviewServiceTest` covers
-  collector negatives; `ReviewPipelineServiceTest` drives actual provider adapters with fake IO.
+  collector negatives; `ReviewPipelineServiceTest` and `ReviewPipelineRecallTest` (shared fixtures in
+  `ReviewPipelineTestSupport`) drive actual provider adapters with fake IO.
 - `review-engine/.../review/IjctlClient.java` — fixed read-only allowlist, schemas and limits.
 - `review-engine/.../review/SemanticSkillBundle.java` and `src/main/resources/semantic-skills/`
   — complete pinned instructions, provenance and license; never project-selected instructions.
@@ -279,12 +300,14 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
   `GitWorktreeService` protects retained trees from ordinary cleanup and non-force removal.
 - `review-engine/.../engine/ReviewEngineApi.java`, `ReviewSessionService.java` and
   `sidecar/.../StdioJsonRpcServer.java` — prepare/list/cleanup capability and lifetime boundary.
-- `intellij-plugin/.../ui/WebviewPanel.java`, `services/IntellijClaudeService.java` and
+- `intellij-plugin/.../ui/WebviewPanel.java`, `DeepReviewController.java`, `services/IntellijClaudeService.java` and
   `vscode-extension/src/{extension,deepReview,sidecar}.ts` — actual correlated host callbacks;
   selection/head/settings/operation fencing; provider ownership until final delivery.
 - `webview/src/components/ReviewPane/{DeepReviewSetup,ReviewOverrides,ReviewPane,useReviewController}`
   — opt-in, manual pause, Continue/Retry/Cancel/ordinary fallback and retained maintenance.
-  `ReviewPane.component.test.tsx` and `a11y/app.a11y.spec.ts` cover the shared interaction flow.
+  `ReviewPane.component.test.tsx`, `ReviewPane.submission.component.test.tsx` (shared helpers in
+  `reviewPaneTestUtils.tsx`) and `a11y/app.a11y.spec.ts`/`review.a11y.spec.ts` (shared helpers in
+  `a11y/a11yHelpers.ts`) cover the shared interaction flow.
   The opt-in controls render only when `draftLoaded.intellijAssistedEnabled` is `true`, set from the
   default-off `PluginSettings.experimentalIntellijAssistedReview` /
   `pr-pilot.experimentalIntellijAssistedReview`; both hosts reject assisted requests while it is off.

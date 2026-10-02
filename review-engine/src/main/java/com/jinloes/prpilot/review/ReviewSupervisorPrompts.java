@@ -29,7 +29,7 @@ final class ReviewSupervisorPrompts {
     static String selectionPrompt(
             PRReviewRequest request, List<CoverageGap> gaps, ReviewResult baseline) {
         StringBuilder prompt = new StringBuilder(selectionPrompt(gaps, baseline));
-        ClaudeService.appendSemanticSections(prompt, request);
+        ReviewPrompts.appendSemanticSections(prompt, request);
         return prompt.toString();
     }
 

@@ -1,9 +1,17 @@
 package com.jinloes.prpilot.ui;
 
 import static com.intellij.openapi.application.ApplicationManager.getApplication;
+import static com.jinloes.prpilot.ui.WebviewPrSupport.bridgePrKey;
+import static com.jinloes.prpilot.ui.WebviewPrSupport.healthyDraftEntries;
+import static com.jinloes.prpilot.ui.WebviewPrSupport.hydratePullRequest;
+import static com.jinloes.prpilot.ui.WebviewPrSupport.isSamePr;
+import static com.jinloes.prpilot.ui.WebviewPrSupport.matchesPrRequest;
+import static com.jinloes.prpilot.ui.WebviewPrSupport.mergeActivatedPr;
+import static com.jinloes.prpilot.ui.WebviewPrSupport.normalizeSearchScope;
+import static com.jinloes.prpilot.ui.WebviewPrSupport.saveRepositoryInstructionsReply;
+import static com.jinloes.prpilot.ui.WebviewPrSupport.toWebviewPr;
+import static com.jinloes.prpilot.ui.WebviewPrSupport.worktreeKey;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -20,19 +28,18 @@ import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
 import com.intellij.util.Alarm;
 import com.intellij.util.ui.UIUtil;
-import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.CiAnnotation;
 import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
-import com.jinloes.prpilot.model.ReviewStatus;
 import com.jinloes.prpilot.review.ClaudeService;
 import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.ProviderSetupProbe;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
+import com.jinloes.prpilot.review.ReviewPrompts;
 import com.jinloes.prpilot.services.DraftRecoveryStore;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.services.IntellijGitHubService;
@@ -43,13 +50,33 @@ import com.jinloes.prpilot.settings.PluginSettings;
 import com.jinloes.prpilot.settings.PluginSettingsConfigurable;
 import com.jinloes.prpilot.settings.RepositoryReviewInstructions;
 import com.jinloes.prpilot.sidecar.pr.PrDetail;
-import com.sun.net.httpserver.HttpExchange;
+import com.jinloes.prpilot.ui.DeepReviewController.DeepInvocation;
+import com.jinloes.prpilot.ui.DeepReviewController.DeepPending;
+import com.jinloes.prpilot.ui.DeepReviewController.DeepReviewIo;
+import com.jinloes.prpilot.ui.DeepReviewController.FreshDeepPr;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.ActivatePrMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftLoadedMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftLoadingMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftSaveErrorMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftSavedMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.ErrorMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.GeneratedReview;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrDraftStatusMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrListMessage;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrListStatus;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrWorktree;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.ProviderReadinessDto;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewChunkMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewGeneratingMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewGenerationSettings;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewResultMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.SetupRequiredMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.SimpleMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.ThemeChangedMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.WebviewPr;
+import com.jinloes.prpilot.ui.WorktreeCoordinator.WorktreeLease;
 import com.sun.net.httpserver.HttpServer;
 import java.awt.BorderLayout;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.InetSocketAddress;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -93,139 +120,6 @@ public class WebviewPanel implements Disposable {
 
     private static final int LAYOUT_REPAINT_DELAY_MS = 50;
 
-    // --- Outbound DTO records (Java → JS) ---
-    // ReviewResultDto and LineCommentDto live in WebviewDtos.java (package-private);
-    // see ReviewMapper for compile-time-verified model→DTO mapping.
-
-    private record WebviewPr(
-            int number,
-            String title,
-            String owner,
-            String repo,
-            String author,
-            @JsonProperty("createdAt") String createdAt,
-            @JsonProperty("htmlUrl") String htmlUrl,
-            @JsonProperty("isDraft") boolean isDraft,
-            @JsonProperty("hasReviewDraft") boolean hasReviewDraft,
-            @JsonProperty("reviewStatus") ReviewStatus reviewStatus) {}
-
-    record PrListStatus(
-            String searchScope,
-            String currentRepo,
-            int resultLimit,
-            boolean limited,
-            boolean reviewStatusAvailable) {}
-
-    record PrListMessage(
-            String type,
-            List<WebviewPr> prs,
-            @JsonProperty("defaultRepo") String defaultRepo,
-            @JsonProperty("listStatus") PrListStatus listStatus,
-            @JsonProperty("providerReadiness") ProviderReadinessDto providerReadiness,
-            @JsonProperty("intellijAssistedEnabled") boolean intellijAssistedEnabled) {}
-
-    private record DraftLoadingMsg(String type, @JsonProperty("prKey") String prKey) {}
-
-    private record ThemeChangedMsg(String type, String theme) {}
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    record DraftLoadedMsg(
-            String type,
-            @JsonProperty("prKey") String prKey,
-            String prState,
-            @JsonProperty("reviewId") String reviewId,
-            @JsonProperty("result") ReviewResultDto result,
-            String diff,
-            @JsonProperty("validationDiff") String validationDiff,
-            boolean staleCommits,
-            boolean importedFromGitHub,
-            boolean recoveryPending,
-            String status,
-            @JsonProperty("providerReadiness") ProviderReadinessDto providerReadiness,
-            @JsonProperty("intellijAssistedEnabled") boolean intellijAssistedEnabled,
-            @JsonProperty("repositoryInstructions") String repositoryInstructions) {}
-
-    record RepositoryInstructionsSavedMsg(
-            String type, @JsonProperty("prKey") String prKey, String instructions) {}
-
-    private record ReviewGeneratingMsg(
-            String type, @JsonProperty("prKey") String prKey, String message) {}
-
-    private record ReviewChunkMsg(
-            String type, @JsonProperty("prKey") String prKey, String kind, String chunk) {}
-
-    private record ReviewResultMsg(
-            String type,
-            @JsonProperty("prKey") String prKey,
-            ReviewResultDto result,
-            String diff,
-            @JsonProperty("validationDiff") String validationDiff) {}
-
-    private record ErrorMsg(String type, @JsonProperty("prKey") String prKey, String message) {}
-
-    private record DraftSavedMsg(
-            String type,
-            @JsonProperty("prKey") String prKey,
-            long saveId,
-            String reviewId,
-            boolean commentsDropped) {}
-
-    private record DraftSaveErrorMsg(
-            String type, @JsonProperty("prKey") String prKey, long saveId, String message) {}
-
-    private record SimpleMsg(String type, @JsonProperty("prKey") String prKey) {}
-
-    private record ChatChunkMsg(String type, @JsonProperty("prKey") String prKey, String chunk) {}
-
-    private record ChatResponseMsg(
-            String type, @JsonProperty("prKey") String prKey, String response) {}
-
-    private record PrDraftStatusMsg(
-            String type,
-            int number,
-            String owner,
-            String repo,
-            @JsonProperty("hasReviewDraft") boolean hasReviewDraft) {}
-
-    record ProviderReadinessDto(
-            String provider,
-            boolean available,
-            String detail,
-            @JsonProperty("binaryStatus") String binaryStatus,
-            @JsonProperty("authenticationStatus") String authenticationStatus,
-            @JsonProperty("authCommand") String authCommand) {
-        ProviderReadinessDto(String provider, boolean available, String detail) {
-            this(
-                    provider,
-                    available,
-                    detail,
-                    available ? "ready" : "missing",
-                    available ? "unverified" : "unavailable",
-                    "copilot".equals(provider) ? "copilot login" : "claude auth login");
-        }
-    }
-
-    private record ActivatePrMsg(String type, @JsonProperty("pr") WebviewPr pr, String source) {}
-
-    private record SetupRequiredMsg(
-            String type,
-            String reason,
-            String detail,
-            @JsonProperty("providerReadiness") ProviderReadinessDto providerReadiness) {}
-
-    private record ReviewGenerationSettings(
-            IntellijClaudeService.ReviewRuntimeSettings runtime,
-            String focusAreas,
-            String customInstructions,
-            List<String> guidanceGlobs,
-            String rulesDirectory,
-            String repositoryInstructions) {}
-
-    record GeneratedReview(
-            long generationId, ReviewResult result, ReviewOutcomeLog.Metadata metadata) {}
-
-    private record PrWorktree(java.io.File directory, java.io.File gitRoot) {}
-
     private record LifecycleTransition(
             long selectionRevision,
             IntellijClaudeService reviewService,
@@ -264,89 +158,9 @@ public class WebviewPanel implements Disposable {
         IntellijGitHubService.PendingReview load() throws Exception;
     }
 
-    record WorktreeLease<T>(long epoch, String key, CompletableFuture<T> future, boolean owner) {}
-
-    static final class WorktreeCoordinator<T> {
-        private long epoch;
-        private String activeKey;
-        private T activeValue;
-        private String inFlightKey;
-        private CompletableFuture<T> inFlight;
-
-        synchronized WorktreeLease<T> acquire(String key) {
-            if (activeValue != null && StringUtils.equals(activeKey, key)) {
-                return new WorktreeLease<>(
-                        epoch, key, CompletableFuture.completedFuture(activeValue), false);
-            }
-            if (inFlight != null && StringUtils.equals(inFlightKey, key)) {
-                return new WorktreeLease<>(epoch, key, inFlight, false);
-            }
-            CompletableFuture<T> future = new CompletableFuture<>();
-            inFlightKey = key;
-            inFlight = future;
-            return new WorktreeLease<>(epoch, key, future, true);
-        }
-
-        boolean install(WorktreeLease<T> lease, T value) {
-            boolean accepted;
-            synchronized (this) {
-                accepted =
-                        lease.epoch() == epoch
-                                && inFlight == lease.future()
-                                && StringUtils.equals(inFlightKey, lease.key());
-                if (accepted) {
-                    activeKey = lease.key();
-                    activeValue = value;
-                    inFlightKey = null;
-                    inFlight = null;
-                }
-            }
-            if (accepted) {
-                lease.future().complete(value);
-            }
-            return accepted;
-        }
-
-        void fail(WorktreeLease<T> lease) {
-            synchronized (this) {
-                if (inFlight == lease.future()) {
-                    inFlightKey = null;
-                    inFlight = null;
-                }
-            }
-            lease.future()
-                    .completeExceptionally(
-                            new IllegalStateException(
-                                    "Unable to create an isolated pull request worktree."));
-        }
-
-        synchronized T activeValue() {
-            return activeValue;
-        }
-
-        T clear() {
-            T previous;
-            CompletableFuture<T> detached;
-            synchronized (this) {
-                epoch++;
-                previous = activeValue;
-                detached = inFlight;
-                activeKey = null;
-                activeValue = null;
-                inFlightKey = null;
-                inFlight = null;
-            }
-            if (detached != null) {
-                detached.completeExceptionally(
-                        new IllegalStateException("Pull request worktree creation was cancelled."));
-            }
-            return previous;
-        }
-    }
-
     // --- Infrastructure ---
 
-    private volatile HttpServer httpServer;
+    private final WebviewResourceServer resourceServer = new WebviewResourceServer();
     private volatile String webviewUrl;
     private volatile boolean disposed;
     private final JBCefBrowser browser;
@@ -363,28 +177,10 @@ public class WebviewPanel implements Disposable {
     private final GitWorktreeService worktreeService = new GitWorktreeService();
     private final com.jinloes.prpilot.review.SemanticReviewService semanticReviews =
             new com.jinloes.prpilot.review.SemanticReviewService();
-    private DeepPending deepPending;
-    private long deepPreparationRevision;
-    private String deepOperationId;
-    private final java.util.Set<String> consumedDeepOperations = new java.util.HashSet<>();
-
-    record DeepPending(
-            com.jinloes.prpilot.review.SemanticReviewService.Preparation preparation,
-            JsonNode options,
-            String key,
-            long selection,
-            Object settings,
-            String diff,
-            long revision) {}
-
-    private record DeepInvocation(DeepPending pending, String server) {}
 
     private final IntellijGitHubService ghSvc;
     private final DraftRecoveryStore draftRecoveryStore;
     private final Project project;
-    private final DeepReviewIo deepIo;
-    private final Consumer<Runnable> deepBackground;
-    private final java.util.function.Supplier<Object> deepSettings;
     private final Consumer<Object> testMessageSink;
 
     /** Experimental opt-in; while off, the webview hides the IntelliJ-assisted controls. */
@@ -394,22 +190,6 @@ public class WebviewPanel implements Disposable {
 
     static final String INTELLIJ_ASSISTED_DISABLED_ERROR =
             "IntelliJ-assisted review is disabled; enable it in PR Pilot settings (experimental)";
-
-    /**
-     * External effects only; correlation, head checks and Continue consumption stay in the host.
-     */
-    interface DeepReviewIo {
-        com.jinloes.prpilot.review.SemanticReviewService.Preparation prepare(
-                JsonNode options, FreshDeepPr fresh) throws Exception;
-
-        FreshDeepPr fresh(int number, String owner, String repo) throws Exception;
-
-        void generate(DeepPending pending, String operationId, String server);
-
-        List<com.jinloes.prpilot.review.SemanticWorktreeStore.Retained> list() throws Exception;
-
-        void cleanup(String id, boolean closed) throws Exception;
-    }
 
     /**
      * Points to the service that owns the currently running review process (may be a per-worktree
@@ -427,9 +207,6 @@ public class WebviewPanel implements Disposable {
     private final AtomicLong generationSequence = new AtomicLong();
     private volatile long activeGenerationId;
     private volatile String activeReviewOperationId;
-    private final AtomicLong chatSequence = new AtomicLong();
-    private volatile long activeChatId;
-    private volatile String activeChatOperationId;
 
     private final ReviewOutcomeLog outcomeLog = new ReviewOutcomeLog();
     private volatile String pendingReviewId = null;
@@ -439,10 +216,9 @@ public class WebviewPanel implements Disposable {
     private volatile String prefetchedDiff = null;
     private volatile String prefetchedValidationDiff = null;
     private volatile String prefetchedExistingReviews = null;
-    private volatile List<ChatMessage> chatHistory = List.of();
-    private volatile IntellijClaudeService activeChatService;
-    private volatile ReviewProvider activeChatProvider = ReviewProvider.CLAUDE;
     private final WorktreeCoordinator<PrWorktree> worktrees;
+    private final PrChatController chats;
+    private final DeepReviewController assistedReviews;
 
     private volatile String prStateFilter = "open";
     private volatile String searchScope = "currentRepo";
@@ -455,15 +231,13 @@ public class WebviewPanel implements Disposable {
         this.layoutRepaintAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD, this);
         this.ghSvc = IntellijGitHubService.getInstance();
         this.draftRecoveryStore = DraftRecoveryStore.getInstance();
-        this.deepSettings = this::readDeepSettingsIdentity;
-        this.deepBackground = job -> getApplication().executeOnPooledThread(job);
         this.testMessageSink = null;
         this.intellijAssistedEnabled =
                 () -> PluginSettings.getInstance().isExperimentalIntellijAssistedReview();
         this.repositoryInstructionsLookup =
                 (owner, repo) ->
                         PluginSettings.getInstance().getRepositoryReviewInstructions(owner, repo);
-        this.deepIo =
+        DeepReviewIo io =
                 new DeepReviewIo() {
                     public com.jinloes.prpilot.review.SemanticReviewService.Preparation prepare(
                             JsonNode options, FreshDeepPr fresh) throws Exception {
@@ -530,7 +304,14 @@ public class WebviewPanel implements Disposable {
                 };
         this.claudeService = new IntellijClaudeService(project.getBasePath());
         this.activeReviewService = this.claudeService;
-        this.activeChatService = this.claudeService;
+        this.chats = new PrChatController(this, new ChatHost());
+        this.assistedReviews =
+                new DeepReviewController(
+                        this,
+                        new DeepHost(),
+                        io,
+                        job -> getApplication().executeOnPooledThread(job),
+                        this::readDeepSettingsIdentity);
         this.worktrees = new WorktreeCoordinator<>();
         browser = JBCefBrowser.createBuilder().setOffScreenRendering(true).build();
         browserPanel = createBrowserHostPanel(browser.getComponent());
@@ -622,24 +403,23 @@ public class WebviewPanel implements Disposable {
         draftRecoveryStore = null;
         claudeService = null;
         worktrees = new WorktreeCoordinator<>();
+        chats = new PrChatController(this, new ChatHost());
+        assistedReviews = new DeepReviewController(this, new DeepHost(), io, background, settings);
         activePR = selected;
-        deepIo = io;
-        deepBackground = background;
-        deepSettings = settings;
         testMessageSink = messages;
         this.intellijAssistedEnabled = intellijAssistedEnabled;
         this.repositoryInstructionsLookup = (owner, repo) -> "";
     }
 
     private void startServerAndLoad() {
-        HttpServer server = tryStartServer();
+        HttpServer server = resourceServer.tryStart();
         if (disposed) {
             if (server != null) {
                 server.stop(0);
             }
             return;
         }
-        httpServer = server;
+        resourceServer.adopt(server);
         if (server == null) {
             getApplication()
                     .invokeLater(
@@ -676,72 +456,6 @@ public class WebviewPanel implements Disposable {
         JPanel panel = new JPanel(new BorderLayout());
         panel.add(browserComponent, BorderLayout.CENTER);
         return panel;
-    }
-
-    private HttpServer tryStartServer() {
-        try {
-            HttpServer s = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            s.createContext("/", this::serveResource);
-            s.start();
-            log.debug("Webview HTTP server listening on port {}", s.getAddress().getPort());
-            return s;
-        } catch (IOException e) {
-            log.error("Failed to start webview HTTP server", e);
-            return null;
-        }
-    }
-
-    private void serveResource(HttpExchange exchange) throws IOException {
-        String resource = resolveResourcePath(exchange.getRequestURI().getPath());
-        if (resource == null) {
-            exchange.sendResponseHeaders(404, 0);
-            exchange.close();
-            return;
-        }
-        try (InputStream in = WebviewPanel.class.getResourceAsStream(resource)) {
-            if (in == null) {
-                exchange.sendResponseHeaders(404, 0);
-                exchange.close();
-                return;
-            }
-            byte[] bytes = in.readAllBytes();
-            exchange.getResponseHeaders().add("Content-Type", mimeFor(resource));
-            exchange.getResponseHeaders().add("Cache-Control", "no-store");
-            exchange.sendResponseHeaders(200, bytes.length);
-            try (var out = exchange.getResponseBody()) {
-                out.write(bytes);
-            }
-        }
-    }
-
-    /**
-     * Maps a request path to a classpath resource path under {@code /webview/}, or returns null if
-     * the request would escape that root.
-     */
-    static String resolveResourcePath(String requestPath) {
-        if (StringUtils.isBlank(requestPath) || !requestPath.startsWith("/")) {
-            return null;
-        }
-        String path = "/".equals(requestPath) ? "/index.html" : requestPath;
-        String candidate = "/webview" + path;
-        String normalized = URI.create(candidate).normalize().getPath();
-        if (!normalized.startsWith("/webview/")) {
-            return null;
-        }
-        return normalized;
-    }
-
-    private static String mimeFor(String path) {
-        if (path.endsWith(".html")) {
-            return "text/html; charset=utf-8";
-        }
-        if (path.endsWith(".js")) {
-            return "application/javascript; charset=utf-8";
-        }
-        if (path.endsWith(".css")) {
-            return "text/css; charset=utf-8";
-        }
-        return "application/octet-stream";
     }
 
     private void injectBridge(CefBrowser cefBrowser) {
@@ -826,11 +540,10 @@ public class WebviewPanel implements Disposable {
                 case "webviewLayoutChanged" -> scheduleWebviewLayoutRepaint();
                 case "generateReview" -> {
                     if (node.path("intellijAssisted").asBoolean(false)) {
-                        handlePrepareDeepReview(node.deepCopy());
+                        assistedReviews.prepare(node.deepCopy());
                     } else {
                         synchronized (this) {
-                            deepPending = null;
-                            deepPreparationRevision++;
+                            assistedReviews.invalidateLocked();
                         }
                         handleGenerateReview(
                                 number,
@@ -844,9 +557,9 @@ public class WebviewPanel implements Disposable {
                                 null);
                     }
                 }
-                case "continueDeepReview" -> handleContinueDeepReview(node.deepCopy());
+                case "continueDeepReview" -> assistedReviews.continueReview(node.deepCopy());
                 case "listDeepReviews", "cleanupDeepReview" ->
-                        handleDeepMaintenance(node.deepCopy());
+                        assistedReviews.maintenance(node.deepCopy());
                 case "cancelReview" -> cancelActiveReview(node.path("operationId").asText());
                 case "saveDraft" -> {
                     long saveId = node.path("saveId").asLong();
@@ -914,8 +627,8 @@ public class WebviewPanel implements Disposable {
                                                 handleDeleteDraft(number, owner, repo);
                                             }
                                         });
-                case "clearChat" -> clearChat(node.path("operationId").asText());
-                case "cancelChat" -> cancelChat(node.path("operationId").asText());
+                case "clearChat" -> chats.clear(node.path("operationId").asText());
+                case "cancelChat" -> chats.cancel(node.path("operationId").asText());
                 case "saveRepositoryInstructions" ->
                         pushMessage(
                                 saveRepositoryInstructionsReply(
@@ -929,8 +642,7 @@ public class WebviewPanel implements Disposable {
                     String context = node.path("context").asText("");
                     String operationId = node.path("operationId").asText();
                     getApplication()
-                            .executeOnPooledThread(
-                                    () -> handleAskClaude(question, context, operationId));
+                            .executeOnPooledThread(() -> chats.ask(question, context, operationId));
                 }
                 default -> log.warn("Unknown bridge message type: {}", type);
             }
@@ -1276,19 +988,13 @@ public class WebviewPanel implements Disposable {
 
     private LifecycleTransition transitionToSelection(PullRequest pr) {
         IntellijClaudeService reviewService = activeReviewService;
-        IntellijClaudeService chatService = activeChatService;
         ReviewProvider reviewProvider = activeReviewProvider;
-        ReviewProvider chatProvider = activeChatProvider;
         String reviewOperationId = activeReviewOperationId;
-        String chatOperationId = activeChatOperationId;
         activeReviewService = claudeService;
-        activeChatService = claudeService;
         activeReviewProvider = ReviewProvider.CLAUDE;
-        activeChatProvider = ReviewProvider.CLAUDE;
         activeReviewOperationId = null;
-        activeChatOperationId = null;
         activeGenerationId = generationSequence.incrementAndGet();
-        activeChatId = chatSequence.incrementAndGet();
+        PrChatController.ChatReset chat = chats.resetLocked();
         PrWorktree worktree = worktrees.clear();
 
         boolean samePullRequest =
@@ -1305,15 +1011,14 @@ public class WebviewPanel implements Disposable {
         prefetchedDiff = null;
         prefetchedValidationDiff = null;
         prefetchedExistingReviews = null;
-        chatHistory = List.of();
         return new LifecycleTransition(
                 ++selectionRevision,
                 reviewService,
-                chatService,
+                chat.service(),
                 reviewProvider,
-                chatProvider,
+                chat.provider(),
                 reviewOperationId,
-                chatOperationId,
+                chat.operationId(),
                 worktree);
     }
 
@@ -1331,11 +1036,7 @@ public class WebviewPanel implements Disposable {
         IntellijClaudeService service;
         ReviewProvider provider;
         synchronized (this) {
-            if (operationId != null && operationId.equals(deepOperationId)) {
-                deepPending = null;
-                deepOperationId = null;
-                deepPreparationRevision++;
-            }
+            assistedReviews.onReviewCancelledLocked(operationId);
             if (!StringUtils.equals(activeReviewOperationId, operationId)) return;
             activeGenerationId = generationSequence.incrementAndGet();
             service = activeReviewService;
@@ -1359,8 +1060,6 @@ public class WebviewPanel implements Disposable {
                 settings.getReviewRulesDirectory());
     }
 
-    record FreshDeepPr(IntellijGitHubService.PRHeadInfo head, String diff) {}
-
     private FreshDeepPr freshDeepPr(int number, String owner, String repo) throws Exception {
         var before = ghSvc.getPRHeadInfo(owner, repo, number);
         String diff = ghSvc.getPRDiffFull(owner, repo, number);
@@ -1371,205 +1070,6 @@ public class WebviewPanel implements Disposable {
                 || diff.isBlank())
             throw new java.io.IOException("Cannot bind a fresh PR head and diff. Prepare again.");
         return new FreshDeepPr(after, diff);
-    }
-
-    private void publishDeepPrepared(DeepPending pending, String operationId, String message) {
-        var p = pending.preparation();
-        pushMessage(
-                java.util.Map.of(
-                        "type",
-                        "deepReviewPrepared",
-                        "prKey",
-                        pending.key(),
-                        "operationId",
-                        operationId,
-                        "retainedId",
-                        p.retainedId(),
-                        "worktree",
-                        p.worktree(),
-                        "head",
-                        p.head(),
-                        "servers",
-                        p.servers(),
-                        "message",
-                        message));
-    }
-
-    private void handlePrepareDeepReview(JsonNode options) {
-        int number = options.path("number").asInt();
-        String owner = options.path("owner").asText(), repo = options.path("repo").asText();
-        String key = bridgePrKey(number, owner, repo);
-        if (!intellijAssistedEnabled.getAsBoolean()) {
-            // Reject rather than downgrade: an ordinary review must be an explicit user choice.
-            pushMessage(new ErrorMsg("reviewError", key, INTELLIJ_ASSISTED_DISABLED_ERROR));
-            return;
-        }
-        final long revision, selection;
-        final Object settings = deepSettings.get();
-        synchronized (this) {
-            if (disposed || !matchesPrRequest(activePR, number, owner, repo)) return;
-            revision = ++deepPreparationRevision;
-            selection = selectionRevision;
-            deepPending = null;
-            deepOperationId = options.path("operationId").asText();
-        }
-        cancelActiveReview(activeReviewOperationId);
-        deepBackground.accept(
-                () -> {
-                    try {
-                        var fresh = deepIo.fresh(number, owner, repo);
-                        var prepared = deepIo.prepare(options, fresh);
-                        synchronized (this) {
-                            if (disposed
-                                    || revision != deepPreparationRevision
-                                    || !isCurrentSelectionLocked(key, selection)
-                                    || !settings.equals(deepSettings.get())) return;
-                            deepPending =
-                                    new DeepPending(
-                                            prepared,
-                                            options,
-                                            key,
-                                            selection,
-                                            settings,
-                                            fresh.diff(),
-                                            revision);
-                            publishDeepPrepared(
-                                    deepPending,
-                                    options.path("operationId").asText(),
-                                    "Open this exact worktree in IntelliJ, enable MCP and import Gradle. Continue may first arm tracking; then run one manual Gradle sync and Retry.");
-                        }
-                    } catch (Exception error) {
-                        synchronized (this) {
-                            if (!disposed
-                                    && revision == deepPreparationRevision
-                                    && isCurrentSelectionLocked(key, selection))
-                                pushMessage(
-                                        new ErrorMsg(
-                                                "reviewError",
-                                                key,
-                                                String.valueOf(error.getMessage())));
-                        }
-                    }
-                });
-    }
-
-    private void handleContinueDeepReview(JsonNode input) {
-        final DeepPending pending;
-        String operationId = input.path("operationId").asText(),
-                server = input.path("server").asText();
-        String key =
-                bridgePrKey(
-                        input.path("number").asInt(),
-                        input.path("owner").asText(),
-                        input.path("repo").asText());
-        synchronized (this) {
-            pending = deepPending;
-            if (disposed
-                    || pending == null
-                    || consumedDeepOperations.contains(operationId)
-                    || !pending.key().equals(key)
-                    || !isCurrentSelectionLocked(key, pending.selection())
-                    || !pending.preparation()
-                            .retainedId()
-                            .equals(input.path("retainedId").asText())) return;
-            if (pending.revision() != deepPreparationRevision
-                    || !pending.settings().equals(deepSettings.get())
-                    || !pending.preparation().servers().contains(server)) {
-                pushMessage(
-                        new ErrorMsg(
-                                "reviewError",
-                                key,
-                                "Stale, duplicate or changed deep review; prepare again."));
-                return;
-            }
-            consumedDeepOperations.add(operationId);
-            deepOperationId = operationId;
-            deepPending = null;
-        }
-        deepBackground.accept(
-                () -> {
-                    boolean refreshing = true;
-                    try {
-                        var o = pending.options();
-                        var fresh =
-                                deepIo.fresh(
-                                        o.path("number").asInt(),
-                                        o.path("owner").asText(),
-                                        o.path("repo").asText());
-                        refreshing = false;
-                        validateDeepHead(pending, fresh);
-                        deepIo.generate(pending, operationId, server);
-                    } catch (Exception error) {
-                        synchronized (this) {
-                            if (!disposed
-                                    && pending.revision() == deepPreparationRevision
-                                    && operationId.equals(deepOperationId)
-                                    && isCurrentSelectionLocked(key, pending.selection())) {
-                                if (refreshing && pending.settings().equals(deepSettings.get())) {
-                                    deepPending = pending;
-                                }
-                                pushMessage(
-                                        new ErrorMsg(
-                                                "reviewError",
-                                                key,
-                                                String.valueOf(error.getMessage())));
-                            }
-                        }
-                    }
-                });
-    }
-
-    private void validateDeepHead(DeepPending pending) throws Exception {
-        var o = pending.options();
-        var fresh =
-                deepIo.fresh(
-                        o.path("number").asInt(),
-                        o.path("owner").asText(),
-                        o.path("repo").asText());
-        validateDeepHead(pending, fresh);
-    }
-
-    private void validateDeepHead(DeepPending pending, FreshDeepPr fresh) throws Exception {
-        synchronized (this) {
-            if (disposed
-                    || pending.revision() != deepPreparationRevision
-                    || !fresh.head().sha().equals(pending.preparation().head())
-                    || !fresh.diff().equals(pending.diff())
-                    || !pending.settings().equals(deepSettings.get())
-                    || !isCurrentSelectionLocked(pending.key(), pending.selection()))
-                throw new java.io.IOException(
-                        "Deep review PR, settings or selection changed; prepare again.");
-        }
-    }
-
-    private void handleDeepMaintenance(JsonNode input) {
-        if (disposed) return;
-        deepBackground.accept(
-                () -> {
-                    try {
-                        if ("cleanupDeepReview".equals(input.path("type").asText()))
-                            deepIo.cleanup(
-                                    input.path("retainedId").asText(),
-                                    input.path("projectClosed").asBoolean());
-                        pushMessage(
-                                java.util.Map.of(
-                                        "type",
-                                        "retainedDeepReviews",
-                                        "operationId",
-                                        input.path("operationId").asText(),
-                                        "retained",
-                                        deepIo.list()));
-                    } catch (Exception error) {
-                        pushMessage(
-                                java.util.Map.of(
-                                        "type",
-                                        "deepReviewMaintenanceError",
-                                        "operationId",
-                                        input.path("operationId").asText(),
-                                        "message",
-                                        String.valueOf(error.getMessage())));
-                    }
-                });
     }
 
     private void handleGenerateReview(
@@ -1979,16 +1479,13 @@ public class WebviewPanel implements Disposable {
                                                 && !lower.contains("interrupt")) {
                                             if (deep != null) {
                                                 synchronized (WebviewPanel.this) {
-                                                    if (!disposed
-                                                            && deep.pending().revision()
-                                                                    == deepPreparationRevision
-                                                            && isCurrentGenerationLocked(
-                                                                    key,
-                                                                    reviewRevision,
-                                                                    generationId)) {
-                                                        deepPending = deep.pending();
-                                                        publishDeepPrepared(
-                                                                deep.pending(), operationId, err);
+                                                    if (isCurrentGenerationLocked(
+                                                            key, reviewRevision, generationId)) {
+                                                        assistedReviews
+                                                                .restoreAfterGenerationFailureLocked(
+                                                                        deep.pending(),
+                                                                        operationId,
+                                                                        err);
                                                     }
                                                 }
                                                 return;
@@ -2008,7 +1505,9 @@ public class WebviewPanel implements Disposable {
                                                     deep.server(),
                                                     owner + "/" + repo + "#" + number,
                                                     operationId,
-                                                    () -> validateDeepHead(deep.pending())));
+                                                    () ->
+                                                            assistedReviews.validateHead(
+                                                                    deep.pending())));
                         });
     }
 
@@ -2197,7 +1696,7 @@ public class WebviewPanel implements Disposable {
     static ReviewOutcomeLog.Metadata generationMetadata(
             ReviewProvider provider, String model, boolean supervisorEnabled) {
         return new ReviewOutcomeLog.Metadata(
-                ClaudeService.reviewPipelineVersion(supervisorEnabled),
+                ReviewPrompts.reviewPipelineVersion(supervisorEnabled),
                 provider.name().toLowerCase(java.util.Locale.ROOT),
                 model);
     }
@@ -2267,304 +1766,9 @@ public class WebviewPanel implements Disposable {
         pushMessage(new PrDraftStatusMsg("prDraftStatusUpdated", number, owner, repo, false));
     }
 
-    // --- askClaude ---
-
-    private void handleAskClaude(String question, String context, String operationId) {
-        if (StringUtils.isBlank(question)) {
-            return;
-        }
-
-        final PullRequest pr;
-        final long selectionRevisionSnapshot;
-        final long chatId;
-        final List<ChatMessage> history;
-        final IntellijClaudeService.ReviewRuntimeSettings runtimeSettings;
-        final IntellijClaudeService previousChatService;
-        final ReviewProvider previousChatProvider;
-        synchronized (this) {
-            pr = activePR;
-            selectionRevisionSnapshot = selectionRevision;
-            chatId = chatSequence.incrementAndGet();
-            activeChatId = chatId;
-            history = List.copyOf(chatHistory);
-            runtimeSettings = IntellijClaudeService.snapshotReviewRuntimeSettings();
-            previousChatService = activeChatService;
-            previousChatProvider = activeChatProvider;
-            activeChatService = claudeService;
-            activeChatProvider = runtimeSettings.provider();
-            activeChatOperationId = operationId;
-        }
-        if (pr == null) {
-            synchronized (this) {
-                if (activeChatId == chatId
-                        && StringUtils.equals(activeChatOperationId, operationId)) {
-                    activeChatService = claudeService;
-                    activeChatProvider = ReviewProvider.CLAUDE;
-                    activeChatOperationId = null;
-                }
-            }
-            pushMessage(new ErrorMsg("chatError", null, "No PR selected."));
-            return;
-        }
-        String key = bridgePrKey(pr.getNumber(), pr.getOwner(), pr.getRepo());
-        previousChatService.cancelCurrentRequest(previousChatProvider);
-
-        IntellijClaudeService chatService;
-        try {
-            chatService = resolvePrClaudeService(pr);
-        } catch (Exception e) {
-            log.warn("Worktree resolution for PR #{} failed: {}", pr.getNumber(), e.getMessage());
-            pushMessage(
-                    new ErrorMsg(
-                            "chatError",
-                            key,
-                            "Unable to create an isolated pull request worktree."
-                                    + " Open the PR repository and try again."));
-            synchronized (this) {
-                if (isCurrentChatLocked(key, selectionRevisionSnapshot, chatId)) {
-                    activeChatService = claudeService;
-                    activeChatProvider = ReviewProvider.CLAUDE;
-                    activeChatOperationId = null;
-                }
-            }
-            return;
-        }
-        synchronized (this) {
-            if (!isCurrentChatLocked(key, selectionRevisionSnapshot, chatId)) {
-                return;
-            }
-            activeChatService = chatService;
-        }
-
-        // When the user has selected a code snippet, use a focused prompt (no history, no PR
-        // context) — matching VS Code's buildFocusedChatPrompt path. Responses for focused
-        // questions are not stored in chatHistory since they are context-specific.
-        if (StringUtils.isNotBlank(context)) {
-            chatService.chatFocused(
-                    context,
-                    question,
-                    runtimeSettings,
-                    chunk ->
-                            publishIfCurrentChat(
-                                    key,
-                                    selectionRevisionSnapshot,
-                                    chatId,
-                                    new ChatChunkMsg("chatChunk", key, chunk)),
-                    response -> {
-                        synchronized (WebviewPanel.this) {
-                            if (!isCurrentChatLocked(key, selectionRevisionSnapshot, chatId)) {
-                                return;
-                            }
-                            activeChatService = claudeService;
-                            activeChatProvider = ReviewProvider.CLAUDE;
-                            activeChatOperationId = null;
-                        }
-                        publishIfCurrentChat(
-                                key,
-                                selectionRevisionSnapshot,
-                                chatId,
-                                new ChatResponseMsg("chatResponse", key, response));
-                    },
-                    err -> {
-                        synchronized (WebviewPanel.this) {
-                            if (!isCurrentChatLocked(key, selectionRevisionSnapshot, chatId)) {
-                                return;
-                            }
-                            activeChatService = claudeService;
-                            activeChatProvider = ReviewProvider.CLAUDE;
-                            activeChatOperationId = null;
-                        }
-                        publishIfCurrentChat(
-                                key,
-                                selectionRevisionSnapshot,
-                                chatId,
-                                new ErrorMsg("chatError", key, err));
-                    });
-            return;
-        }
-
-        String prContext = buildPrContext(pr);
-
-        chatService.chat(
-                prContext,
-                history,
-                question,
-                runtimeSettings,
-                chunk ->
-                        publishIfCurrentChat(
-                                key,
-                                selectionRevisionSnapshot,
-                                chatId,
-                                new ChatChunkMsg("chatChunk", key, chunk)),
-                response -> {
-                    synchronized (WebviewPanel.this) {
-                        if (!isCurrentChatLocked(key, selectionRevisionSnapshot, chatId)) {
-                            return;
-                        }
-                        List<ChatMessage> updated = new ArrayList<>(history);
-                        updated.add(new ChatMessage(ChatMessage.Role.USER, question));
-                        updated.add(new ChatMessage(ChatMessage.Role.ASSISTANT, response));
-                        chatHistory = List.copyOf(updated);
-                        activeChatService = claudeService;
-                        activeChatProvider = ReviewProvider.CLAUDE;
-                        activeChatOperationId = null;
-                    }
-                    publishIfCurrentChat(
-                            key,
-                            selectionRevisionSnapshot,
-                            chatId,
-                            new ChatResponseMsg("chatResponse", key, response));
-                },
-                err -> {
-                    synchronized (WebviewPanel.this) {
-                        if (!isCurrentChatLocked(key, selectionRevisionSnapshot, chatId)) {
-                            return;
-                        }
-                        activeChatService = claudeService;
-                        activeChatProvider = ReviewProvider.CLAUDE;
-                        activeChatOperationId = null;
-                    }
-                    publishIfCurrentChat(
-                            key,
-                            selectionRevisionSnapshot,
-                            chatId,
-                            new ErrorMsg("chatError", key, err));
-                });
-    }
-
-    private void clearChat(String operationId) {
-        IntellijClaudeService service;
-        ReviewProvider provider;
-        synchronized (this) {
-            if (!StringUtils.equals(activeChatOperationId, operationId)) {
-                chatHistory = List.of();
-                return;
-            }
-            activeChatId = chatSequence.incrementAndGet();
-            chatHistory = List.of();
-            service = activeChatService;
-            provider = activeChatProvider;
-            activeChatService = claudeService;
-            activeChatProvider = ReviewProvider.CLAUDE;
-            activeChatOperationId = null;
-        }
-        service.cancelCurrentRequest(provider);
-    }
-
-    /**
-     * Stops the chat answer that owns {@code operationId} without deleting conversation history.
-     * Advancing the chat id drops the stopped answer's late chunks, response and error silently.
-     */
-    private void cancelChat(String operationId) {
-        IntellijClaudeService service;
-        ReviewProvider provider;
-        synchronized (this) {
-            if (activeChatOperationId == null
-                    || !StringUtils.equals(activeChatOperationId, operationId)) {
-                return;
-            }
-            activeChatId = chatSequence.incrementAndGet();
-            service = activeChatService;
-            provider = activeChatProvider;
-            activeChatService = claudeService;
-            activeChatProvider = ReviewProvider.CLAUDE;
-            activeChatOperationId = null;
-        }
-        if (service != null) service.cancelCurrentRequest(provider);
-    }
-
-    static String worktreeKey(int number, String owner, String repo) {
-        return owner.toLowerCase(java.util.Locale.ROOT)
-                + "/"
-                + repo.toLowerCase(java.util.Locale.ROOT)
-                + "#"
-                + number;
-    }
-
     /** Remembered instructions for the PR's repository, or null so the bridge field is omitted. */
     private String rememberedRepositoryInstructions(String owner, String repo) {
         return StringUtils.defaultIfEmpty(repositoryInstructionsLookup.apply(owner, repo), null);
-    }
-
-    /**
-     * Remembers (or forgets, when blank) review instructions for the PR's repository and returns
-     * the bridge reply: the stored text on success, or an error the webview shows beside the field.
-     */
-    static Object saveRepositoryInstructionsReply(
-            PluginSettings settings, int number, String owner, String repo, String instructions) {
-        String key = bridgePrKey(number, owner, repo);
-        if (RepositoryReviewInstructions.repositoryKey(owner, repo) == null) {
-            return new ErrorMsg(
-                    "repositoryInstructionsSaveError",
-                    key,
-                    "This repository name cannot be remembered.");
-        }
-        String stored = settings.rememberRepositoryReviewInstructions(owner, repo, instructions);
-        if (stored == null) {
-            return new ErrorMsg(
-                    "repositoryInstructionsSaveError",
-                    key,
-                    "Repository instructions are limited to 10,000 characters and 200"
-                            + " repositories.");
-        }
-        return new RepositoryInstructionsSavedMsg("repositoryInstructionsSaved", key, stored);
-    }
-
-    static String bridgePrKey(int number, String owner, String repo) {
-        return owner + "/" + repo + "#" + number;
-    }
-
-    static String normalizeSearchScope(String value) {
-        return switch (value) {
-            case "authored", "assigned", "reviewRequested" -> value;
-            default -> "currentRepo";
-        };
-    }
-
-    static boolean isSamePr(PullRequest left, PullRequest right) {
-        if (left == null || right == null) {
-            return false;
-        }
-        return left.getNumber() == right.getNumber()
-                && StringUtils.equalsIgnoreCase(left.getOwner(), right.getOwner())
-                && StringUtils.equalsIgnoreCase(left.getRepo(), right.getRepo());
-    }
-
-    static PullRequest hydratePullRequest(PullRequest summary, PrDetail detail) {
-        if (detail == null) {
-            return summary;
-        }
-        return new PullRequest(
-                detail.title(),
-                summary.getHtmlUrl(),
-                summary.getOwner(),
-                summary.getRepo(),
-                summary.getNumber(),
-                detail.body(),
-                summary.getAuthor(),
-                summary.getCreatedAt(),
-                summary.isDraft(),
-                summary.getReviewStatus());
-    }
-
-    static boolean matchesPrRequest(PullRequest pr, int number, String owner, String repo) {
-        return pr != null
-                && pr.getNumber() == number
-                && StringUtils.equalsIgnoreCase(pr.getOwner(), owner)
-                && StringUtils.equalsIgnoreCase(pr.getRepo(), repo);
-    }
-
-    static boolean isCurrentSelection(
-            PullRequest currentPr,
-            long currentRevision,
-            String expectedKey,
-            long expectedRevision) {
-        return currentPr != null
-                && currentRevision == expectedRevision
-                && StringUtils.equals(
-                        bridgePrKey(
-                                currentPr.getNumber(), currentPr.getOwner(), currentPr.getRepo()),
-                        expectedKey);
     }
 
     private boolean isCurrentSelection(String expectedKey, long expectedRevision) {
@@ -2574,7 +1778,8 @@ public class WebviewPanel implements Disposable {
     }
 
     private boolean isCurrentSelectionLocked(String expectedKey, long expectedRevision) {
-        return isCurrentSelection(activePR, selectionRevision, expectedKey, expectedRevision);
+        return WebviewPrSupport.isCurrentSelection(
+                activePR, selectionRevision, expectedKey, expectedRevision);
     }
 
     private void publishIfCurrentSelection(
@@ -2605,45 +1810,6 @@ public class WebviewPanel implements Disposable {
             if (isCurrentGenerationLocked(expectedKey, expectedRevision, expectedGenerationId)) {
                 pushMessage(message);
             }
-        }
-    }
-
-    static boolean isCurrentChat(
-            PullRequest currentPr,
-            long currentSelectionRevision,
-            long currentChatId,
-            String expectedKey,
-            long expectedSelectionRevision,
-            long expectedChatId) {
-        return currentChatId == expectedChatId
-                && isCurrentSelection(
-                        currentPr,
-                        currentSelectionRevision,
-                        expectedKey,
-                        expectedSelectionRevision);
-    }
-
-    private boolean isCurrentChatLocked(
-            String expectedKey, long expectedSelectionRevision, long expectedChatId) {
-        return isCurrentChat(
-                activePR,
-                selectionRevision,
-                activeChatId,
-                expectedKey,
-                expectedSelectionRevision,
-                expectedChatId);
-    }
-
-    private void publishIfCurrentChat(
-            String expectedKey,
-            long expectedSelectionRevision,
-            long expectedChatId,
-            Object message) {
-        synchronized (this) {
-            if (!isCurrentChatLocked(expectedKey, expectedSelectionRevision, expectedChatId)) {
-                return;
-            }
-            pushMessage(message);
         }
     }
 
@@ -2985,11 +2151,6 @@ public class WebviewPanel implements Disposable {
                 new ActivatePrMsg("activatePR", toWebviewPr(activatedPr, hasReviewDraft), source));
     }
 
-    static Optional<List<PendingReviewIndex.Entry>> healthyDraftEntries(
-            PendingReviewIndex.LoadResult result) {
-        return result.healthy() ? Optional.of(result.entries()) : Optional.empty();
-    }
-
     private Optional<List<PendingReviewIndex.Entry>> loadHealthyDraftEntries() {
         PendingReviewIndex.LoadResult result = pendingIndex.listResult();
         observePendingIndex(result);
@@ -3015,27 +2176,6 @@ public class WebviewPanel implements Disposable {
                         pendingIndex, result, pendingIndexRecoveryAction);
     }
 
-    private static WebviewPr toWebviewPr(PullRequest pr, boolean hasReviewDraft) {
-        return new WebviewPr(
-                pr.getNumber(),
-                pr.getTitle(),
-                pr.getOwner(),
-                pr.getRepo(),
-                pr.getAuthor(),
-                pr.getCreatedAt(),
-                pr.getHtmlUrl(),
-                pr.isDraft(),
-                hasReviewDraft,
-                pr.getReviewStatus());
-    }
-
-    static PullRequest mergeActivatedPr(PullRequest existing, PullRequest incoming) {
-        return incoming.getReviewStatus() == ReviewStatus.UNAVAILABLE
-                        && existing.getReviewStatus() != ReviewStatus.UNAVAILABLE
-                ? incoming.withReviewStatus(existing.getReviewStatus())
-                : incoming;
-    }
-
     public String getPrStateFilter() {
         return prStateFilter;
     }
@@ -3054,6 +2194,90 @@ public class WebviewPanel implements Disposable {
         return browserPanel;
     }
 
+    PrChatController chatController() {
+        return chats;
+    }
+
+    DeepReviewController deepController() {
+        return assistedReviews;
+    }
+
+    /** Exposes the panel state the deep-review flow reads; lock-suffixed calls need the lock. */
+    private final class DeepHost implements DeepReviewController.Host {
+        @Override
+        public boolean isDisposed() {
+            return disposed;
+        }
+
+        @Override
+        public PullRequest activePR() {
+            return activePR;
+        }
+
+        @Override
+        public long selectionRevision() {
+            return selectionRevision;
+        }
+
+        @Override
+        public boolean isCurrentSelectionLocked(String expectedKey, long expectedRevision) {
+            return WebviewPanel.this.isCurrentSelectionLocked(expectedKey, expectedRevision);
+        }
+
+        @Override
+        public void pushMessage(Object payload) {
+            WebviewPanel.this.pushMessage(payload);
+        }
+
+        @Override
+        public String activeReviewOperationId() {
+            return activeReviewOperationId;
+        }
+
+        @Override
+        public void cancelActiveReview(String operationId) {
+            WebviewPanel.this.cancelActiveReview(operationId);
+        }
+
+        @Override
+        public boolean intellijAssistedEnabled() {
+            return intellijAssistedEnabled.getAsBoolean();
+        }
+    }
+
+    /** Exposes the panel state the chat flow reads; callers hold the panel lock when required. */
+    private final class ChatHost implements PrChatController.Host {
+        @Override
+        public PullRequest activePR() {
+            return activePR;
+        }
+
+        @Override
+        public long selectionRevision() {
+            return selectionRevision;
+        }
+
+        @Override
+        public IntellijClaudeService defaultService() {
+            return claudeService;
+        }
+
+        @Override
+        public IntellijClaudeService resolvePrClaudeService(PullRequest pr) {
+            return WebviewPanel.this.resolvePrClaudeService(pr);
+        }
+
+        @Override
+        public String buildPrContext(PullRequest pr) {
+            return WebviewPanel.this.buildPrContext(pr);
+        }
+
+        @Override
+        public void pushMessage(Object payload) {
+            WebviewPanel.this.pushMessage(payload);
+        }
+    }
+
     @Override
     public void dispose() {
         LifecycleTransition transition;
@@ -3066,15 +2290,7 @@ public class WebviewPanel implements Disposable {
         }
         finishLifecycleTransition(transition);
         pendingIndexRecoveryRegistration.close();
-        HttpServer server = httpServer;
-        if (server != null) {
-            try {
-                server.stop(0);
-            } catch (Exception e) {
-                log.warn("HttpServer.stop failed: {}", e.getMessage());
-            }
-            httpServer = null;
-        }
+        resourceServer.stop();
         Disposer.dispose(bridgeQuery);
         Disposer.dispose(browser);
     }

@@ -7,14 +7,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
-import com.jinloes.prpilot.model.ReviewStatus;
 import com.jinloes.prpilot.review.SemanticReviewService;
 import com.jinloes.prpilot.review.SemanticWorktreeStore;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.services.IntellijGitHubService;
-import com.jinloes.prpilot.services.PendingReviewIndex;
-import com.jinloes.prpilot.settings.PluginSettings;
-import com.jinloes.prpilot.sidecar.pr.PrDetail;
 import java.awt.BorderLayout;
 import java.awt.Rectangle;
 import java.io.File;
@@ -197,7 +193,7 @@ class WebviewPanelTest {
         }
     }
 
-    private static final class DeepFixture implements WebviewPanel.DeepReviewIo {
+    private static final class DeepFixture implements DeepReviewController.DeepReviewIo {
         final String id = "11111111-1111-4111-8111-111111111111";
         String head = "a".repeat(40);
         String settings = "claude";
@@ -217,9 +213,10 @@ class WebviewPanelTest {
                         () -> assistedEnabled);
 
         void field(String name, Object value) throws Exception {
-            var field = WebviewPanel.class.getDeclaredField(name);
+            boolean chat = name.startsWith("chat") || name.startsWith("activeChat");
+            var field = (chat ? PrChatController.class : WebviewPanel.class).getDeclaredField(name);
             field.setAccessible(true);
-            field.set(panel, value);
+            field.set(chat ? panel.chatController() : panel, value);
         }
 
         void send(String type, String operationId, Map<String, Object> extra) throws Exception {
@@ -244,20 +241,22 @@ class WebviewPanelTest {
         }
 
         public SemanticReviewService.Preparation prepare(
-                com.fasterxml.jackson.databind.JsonNode options, WebviewPanel.FreshDeepPr fresh) {
+                com.fasterxml.jackson.databind.JsonNode options,
+                DeepReviewController.FreshDeepPr fresh) {
             assertThat(options.path("intellijAssisted").asBoolean()).isTrue();
             return new SemanticReviewService.Preparation(
                     id, fresh.head().sha(), "/fixture/deep", List.of("private"));
         }
 
-        public WebviewPanel.FreshDeepPr fresh(int number, String owner, String repo)
+        public DeepReviewController.FreshDeepPr fresh(int number, String owner, String repo)
                 throws IOException {
             if (failRefresh) throw new IOException("Temporary GitHub refresh failure");
-            return new WebviewPanel.FreshDeepPr(
+            return new DeepReviewController.FreshDeepPr(
                     new IntellijGitHubService.PRHeadInfo("fix", head, false, ""), "fresh-diff");
         }
 
-        public void generate(WebviewPanel.DeepPending pending, String operation, String server) {
+        public void generate(
+                DeepReviewController.DeepPending pending, String operation, String server) {
             assertThat(pending.diff()).isEqualTo("fresh-diff");
             assertThat(pending.settings()).isEqualTo(settings);
             assertThat(server).isEqualTo("private");
@@ -315,91 +314,6 @@ class WebviewPanelTest {
     }
 
     @Nested
-    class HealthyDraftEntries {
-
-        @Test
-        void keepsHealthyEmptyStateDistinctFromUnavailableState() {
-            var healthy =
-                    WebviewPanel.healthyDraftEntries(
-                            new PendingReviewIndex.LoadResult(List.of(), null));
-            var unavailable =
-                    WebviewPanel.healthyDraftEntries(
-                            new PendingReviewIndex.LoadResult(List.of(), "corrupt"));
-
-            assertThat(healthy).isPresent();
-            assertThat(healthy.orElseThrow()).isEmpty();
-            assertThat(unavailable).isEmpty();
-        }
-    }
-
-    @Nested
-    class WorktreeKey {
-
-        @Test
-        void normalizesOwnerAndRepoCase() {
-            assertThat(WebviewPanel.worktreeKey(42, "JinLoes", "PR-Pilot"))
-                    .isEqualTo("jinloes/pr-pilot#42");
-        }
-
-        @Test
-        void keyIncludesPrNumber() {
-            assertThat(WebviewPanel.worktreeKey(1, "a", "b"))
-                    .isNotEqualTo(WebviewPanel.worktreeKey(2, "a", "b"));
-        }
-    }
-
-    @Nested
-    class IsSamePr {
-
-        @Test
-        void matchesByNumberAndRepoIgnoringCase() {
-            PullRequest left = new PullRequest("t", "", "OwNeR", "RePo", 7, "", "a", "");
-            PullRequest right = new PullRequest("t2", "", "owner", "repo", 7, "", "b", "");
-
-            assertThat(WebviewPanel.isSamePr(left, right)).isTrue();
-        }
-
-        @Test
-        void rejectsDifferentNumberOrRepo() {
-            PullRequest base = new PullRequest("t", "", "owner", "repo", 7, "", "a", "");
-            PullRequest differentNumber = new PullRequest("t", "", "owner", "repo", 8, "", "a", "");
-            PullRequest differentRepo = new PullRequest("t", "", "owner", "other", 7, "", "a", "");
-
-            assertThat(WebviewPanel.isSamePr(base, differentNumber)).isFalse();
-            assertThat(WebviewPanel.isSamePr(base, differentRepo)).isFalse();
-        }
-
-        @Test
-        void returnsFalseWhenEitherIsNull() {
-            PullRequest pr = new PullRequest("t", "", "owner", "repo", 7, "", "a", "");
-
-            assertThat(WebviewPanel.isSamePr(pr, null)).isFalse();
-            assertThat(WebviewPanel.isSamePr(null, pr)).isFalse();
-        }
-    }
-
-    @Nested
-    class IsCurrentSelection {
-
-        @Test
-        void acceptsHydratedInstanceAtCapturedRevision() {
-            PullRequest hydrated =
-                    new PullRequest("detail", "", "acme", "platform", 7, "body", "a", "");
-
-            assertThat(WebviewPanel.isCurrentSelection(hydrated, 4, "acme/platform#7", 4)).isTrue();
-        }
-
-        @Test
-        void rejectsSamePrReselectedAtNewerRevision() {
-            PullRequest reselected =
-                    new PullRequest("detail", "", "acme", "platform", 7, "body", "a", "");
-
-            assertThat(WebviewPanel.isCurrentSelection(reselected, 5, "acme/platform#7", 4))
-                    .isFalse();
-        }
-    }
-
-    @Nested
     class IsCurrentChat {
 
         private final PullRequest pr =
@@ -407,73 +321,14 @@ class WebviewPanelTest {
 
         @Test
         void acceptsMatchingSelectionAndChatId() {
-            assertThat(WebviewPanel.isCurrentChat(pr, 3, 9, "acme/platform#7", 3, 9)).isTrue();
+            assertThat(PrChatController.isCurrentChat(pr, 3, 9, "acme/platform#7", 3, 9)).isTrue();
         }
 
         @Test
         void rejectsOlderChatOrSelection() {
-            assertThat(WebviewPanel.isCurrentChat(pr, 3, 10, "acme/platform#7", 3, 9)).isFalse();
-            assertThat(WebviewPanel.isCurrentChat(pr, 4, 9, "acme/platform#7", 3, 9)).isFalse();
-        }
-    }
-
-    @Nested
-    class WorktreeCoordinator {
-
-        @Test
-        void concurrentSameKeyAcquiresShareOneCreation() {
-            WebviewPanel.WorktreeCoordinator<String> coordinator =
-                    new WebviewPanel.WorktreeCoordinator<>();
-
-            WebviewPanel.WorktreeLease<String> owner = coordinator.acquire("acme/repo#7");
-            WebviewPanel.WorktreeLease<String> waiter = coordinator.acquire("acme/repo#7");
-
-            assertThat(owner.owner()).isTrue();
-            assertThat(waiter.owner()).isFalse();
-            assertThat(waiter.future()).isSameAs(owner.future());
-            assertThat(coordinator.install(owner, "worktree")).isTrue();
-            assertThat(waiter.future()).isCompletedWithValue("worktree");
-            assertThat(coordinator.activeValue()).isEqualTo("worktree");
-        }
-
-        @Test
-        void clearDuringCreationRejectsLateInstallAndFailsWaiters() {
-            WebviewPanel.WorktreeCoordinator<String> coordinator =
-                    new WebviewPanel.WorktreeCoordinator<>();
-            WebviewPanel.WorktreeLease<String> owner = coordinator.acquire("acme/repo#7");
-            WebviewPanel.WorktreeLease<String> waiter = coordinator.acquire("acme/repo#7");
-
-            assertThat(coordinator.clear()).isNull();
-            assertThat(waiter.future()).isCompletedExceptionally();
-
-            assertThat(coordinator.install(owner, "stale-worktree")).isFalse();
-            assertThat(waiter.future()).isCompletedExceptionally();
-            assertThat(coordinator.activeValue()).isNull();
-        }
-
-        @Test
-        void clearReturnsInstalledValueAndStartsNewEpoch() {
-            WebviewPanel.WorktreeCoordinator<String> coordinator =
-                    new WebviewPanel.WorktreeCoordinator<>();
-            WebviewPanel.WorktreeLease<String> first = coordinator.acquire("acme/repo#7");
-            coordinator.install(first, "worktree");
-
-            assertThat(coordinator.clear()).isEqualTo("worktree");
-            WebviewPanel.WorktreeLease<String> next = coordinator.acquire("acme/repo#7");
-            assertThat(next.owner()).isTrue();
-            assertThat(next.future()).isNotSameAs(first.future());
-        }
-
-        @Test
-        void failedCreationReleasesKeyForRetry() {
-            WebviewPanel.WorktreeCoordinator<String> coordinator =
-                    new WebviewPanel.WorktreeCoordinator<>();
-            WebviewPanel.WorktreeLease<String> failed = coordinator.acquire("acme/repo#7");
-
-            coordinator.fail(failed);
-
-            assertThat(failed.future()).isCompletedExceptionally();
-            assertThat(coordinator.acquire("acme/repo#7").owner()).isTrue();
+            assertThat(PrChatController.isCurrentChat(pr, 3, 10, "acme/platform#7", 3, 9))
+                    .isFalse();
+            assertThat(PrChatController.isCurrentChat(pr, 4, 9, "acme/platform#7", 3, 9)).isFalse();
         }
     }
 
@@ -492,122 +347,6 @@ class WebviewPanelTest {
     }
 
     @Nested
-    class MatchesPrRequest {
-
-        @Test
-        void matchesByIdentityFieldsIgnoringCase() {
-            PullRequest pr = new PullRequest("t", "", "OwNeR", "RePo", 7, "", "a", "");
-
-            assertThat(WebviewPanel.matchesPrRequest(pr, 7, "owner", "repo")).isTrue();
-        }
-
-        @Test
-        void rejectsNullAndFieldMismatches() {
-            PullRequest pr = new PullRequest("t", "", "owner", "repo", 7, "", "a", "");
-
-            assertThat(WebviewPanel.matchesPrRequest(null, 7, "owner", "repo")).isFalse();
-            assertThat(WebviewPanel.matchesPrRequest(pr, 8, "owner", "repo")).isFalse();
-            assertThat(WebviewPanel.matchesPrRequest(pr, 7, "other", "repo")).isFalse();
-            assertThat(WebviewPanel.matchesPrRequest(pr, 7, "owner", "other")).isFalse();
-        }
-    }
-
-    @Nested
-    class HydratePullRequest {
-
-        @Test
-        void replacesDetailFieldsAndPreservesListMetadata() {
-            PullRequest summary =
-                    new PullRequest(
-                            "List title",
-                            "https://github.com/acme/platform/pull/7",
-                            "acme",
-                            "platform",
-                            7,
-                            "",
-                            "octocat",
-                            "2026-07-30T12:00:00Z",
-                            true,
-                            ReviewStatus.REVIEWED);
-            PrDetail detail =
-                    new PrDetail(
-                            false,
-                            "Detailed title",
-                            "Closes #42",
-                            new PrDetail.Head("sha", "branch", "acme/platform", "clone"),
-                            "acme/platform",
-                            null);
-
-            PullRequest hydrated = WebviewPanel.hydratePullRequest(summary, detail);
-
-            assertThat(hydrated.getTitle()).isEqualTo("Detailed title");
-            assertThat(hydrated.getBody()).isEqualTo("Closes #42");
-            assertThat(hydrated.getHtmlUrl()).isEqualTo(summary.getHtmlUrl());
-            assertThat(hydrated.getOwner()).isEqualTo("acme");
-            assertThat(hydrated.getRepo()).isEqualTo("platform");
-            assertThat(hydrated.getNumber()).isEqualTo(7);
-            assertThat(hydrated.getAuthor()).isEqualTo("octocat");
-            assertThat(hydrated.getCreatedAt()).isEqualTo("2026-07-30T12:00:00Z");
-            assertThat(hydrated.isDraft()).isTrue();
-            assertThat(hydrated.getReviewStatus()).isEqualTo(ReviewStatus.REVIEWED);
-        }
-
-        @Test
-        void returnsSummaryWhenDetailReadFailed() {
-            PullRequest summary =
-                    new PullRequest("Title", "", "acme", "platform", 7, "", "octocat", "");
-
-            assertThat(WebviewPanel.hydratePullRequest(summary, null)).isSameAs(summary);
-        }
-    }
-
-    @Nested
-    class MergeActivatedPr {
-
-        @Test
-        void preservesKnownReviewStatusForNotificationSummary() {
-            PullRequest existing =
-                    new PullRequest(
-                            "List title",
-                            "",
-                            "acme",
-                            "platform",
-                            7,
-                            "",
-                            "octocat",
-                            "",
-                            false,
-                            ReviewStatus.REVIEWED);
-            PullRequest incoming =
-                    new PullRequest(
-                            "Notification title",
-                            "",
-                            "acme",
-                            "platform",
-                            7,
-                            "",
-                            "octocat",
-                            "",
-                            false,
-                            ReviewStatus.UNAVAILABLE);
-
-            PullRequest merged = WebviewPanel.mergeActivatedPr(existing, incoming);
-
-            assertThat(merged.getTitle()).isEqualTo("Notification title");
-            assertThat(merged.getReviewStatus()).isEqualTo(ReviewStatus.REVIEWED);
-        }
-
-        @Test
-        void acceptsNewKnownReviewStatus() {
-            PullRequest existing =
-                    new PullRequest("Old", "", "acme", "platform", 7, "", "octocat", "");
-            PullRequest incoming = existing.withReviewStatus(ReviewStatus.UPDATED_SINCE_REVIEW);
-
-            assertThat(WebviewPanel.mergeActivatedPr(existing, incoming)).isSameAs(incoming);
-        }
-    }
-
-    @Nested
     class CanPersistDraft {
         @Test
         void activePrMayUseHostState() {
@@ -618,53 +357,6 @@ class WebviewPanelTest {
         void outgoingPrRequiresExplicitResult() {
             assertThat(WebviewPanel.canPersistDraft(false, true)).isTrue();
             assertThat(WebviewPanel.canPersistDraft(false, false)).isFalse();
-        }
-    }
-
-    @Nested
-    class ResolveResourcePath {
-
-        @Test
-        void rootMapsToIndexHtml() {
-            assertThat(WebviewPanel.resolveResourcePath("/")).isEqualTo("/webview/index.html");
-        }
-
-        @Test
-        void normalAssetIsAllowed() {
-            assertThat(WebviewPanel.resolveResourcePath("/assets/index.js"))
-                    .isEqualTo("/webview/assets/index.js");
-        }
-
-        @Test
-        void parentSegmentIsRejected() {
-            assertThat(WebviewPanel.resolveResourcePath("/../META-INF/plugin.xml")).isNull();
-        }
-
-        @Test
-        void nestedTraversalIsRejected() {
-            assertThat(WebviewPanel.resolveResourcePath("/assets/../../etc/passwd")).isNull();
-        }
-
-        @Test
-        void pathThatNormalizesBackInsideWebviewIsAllowed() {
-            assertThat(WebviewPanel.resolveResourcePath("/assets/../index.html"))
-                    .isEqualTo("/webview/index.html");
-        }
-
-        @Test
-        void pathWithoutLeadingSlashIsRejected() {
-            assertThat(WebviewPanel.resolveResourcePath("index.html")).isNull();
-        }
-
-        @Test
-        void blankPathIsRejected() {
-            assertThat(WebviewPanel.resolveResourcePath("")).isNull();
-            assertThat(WebviewPanel.resolveResourcePath(null)).isNull();
-        }
-
-        @Test
-        void multipleParentSegmentsRejected() {
-            assertThat(WebviewPanel.resolveResourcePath("/../../foo")).isNull();
         }
     }
 
@@ -829,7 +521,7 @@ class WebviewPanelTest {
         @Test
         void includesBoundedAndValidationDiffsInNoDraftMessage() {
             var message =
-                    new WebviewPanel.DraftLoadedMsg(
+                    new WebviewBridgeMessages.DraftLoadedMsg(
                             "draftLoaded",
                             "acme/platform#42",
                             "NO_DRAFT",
@@ -841,7 +533,7 @@ class WebviewPanelTest {
                             false,
                             false,
                             "",
-                            new WebviewPanel.ProviderReadinessDto("claude", true, "Ready"),
+                            new WebviewBridgeMessages.ProviderReadinessDto("claude", true, "Ready"),
                             true,
                             "API PRs precede service PRs.");
 
@@ -861,7 +553,7 @@ class WebviewPanelTest {
         @Test
         void omitsAbsentOptionalFieldsFromMergedMessage() {
             var message =
-                    new WebviewPanel.DraftLoadedMsg(
+                    new WebviewBridgeMessages.DraftLoadedMsg(
                             "draftLoaded",
                             "acme/platform#42",
                             "MERGED",
@@ -873,7 +565,8 @@ class WebviewPanelTest {
                             false,
                             false,
                             "PR is merged.",
-                            new WebviewPanel.ProviderReadinessDto("copilot", true, "Ready"),
+                            new WebviewBridgeMessages.ProviderReadinessDto(
+                                    "copilot", true, "Ready"),
                             false,
                             null);
 
@@ -923,9 +616,9 @@ class WebviewPanelTest {
                 };
 
         private Object field(DeepFixture f, String name) throws Exception {
-            var field = WebviewPanel.class.getDeclaredField(name);
+            var field = PrChatController.class.getDeclaredField(name);
             field.setAccessible(true);
-            return field.get(f.panel);
+            return field.get(f.panel.chatController());
         }
 
         private DeepFixture fixtureWithActiveChat(String operationId) throws Exception {
@@ -1086,82 +779,6 @@ class WebviewPanelTest {
             parent.setSize(width, height);
             parent.doLayout();
             host.doLayout();
-        }
-    }
-
-    @Nested
-    class SaveRepositoryInstructionsReply {
-        @Test
-        void remembersTrimmedTextAndRepliesWithTheStoredValue() {
-            PluginSettings settings = new PluginSettings();
-            Object reply =
-                    WebviewPanel.saveRepositoryInstructionsReply(
-                            settings, 7, "Acme", "Widget", "  API PRs precede service PRs.  ");
-
-            assertThat(MAPPER.valueToTree(reply).toString())
-                    .isEqualTo(
-                            MAPPER.createObjectNode()
-                                    .put("type", "repositoryInstructionsSaved")
-                                    .put("prKey", "Acme/Widget#7")
-                                    .put("instructions", "API PRs precede service PRs.")
-                                    .toString());
-            assertThat(settings.getRepositoryReviewInstructions("acme", "widget"))
-                    .isEqualTo("API PRs precede service PRs.");
-        }
-
-        @Test
-        void forgetsOnBlankText() {
-            PluginSettings settings = new PluginSettings();
-            settings.rememberRepositoryReviewInstructions("acme", "widget", "Old");
-            Object reply =
-                    WebviewPanel.saveRepositoryInstructionsReply(
-                            settings, 7, "acme", "widget", "   ");
-
-            assertThat(MAPPER.valueToTree(reply).path("instructions").asText("missing")).isEmpty();
-            assertThat(settings.getRepositoryReviewInstructions()).isEmpty();
-        }
-
-        @Test
-        void reportsInvalidNamesAndOversizedTextWithoutSaving() {
-            PluginSettings settings = new PluginSettings();
-            Object invalid =
-                    WebviewPanel.saveRepositoryInstructionsReply(settings, 1, "a b", "w", "Rule");
-            Object oversized =
-                    WebviewPanel.saveRepositoryInstructionsReply(
-                            settings, 1, "acme", "widget", "x".repeat(10_001));
-
-            assertThat(MAPPER.valueToTree(invalid).path("type").asText())
-                    .isEqualTo("repositoryInstructionsSaveError");
-            assertThat(MAPPER.valueToTree(oversized).path("message").asText())
-                    .contains("10,000 characters");
-            assertThat(MAPPER.valueToTree(oversized).path("prKey").asText())
-                    .isEqualTo("acme/widget#1");
-            assertThat(settings.getRepositoryReviewInstructions()).isEmpty();
-        }
-
-        @Test
-        void validatorRequiresPrIdentityAndBoundedInstructions() {
-            ObjectNode valid =
-                    MAPPER.createObjectNode()
-                            .put("protocolVersion", 1)
-                            .put("type", "saveRepositoryInstructions")
-                            .put("number", 7)
-                            .put("owner", "acme")
-                            .put("repo", "widget")
-                            .put("instructions", "Rule");
-            assertThat(BridgeMessageValidator.isValid(valid)).isTrue();
-            assertThat(BridgeMessageValidator.isValid(valid.deepCopy().put("instructions", "")))
-                    .isTrue();
-            ObjectNode missing = valid.deepCopy();
-            missing.remove("instructions");
-            assertThat(BridgeMessageValidator.isValid(missing)).isFalse();
-            assertThat(
-                            BridgeMessageValidator.isValid(
-                                    valid.deepCopy().put("instructions", "x".repeat(10_001))))
-                    .isFalse();
-            ObjectNode noPr = valid.deepCopy();
-            noPr.remove("number");
-            assertThat(BridgeMessageValidator.isValid(noPr)).isFalse();
         }
     }
 }

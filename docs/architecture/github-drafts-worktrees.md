@@ -1,0 +1,53 @@
+# GitHub, drafts and worktrees
+
+Key design decisions moved from [ARCHITECTURE.md](../../ARCHITECTURE.md). Each section encodes an active constraint future code must respect.
+
+### Pending review index coordination
+`PendingReviewIndex` instances are per caller, but their default `~/.pr-pilot/pending-prs.json` is process-global. All reads, mutations, and corrupt-file quarantine operations therefore synchronize on a static lock keyed by the normalized index path; do not restore instance-only synchronization or introduce a separate write path. The lock map intentionally lives for the IntelliJ application lifetime, matching the default index lifetime, while distinct temporary paths remain independent test seams. Recovery callbacks are likewise path-scoped, but a `WebviewPanel` must close its registration on disposal so its bound reload callback cannot outlive the project.
+
+### Authenticated-user review freshness
+
+`prs/list` keeps REST issue search as the discovery source, then enriches at most its 50 returned pull requests with the authenticated user's review freshness. `github-engine` resolves the viewer from the same `gh` token and performs one bounded GraphQL request using `headRefOid` and the latest `APPROVED`, `CHANGES_REQUESTED`, or `COMMENTED` review by that viewer. Matching commit OIDs map to `REVIEWED`, a different commit maps to `UPDATED_SINCE_REVIEW`, and no eligible review maps to `UNREVIEWED`; missing data, viewer lookup failure, GraphQL errors, or malformed responses map to `UNAVAILABLE`. The list still succeeds when enrichment fails and reports `reviewStatusAvailable=false` so the shared webview emits one degraded notice rather than mislabeling rows. Because enrichment is optional, viewer lookup and GraphQL enrichment each use one three-second request attempt instead of the required-call retry budget; a freshness outage therefore cannot hold an otherwise successful REST list for repeated 15-second timeouts.
+
+GitHub.com uses `https://api.github.com/graphql`; GHES uses `https://<host>/api/graphql`, derived by `GitHubApiBase` from the validated origin. Hosts must forward these token-free states without querying GitHub themselves. Search-only notification paths intentionally use `UNAVAILABLE`, and notification activation must not overwrite an already known list status with that weaker state.
+
+### Review submission uses a synchronous webview lock
+`ReviewPane` guards `handleSubmit` with `submitInFlightRef`, not only React's asynchronous `submitting` state. A second click can otherwise enter the save-then-submit path before React rerenders the first click's disabled button, producing a second GitHub draft and therefore a second approval. The lock spans both the initial `saveDraft` and the later `draftSaved` → `submitReview` handoff. It is released only on a submit/save error, watchdog recovery, PR change, or `reviewSubmitted`; do not replace it with a visual `disabled` check alone. The IntelliJ `draftMutationLock` and VS Code `enqueueMutation` serialize host calls, but cannot deduplicate two separately-created draft review IDs.
+
+### The review worktree is pinned to the PR head commit, not the branch tip
+`GitWorktreeService` resolves the worktree to the PR's `head.sha` (`git worktree add --detach <dir> <sha>`) rather than `origin/<branch>` or `FETCH_HEAD`. A branch tip is a moving target: if the contributor pushes between the diff being rendered and the worktree being built, the agent would Grep code that is not under review — which matters because the prompt's `Blast radius:` directive instructs it to search that tree and treat the result as evidence. Forks get the same treatment; `FETCH_HEAD` is just the fork branch's tip and drifts identically. Pinning fails when the SHA is blank, malformed, or unavailable after fetch (for example, after a force-push): neither a branch tip nor the user's checkout is an acceptable substitute. `head.sha` arrives from the GitHub API, so it is validated as a hex object name before reaching a git command line; a value like `HEAD`, `main`, or `--upload-pack=…` is refused rather than being passed as a revision.
+
+### The review worktree is not indexed by the IDE
+Reviews run against a detached git worktree at `$TMPDIR/pr-pilot-wt-<unique>` (`WebviewPanel.java`), deliberately isolated from the user's checkout. That path is **not a content root of the open IntelliJ project**, so it is in no module and no index. Any future IDE-native code intelligence must therefore query the **open project's** warm index (for "who calls this symbol?") rather than the worktree — PSI over an unindexed path yields a parse tree without resolution, which is no better than a textual search for far more complexity. The prompt's `Blast radius:` directive covers the same need portably, by having the model Grep the worktree it can already read.
+
+### PR discovery scope
+The shared PR list sends an explicit `searchScope` on `refreshPRs`: `currentRepo`, `reviewRequested`, `assigned`, or `authored`. `PrSearchQueryService` in `github-engine` builds the query for both hosts, and hosts return `listStatus` (`searchScope`, `currentRepo`, `resultLimit`, `limited`) with `prListLoaded` so the webview can explain what was searched and when additional PRs are hidden. To distinguish "exactly the limit" from "more exist", the search over-fetches one row beyond the display limit (`resultLimit` = 50, fetch 51): `limited` is true only when more than 50 match, and the list is sliced back to 50. `currentRepo` searches only the engine-detected repository; if no repo is detected it falls back to `author:@me`. Main-list discovery intentionally includes GitHub draft pull requests (the old `draft:false` filter was removed) so authored WIP PRs are discoverable; the shared PR DTO distinguishes `isDraft` (GitHub PR draft / `PR-DRAFT`) from `hasReviewDraft` (saved PR Pilot review draft / `REV-DRAFT`). Starred repositories are used only by optional notification polling, not by the main list's current-repo scope.
+
+### Worktree-based PR context
+When the PR's repo matches the open project/workspace and a git root is found, both hosts create a temporary git worktree checked out to the exact PR head commit and reuse it for both review and chat. This gives the model accurate local file context (correct branch state) for type lookups and cross-file references across the full PR session. Cleanup runs when the active PR changes or the view is disposed. If worktree creation fails or the PR is from an unrelated repo, review and PR chat stop with an actionable error; they never expose the open project/workspace directory to a provider. Fork PRs fetch the fork branch only to obtain the supplied exact head commit.
+
+- **IntelliJ**: `WebviewPanel.resolvePrClaudeService` builds a per-PR `IntellijClaudeService` pointed at the worktree, using `review-engine`'s `GitWorktreeService`.
+- **VS Code**: `extension.ts` `resolveWorkingDir`/`clearWorktree` own only the *lifecycle* — which directory belongs to the active PR, and when to tear it down. The git work goes through the sidecar's `worktrees` capability (`reviews/findGitRoot`, `reviews/createWorktree`, `reviews/removeWorktree`), so destination naming, the fork-versus-origin fetch decision, and head-SHA pinning have exactly one implementation. The resolved dir is passed as `projectDir` to `reviews/generate`/`reviews/chat`, which hands it to `review-engine`'s `ClaudeService`/`CopilotService` as the process working directory. Chat reuses an existing worktree and never requests GitHub credentials directly.
+
+`reviews/createWorktree` reports `skipped` (no branch to check out) and `failed` (git could not produce one) as ordinary results rather than RPC errors, because every caller degrades to the user's own checkout — a worktree is an optimization, not a precondition. `reviews/findGitRoot` likewise answers `""` for a path that is not in a repository. Both keep the failure path free of exception handling that would otherwise be easy to get wrong in a way that fails the whole review.
+
+### GitHub API resilience policy
+Both hosts apply a transient-failure policy on GitHub REST calls: 15s request/connect/socket timeout, retries on `429`/`5xx`, and retry of timeout-style transport errors. This keeps PR loading/review flows resilient to short-lived network or GitHub edge failures while preserving fast-fail behavior for permanent `4xx` errors.
+
+### Draft review storage semantics
+Inline comment metadata is encoded in review body HTML comment for resilient draft reload. Pending review creation omits `event`. On 422 for inline comments, fallback to body-first creation then per-comment POST. When a pending draft lacks usable hidden metadata, hosts fall back to GitHub API review comments and set `importedFromGitHub`; the webview warns that recovered review details may be incomplete and offers a **Re-anchor from current diff** action that re-runs `validateComments` to snap comments back to valid positions, clears the imported flag, and (via autosave) re-encodes proper hidden metadata to GitHub so the draft reloads cleanly next time. GitHub replaces a pending review's body with an explicit submit `body` and keeps it when `body` is omitted (observed for COMMENT on 2026-09-25). Submission therefore always sends the composed body, never an omitted or empty body and never the hidden metadata, so General Notes and detached comments stored in the draft body are published; the webview publish dialog previews that composition (`publishBody.ts`).
+
+### Draft autosave
+GitHub's pending review remains the remote source of truth, while each host also persists a bounded,
+token-free recovery snapshot before attempting a save (IntelliJ via `DraftRecoveryStore`, VS Code via
+extension `globalState`). A snapshot is restored as dirty state after reopen and retried by the normal
+autosave path; it is cleared only after a confirmed save, submit, delete, or merged-PR transition.
+Replacing inline comments reads the head and existing pending review before deletion, adopts an exact
+match, uses a documented body-only update when comments are unchanged, and otherwise creates the
+replacement atomically with `comments[]`. If GitHub rejects an inline position, the fallback pending
+review retains all comments in encoded metadata and a visible detached-comment section.
+
+The webview autosaves from shared code in `ReviewPane.tsx` driven by `lib/autosave.ts`: a freshly
+generated review saves immediately, and later edits are flushed on a 30s debounce plus panel hide and
+PR switch. Dirty state is snapshot equality against the last acknowledged save; saves remain
+correlated by `saveId`, and submit saves first when necessary.

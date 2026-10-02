@@ -239,7 +239,7 @@ class ChunkedReviewServiceTest {
                             current -> {
                                 assertThat(current.diffCoverage()).isEqualTo(omitted);
                                 assertThat(current.getDiff()).doesNotContain("[pr-pilot:");
-                                assertThat(ClaudeService.buildPrompt(current))
+                                assertThat(ReviewPrompts.buildPrompt(current))
                                         .contains("<omitted_files>\n", "- Big.java", "- Huge.java")
                                         .doesNotContain("[pr-pilot:");
                             });
@@ -296,7 +296,7 @@ class ChunkedReviewServiceTest {
                     .allSatisfy(
                             current -> {
                                 assertThat(current.diffCoverage()).isEqualTo(DiffCoverage.NONE);
-                                assertThat(ClaudeService.buildPrompt(current))
+                                assertThat(ReviewPrompts.buildPrompt(current))
                                         .doesNotContain("<omitted_files>\n");
                             });
         }

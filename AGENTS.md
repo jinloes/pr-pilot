@@ -5,7 +5,8 @@ Operational guide for coding agents working in this repository.
 ## Source of truth split
 
 - `AGENTS.md` (this file): workflow, testing, coding conventions, and cross-host sync obligations.
-- `ARCHITECTURE.md`: system boundaries, design constraints, settings, and local data files.
+- `ARCHITECTURE.md`: system boundaries, settings, local data files, and an index of design
+  constraints whose full text lives in `docs/architecture/*.md`.
 - `CODEMAP.md`: implementation locations, task entry points, related tests, and cross-module paths.
 - Treat `AGENTS.md` as the single instruction file for agent workflows in this repo.
 - Read `ARCHITECTURE.md` when a change affects design or crosses module boundaries. Read
@@ -17,7 +18,8 @@ Operational guide for coding agents working in this repository.
 Update docs as part of each coding task:
 
 - Update `CODEMAP.md` when documented files, task entry points, or cross-module paths change.
-- Add to `ARCHITECTURE.md` "Key design decisions" only for non-obvious constraints future code must respect.
+- Record non-obvious constraints future code must respect as a `###` section in the matching
+  `docs/architecture/*.md` topic file, plus an index line under `ARCHITECTURE.md` "Key design decisions".
 - Update `ARCHITECTURE.md` "Settings persistence" when new persisted settings are added.
 - Update `ARCHITECTURE.md` "Local data files" when persistent files are added.
 - Update affected Mermaid sources under `diagrams/` when code changes alter depicted components,
@@ -74,7 +76,8 @@ a host does not yet consume, say so explicitly in the plan and the PR descriptio
 work complete.
 
 If a genuine platform constraint makes a capability impossible in one host, document the gap and the
-reason in `ARCHITECTURE.md` "Key design decisions" and call it out in the PR description.
+reason as a section in the matching `docs/architecture/*.md` topic file (with an index line under
+`ARCHITECTURE.md` "Key design decisions") and call it out in the PR description.
 
 ### VS Code support floor
 
@@ -93,15 +96,15 @@ without justification.
 
 | Changed file | Must also update |
 |---|---|
-| `review-engine/ClaudeService.java` `CHAT_PERSONA` | `vscode-extension/src/claude.ts` same constant |
-| `review-engine/ClaudeService.java` `buildFocusedChatPrompt` | `vscode-extension/src/claude.ts` same function |
-| `WebviewPanel.resolvePrClaudeService`/worktree lifecycle | `vscode-extension/src/extension.ts` `resolveWorkingDir`/`clearWorktree` — the *lifecycle* only (which dir belongs to the active PR, when to tear it down); the git work is no longer mirrored |
+| `review-engine/ReviewPrompts.java` `CHAT_PERSONA` | `vscode-extension/src/claude.ts` same constant |
+| `review-engine/ReviewPrompts.java` `buildFocusedChatPrompt` | `vscode-extension/src/claude.ts` same function |
+| `WebviewPanel.resolvePrClaudeService`/`WorktreeCoordinator` worktree lifecycle | `vscode-extension/src/extension.ts` `resolveWorkingDir`/`clearWorktree` — the *lifecycle* only (which dir belongs to the active PR, when to tear it down); the git work is no longer mirrored |
 | `PRNotificationService` poll/source-labeling/merge logic | `vscode-extension/src/notifications.ts` + `extension.ts` `PRNotificationPoller.poll` |
 | `review-engine/BinaryLocator.java` | `vscode-extension/src/claude.ts` + `vscode-extension/src/copilot.ts` binary-probing candidates |
 | `review-engine/CopilotModelDiscovery.java` model probing / `PluginSettingsComponent` model combo | `vscode-extension/src/copilot.ts` `listModels`/`filterModelIds` + `extension.ts` `selectCopilotModel` command |
 | `PluginSettingsComponent` settings UI (provider-aware model selector, effort, base URL) | `vscode-extension/src/settings.ts` + `settingsView.ts` settings webview |
 | `review-engine/CopilotService.DEFAULT_REASONING_EFFORT` | `vscode-extension/src/copilot.ts` |
-| `webview/src/bridge/types.ts` message schemas | `WebviewPanel.java` and `vscode-extension/src/extension.ts` handlers |
+| `webview/src/bridge/types.ts` message schemas | `WebviewBridgeMessages.java`/`WebviewPanel.java` and `vscode-extension/src/extension.ts` handlers |
 | `core/.../model/DiffCoverage.java` trailer grammar (`split`, header/path format, limits) | `webview/src/lib/diffCoverage.ts` `splitDiffCoverage`/`parseDiffCoverage`; add accepted and rejected cases to the shared `core/src/test/resources/diff-coverage/trailer.golden.txt`, which both `DiffCoverageTest` and `diffCoverage.test.ts` read |
 | `github-engine/.../DraftReviewMutationService.java` `effectiveBody` fallback bodies and `DraftReviewCodec.encodeBody` general-note/detached-section rules | `webview/src/components/ReviewPane/publishBody.ts` `FALLBACK_REVIEW_BODY`/`publishedBodySections`; `publishBody.test.ts` and `DraftReviewMutationServiceTest` pin the strings. Retire it by adding a read-only publish-preview engine capability. |
 | `intellij-plugin/.../settings/RepositoryReviewInstructions.java` key normalization, limits and `compose` format | `vscode-extension/src/repositoryInstructions.ts` same functions; host-owned settings resolution like guidance profiles, so there is no engine capability to share |

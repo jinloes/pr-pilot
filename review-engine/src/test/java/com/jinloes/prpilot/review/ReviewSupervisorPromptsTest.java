@@ -105,7 +105,7 @@ class ReviewSupervisorPromptsTest {
 
             assertThat(followUp.diffCoverage()).isEqualTo(coverage);
             assertThat(followUp.getDiff()).contains("Api.java").doesNotContain("[pr-pilot:");
-            assertThat(ClaudeService.buildPrompt(followUp))
+            assertThat(ReviewPrompts.buildPrompt(followUp))
                     .contains("<omitted_files>\n", "- Big.java");
         }
 
@@ -132,7 +132,7 @@ class ReviewSupervisorPromptsTest {
             PRReviewRequest followUp = followUpFor(PRReviewRequest.builder(pr(), DIFF).build());
 
             assertThat(followUp.diffCoverage()).isEqualTo(DiffCoverage.NONE);
-            assertThat(ClaudeService.buildPrompt(followUp)).doesNotContain("<omitted_files>\n");
+            assertThat(ReviewPrompts.buildPrompt(followUp)).doesNotContain("<omitted_files>\n");
         }
 
         private static PullRequest pr() {

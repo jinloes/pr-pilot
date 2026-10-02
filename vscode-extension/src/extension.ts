@@ -1417,7 +1417,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 : guidance.customInstructions,
         );
 
-        // Prompt construction happens sidecar-side (shared review-engine ClaudeService/CopilotService);
+        // Prompt construction happens sidecar-side (shared review-engine ReviewPrompts via ClaudeService/CopilotService);
         // the extension only supplies raw PR/diff/context fields.
         let result: ReviewResult | null;
         try {
@@ -1439,7 +1439,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 pr: {
                     title,
                     // htmlUrl/author/createdAt/isDraft aren't used by ClaudeService/CopilotService's
-                    // prompt building (see review-engine ClaudeService.buildPrompt) — ActivePR
+                    // prompt building (see review-engine ReviewPrompts.buildPrompt) — ActivePR
                     // doesn't track them, so placeholders are supplied to satisfy the sidecar's
                     // PrParams shape without any loss of behavior.
                     htmlUrl: '',

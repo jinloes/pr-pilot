@@ -13,6 +13,7 @@ import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.RepoGuidelinesReader;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
 import com.jinloes.prpilot.review.ReviewPipelineService;
+import com.jinloes.prpilot.review.ReviewPrompts;
 import com.jinloes.prpilot.review.SemanticReviewService;
 import com.jinloes.prpilot.review.SemanticWorktreeStore;
 import java.io.File;
@@ -436,7 +437,7 @@ public class ReviewSessionService implements ReviewEngineApi {
         if (params == null) return new RecordOutcomeResult(0);
         ReviewOutcomeLog.Metadata metadata =
                 new ReviewOutcomeLog.Metadata(
-                        ClaudeService.reviewPipelineVersion(params.reviewSupervisorEnabled()),
+                        ReviewPrompts.reviewPipelineVersion(params.reviewSupervisorEnabled()),
                         params.provider(),
                         params.model());
         int recorded =

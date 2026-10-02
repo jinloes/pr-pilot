@@ -8,6 +8,7 @@ import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.review.ClaudeService;
 import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.ReviewPipelineService;
+import com.jinloes.prpilot.review.ReviewPrompts;
 import com.jinloes.prpilot.review.SemanticReviewService;
 import com.jinloes.prpilot.settings.PluginSettings;
 import java.util.List;
@@ -351,7 +352,7 @@ public class IntellijClaudeService {
 
     /**
      * Sends a focused question about a specific code snippet. Builds the prompt with {@link
-     * ClaudeService#buildFocusedChatPrompt} so the model receives only the code context and
+     * ReviewPrompts#buildFocusedChatPrompt} so the model receives only the code context and
      * question — no PR metadata or conversation history — matching VS Code's focused-chat path.
      */
     public void chatFocused(
@@ -376,7 +377,7 @@ public class IntellijClaudeService {
             Consumer<String> onChunk,
             Consumer<String> onDone,
             Consumer<String> onError) {
-        String rawPrompt = ClaudeService.buildFocusedChatPrompt(focusedContext, question);
+        String rawPrompt = ReviewPrompts.buildFocusedChatPrompt(focusedContext, question);
         Consumer<String> wrappedChunk = wrapCallback(onChunk);
         runOnPooledThread(
                 settings.provider,

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 import { buildFocusedChatPrompt, escapeClosingTag, truncatePromptContent } from '../src/claude';
 
-// Review and regular-chat prompt building live in review-engine's ClaudeService and are covered by
-// ClaudeServiceTest. Only the focused-chat prompt is still built host-side (it mirrors IntelliJ's
+// Review and regular-chat prompt building live in review-engine's ReviewPrompts and are covered by
+// ReviewPromptsTest. Only the focused-chat prompt is still built host-side (it mirrors IntelliJ's
 // IntellijClaudeService.chatFocused), so it is the only prompt asserted here.
 
 test('escapeClosingTag only escapes the matching closing tag', () => {

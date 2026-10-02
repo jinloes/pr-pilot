@@ -12,6 +12,7 @@ import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
 import com.jinloes.prpilot.review.ReviewPipelineService;
+import com.jinloes.prpilot.review.ReviewPrompts;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -270,7 +271,7 @@ class ReviewSessionServiceTest {
             assertThat(line)
                     .contains(
                             "\"promptVersion\":\""
-                                    + ClaudeService.reviewPipelineVersion(true)
+                                    + ReviewPrompts.reviewPipelineVersion(true)
                                     + "\"")
                     .contains("\"provider\":\"copilot\"")
                     .contains("\"model\":\"gpt-5\"");

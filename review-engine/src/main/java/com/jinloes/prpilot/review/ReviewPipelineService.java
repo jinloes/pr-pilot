@@ -251,12 +251,12 @@ public final class ReviewPipelineService {
                         chunkedReviewService.finalValidationRequest(request);
                 String raw =
                         provider.complete(
-                                ClaudeService.buildCritiquePrompt(critiqueRequest, candidate),
+                                ReviewPrompts.buildCritiquePrompt(critiqueRequest, candidate),
                                 CRITIQUE_TIMEOUT_MS,
                                 true,
                                 true,
                                 onStatus);
-                candidate = ClaudeService.parseReview(raw);
+                candidate = ReviewResultParser.parseReview(raw);
             } catch (InterruptedException interrupted) {
                 throw interrupted;
             } catch (IOException | IllegalArgumentException exception) {
@@ -304,7 +304,7 @@ public final class ReviewPipelineService {
         try {
             String raw =
                     provider.complete(
-                            ClaudeService.buildHygienePrompt(
+                            ReviewPrompts.buildHygienePrompt(
                                     chunked
                                             ? chunkedReviewService.finalValidationRequest(request)
                                             : request),
@@ -313,7 +313,8 @@ public final class ReviewPipelineService {
                             false,
                             onStatus);
             ReviewResult hygiene =
-                    ClaudeService.parseReview(raw, ClaudeService.RECALL_MAX_LINE_COMMENTS);
+                    ReviewResultParser.parseReview(
+                            raw, ReviewResultParser.RECALL_MAX_LINE_COMMENTS);
             // Hygiene findings bypass validation, so an unanchored one must never survive.
             hygiene = ReviewAnchorValidator.validate(hygiene, manifest);
             onStatus.accept("Hygiene pass found " + findings(hygiene.getLineComments().size()));
@@ -624,7 +625,7 @@ public final class ReviewPipelineService {
                         InspectionManifest.fromDiff(followUpRequest.getDiff());
                 String raw =
                         provider.complete(
-                                ClaudeService.buildPrompt(followUpRequest, followUpManifest),
+                                ReviewPrompts.buildPrompt(followUpRequest, followUpManifest),
                                 FOLLOW_UP_TIMEOUT_MS,
                                 true,
                                 false,
