@@ -506,11 +506,14 @@ class ReviewPipelineServiceTest {
                     new ReviewPipelineService(
                             provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
 
+            List<String> statuses = new ArrayList<>();
+
             ReviewResult result =
-                    pipeline.review(request(diff), false, false, true, ignored -> {}, null);
+                    pipeline.review(request(diff), false, false, true, statuses::add, null);
 
             assertThat(result).isSameAs(baseline);
             assertThat(provider.completeCalls).isEmpty();
+            assertThat(statuses).contains(ReviewPipelineService.STATUS_COVERAGE_COMPLETE);
         }
 
         @Test
@@ -561,9 +564,15 @@ class ReviewPipelineServiceTest {
                     new ReviewPipelineService(
                             provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
 
-            ReviewResult result =
-                    pipeline.review(request(fileDiff(7)), false, false, true, ignored -> {}, null);
+            List<String> statuses = new ArrayList<>();
 
+            ReviewResult result =
+                    pipeline.review(request(fileDiff(7)), false, false, true, statuses::add, null);
+
+            assertThat(statuses)
+                    .contains(
+                            "Coverage follow-ups re-reviewed 7 files and 0 hunks and found 2"
+                                    + " findings");
             assertThat(provider.completeCalls).hasSize(2);
             assertThat(provider.completeCalls).allMatch(PromptCall::allowReadTools);
             assertThat(provider.completeCalls.get(0).prompt())
@@ -1143,7 +1152,7 @@ class ReviewPipelineServiceTest {
             FakeProvider provider = new FakeProvider();
             provider.primaryResult = pass(result(comment("src/A.java", 1, "high", "Bug.")));
             provider.hygieneCompletions.add(
-                    reviewJson(comment("src/A.java", 2, "medium", "Demote this log.")));
+                    reviewJson(comment("src/Api.java", 1, "medium", "Demote this log.")));
             provider.completions.add(emptyReviewJson());
             List<String> statuses = new ArrayList<>();
 
@@ -1168,6 +1177,57 @@ class ReviewPipelineServiceTest {
                             "Draft review has 2 findings before validation");
             assertThat(provider.completeCalls.get(0).prompt())
                     .contains("<draft_review>", "Bug.", "Demote this log.");
+        }
+
+        @Test
+        void keepsAHygieneFindingTheCritiqueDropped() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult = pass(result(comment("src/A.java", 1, "high", "Bug.")));
+            provider.hygieneCompletions.add(
+                    reviewJson(hygiene("src/Api.java", 1, "medium", "Demote this log.")));
+            provider.completions.add(reviewJson(comment("src/A.java", 1, "high", "Bug.")));
+            List<String> statuses = new ArrayList<>();
+
+            ReviewResult result =
+                    pipeline(provider)
+                            .review(
+                                    request(oneRiskyHunk()),
+                                    false,
+                                    true,
+                                    false,
+                                    statuses::add,
+                                    null);
+
+            assertThat(result.getLineComments())
+                    .extracting(LineComment::getBody)
+                    .containsExactlyInAnyOrder("Bug.", "Demote this log.");
+            assertThat(statuses)
+                    .containsSubsequence(
+                            "Kept 1 finding from the hygiene pass",
+                            "Validation kept 2 of 2 findings");
+        }
+
+        @Test
+        void dropsAnUnanchoredHygieneFindingBeforeTheDraft() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult = pass(result());
+            provider.hygieneCompletions.add(
+                    reviewJson(hygiene("src/Missing.java", 4, "high", "Demote this log.")));
+            provider.completions.add(emptyReviewJson());
+            List<String> statuses = new ArrayList<>();
+
+            ReviewResult result =
+                    pipeline(provider)
+                            .review(
+                                    request(oneRiskyHunk()),
+                                    false,
+                                    true,
+                                    false,
+                                    statuses::add,
+                                    null);
+
+            assertThat(result.getLineComments()).isEmpty();
+            assertThat(statuses).contains("Hygiene pass found 0 findings");
         }
 
         @Test
@@ -1471,6 +1531,13 @@ class ReviewPipelineServiceTest {
             return comment;
         }
 
+        private static LineComment hygiene(String file, int line, String confidence, String body) {
+            LineComment comment = comment(file, line, confidence, body);
+            comment.setType("suggestion");
+            comment.setCategory("performance");
+            return comment;
+        }
+
         private static String reviewJson(LineComment... comments) throws IOException {
             return JSON.writeValueAsString(
                     Map.of(
@@ -1480,6 +1547,114 @@ class ReviewPipelineServiceTest {
                             "COMMENT",
                             "lineComments",
                             List.of(comments)));
+        }
+    }
+
+    @Nested
+    class RestoreHygieneFindings {
+        private final InspectionManifest manifest = InspectionManifest.fromDiff(fileDiff(2));
+
+        @Test
+        void restoresADroppedConfirmedFinding() {
+            ReviewResult validated = new ReviewResult("ok", "APPROVE", new ArrayList<>());
+            ReviewResult hygiene = result(finding("F0.java", 1, "performance", "medium"));
+
+            ReviewResult restored =
+                    ReviewPipelineService.restoreHygieneFindings(validated, hygiene, manifest);
+
+            assertThat(restored.getSummary()).isEqualTo("ok");
+            assertThat(restored.getVerdict()).isEqualTo("COMMENT");
+            assertThat(restored.getLineComments())
+                    .singleElement()
+                    .extracting(LineComment::getFile)
+                    .isEqualTo("F0.java");
+        }
+
+        @Test
+        void skipsLowConfidenceAndUnanchoredFindings() {
+            ReviewResult validated = result();
+            ReviewResult hygiene =
+                    result(
+                            finding("F0.java", 1, "performance", "low"),
+                            finding("F0.java", 9, "performance", "high"),
+                            finding("Gone.java", 1, "performance", "high"));
+
+            assertThat(ReviewPipelineService.restoreHygieneFindings(validated, hygiene, manifest))
+                    .isSameAs(validated);
+        }
+
+        @Test
+        void treatsANearbySameCategoryFindingAsTheValidatorsRewording() {
+            ReviewResult validated =
+                    result(
+                            finding(
+                                    "F1.java",
+                                    1 + ReviewPipelineService.HYGIENE_COVER_LINES,
+                                    "performance",
+                                    "high"));
+            ReviewResult hygiene = result(finding("F1.java", 1, "performance", "medium"));
+
+            assertThat(ReviewPipelineService.restoreHygieneFindings(validated, hygiene, manifest))
+                    .isSameAs(validated);
+        }
+
+        @Test
+        void keepsAHygieneFindingNextToAFindingOfAnotherCategory() {
+            ReviewResult validated = result(finding("F1.java", 1, "correctness", "high"));
+            ReviewResult hygiene = result(finding("F1.java", 1, "maintainability", "medium"));
+
+            assertThat(
+                            ReviewPipelineService.restoreHygieneFindings(
+                                            validated, hygiene, manifest)
+                                    .getLineComments())
+                    .extracting(LineComment::getCategory)
+                    .containsExactlyInAnyOrder("correctness", "maintainability");
+        }
+
+        @Test
+        void restoresOnlyOneOfTwoHygieneDuplicatesAtTheSameSite() {
+            ReviewResult hygiene =
+                    result(
+                            finding("F0.java", 1, "performance", "medium"),
+                            finding("F0.java", 1, "performance", "high"));
+
+            assertThat(
+                            ReviewPipelineService.restoreHygieneFindings(
+                                            result(), hygiene, manifest)
+                                    .getLineComments())
+                    .hasSize(1);
+        }
+
+        private static ReviewResult result(LineComment... comments) {
+            return new ReviewResult("ok", "COMMENT", new ArrayList<>(List.of(comments)));
+        }
+
+        private static LineComment finding(
+                String file, int line, String category, String confidence) {
+            LineComment comment = new LineComment(file, line, "suggestion", category + " finding");
+            comment.setSeverity("minor");
+            comment.setCategory(category);
+            comment.setConfidence(confidence);
+            return comment;
+        }
+    }
+
+    @Nested
+    class CoverageStatus {
+        @Test
+        void reportsFilesHunksAndFindings() {
+            assertThat(ReviewPipelineService.coverageStatus(1, 2, 1, 0))
+                    .isEqualTo(
+                            "Coverage follow-ups re-reviewed 1 file and 2 hunks and found 1"
+                                    + " finding");
+        }
+
+        @Test
+        void appendsFailedCalls() {
+            assertThat(ReviewPipelineService.coverageStatus(7, 1, 0, 2))
+                    .isEqualTo(
+                            "Coverage follow-ups re-reviewed 7 files and 1 hunk and found 0"
+                                    + " findings (2 calls failed)");
         }
     }
 

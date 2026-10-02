@@ -120,6 +120,7 @@ sequenceDiagram
         Pipeline->>Pipeline: Build contract index from changed files, even for direct/single-batch reviews
         Pipeline->>Provider: Validate findings against bounded context and contract index; confirm or drop recall candidates
         Provider-->>Pipeline: Refined review
+        Pipeline->>Pipeline: Restore anchored hygiene findings the critique dropped (dedup by file, ±2 lines, category)
         opt prpilot.review.reportDropped=true
             Pipeline-->>Host: One status per draft finding validation dropped
         end

@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -41,6 +42,10 @@ public final class ReviewPipelineService {
     static final String STATUS_HYGIENE_FAILED = "Hygiene pass failed; continuing without it";
     private static final long SECONDARY_POLL_MS = 250;
     private static final int MERGED_CANDIDATE_CAP = 40;
+    // A validated finding this close to a hygiene finding, in the same category, already covers it.
+    static final int HYGIENE_COVER_LINES = 2;
+    static final String STATUS_COVERAGE_COMPLETE =
+            "Coverage check: every changed file was reviewed; no follow-up findings needed";
     static final String STATUS_BASE_CONTEXT = "Reading base-commit guidance…";
 
     private final ProviderExecutor provider;
@@ -233,9 +238,8 @@ public final class ReviewPipelineService {
         provider.checkCancelled();
 
         if (recall) {
-            candidate =
-                    withHygieneFindings(
-                            request, chunked, manifest, candidate, supervisorEnabled, onStatus);
+            ReviewResult hygiene = hygieneFindings(request, chunked, manifest, onStatus);
+            candidate = ReviewResultMerger.merge(candidate, hygiene, MERGED_CANDIDATE_CAP);
             provider.checkCancelled();
             ReviewResult draft = candidate;
             int draftCount = candidate.getLineComments().size();
@@ -262,6 +266,12 @@ public final class ReviewPipelineService {
             }
             // Unconfirmed recall candidates never reach the user, even if validation failed.
             candidate = ReviewResultMerger.withoutLowConfidence(candidate);
+            int validatedCount = candidate.getLineComments().size();
+            candidate = restoreHygieneFindings(candidate, hygiene, manifest);
+            int restored = candidate.getLineComments().size() - validatedCount;
+            if (restored > 0) {
+                onStatus.accept("Kept " + findings(restored) + " from the hygiene pass");
+            }
             if (Boolean.getBoolean(REPORT_DROPPED_PROPERTY)) {
                 droppedStatuses(draft, candidate).forEach(onStatus);
             }
@@ -277,18 +287,17 @@ public final class ReviewPipelineService {
     }
 
     /**
-     * Runs the recall-mode hygiene pass and merges its findings into the draft. The hygiene rules
-     * are left out of the recall first-pass prompt so the bug hunt keeps its budget; this pass
-     * restores them as a focused, best-effort call whose failure never loses the draft. Its rules
-     * inventory every changed log statement and comment, so it needs the full diff; only a chunked
-     * review, whose diff may exceed one prompt, falls back to the condensed index.
+     * Runs the recall-mode hygiene pass and returns its anchored findings, or an empty result when
+     * it fails. The hygiene rules are left out of the recall first-pass prompt so the bug hunt
+     * keeps its budget; this pass restores them as a focused, best-effort call whose failure never
+     * loses the draft. Its rules inventory every changed log statement and comment, so it needs the
+     * full diff; only a chunked review, whose diff may exceed one prompt, falls back to the
+     * condensed index.
      */
-    private ReviewResult withHygieneFindings(
+    private ReviewResult hygieneFindings(
             PRReviewRequest request,
             boolean chunked,
             InspectionManifest manifest,
-            ReviewResult candidate,
-            boolean supervisorEnabled,
             Consumer<String> onStatus)
             throws IOException, InterruptedException {
         validateAuthority();
@@ -305,18 +314,51 @@ public final class ReviewPipelineService {
                             onStatus);
             ReviewResult hygiene =
                     ClaudeService.parseReview(raw, ClaudeService.RECALL_MAX_LINE_COMMENTS);
-            if (supervisorEnabled) {
-                hygiene = ReviewAnchorValidator.validate(hygiene, manifest);
-            }
+            // Hygiene findings bypass validation, so an unanchored one must never survive.
+            hygiene = ReviewAnchorValidator.validate(hygiene, manifest);
             onStatus.accept("Hygiene pass found " + findings(hygiene.getLineComments().size()));
-            return ReviewResultMerger.merge(candidate, hygiene, MERGED_CANDIDATE_CAP);
+            return hygiene;
         } catch (InterruptedException interrupted) {
             throw interrupted;
         } catch (IOException | IllegalArgumentException exception) {
             log.warn("Hygiene pass failed; continuing without it", exception);
             onStatus.accept(STATUS_HYGIENE_FAILED);
-            return candidate;
+            return new ReviewResult("", "APPROVE", new ArrayList<>());
         }
+    }
+
+    /**
+     * Re-adds confirmed hygiene findings that validation dropped. The hygiene rules are mechanical
+     * (log level, attached exception, comment wording), and the validator reliably discards them as
+     * low-value even when told to keep them, which loses exactly the findings production reviewers
+     * such as Mae report. A hygiene finding is kept unless it is low confidence, does not anchor to
+     * a changed line, or a validated finding of the same category already sits within {@link
+     * #HYGIENE_COVER_LINES} lines of it in the same file (the validator reworded or merged it).
+     */
+    static ReviewResult restoreHygieneFindings(
+            ReviewResult validated, ReviewResult hygiene, InspectionManifest manifest) {
+        List<LineComment> kept = new ArrayList<>(validated.getLineComments());
+        List<LineComment> restored = new ArrayList<>();
+        for (LineComment comment : hygiene.getLineComments()) {
+            if ("low".equals(comment.getConfidence())
+                    || manifest.hunkFor(comment.getFile(), comment.getLine()).isEmpty()
+                    || kept.stream().anyMatch(other -> covers(other, comment))) {
+                continue;
+            }
+            kept.add(comment);
+            restored.add(comment);
+        }
+        if (restored.isEmpty()) {
+            return validated;
+        }
+        return ReviewResultMerger.merge(
+                validated, new ReviewResult("", "COMMENT", restored), MERGED_CANDIDATE_CAP);
+    }
+
+    private static boolean covers(LineComment kept, LineComment hygiene) {
+        return Objects.equals(kept.getFile(), hygiene.getFile())
+                && Math.abs(kept.getLine() - hygiene.getLine()) <= HYGIENE_COVER_LINES
+                && Objects.equals(kept.getCategory(), hygiene.getCategory());
     }
 
     /**
@@ -437,6 +479,20 @@ public final class ReviewPipelineService {
         return count + (count == 1 ? " finding" : " findings");
     }
 
+    static String coverageStatus(long files, int hunks, int found, int failed) {
+        String status =
+                "Coverage follow-ups re-reviewed %d %s and %d %s and found %s"
+                        .formatted(
+                                files,
+                                files == 1 ? "file" : "files",
+                                hunks,
+                                hunks == 1 ? "hunk" : "hunks",
+                                findings(found));
+        return failed == 0
+                ? status
+                : status + " (" + failed + (failed == 1 ? " call" : " calls") + " failed)";
+    }
+
     static String draftStatus(int count) {
         return "Draft review has " + findings(count) + " before validation";
     }
@@ -511,6 +567,7 @@ public final class ReviewPipelineService {
         List<CoverageGap> gaps = coverageAnalyzer.findGaps(manifest, primary.ledger());
         if (gaps.isEmpty()) {
             logCoverage(manifest, primary, 0, 0, 0, elapsedMillis(startedAt));
+            onStatus.accept(STATUS_COVERAGE_COMPLETE);
             return primary.review();
         }
 
@@ -544,12 +601,14 @@ public final class ReviewPipelineService {
         }
         if (batches.isEmpty()) {
             logCoverage(manifest, primary, gaps.size(), 0, 0, elapsedMillis(startedAt));
+            onStatus.accept(coverageStatus(0, 0, 0, 0));
             return primary.review();
         }
 
         ReviewResult merged = primary.review();
         int directiveCount = 0;
         int followUpFindings = 0;
+        int failedFollowUps = 0;
         for (int i = 0; i < batches.size(); i++) {
             List<FollowUpDirective> directives = batches.get(i);
             provider.checkCancelled();
@@ -578,8 +637,15 @@ public final class ReviewPipelineService {
                 throw interrupted;
             } catch (IOException exception) {
                 log.warn("Targeted review follow-up failed; keeping the review so far", exception);
+                failedFollowUps++;
             }
         }
+        onStatus.accept(
+                coverageStatus(
+                        Math.min(fileDirectives.size(), FILES_PER_FOLLOW_UP * MAX_FILE_FOLLOW_UPS),
+                        hunkDirectives.size(),
+                        followUpFindings,
+                        failedFollowUps));
         logCoverage(
                 manifest,
                 primary,

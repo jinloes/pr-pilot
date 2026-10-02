@@ -387,7 +387,12 @@ tells the model to read every changed file in full and look up each new or chang
 definition; the hygiene rules move to a dedicated read-only hygiene pass
 (`ClaudeService.buildHygienePrompt`) that runs after the review/supervisor passes and before the
 critique. Bundling them into the main prompt let the semantic passes crowd them out. Its findings are
-merged into the draft so the critique validates them like any other; a failed hygiene pass reports a
+anchor-validated against the diff and merged into the draft, but the critique's judgement does not
+remove them: after validation the pipeline restores every anchored, non-low-confidence hygiene finding
+the critique dropped unless a kept finding of the same category sits within two lines of it
+(`ReviewPipelineService.restoreHygieneFindings`). On the Mae benchmark the critic discarded
+confirmed hot-path and exception-logging findings in every run despite being told to keep them, so
+the critique can only reword or deduplicate them. A failed hygiene pass reports a
 status and the review continues without it. Deep reviews carry the pinned semantic sections into the
 hygiene prompt too, because every deep-review provider call must see the same trusted evidence. With
 the JVM property `prpilot.review.reportDropped=true`, the pipeline emits one `Validation dropped
@@ -527,7 +532,9 @@ anchors. When enabled:
   still run.
 - The engine authors the follow-up objectives and allows six-minute, read-only worktree passes with
   MCP disabled. A failed batch is logged and skipped without discarding other batches. Baseline and
-  follow-up findings are merged and deduplicated.
+  follow-up findings are merged and deduplicated. The supervisor always reports a status naming
+  how many files and hunks it re-reviewed, the findings found, and any failed calls (or that no
+  follow-up was needed); each mentions "finding" so the recall benchmark records it as a stage.
 - `ReviewAnchorValidator` removes findings not attached to changed new-side lines before the
   existing final critique and CI suppression gates run once. Chunked reviews use their bounded
   contract index for the final critique rather than re-sending the full diff.
