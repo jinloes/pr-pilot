@@ -59,7 +59,11 @@ class ReviewPromptsTest {
                     .contains("every file and hunk listed in <inspection_manifest>")
                     .contains("Do not stop after the first finding")
                     .contains("established sibling it mirrors")
-                    .contains("Cite the sibling's path");
+                    .contains("Cite the sibling's path")
+                    .contains("duplicated shared logic")
+                    .contains("covers in whole or in part")
+                    .contains("Suggesting reuse is part of review")
+                    .contains("Do not report it when no such type is found");
         }
 
         @Test
@@ -77,6 +81,8 @@ class ReviewPromptsTest {
                     .contains("Exception not attached")
                     .contains("pass the exception as the final logger argument")
                     .contains("Comment hygiene")
+                    .contains("Misplaced doc comment")
+                    .contains("name the member it actually")
                     .contains("\"reserved\" statement")
                     .contains("merge all three passes")
                     .contains("keep one comment per affected line")
@@ -94,9 +100,10 @@ class ReviewPromptsTest {
                     .contains("sensitive logging, hot-path logging")
                     .contains("a failure log without its subject")
                     .contains("an exception not attached to its log")
-                    .contains("history-narrating comment or untracked TODO")
+                    .contains("history-narrating or misplaced doc comment or untracked TODO")
                     .contains("an unreserved removed protobuf field")
                     .contains("is not a style finding: keep it")
+                    .contains("A reuse suggestion that names an existing")
                     .doesNotContain(ReviewPrompts.HYGIENE_PASS);
         }
 
@@ -238,7 +245,7 @@ class ReviewPromptsTest {
 
         @Test
         void promptVersionSegmentsContextConformanceChanges() {
-            assertThat(ReviewPrompts.PROMPT_VERSION).isEqualTo("2026-10-bug-hunt-coverage");
+            assertThat(ReviewPrompts.PROMPT_VERSION).isEqualTo("2026-10-absent-inputs-reuse");
         }
 
         @Test
@@ -247,6 +254,9 @@ class ReviewPromptsTest {
                     ReviewPrompts.buildPrompt(PRReviewRequest.builder(fakePr(), "").build());
 
             assertThat(prompt).contains(ReviewPrompts.BUG_HUNT_CHECKLIST);
+            assertThat(ReviewPrompts.BUG_HUNT_CHECKLIST)
+                    .contains("Unchecked absent inputs")
+                    .contains("reached by");
             assertThat(prompt)
                     .contains("A deleted ('-') line is in scope when removing it creates the")
                     .contains("the removed code in \"rationale\"");

@@ -54,8 +54,8 @@ Three parts of the pipeline previously treated `"confidence": "low"` as a way to
 
 The self-critique directive is keyed on `confidence`, not on type, for a related reason: its input is `draftReviewJson` over an already-parsed draft, so by then no low-confidence `"issue"` exists and the old "drop a low-confidence issue" rule could never match anything. It now requires each surviving low-confidence comment to be confirmed and raised, or dropped.
 
-`PROMPT_VERSION` is `2026-10-bug-hunt-coverage`. Pass B appends `BUG_HUNT_CHECKLIST` (failure
-disposition, swallowed failures, removed safeguards, mixed versions, and the other defect classes a
+`PROMPT_VERSION` is `2026-10-absent-inputs-reuse`. Pass B appends `BUG_HUNT_CHECKLIST` (failure
+disposition, swallowed failures, removed safeguards, unchecked absent (protobuf default) inputs, mixed versions, and the other defect classes a
 generic "look for bugs" instruction skips) plus `LanguageChecklists` entries for only the languages
 the diff changes. Two scope rules close gaps the evidence policy used to open: a finding caused by a
 deleted line anchors on the nearest added line in the same hunk or file and quotes the removed code
@@ -66,9 +66,11 @@ matching keep rules so it does not drop either kind as misplaced or unsupported.
 
 The non-recall review prompt has a third pass of built-in
 hygiene rules (sensitive or per-request logging, failure logs that omit the failing identifier or
-drop the exception, history-narrating comments, unreserved removed protobuf fields) with fixed
+drop the exception, history-narrating or misplaced doc comments, unreserved removed protobuf fields) with fixed
 type, category and severity. Pass A also compares each new type against the existing sibling it
-mirrors, because a missing annotation or serialization convention is invisible from the diff alone.
+mirrors, because a missing annotation or serialization convention is invisible from the diff alone. It
+also flags new or changed code that re-implements logic an existing base class or shared helper
+already provides, naming the type to reuse.
 On the Mae benchmark these were most of the misses, and the self-critique pass is told they are not style findings so it keeps them.
 In recall mode (self-critique or a second reviewer) the review prompt runs only passes A and B and
 tells the model to read every changed file in full and look up each new or changed symbol's
