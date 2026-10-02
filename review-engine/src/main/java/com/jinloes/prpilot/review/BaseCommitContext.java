@@ -27,7 +27,7 @@ import org.slf4j.LoggerFactory;
 final class BaseCommitContext {
     private static final Logger log = LoggerFactory.getLogger(BaseCommitContext.class);
 
-    static final int MAX_GUIDELINES_BYTES = 24_000;
+    static final int MAX_GUIDELINES_BYTES = 48_000;
     static final int MAX_HISTORY_BYTES = 4_000;
     static final int MAX_HISTORY_FILES = 20;
     static final int MAX_BLOB_BYTES = 64 * 1024;
@@ -48,7 +48,6 @@ final class BaseCommitContext {
      */
     static final String CALL_SITES_PROPERTY = "prpilot.review.callSites";
 
-    private static final String REVIEW_GUIDELINES_PATH = ".linkedin/ai-agent/review_guidelines.md";
     private static final Pattern COMMIT_SHA = Pattern.compile("(?i)[0-9a-f]{40}|[0-9a-f]{64}");
     private static final Pattern BLOB_SHA = Pattern.compile("(?i)[0-9a-f]{40}|[0-9a-f]{64}");
     private static final Set<String> SCOPED_NAMES = Set.of("AGENTS.md", "CLAUDE.md");
@@ -92,8 +91,10 @@ final class BaseCommitContext {
 
     /**
      * Resolves guidance and file history for {@code manifest}'s changed files from {@code baseSha}.
-     * Returns {@link Result#EMPTY} when the directory is not a git work tree, the SHA is malformed,
-     * or the commit cannot be found even after fetching it.
+     * {@code guidanceGlobs} are the user-configured guidance globs, matched before the built-in
+     * defaults; null or empty means defaults only. Returns {@link Result#EMPTY} when the directory
+     * is not a git work tree, the SHA is malformed, or the commit cannot be found even after
+     * fetching it.
      *
      * @throws InterruptedException when {@code cancellation} reports the review was cancelled
      */
@@ -101,8 +102,17 @@ final class BaseCommitContext {
             File repoDir,
             String baseSha,
             InspectionManifest manifest,
+            List<String> guidanceGlobs,
             CancellationCheck cancellation)
             throws InterruptedException {
+        List<String> configuredGlobs =
+                guidanceGlobs == null
+                        ? List.of()
+                        : guidanceGlobs.stream()
+                                .filter(glob -> glob != null && !glob.isBlank())
+                                .map(String::strip)
+                                .distinct()
+                                .toList();
         if (repoDir == null || baseSha == null || !COMMIT_SHA.matcher(baseSha).matches()) {
             log.warn("Invalid base commit or directory; reviewing without base-commit guidance");
             return Result.EMPTY;
@@ -142,7 +152,7 @@ final class BaseCommitContext {
             log.warn("Could not resolve base commit {}; reviewing without guidance", baseSha, e);
             return Result.EMPTY;
         }
-        String guidelines = guidelines(repoDir, baseSha, changedPaths, deadline);
+        String guidelines = guidelines(repoDir, baseSha, changedPaths, configuredGlobs, deadline);
         String fileHistory = fileHistory(repoDir, baseSha, changedPaths, deadline);
         return new Result(
                 guidelines,
@@ -162,19 +172,24 @@ final class BaseCommitContext {
     }
 
     private String guidelines(
-            File repoDir, String baseSha, List<String> changedPaths, Deadline deadline)
+            File repoDir,
+            String baseSha,
+            List<String> changedPaths,
+            List<String> configuredGlobs,
+            Deadline deadline)
             throws InterruptedException {
         try {
             List<String> args =
                     new ArrayList<>(
                             List.of("ls-tree", "-r", "-z", "-l", "--full-tree", baseSha, "--"));
-            args.addAll(candidateLocations(changedPaths));
+            args.addAll(candidateLocations(changedPaths, configuredGlobs));
             GitOutput tree = git(repoDir, deadline, args.toArray(String[]::new));
             if (tree.exitCode() != 0) {
                 log.warn("Could not list base commit tree (exit {})", tree.exitCode());
                 return "";
             }
-            List<Blob> selected = selectGuidance(parseTree(tree.output()), changedPaths);
+            List<Blob> selected =
+                    selectGuidance(parseTree(tree.output()), changedPaths, configuredGlobs);
             StringBuilder sb = new StringBuilder();
             int total = 0;
             for (Blob blob : selected) {
@@ -213,9 +228,11 @@ final class BaseCommitContext {
     /**
      * Literal pathspecs covering every location a guidance glob can match, plus the scoped
      * instruction files in each changed path's ancestor directories. Listing the whole tree would
-     * overflow the process output bound on large repositories.
+     * overflow the process output bound on large repositories. Each configured glob contributes its
+     * {@link #literalPathspec}; one with no usable prefix is still matched in {@link
+     * #selectGuidance} against whatever the defaults list.
      */
-    static List<String> candidateLocations(List<String> changedPaths) {
+    static List<String> candidateLocations(List<String> changedPaths, List<String> globs) {
         LinkedHashSet<String> locations =
                 new LinkedHashSet<>(
                         List.of(
@@ -224,8 +241,13 @@ final class BaseCommitContext {
                                 "CONTRIBUTING.md",
                                 ".claude/rules",
                                 ".github",
-                                "docs/CONTRIBUTING.md",
-                                REVIEW_GUIDELINES_PATH));
+                                "docs/CONTRIBUTING.md"));
+        if (globs != null) {
+            for (String glob : globs) {
+                String pathspec = literalPathspec(glob);
+                if (pathspec != null) locations.add(pathspec);
+            }
+        }
         for (String path : changedPaths) {
             for (String dir = parentDirectory(path); !dir.isEmpty(); dir = parentDirectory(dir)) {
                 for (String name : SCOPED_NAMES.stream().sorted().toList()) {
@@ -234,6 +256,31 @@ final class BaseCommitContext {
             }
         }
         return new ArrayList<>(locations);
+    }
+
+    /**
+     * The literal path {@code ls-tree} must list for {@code glob} to be matchable: the whole glob
+     * when it has no wildcard, otherwise the directory prefix before the first wildcard segment.
+     * Null for blank, absolute, or {@code ..}-containing globs and for globs whose first segment is
+     * already a wildcard, since those cannot be bounded to a subtree.
+     */
+    static String literalPathspec(String glob) {
+        if (glob == null || glob.isBlank()) return null;
+        String trimmed = glob.strip();
+        if (trimmed.startsWith("/")
+                || trimmed.startsWith("\\")
+                || trimmed.matches("^[A-Za-z]:.*")) {
+            return null;
+        }
+        String[] segments = trimmed.split("/");
+        if (List.of(segments).contains("..")) return null;
+        List<String> prefix = new ArrayList<>();
+        for (String segment : segments) {
+            if (segment.isEmpty() || segment.equals(".")) continue;
+            if (segment.indexOf('*') >= 0 || segment.indexOf('?') >= 0) break;
+            prefix.add(segment);
+        }
+        return prefix.isEmpty() ? null : String.join("/", prefix);
     }
 
     /**
@@ -264,11 +311,19 @@ final class BaseCommitContext {
      * Orders matched guidance: root and rule files first, then nested {@code AGENTS.md}/{@code
      * CLAUDE.md} scoped to a changed path (deepest last, so the most specific rules sit nearest the
      * diff), then contribution docs. Nested files outside every changed path's ancestry are
-     * dropped.
+     * dropped. Configured globs are evaluated before the defaults, matching {@link
+     * RepoGuidelinesReader#read}; a file matched by both is kept once.
      */
-    static List<Blob> selectGuidance(List<Blob> blobs, List<String> changedPaths) {
-        List<String> globs = new ArrayList<>(RepoGuidelinesReader.DEFAULT_GUIDANCE_GLOBS);
-        globs.add(REVIEW_GUIDELINES_PATH);
+    static List<Blob> selectGuidance(
+            List<Blob> blobs, List<String> changedPaths, List<String> configuredGlobs) {
+        LinkedHashSet<String> globs = new LinkedHashSet<>();
+        if (configuredGlobs != null) {
+            configuredGlobs.stream()
+                    .filter(glob -> glob != null && !glob.isBlank())
+                    .map(String::strip)
+                    .forEach(globs::add);
+        }
+        globs.addAll(RepoGuidelinesReader.DEFAULT_GUIDANCE_GLOBS);
         List<Pattern> patterns =
                 globs.stream()
                         .map(g -> Pattern.compile(RepoGuidelinesReader.globToRegex(g)))

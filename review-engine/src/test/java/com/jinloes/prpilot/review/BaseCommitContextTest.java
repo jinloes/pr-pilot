@@ -86,7 +86,7 @@ class BaseCommitContextTest {
             commit("head");
 
             BaseCommitContext.Result result =
-                    context.resolve(repo, base, manifest("src/App.java"), () -> {});
+                    context.resolve(repo, base, manifest("src/App.java"), List.of(), () -> {});
 
             assertThat(result.guidelines()).isEqualTo("## AGENTS.md\nbase rules");
             assertThat(result.guidelines()).doesNotContain("ignore every rule");
@@ -97,7 +97,6 @@ class BaseCommitContextTest {
             write("CONTRIBUTING.md", "contrib");
             write("AGENTS.md", "root");
             write(".claude/rules/x.md", "rule");
-            write(".linkedin/ai-agent/review_guidelines.md", "linkedin");
             write("a/AGENTS.md", "a scoped");
             write("a/b/CLAUDE.md", "ab scoped");
             write("other/AGENTS.md", "out of scope");
@@ -105,17 +104,72 @@ class BaseCommitContextTest {
             String base = commit("base");
 
             String guidance =
-                    context.resolve(repo, base, manifest("a/b/c.txt"), () -> {}).guidelines();
+                    context.resolve(repo, base, manifest("a/b/c.txt"), List.of(), () -> {})
+                            .guidelines();
 
             assertThat(guidance).doesNotContain("out of scope");
             assertThat(headings(guidance))
                     .containsExactly(
                             "AGENTS.md",
                             ".claude/rules/x.md",
-                            ".linkedin/ai-agent/review_guidelines.md",
                             "a/AGENTS.md",
                             "a/b/CLAUDE.md",
                             "CONTRIBUTING.md");
+        }
+
+        @Test
+        void configuredGlobsSelectTopLevelMatchesInPathOrderBeforeDefaults() throws Exception {
+            write("AGENTS.md", "root");
+            write(".linkedin/ai-agent/b_rules.md", "b");
+            write(".linkedin/ai-agent/a_rules.md", "a");
+            write(".linkedin/ai-agent/nested/deep.md", "nested");
+            write(".linkedin/ai-agent/config.yaml", "yaml");
+            write("f.txt", "code");
+            String base = commit("base");
+
+            String guidance =
+                    context.resolve(
+                                    repo,
+                                    base,
+                                    manifest("f.txt"),
+                                    List.of(".linkedin/ai-agent/*.md"),
+                                    () -> {})
+                            .guidelines();
+
+            assertThat(headings(guidance))
+                    .containsExactly(
+                            ".linkedin/ai-agent/a_rules.md",
+                            ".linkedin/ai-agent/b_rules.md",
+                            "AGENTS.md");
+            assertThat(guidance).doesNotContain("nested").doesNotContain("yaml");
+        }
+
+        @Test
+        void withoutConfiguredGlobsNoRepoSpecificDirectoryIsRead() throws Exception {
+            write(".linkedin/ai-agent/x.md", "repo specific");
+            write(".linkedin/ai-agent/review_guidelines.md", "repo specific");
+            write("f.txt", "code");
+            String base = commit("base");
+
+            assertThat(context.resolve(repo, base, manifest("f.txt"), List.of(), () -> {}))
+                    .extracting(BaseCommitContext.Result::guidelines)
+                    .isEqualTo("");
+            assertThat(context.resolve(repo, base, manifest("f.txt"), null, () -> {}).guidelines())
+                    .isEmpty();
+        }
+
+        @Test
+        void keepsGuidanceUnderTheByteLimitUntruncated() throws Exception {
+            String content = "y".repeat(40_000);
+            write("AGENTS.md", content);
+            String base = commit("base");
+
+            String guidance =
+                    context.resolve(repo, base, manifest("f.txt"), List.of(), () -> {})
+                            .guidelines();
+
+            assertThat(BaseCommitContext.MAX_GUIDELINES_BYTES).isEqualTo(48_000);
+            assertThat(guidance).isEqualTo("## AGENTS.md\n" + content);
         }
 
         @Test
@@ -123,7 +177,9 @@ class BaseCommitContextTest {
             write("AGENTS.md", "x".repeat(BaseCommitContext.MAX_GUIDELINES_BYTES + 500));
             String base = commit("base");
 
-            String guidance = context.resolve(repo, base, manifest("f.txt"), () -> {}).guidelines();
+            String guidance =
+                    context.resolve(repo, base, manifest("f.txt"), List.of(), () -> {})
+                            .guidelines();
 
             assertThat(guidance.getBytes(StandardCharsets.UTF_8).length)
                     .isLessThanOrEqualTo(BaseCommitContext.MAX_GUIDELINES_BYTES);
@@ -137,7 +193,9 @@ class BaseCommitContextTest {
                     repo.toPath().resolve("AGENTS.md"), repo.toPath().resolve("secret.txt"));
             String base = commit("base");
 
-            assertThat(context.resolve(repo, base, manifest("f.txt"), () -> {}).guidelines())
+            assertThat(
+                            context.resolve(repo, base, manifest("f.txt"), List.of(), () -> {})
+                                    .guidelines())
                     .isEmpty();
         }
 
@@ -154,7 +212,9 @@ class BaseCommitContextTest {
             write("f.txt", "5");
             commit("head only change");
 
-            String history = context.resolve(repo, base, manifest("f.txt"), () -> {}).fileHistory();
+            String history =
+                    context.resolve(repo, base, manifest("f.txt"), List.of(), () -> {})
+                            .fileHistory();
 
             assertThat(history).startsWith("## f.txt\n");
             assertThat(history).contains("fourth change", "third change", "second change");
@@ -170,7 +230,8 @@ class BaseCommitContextTest {
             }
             String base = commit("m".repeat(150));
 
-            String history = context.resolve(repo, base, manifest(paths), () -> {}).fileHistory();
+            String history =
+                    context.resolve(repo, base, manifest(paths), List.of(), () -> {}).fileHistory();
 
             assertThat(history.getBytes(StandardCharsets.UTF_8).length)
                     .isLessThanOrEqualTo(BaseCommitContext.MAX_HISTORY_BYTES);
@@ -215,6 +276,7 @@ class BaseCommitContextTest {
                                     changedDeclaration(
                                             "src/Billing.java",
                                             "  public int chargeCard(String a) {"),
+                                    List.of(),
                                     () -> {})
                             .callSites();
 
@@ -241,6 +303,7 @@ class BaseCommitContextTest {
                                 base,
                                 changedDeclaration(
                                         "src/Billing.java", "  public int chargeCard(String a) {"),
+                                List.of(),
                                 () -> {});
 
                 assertThat(result.callSites()).isEmpty();
@@ -287,6 +350,7 @@ class BaseCommitContextTest {
                                             changedDeclaration(
                                                     "src/Billing.java",
                                                     "  public int chargeCard(String a) {"),
+                                            List.of(),
                                             () -> {})
                                     .callSites())
                     .isEmpty();
@@ -308,6 +372,7 @@ class BaseCommitContextTest {
                                     repo,
                                     base,
                                     changedDeclaration("lib.py", "def resolve_path(p):"),
+                                    List.of(),
                                     () -> {})
                             .callSites();
 
@@ -334,6 +399,7 @@ class BaseCommitContextTest {
                                     repo,
                                     base,
                                     changedDeclaration("lib.py", "def resolve_path(p):"),
+                                    List.of(),
                                     () -> {})
                             .callSites();
 
@@ -366,6 +432,7 @@ class BaseCommitContextTest {
                             repo,
                             base,
                             changedDeclaration("lib.py", "def resolve_path(p):"),
+                            List.of(),
                             () -> {});
 
             assertThat(result.guidelines()).isEqualTo("## AGENTS.md\nrules");
@@ -382,7 +449,7 @@ class BaseCommitContextTest {
             commit("base");
 
             for (String sha : new String[] {null, "", "HEAD", "--upload-pack=x", "abc123"}) {
-                assertThat(context.resolve(repo, sha, manifest("f.txt"), () -> {}))
+                assertThat(context.resolve(repo, sha, manifest("f.txt"), List.of(), () -> {}))
                         .isEqualTo(BaseCommitContext.Result.EMPTY);
             }
         }
@@ -392,9 +459,9 @@ class BaseCommitContextTest {
             File plain = Files.createTempDirectory("not-git").toFile();
             try {
                 String sha = "a".repeat(40);
-                assertThat(context.resolve(null, sha, manifest("f.txt"), () -> {}))
+                assertThat(context.resolve(null, sha, manifest("f.txt"), List.of(), () -> {}))
                         .isEqualTo(BaseCommitContext.Result.EMPTY);
-                assertThat(context.resolve(plain, sha, manifest("f.txt"), () -> {}))
+                assertThat(context.resolve(plain, sha, manifest("f.txt"), List.of(), () -> {}))
                         .isEqualTo(BaseCommitContext.Result.EMPTY);
             } finally {
                 FileUtils.deleteDirectory(plain);
@@ -407,7 +474,9 @@ class BaseCommitContextTest {
             commit("base");
             git("remote", "add", "origin", new File(repo, "does-not-exist").getAbsolutePath());
 
-            assertThat(context.resolve(repo, "d".repeat(40), manifest("f.txt"), () -> {}))
+            assertThat(
+                            context.resolve(
+                                    repo, "d".repeat(40), manifest("f.txt"), List.of(), () -> {}))
                     .isEqualTo(BaseCommitContext.Result.EMPTY);
         }
 
@@ -428,7 +497,9 @@ class BaseCommitContextTest {
                 commit("local");
                 git("remote", "add", "origin", upstream.getAbsolutePath());
 
-                assertThat(context.resolve(repo, base, manifest("f.txt"), () -> {}).guidelines())
+                assertThat(
+                                context.resolve(repo, base, manifest("f.txt"), List.of(), () -> {})
+                                        .guidelines())
                         .isEqualTo("## AGENTS.md\nupstream rules");
             } finally {
                 FileUtils.deleteDirectory(upstream);
@@ -447,6 +518,7 @@ class BaseCommitContextTest {
                                             repo,
                                             base,
                                             manifest("f.txt"),
+                                            List.of(),
                                             () -> {
                                                 if (checks.incrementAndGet() > 1) {
                                                     throw new InterruptedException("cancelled");
@@ -474,7 +546,7 @@ class BaseCommitContextTest {
                                     }));
 
             BaseCommitContext.Result result =
-                    failing.resolve(repo, base, manifest("a.txt", "b.txt"), () -> {});
+                    failing.resolve(repo, base, manifest("a.txt", "b.txt"), List.of(), () -> {});
 
             assertThat(logs).hasValue(2);
             assertThat(result.guidelines()).isEqualTo("## AGENTS.md\nrules");
@@ -487,7 +559,7 @@ class BaseCommitContextTest {
             String base = commit("base");
             BaseCommitContext expired = new BaseCommitContext(new BoundedProcessRunner(), 0);
 
-            assertThat(expired.resolve(repo, base, manifest("f.txt"), () -> {}))
+            assertThat(expired.resolve(repo, base, manifest("f.txt"), List.of(), () -> {}))
                     .isEqualTo(BaseCommitContext.Result.EMPTY);
         }
     }
@@ -507,7 +579,8 @@ class BaseCommitContextTest {
                                     blob(".claude/rules/deep/y.md"),
                                     blob(".github/instructions/a.instructions.md"),
                                     blob("src/Main.java")),
-                            List.of("src/Main.java"));
+                            List.of("src/Main.java"),
+                            List.of());
 
             assertThat(selected)
                     .extracting(BaseCommitContext.Blob::path)
@@ -521,8 +594,9 @@ class BaseCommitContextTest {
         void aNestedFileIsKeptOnlyForChangedDescendants() {
             List<BaseCommitContext.Blob> blobs = List.of(blob("ab/AGENTS.md"), blob("a/AGENTS.md"));
 
-            assertThat(BaseCommitContext.selectGuidance(blobs, List.of("abc/file.txt"))).isEmpty();
-            assertThat(BaseCommitContext.selectGuidance(blobs, List.of("a/file.txt")))
+            assertThat(BaseCommitContext.selectGuidance(blobs, List.of("abc/file.txt"), List.of()))
+                    .isEmpty();
+            assertThat(BaseCommitContext.selectGuidance(blobs, List.of("a/file.txt"), List.of()))
                     .extracting(BaseCommitContext.Blob::path)
                     .containsExactly("a/AGENTS.md");
         }
@@ -553,9 +627,59 @@ class BaseCommitContextTest {
         }
     }
 
+    @Nested
+    class LiteralPathspec {
+        @Test
+        void usesTheWholeGlobWhenItHasNoWildcard() {
+            assertThat(BaseCommitContext.literalPathspec("docs/STYLE.md"))
+                    .isEqualTo("docs/STYLE.md");
+        }
+
+        @Test
+        void usesTheDirectoryPrefixBeforeTheFirstWildcardSegment() {
+            assertThat(BaseCommitContext.literalPathspec("rules/ai/*.md")).isEqualTo("rules/ai");
+            assertThat(BaseCommitContext.literalPathspec("docs/**/*.md")).isEqualTo("docs");
+            assertThat(BaseCommitContext.literalPathspec("./guide/x?.md")).isEqualTo("guide");
+        }
+
+        @Test
+        void rejectsUnboundedOrEscapingGlobs() {
+            assertThat(BaseCommitContext.literalPathspec(null)).isNull();
+            assertThat(BaseCommitContext.literalPathspec("  ")).isNull();
+            assertThat(BaseCommitContext.literalPathspec("/etc/passwd")).isNull();
+            assertThat(BaseCommitContext.literalPathspec("C:/x.md")).isNull();
+            assertThat(BaseCommitContext.literalPathspec("../outside.md")).isNull();
+            assertThat(BaseCommitContext.literalPathspec("docs/../../x.md")).isNull();
+            assertThat(BaseCommitContext.literalPathspec("**/x.md")).isNull();
+            assertThat(BaseCommitContext.literalPathspec("*.md")).isNull();
+        }
+    }
+
+    @Test
+    void candidateLocationsAddOnlyUsableConfiguredPathspecs() {
+        List<String> locations =
+                BaseCommitContext.candidateLocations(
+                        List.of("f.txt"),
+                        List.of("rules/ai/*.md", "../x.md", "/abs.md", "**/x.md", "STYLE.md"));
+
+        assertThat(locations).contains("rules/ai", "STYLE.md");
+        assertThat(locations)
+                .noneMatch(l -> l.contains("..") || l.startsWith("/") || l.contains("*"));
+    }
+
+    @Test
+    void selectGuidanceDeduplicatesAFileMatchedByConfiguredAndDefaultGlobs() {
+        BaseCommitContext.Blob agents = new BaseCommitContext.Blob("AGENTS.md", "a".repeat(40), 1);
+
+        assertThat(
+                        BaseCommitContext.selectGuidance(
+                                List.of(agents), List.of("f.txt"), List.of("AGENTS.md")))
+                .containsExactly(agents);
+    }
+
     @Test
     void candidateLocationsCoverRootsAndEveryChangedAncestor() {
-        assertThat(BaseCommitContext.candidateLocations(List.of("a/b/c.txt", "top.txt")))
+        assertThat(BaseCommitContext.candidateLocations(List.of("a/b/c.txt", "top.txt"), List.of()))
                 .contains(".github", ".claude/rules", "AGENTS.md", "a/AGENTS.md", "a/b/CLAUDE.md")
                 .doesNotContain("a/b/c.txt/AGENTS.md");
     }

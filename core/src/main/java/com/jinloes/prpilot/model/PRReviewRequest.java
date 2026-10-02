@@ -33,6 +33,7 @@ public final class PRReviewRequest {
     private final java.util.List<CiAnnotation> ciAnnotations;
     private final SemanticReviewContext semanticContext;
     private final String baseSha;
+    private final java.util.List<String> guidanceGlobs;
     private final String fileHistory;
     private final String callSites;
     private final boolean candidateRecall;
@@ -52,6 +53,12 @@ public final class PRReviewRequest {
         this.repoProfile = builder.repoProfile;
         this.semanticContext = copySemanticContext(builder.semanticContext);
         this.baseSha = builder.baseSha;
+        this.guidanceGlobs =
+                builder.guidanceGlobs == null
+                        ? java.util.List.of()
+                        : builder.guidanceGlobs.stream()
+                                .filter(java.util.Objects::nonNull)
+                                .toList();
         this.fileHistory = builder.fileHistory;
         this.callSites = builder.callSites;
         this.candidateRecall = builder.candidateRecall;
@@ -148,6 +155,14 @@ public final class PRReviewRequest {
         return baseSha;
     }
 
+    /**
+     * User-configured guidance globs, matched against the base commit before the built-in defaults.
+     * Never null; empty when none are configured.
+     */
+    public java.util.List<String> getGuidanceGlobs() {
+        return guidanceGlobs;
+    }
+
     /** Rendered recent commit history of the changed files, reachable from the base commit. */
     public String getFileHistory() {
         return fileHistory;
@@ -219,6 +234,7 @@ public final class PRReviewRequest {
                 .ciAnnotations(ciAnnotations)
                 .semanticContext(semanticContext)
                 .baseSha(baseSha)
+                .guidanceGlobs(guidanceGlobs)
                 .fileHistory(fileHistory)
                 .callSites(callSites)
                 .candidateRecall(candidateRecall);
@@ -254,6 +270,7 @@ public final class PRReviewRequest {
         private java.util.List<CiAnnotation> ciAnnotations = java.util.List.of();
         private SemanticReviewContext semanticContext;
         private String baseSha;
+        private java.util.List<String> guidanceGlobs;
         private String fileHistory;
         private String callSites;
         private boolean candidateRecall;
@@ -342,6 +359,11 @@ public final class PRReviewRequest {
 
         public Builder baseSha(String value) {
             this.baseSha = value;
+            return this;
+        }
+
+        public Builder guidanceGlobs(java.util.List<String> value) {
+            this.guidanceGlobs = value;
             return this;
         }
 

@@ -1,6 +1,7 @@
 package com.jinloes.prpilot.benchmark;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -19,6 +20,7 @@ record BenchmarkOptions(
         boolean supervisor,
         boolean chunked,
         boolean callSites,
+        List<String> guidanceGlobs,
         String judge,
         String judgeModel,
         int lineWindow,
@@ -41,6 +43,7 @@ record BenchmarkOptions(
                     "--effort",
                     "--config-dir",
                     "--second-reviewer",
+                    "--guidance-glob",
                     "--judge",
                     "--judge-model",
                     "--line-window",
@@ -66,6 +69,7 @@ record BenchmarkOptions(
               --supervisor            Enable the review supervisor
               --chunked               Review large diffs in per-file chunks
               --no-call-sites         Omit base-commit call-site context
+              --guidance-glob GLOB    Also read base-commit guidance matching GLOB (repeatable)
               --judge llm|location    How matches are decided (default llm)
               --judge-model ID        Judge model (defaults to --model)
               --line-window N         Max line distance for a candidate match (default 10)
@@ -88,6 +92,7 @@ record BenchmarkOptions(
         boolean supervisor = false;
         boolean chunked = false;
         boolean callSites = true;
+        List<String> guidanceGlobs = new ArrayList<>();
         String judge = JUDGE_LLM;
         String judgeModel = "";
         int window = DEFAULT_LINE_WINDOW;
@@ -111,6 +116,7 @@ record BenchmarkOptions(
                             false,
                             false,
                             true,
+                            List.of(),
                             JUDGE_LLM,
                             "",
                             DEFAULT_LINE_WINDOW,
@@ -135,6 +141,7 @@ record BenchmarkOptions(
                         case "--effort" -> effort = value;
                         case "--config-dir" -> configDir = value;
                         case "--second-reviewer" -> second = value;
+                        case "--guidance-glob" -> guidanceGlobs.add(value);
                         case "--judge" -> judge = value;
                         case "--judge-model" -> judgeModel = value;
                         case "--line-window" -> window = lineWindow(value);
@@ -166,6 +173,7 @@ record BenchmarkOptions(
                 supervisor,
                 chunked,
                 callSites,
+                List.copyOf(guidanceGlobs),
                 judge,
                 StringUtils.defaultIfBlank(judgeModel, model),
                 window,

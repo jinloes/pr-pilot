@@ -33,6 +33,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringUtils;
 
 /**
@@ -45,6 +47,12 @@ import org.apache.commons.lang3.StringUtils;
 public final class ReviewBenchmark {
     /** Mirrors {@code BaseCommitContext.CALL_SITES_PROPERTY}, which is package-private. */
     static final String CALL_SITES_PROPERTY = "prpilot.review.callSites";
+
+    /** Mirrors {@code ReviewPipelineService.REPORT_DROPPED_PROPERTY}, which is package-private. */
+    static final String REPORT_DROPPED_PROPERTY = "prpilot.review.reportDropped";
+
+    private static final Pattern DROPPED =
+            Pattern.compile("^Validation dropped finding at (.+):(\\d+) — (.*)$", Pattern.DOTALL);
 
     private static final DateTimeFormatter STEM =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
@@ -97,6 +105,7 @@ public final class ReviewBenchmark {
         Path outDir = options.outDir().resolve(STEM.format(started));
         Files.createDirectories(outDir);
         System.setProperty(CALL_SITES_PROPERTY, Boolean.toString(options.callSites()));
+        System.setProperty(REPORT_DROPPED_PROPERTY, "true");
         reviews = new ReviewSessionService(new ReviewOutcomeLog(outDir.resolve("outcomes.jsonl")));
         String stem = "benchmark-" + STEM.format(started);
         if (options.repeat() == 1) return runOnce(prs, started, outDir, stem, "").path();
@@ -199,6 +208,7 @@ public final class ReviewBenchmark {
             say.accept("reviewing");
             long start = System.nanoTime();
             List<String> stages = new ArrayList<>();
+            List<Finding> dropped = new ArrayList<>();
             ReviewResult review =
                     reviews.generate(
                             reviewParams(
@@ -211,7 +221,12 @@ public final class ReviewBenchmark {
                                     profile,
                                     mae.commitId()),
                             status -> {
-                                if (isStage(status)) stages.add(status);
+                                Finding droppedFinding = parseDropped(status);
+                                if (droppedFinding != null) {
+                                    dropped.add(droppedFinding);
+                                } else if (isStage(status)) {
+                                    stages.add(status);
+                                }
                                 if (options.verbose()) say.accept(status);
                             },
                             (a, b) -> {});
@@ -252,7 +267,24 @@ public final class ReviewBenchmark {
                             .map(m -> new BenchmarkReport.Miss(m.expected(), m.reason()))
                             .toList(),
                     outcome.extras(),
-                    List.copyOf(stages));
+                    List.copyOf(stages),
+                    List.copyOf(dropped));
+        }
+    }
+
+    /**
+     * Parses a {@code Validation dropped finding at <file>:<line> — <body>} status, or returns null
+     * for any other status.
+     */
+    static Finding parseDropped(String status) {
+        if (status == null) return null;
+        Matcher matcher = DROPPED.matcher(status);
+        if (!matcher.matches()) return null;
+        try {
+            return new Finding(
+                    null, matcher.group(1), Integer.parseInt(matcher.group(2)), matcher.group(3));
+        } catch (NumberFormatException overflow) {
+            return null;
         }
     }
 
@@ -311,7 +343,8 @@ public final class ReviewBenchmark {
                 options.chunked(),
                 null,
                 StringUtils.defaultString(detail.baseSha()),
-                options.secondReviewerModel());
+                options.secondReviewerModel(),
+                options.guidanceGlobs());
     }
 
     private FindingMatcher.Judge judge(String worktree) {

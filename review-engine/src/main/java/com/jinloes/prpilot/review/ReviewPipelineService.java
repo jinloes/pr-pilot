@@ -1,10 +1,14 @@
 package com.jinloes.prpilot.review;
 
+import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewResult;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -28,6 +32,10 @@ public final class ReviewPipelineService {
     private static final long SUPERVISOR_TIMEOUT_MS = 90_000;
     private static final long FOLLOW_UP_TIMEOUT_MS = 6L * 60L * 1000L;
     private static final long CRITIQUE_TIMEOUT_MS = 30L * 60L * 1000L;
+    private static final long HYGIENE_TIMEOUT_MS = 15L * 60L * 1000L;
+    private static final int DROPPED_BODY_MAX_CHARS = 120;
+    static final String REPORT_DROPPED_PROPERTY = "prpilot.review.reportDropped";
+    static final String STATUS_HYGIENE_FAILED = "Hygiene pass failed; continuing without it";
     private static final long SECONDARY_POLL_MS = 250;
     private static final int MERGED_CANDIDATE_CAP = 40;
     static final String STATUS_BASE_CONTEXT = "Reading base-commit guidance…";
@@ -221,6 +229,11 @@ public final class ReviewPipelineService {
         provider.checkCancelled();
 
         if (recall) {
+            candidate =
+                    withHygieneFindings(
+                            request, chunked, manifest, candidate, supervisorEnabled, onStatus);
+            provider.checkCancelled();
+            ReviewResult draft = candidate;
             int draftCount = candidate.getLineComments().size();
             onStatus.accept(draftStatus(draftCount));
             onStatus.accept(ClaudeService.STATUS_REFINING);
@@ -245,6 +258,9 @@ public final class ReviewPipelineService {
             }
             // Unconfirmed recall candidates never reach the user, even if validation failed.
             candidate = ReviewResultMerger.withoutLowConfidence(candidate);
+            if (Boolean.getBoolean(REPORT_DROPPED_PROPERTY)) {
+                droppedStatuses(draft, candidate).forEach(onStatus);
+            }
             onStatus.accept(validatedStatus(candidate.getLineComments().size(), draftCount));
         }
         provider.checkCancelled();
@@ -254,6 +270,75 @@ public final class ReviewPipelineService {
         candidate = ReviewResultMerger.capFinal(candidate);
         validateAuthority();
         return CiFindingSuppressor.suppress(candidate, request.getCiAnnotations());
+    }
+
+    /**
+     * Runs the recall-mode hygiene pass and merges its findings into the draft. The hygiene rules
+     * are left out of the recall first-pass prompt so the bug hunt keeps its budget; this pass
+     * restores them as a focused, best-effort call whose failure never loses the draft. Its rules
+     * inventory every changed log statement and comment, so it needs the full diff; only a chunked
+     * review, whose diff may exceed one prompt, falls back to the condensed index.
+     */
+    private ReviewResult withHygieneFindings(
+            PRReviewRequest request,
+            boolean chunked,
+            InspectionManifest manifest,
+            ReviewResult candidate,
+            boolean supervisorEnabled,
+            Consumer<String> onStatus)
+            throws IOException, InterruptedException {
+        validateAuthority();
+        try {
+            String raw =
+                    provider.complete(
+                            ClaudeService.buildHygienePrompt(
+                                    chunked
+                                            ? chunkedReviewService.finalValidationRequest(request)
+                                            : request),
+                            HYGIENE_TIMEOUT_MS,
+                            true,
+                            false,
+                            onStatus);
+            ReviewResult hygiene =
+                    ClaudeService.parseReview(raw, ClaudeService.RECALL_MAX_LINE_COMMENTS);
+            if (supervisorEnabled) {
+                hygiene = ReviewAnchorValidator.validate(hygiene, manifest);
+            }
+            onStatus.accept("Hygiene pass found " + findings(hygiene.getLineComments().size()));
+            return ReviewResultMerger.merge(candidate, hygiene, MERGED_CANDIDATE_CAP);
+        } catch (InterruptedException interrupted) {
+            throw interrupted;
+        } catch (IOException | IllegalArgumentException exception) {
+            log.warn("Hygiene pass failed; continuing without it", exception);
+            onStatus.accept(STATUS_HYGIENE_FAILED);
+            return candidate;
+        }
+    }
+
+    /**
+     * One diagnostic status per draft finding whose file and line no longer appear after
+     * validation. Opt-in via {@link #REPORT_DROPPED_PROPERTY} so recall benchmarks can tell a
+     * finding that was never produced from one validation discarded.
+     */
+    static List<String> droppedStatuses(ReviewResult draft, ReviewResult validated) {
+        Set<String> kept = new HashSet<>();
+        for (LineComment comment : validated.getLineComments()) {
+            kept.add(comment.getFile() + ":" + comment.getLine());
+        }
+        List<String> statuses = new ArrayList<>();
+        Set<String> reported = new HashSet<>();
+        for (LineComment comment : draft.getLineComments()) {
+            String location = comment.getFile() + ":" + comment.getLine();
+            if (kept.contains(location) || !reported.add(location)) continue;
+            statuses.add(
+                    "Validation dropped finding at "
+                            + location
+                            + " — "
+                            + StringUtils.abbreviate(
+                                    StringUtils.normalizeSpace(comment.getBody()),
+                                    DROPPED_BODY_MAX_CHARS));
+        }
+        return statuses;
     }
 
     private PRReviewRequest withBaseCommitContext(
@@ -267,7 +352,11 @@ public final class ReviewPipelineService {
         onStatus.accept(STATUS_BASE_CONTEXT);
         BaseCommitContext.Result resolved =
                 baseContextResolver.resolve(
-                        projectDir, request.getBaseSha(), manifest, provider::checkCancelled);
+                        projectDir,
+                        request.getBaseSha(),
+                        manifest,
+                        request.getGuidanceGlobs(),
+                        provider::checkCancelled);
         String guidelines =
                 StringUtils.isBlank(resolved.guidelines())
                         ? request.getRepoGuidelines()
@@ -537,6 +626,7 @@ public final class ReviewPipelineService {
                 File repoDir,
                 String baseSha,
                 InspectionManifest manifest,
+                List<String> guidanceGlobs,
                 BaseCommitContext.CancellationCheck cancellation)
                 throws InterruptedException;
     }

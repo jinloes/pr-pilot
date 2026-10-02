@@ -80,9 +80,9 @@ guidance.
 - `review/PromptCompleter.java` - One-shot provider-neutral prompt completion used by development tools such as the recall benchmark.
 - `review/ChunkedReviewService.java` - Shared diff batching, contract-index generation, and mandatory global reconciliation.
 - `review/ReviewPipelineService.java` - Shared primary/chunked orchestration, base-commit context
-  enrichment, optional parallel Copilot second reviewer, bounded supervision, recall-candidate
-  critique, cancellation checkpoints, fallback behavior, final CI suppression, and the final comment cap.
-- `review/BaseCommitContext.java` - Trusted guidance files, changed-file commit history and textual
+  enrichment, optional parallel Copilot second reviewer, bounded supervision, the recall-mode
+  hygiene pass, recall-candidate critique, opt-in dropped-finding statuses, cancellation checkpoints, fallback behavior, final CI suppression, and the final comment cap.
+- `review/BaseCommitContext.java` - Trusted guidance files (configured globs, then defaults), changed-file commit history and textual
   call sites read only from the PR base commit's git objects, time-bounded and fail-open. Tests:
   `BaseCommitContextTest`.
 - `review/ChangedSymbols.java` - Extracts the existing declarations a diff changes (removed-line
@@ -168,13 +168,13 @@ Developer-only CLI (`./gradlew :review-benchmark:reviewBenchmark`) that measures
 against Mae's GitHub review comments. It is not shipped with either host.
 
 - `benchmark/ReviewBenchmark.java` - Entry point and per-PR orchestration.
-- `benchmark/BenchmarkOptions.java` - Argument parsing, defaults, and usage.
+- `benchmark/BenchmarkOptions.java` - Argument parsing (including repeatable `--guidance-glob`), defaults, and usage.
 - `benchmark/PrRef.java` - `owner/repo#N` and PR-URL parsing.
 - `benchmark/MaeComments.java` - Paginated review-comment fetch, Mae filtering, and first-reviewed-commit baseline.
 - `benchmark/LocalCheckout.java` - Worktree at the reviewed commit and a locally rendered diff, bounded at the review limit or, for `--chunked`, the validation limit.
 - `benchmark/FindingMatcher.java` - Same-file/nearby-line candidate pairing and one-to-one assignment.
 - `benchmark/LlmJudge.java` - Model judge prompt and JSON verdict parsing for candidate pairs.
-- `benchmark/BenchmarkReport.java` - Totals (including complete-diff recall) and Markdown/JSON report rendering.
+- `benchmark/BenchmarkReport.java` - Totals (including complete-diff recall), dropped-by-validation findings with near-miss marking, and Markdown/JSON report rendering.
 - `benchmark/RepeatSummary.java` - Per-run recall spread and per-PR matched counts for `--repeat`.
 - Tests mirror each class; `LocalCheckoutTest` uses real git in temp directories.
 

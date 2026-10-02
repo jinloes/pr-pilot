@@ -1858,6 +1858,7 @@ public class WebviewPanel implements Disposable {
                                             .repoProfile(finalRepoProfile)
                                             .ciAnnotations(finalCiAnnotations)
                                             .baseSha(finalBaseSha)
+                                            .guidanceGlobs(generationSettings.guidanceGlobs())
                                             .build(),
                                     generationSettings.runtime(),
                                     chunkedReview,

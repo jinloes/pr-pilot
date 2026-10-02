@@ -197,9 +197,9 @@ class ReviewPipelineServiceTest {
     void bothAdaptersPreserveAuthorityThroughEveryStageAndBestEffortFailure() throws Exception {
         for (boolean copilot : List.of(false, true)) {
             for (boolean chunked : List.of(false, true)) {
-                // Four actual adapter calls: primary/selection/follow-up/critique, or two
-                // batch request copies/global reconciliation/final-validation critique.
-                for (int invalidateAt = -1; invalidateAt < 4; invalidateAt++) {
+                // Five actual adapter calls: primary/selection/follow-up/hygiene/critique, or
+                // two batch request copies/global reconciliation/hygiene/final-validation critique.
+                for (int invalidateAt = -1; invalidateAt < 5; invalidateAt++) {
                     for (boolean providerFailure : List.of(false, true)) {
                         var backend =
                                 new SemanticReviewServiceTest.Backend(semanticRoot.toRealPath());
@@ -235,11 +235,13 @@ class ReviewPipelineServiceTest {
                                                                 "primary",
                                                                 "primary",
                                                                 "primary",
+                                                                "hygiene",
                                                                 "critique")
                                                         : List.of(
                                                                 "primary",
                                                                 "selection",
                                                                 "follow-up",
+                                                                "hygiene",
                                                                 "critique"));
                             } else {
                                 assertThatThrownBy(
@@ -306,7 +308,10 @@ class ReviewPipelineServiceTest {
 
         String complete(String prompt, boolean reads) throws IOException {
             boolean critique = prompt.contains("<draft_review>");
-            observe(critique ? "critique" : reads ? "follow-up" : "selection", prompt);
+            boolean hygiene = prompt.contains("hygiene problems only");
+            observe(
+                    critique ? "critique" : hygiene ? "hygiene" : reads ? "follow-up" : "selection",
+                    prompt);
             return !reads ? "{\"selectedGapIds\":[\"G004\",\"G002\"]}" : emptyReviewJson();
         }
 
@@ -562,6 +567,11 @@ class ReviewPipelineServiceTest {
         private final AtomicInteger primaryCalls = new AtomicInteger();
         private final List<String> completions = new ArrayList<>();
         private final List<PromptCall> completeCalls = new ArrayList<>();
+        // Hygiene calls are tracked apart so stage-specific assertions stay readable.
+        private final List<String> hygieneCompletions = new ArrayList<>();
+        private final List<PromptCall> hygieneCalls = new ArrayList<>();
+        private final List<String> callOrder = new ArrayList<>();
+        private IOException hygieneFailure;
         private IOException completionFailure;
         private boolean cancelAfterPrimary;
         private final List<PRReviewRequest> primaryRequests = new ArrayList<>();
@@ -582,6 +592,7 @@ class ReviewPipelineServiceTest {
                 throws InterruptedException {
             primaryCalls.incrementAndGet();
             primaryRequests.add(request);
+            callOrder.add("review");
             beforePrimary.run();
             return primaryResult;
         }
@@ -599,7 +610,17 @@ class ReviewPipelineServiceTest {
                 boolean allowMcp,
                 Consumer<String> onStatus)
                 throws IOException {
-            completeCalls.add(new PromptCall(prompt, timeoutMillis, allowReadTools, allowMcp));
+            PromptCall call = new PromptCall(prompt, timeoutMillis, allowReadTools, allowMcp);
+            if (prompt.contains("hygiene problems only")) {
+                hygieneCalls.add(call);
+                callOrder.add("hygiene");
+                if (hygieneFailure != null) throw hygieneFailure;
+                return hygieneCompletions.isEmpty()
+                        ? emptyReviewJson()
+                        : hygieneCompletions.remove(0);
+            }
+            completeCalls.add(call);
+            callOrder.add(prompt.contains("<draft_review>") ? "critique" : "supervisor");
             if (completionFailure != null) {
                 throw completionFailure;
             }
@@ -953,7 +974,161 @@ class ReviewPipelineServiceTest {
 
             assertThat(provider.primaryRequests.get(0).isCandidateRecall()).isFalse();
             assertThat(provider.completeCalls).isEmpty();
+            assertThat(provider.hygieneCalls).isEmpty();
             assertThat(result.getLineComments()).hasSize(1);
+        }
+
+        @Test
+        void runsTheHygienePassBetweenReviewAndCritiqueAndMergesItsFindings() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult = pass(result(comment("src/A.java", 1, "high", "Bug.")));
+            provider.hygieneCompletions.add(
+                    reviewJson(comment("src/A.java", 2, "medium", "Demote this log.")));
+            provider.completions.add(emptyReviewJson());
+            List<String> statuses = new ArrayList<>();
+
+            pipeline(provider)
+                    .review(request(oneRiskyHunk()), false, true, false, statuses::add, null);
+
+            assertThat(provider.callOrder).containsExactly("review", "hygiene", "critique");
+            assertThat(provider.hygieneCalls)
+                    .singleElement()
+                    .satisfies(
+                            call -> {
+                                assertThat(call.allowReadTools()).isTrue();
+                                assertThat(call.allowMcp()).isFalse();
+                                assertThat(call.timeoutMillis()).isEqualTo(15L * 60L * 1000L);
+                                assertThat(call.prompt())
+                                        .contains(ClaudeService.HYGIENE_RULES, "<pr_diff>")
+                                        .doesNotContain("<draft_review>");
+                            });
+            assertThat(statuses)
+                    .containsSubsequence(
+                            "Hygiene pass found 1 finding",
+                            "Draft review has 2 findings before validation");
+            assertThat(provider.completeCalls.get(0).prompt())
+                    .contains("<draft_review>", "Bug.", "Demote this log.");
+        }
+
+        @Test
+        void theHygienePassSeesTheFullDiffNotTheCondensedIndex() throws Exception {
+            StringBuilder diff =
+                    new StringBuilder(
+                            "diff --git a/src/A.java b/src/A.java\n"
+                                    + "--- a/src/A.java\n+++ b/src/A.java\n"
+                                    + "@@ -1,1 +1,91 @@\n"
+                                    + " unchangedContextLine();\n");
+            for (int i = 1; i <= 90; i++) diff.append("+added").append(i).append("();\n");
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult = pass(result());
+            provider.hygieneCompletions.add(emptyReviewJson());
+            provider.completions.add(emptyReviewJson());
+
+            pipeline(provider).review(request(diff.toString()), false, true, false, s -> {}, null);
+
+            assertThat(provider.hygieneCalls)
+                    .singleElement()
+                    .satisfies(
+                            call ->
+                                    assertThat(call.prompt())
+                                            .contains("unchangedContextLine();", "+added90();"));
+        }
+
+        @Test
+        void aFailedHygienePassStillReachesTheCritique() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult = pass(result(comment("src/A.java", 1, "high", "Bug.")));
+            provider.hygieneFailure = new IOException("hygiene unavailable");
+            provider.completions.add(reviewJson(comment("src/A.java", 1, "high", "Bug.")));
+            List<String> statuses = new ArrayList<>();
+
+            ReviewResult result =
+                    pipeline(provider)
+                            .review(
+                                    request(oneRiskyHunk()),
+                                    false,
+                                    true,
+                                    false,
+                                    statuses::add,
+                                    null);
+
+            assertThat(provider.callOrder).containsExactly("review", "hygiene", "critique");
+            assertThat(statuses)
+                    .containsSubsequence(
+                            ReviewPipelineService.STATUS_HYGIENE_FAILED,
+                            "Draft review has 1 finding before validation");
+            assertThat(result.getLineComments())
+                    .extracting(LineComment::getBody)
+                    .containsExactly("Bug.");
+        }
+
+        @Test
+        void reportsNoDroppedFindingsUnlessAskedTo() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult = pass(result(comment("src/A.java", 1, "high", "Bug.")));
+            provider.completions.add(emptyReviewJson());
+            List<String> statuses = new ArrayList<>();
+
+            pipeline(provider)
+                    .review(request(oneRiskyHunk()), false, true, false, statuses::add, null);
+
+            assertThat(statuses).noneMatch(status -> status.startsWith("Validation dropped"));
+        }
+
+        @Test
+        void droppedStatusesSkipKeptLocationsDeduplicateAndAbbreviate() {
+            String longBody = "word ".repeat(60);
+            ReviewResult draft =
+                    result(
+                            comment("src/A.java", 1, "high", "Kept."),
+                            comment("src/A.java", 4, "high", "First\n  dropped."),
+                            comment("src/A.java", 4, "high", "Duplicate location."),
+                            comment("src/B.java", 9, "high", longBody));
+            ReviewResult validated = result(comment("src/A.java", 1, "high", "Kept."));
+
+            List<String> statuses = ReviewPipelineService.droppedStatuses(draft, validated);
+
+            assertThat(statuses).hasSize(2);
+            assertThat(statuses.get(0))
+                    .isEqualTo("Validation dropped finding at src/A.java:4 — First dropped.");
+            assertThat(statuses.get(1))
+                    .startsWith("Validation dropped finding at src/B.java:9 — word word")
+                    .endsWith("...");
+            assertThat(statuses.get(1).substring(statuses.get(1).indexOf("— ") + 2)).hasSize(120);
+        }
+
+        @Test
+        void droppedStatusesAreEmptyWhenEverythingIsKept() {
+            ReviewResult draft = result(comment("src/A.java", 1, "high", "Kept."));
+
+            assertThat(ReviewPipelineService.droppedStatuses(draft, draft)).isEmpty();
+        }
+
+        @Test
+        void reportsEachDroppedFindingWhenAskedTo() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    pass(
+                            result(
+                                    comment("src/A.java", 1, "high", "Kept."),
+                                    comment("src/A.java", 3, "high", "Dropped.")));
+            provider.completions.add(reviewJson(comment("src/A.java", 1, "high", "Kept.")));
+            List<String> statuses = new ArrayList<>();
+            System.setProperty(ReviewPipelineService.REPORT_DROPPED_PROPERTY, "true");
+            try {
+                pipeline(provider)
+                        .review(request(oneRiskyHunk()), false, true, false, statuses::add, null);
+            } finally {
+                System.clearProperty(ReviewPipelineService.REPORT_DROPPED_PROPERTY);
+            }
+
+            assertThat(statuses)
+                    .filteredOn(status -> status.startsWith("Validation dropped"))
+                    .containsExactly("Validation dropped finding at src/A.java:3 — Dropped.");
+            assertThat(statuses)
+                    .containsSubsequence(
+                            "Validation dropped finding at src/A.java:3 — Dropped.",
+                            "Validation kept 1 of 2 findings");
         }
 
         @Test
@@ -1016,8 +1191,9 @@ class ReviewPipelineServiceTest {
 
             pipeline(
                             provider,
-                            (dir, sha, manifest, cancellation) -> {
+                            (dir, sha, manifest, globs, cancellation) -> {
                                 assertThat(dir).isEqualTo(semanticRoot.toFile());
+                                assertThat(globs).containsExactly("rules/*.md");
                                 resolvedShas.add(sha);
                                 return new BaseCommitContext.Result(
                                         "## AGENTS.md\nBase rule.",
@@ -1026,7 +1202,10 @@ class ReviewPipelineServiceTest {
                                                 + "src/Caller.java:7: api.save(x);");
                             })
                     .review(
-                            request(oneRiskyHunk()).toBuilder().baseSha(BASE_SHA).build(),
+                            request(oneRiskyHunk()).toBuilder()
+                                    .baseSha(BASE_SHA)
+                                    .guidanceGlobs(List.of("rules/*.md"))
+                                    .build(),
                             false,
                             true,
                             false,
@@ -1050,7 +1229,10 @@ class ReviewPipelineServiceTest {
             provider.projectDir = semanticRoot.toFile();
             provider.primaryResult = pass(result());
 
-            pipeline(provider, (dir, sha, manifest, cancellation) -> BaseCommitContext.Result.EMPTY)
+            pipeline(
+                            provider,
+                            (dir, sha, manifest, globs, cancellation) ->
+                                    BaseCommitContext.Result.EMPTY)
                     .review(
                             request(oneRiskyHunk()).toBuilder()
                                     .baseSha(BASE_SHA)
@@ -1070,7 +1252,7 @@ class ReviewPipelineServiceTest {
         void skipsEnrichmentWithoutAProjectDirectoryOrBaseSha() throws Exception {
             AtomicInteger resolutions = new AtomicInteger();
             ReviewPipelineService.BaseContextResolver resolver =
-                    (dir, sha, manifest, cancellation) -> {
+                    (dir, sha, manifest, globs, cancellation) -> {
                         resolutions.incrementAndGet();
                         return BaseCommitContext.Result.EMPTY;
                     };

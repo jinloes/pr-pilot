@@ -142,6 +142,7 @@ public class ReviewSessionService implements ReviewEngineApi {
                 .repoProfile(params.repoProfile())
                 .ciAnnotations(toCiAnnotations(params.ciAnnotations()))
                 .baseSha(params.baseSha())
+                .guidanceGlobs(params.guidanceGlobs())
                 .build();
     }
 

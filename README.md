@@ -259,7 +259,18 @@ run the whole set N times; a `-summary.md` report gives recall per run with the 
 maximum, plus matched findings per pull request in each run. A "Pipeline stages" section records
 each status line that carries a finding count, such as the draft count before validation and how
 many findings validation kept, so a low score shows whether findings were never raised or were
-dropped during validation.
+dropped during validation. A "Dropped by validation" section lists each finding the critique
+removed, marked `near miss` when it sat within the line window of a Mae finding PR Pilot missed in
+the same file.
+
+The engine reads only built-in guidance files (`AGENTS.md`, `CLAUDE.md`, contributing and PR
+templates) unless guidance globs are configured. Pass `--guidance-glob GLOB` (repeatable) to read
+more from each PR's base commit, for example a repository that keeps review rules elsewhere:
+
+```bash
+./gradlew :review-benchmark:reviewBenchmark \
+  --args="--prs prs.txt --repos-root ~/src --provider copilot --guidance-glob '.linkedin/ai-agent/*.md'"
+```
 
 ### Build webview assets
 

@@ -169,6 +169,18 @@ class ReviewSessionServiceTest {
             assertThat(decoded.baseSha()).isNull();
             assertThat(decoded.secondReviewerModel()).isNull();
             assertThat(ReviewSessionService.toReviewRequest(decoded).getBaseSha()).isNullOrEmpty();
+            assertThat(decoded.guidanceGlobs()).isNull();
+            assertThat(ReviewSessionService.toReviewRequest(decoded).getGuidanceGlobs()).isEmpty();
+        }
+
+        @Test
+        void carriesConfiguredGuidanceGlobsInOrder() {
+            Map<String, Object> params = params();
+            params.put("guidanceGlobs", List.of("docs/rules/*.md", "STYLE.md"));
+
+            PRReviewRequest request = ReviewSessionService.toReviewRequest(decode(params));
+
+            assertThat(request.getGuidanceGlobs()).containsExactly("docs/rules/*.md", "STYLE.md");
         }
 
         @Test

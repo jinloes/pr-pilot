@@ -47,7 +47,39 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
             List<Match> matches,
             List<Miss> misses,
             List<Finding> prPilotOnly,
-            List<String> stages) {
+            List<String> stages,
+            List<Finding> dropped) {
+
+        PrResult(
+                String pr,
+                String url,
+                String status,
+                String message,
+                String reviewedCommit,
+                long reviewMillis,
+                boolean diffTruncated,
+                int maeFindings,
+                int prPilotFindings,
+                List<Match> matches,
+                List<Miss> misses,
+                List<Finding> prPilotOnly,
+                List<String> stages) {
+            this(
+                    pr,
+                    url,
+                    status,
+                    message,
+                    reviewedCommit,
+                    reviewMillis,
+                    diffTruncated,
+                    maeFindings,
+                    prPilotFindings,
+                    matches,
+                    misses,
+                    prPilotOnly,
+                    stages,
+                    List.of());
+        }
 
         static PrResult notScored(PrRef pr, String url, String status, String message) {
             return new PrResult(
@@ -218,6 +250,21 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
             }
         }
 
+        List<PrResult> withDropped = prs.stream().filter(pr -> !pr.dropped().isEmpty()).toList();
+        if (!withDropped.isEmpty()) {
+            md.append("\n## Dropped by validation\n");
+            for (PrResult pr : withDropped) {
+                md.append("\n### ").append(pr.pr()).append("\n\n");
+                for (Finding dropped : pr.dropped()) {
+                    md.append("- `").append(location(dropped)).append('`');
+                    if (nearMiss(dropped, pr.misses(), settings.lineWindow())) {
+                        md.append(" (near miss)");
+                    }
+                    md.append(" — ").append(excerpt(dropped.body())).append('\n');
+                }
+            }
+        }
+
         List<PrResult> notScored =
                 prs.stream().filter(pr -> !STATUS_SCORED.equals(pr.status())).toList();
         if (!notScored.isEmpty()) {
@@ -245,6 +292,16 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
         Path md = dir.resolve(stem + ".md");
         Files.writeString(md, markdown());
         return md;
+    }
+
+    /** True when a dropped finding sat within the line window of a Mae finding PR Pilot missed. */
+    static boolean nearMiss(Finding dropped, List<Miss> misses, int lineWindow) {
+        return misses.stream()
+                .map(Miss::mae)
+                .anyMatch(
+                        mae ->
+                                StringUtils.equals(mae.path(), dropped.path())
+                                        && Math.abs(mae.line() - dropped.line()) <= lineWindow);
     }
 
     private static String missReason(String reason) {

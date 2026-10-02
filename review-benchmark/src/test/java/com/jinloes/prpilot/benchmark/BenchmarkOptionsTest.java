@@ -28,11 +28,32 @@ class BenchmarkOptionsTest {
             assertThat(options.selfCritique()).isTrue();
             assertThat(options.chunked()).isFalse();
             assertThat(options.callSites()).isTrue();
+            assertThat(options.guidanceGlobs()).isEmpty();
             assertThat(options.judge()).isEqualTo(BenchmarkOptions.JUDGE_LLM);
             assertThat(options.lineWindow()).isEqualTo(10);
             assertThat(options.repeat()).isEqualTo(1);
             assertThat(options.maeLoginPrefix()).isEqualTo("svc-mae");
             assertThat(options.outDir()).isEqualTo(Path.of("build", "review-benchmark"));
+        }
+
+        @Test
+        void collectsRepeatedGuidanceGlobsInOrder() {
+            BenchmarkOptions options =
+                    parse(
+                            "--guidance-glob",
+                            ".linkedin/ai-agent/*.md",
+                            "--guidance-glob",
+                            "docs/x.md");
+
+            assertThat(options.guidanceGlobs())
+                    .containsExactly(".linkedin/ai-agent/*.md", "docs/x.md");
+        }
+
+        @Test
+        void guidanceGlobNeedsAValue() {
+            assertThatThrownBy(() -> parse("--guidance-glob"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("--guidance-glob needs a value");
         }
 
         @Test

@@ -69,7 +69,7 @@ sequenceDiagram
     Note over Host,Pipeline: PRReviewRequest strips any trailer into DiffCoverage, so pr_diff never contains it.<br/>Incomplete coverage adds an escaped omitted_files section to review and critique prompts.
 
     opt baseSha supplied
-        Pipeline->>Pipeline: BaseCommitContext reads guidance, changed-file history and call sites of changed symbols from base-commit git objects only (fetch by SHA if missing; fail-open)
+        Pipeline->>Pipeline: BaseCommitContext reads guidance (configured guidance globs first, then built-in defaults), changed-file history and call sites of changed symbols from base-commit git objects only (fetch by SHA if missing; fail-open)
     end
 
     alt Direct review
@@ -104,10 +104,19 @@ sequenceDiagram
         Pipeline->>Pipeline: Merge and deduplicate findings
     end
 
+    opt Recall mode (self-critique or a second reviewer)
+        Pipeline->>Provider: Read-only hygiene pass with MCP disabled (logging, comments, removed protobuf fields)
+        Provider-->>Pipeline: Hygiene findings (failure is reported and skipped)
+        Pipeline->>Pipeline: Merge hygiene findings into the draft
+    end
+
     opt Self-critique enabled
         Pipeline->>Pipeline: Build contract index from changed files, even for direct/single-batch reviews
         Pipeline->>Provider: Validate findings against bounded context and contract index; confirm or drop recall candidates
         Provider-->>Pipeline: Refined review
+        opt prpilot.review.reportDropped=true
+            Pipeline-->>Host: One status per draft finding validation dropped
+        end
     end
     Pipeline->>Pipeline: Drop unconfirmed low-confidence candidates and cap the final comment count
 
@@ -142,7 +151,7 @@ sequenceDiagram
   API failure.
 - Primary provider failure is terminal.
 - Base-commit enrichment failures (unreachable commit, timeout, non-git directory) review without
-  base guidance or history. Second-reviewer failures are ignored.
+  base guidance or history. Second-reviewer and hygiene-pass failures are ignored.
 - Ordinary supervisor selection, targeted follow-up, and final critique failures keep the best
   valid review. Deep fallback candidates additionally require current engine-owned authority;
   stale native/physical evidence never becomes a success-shaped deep response.

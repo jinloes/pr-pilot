@@ -1454,6 +1454,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 // Guidance in the PR worktree is authored by the change under review, so the host
                 // never reads it; the engine resolves guidance and file history from baseSha.
                 repoGuidelines: '',
+                guidanceGlobs: guidance.guidanceGlobs,
                 focusAreas,
                 customInstructions,
                 ciStatus: checkStatus.summary,

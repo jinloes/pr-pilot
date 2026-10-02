@@ -71,6 +71,27 @@ class BenchmarkReportTest {
                         BenchmarkReport.PrResult.notScored(PR_A, "u", "failed", "boom")));
     }
 
+    private static BenchmarkReport.PrResult withDropped(BenchmarkReport.PrResult base) {
+        return new BenchmarkReport.PrResult(
+                base.pr(),
+                base.url(),
+                base.status(),
+                base.message(),
+                base.reviewedCommit(),
+                base.reviewMillis(),
+                base.diffTruncated(),
+                base.maeFindings(),
+                base.prPilotFindings(),
+                base.matches(),
+                base.misses(),
+                base.prPilotOnly(),
+                base.stages(),
+                List.of(
+                        new Finding(null, "A.java", 12, "Close to the miss"),
+                        new Finding(null, "A.java", 30, "Too far away"),
+                        new Finding(null, "B.java", 3, "Other file")));
+    }
+
     @Nested
     class Totals {
         @Test
@@ -175,6 +196,29 @@ class BenchmarkReportTest {
         }
 
         @Test
+        void listsDroppedFindingsAndMarksNearMissesOfMissedMaeFindings() {
+            BenchmarkReport.PrResult base =
+                    scored(
+                            PR_A,
+                            1,
+                            List.of(),
+                            List.of(new BenchmarkReport.Miss(M1, FindingMatcher.NO_NEARBY_FINDING)),
+                            List.of());
+            String md = BenchmarkReport.of("now", SETTINGS, List.of(withDropped(base))).markdown();
+
+            assertThat(md)
+                    .contains("## Dropped by validation")
+                    .contains("- `A.java:12` (near miss) — Close to the miss\n")
+                    .contains("- `A.java:30` — Too far away\n")
+                    .contains("- `B.java:3` — Other file\n");
+        }
+
+        @Test
+        void omitsDroppedSectionWhenNothingWasDropped() {
+            assertThat(report().markdown()).doesNotContain("## Dropped by validation");
+        }
+
+        @Test
         void headerNamesChunkedAndCallSiteSettingsOnlyWhenNonDefault() {
             assertThat(report().markdown())
                     .doesNotContain("chunked review")
@@ -213,6 +257,24 @@ class BenchmarkReportTest {
             assertThat(json.path("totals").path("matched").asInt()).isEqualTo(1);
             assertThat(json.path("prs").get(0).path("prPilotOnly").get(0).path("id").asText())
                     .isEqualTo("P2");
+            assertThat(json.path("prs").get(0).path("dropped").isArray()).isTrue();
+        }
+
+        @Test
+        void writesDroppedFindingsToJson() throws Exception {
+            ObjectMapper mapper = new ObjectMapper();
+            BenchmarkReport.PrResult base = scored(PR_A, 0, List.of(), List.of(), List.of());
+            BenchmarkReport.of("now", SETTINGS, List.of(withDropped(base)))
+                    .write(dir, "dropped", mapper);
+
+            JsonNode dropped =
+                    mapper.readTree(dir.resolve("dropped.json").toFile())
+                            .path("prs")
+                            .get(0)
+                            .path("dropped");
+            assertThat(dropped).hasSize(3);
+            assertThat(dropped.get(0).path("path").asText()).isEqualTo("A.java");
+            assertThat(dropped.get(0).path("line").asInt()).isEqualTo(12);
         }
     }
 }

@@ -207,6 +207,33 @@ class PRReviewRequestTest {
     }
 
     @Nested
+    class GetGuidanceGlobs {
+        @Test
+        void defaultsToEmptyWhenUnset() {
+            assertThat(PRReviewRequest.builder(pr(), "diff").build().getGuidanceGlobs()).isEmpty();
+            assertThat(
+                            PRReviewRequest.builder(pr(), "diff")
+                                    .guidanceGlobs(null)
+                                    .build()
+                                    .getGuidanceGlobs())
+                    .isEmpty();
+        }
+
+        @Test
+        void isAnImmutableCopyWithoutNulls() {
+            List<String> globs = new ArrayList<>(List.of("a/*.md"));
+            globs.add(null);
+            PRReviewRequest request =
+                    PRReviewRequest.builder(pr(), "diff").guidanceGlobs(globs).build();
+            globs.add("b.md");
+
+            assertThat(request.getGuidanceGlobs()).containsExactly("a/*.md");
+            assertThatThrownBy(() -> request.getGuidanceGlobs().add("c"))
+                    .isInstanceOf(UnsupportedOperationException.class);
+        }
+    }
+
+    @Nested
     class ToBuilder {
         private static final String SHA = "a".repeat(40);
 
@@ -226,6 +253,7 @@ class PRReviewRequestTest {
                     .ciAnnotations(List.of(new CiAnnotation()))
                     .semanticContext(semantic)
                     .baseSha(SHA)
+                    .guidanceGlobs(List.of("docs/rules/*.md"))
                     .fileHistory("history")
                     .callSites("sites")
                     .candidateRecall(true)
@@ -242,6 +270,15 @@ class PRReviewRequestTest {
             assertThat(copy.getBaseSha()).isEqualTo(SHA);
             assertThat(copy.getFileHistory()).isEqualTo("history");
             assertThat(copy.isCandidateRecall()).isTrue();
+            assertThat(copy.getGuidanceGlobs()).containsExactly("docs/rules/*.md");
+        }
+
+        @Test
+        void baseCommitContextKeepsGuidanceGlobs() {
+            PRReviewRequest copy = full().withBaseCommitContext("g", "h", "c");
+
+            assertThat(copy.getGuidanceGlobs()).containsExactly("docs/rules/*.md");
+            assertThat(copy.getRepoGuidelines()).isEqualTo("g");
         }
 
         @Test
