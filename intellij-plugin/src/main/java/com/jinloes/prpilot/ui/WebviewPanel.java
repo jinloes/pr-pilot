@@ -347,6 +347,7 @@ public class WebviewPanel implements Disposable {
     // --- Infrastructure ---
 
     private volatile HttpServer httpServer;
+    private volatile String webviewUrl;
     private volatile boolean disposed;
     private final JBCefBrowser browser;
     private final JPanel browserPanel;
@@ -550,6 +551,22 @@ public class WebviewPanel implements Disposable {
                                 if (!frame.isMain() || disposed) {
                                     return;
                                 }
+                                String target = webviewUrl;
+                                if (!isWebviewPage(frame.getURL(), target)) {
+                                    // JCEF replays a load issued before its native browser
+                                    // existed via invokeLater, so the "Starting webview"
+                                    // placeholder can land after the real page and replace it.
+                                    if (target != null) {
+                                        getApplication()
+                                                .invokeLater(
+                                                        () -> {
+                                                            if (!disposed) {
+                                                                browser.loadURL(target);
+                                                            }
+                                                        });
+                                    }
+                                    return;
+                                }
                                 injectBridge(cefBrowser);
                                 getApplication()
                                         .invokeLater(
@@ -639,6 +656,7 @@ public class WebviewPanel implements Disposable {
             return;
         }
         String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
+        webviewUrl = url;
         log.info("Loading webview from {}", url);
         getApplication()
                 .invokeLater(
@@ -647,6 +665,11 @@ public class WebviewPanel implements Disposable {
                                 browser.loadURL(url);
                             }
                         });
+    }
+
+    /** Whether a finished main-frame load is the served webview rather than a placeholder. */
+    static boolean isWebviewPage(String loadedUrl, String webviewUrl) {
+        return webviewUrl != null && loadedUrl != null && loadedUrl.startsWith(webviewUrl);
     }
 
     static JPanel createBrowserHostPanel(JComponent browserComponent) {

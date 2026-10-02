@@ -1037,6 +1037,33 @@ class WebviewPanelTest {
     }
 
     @Nested
+    class IsWebviewPage {
+
+        private static final String SERVED = "http://127.0.0.1:55767/";
+
+        @Test
+        void acceptsTheServedPageAndItsSubpaths() {
+            assertThat(WebviewPanel.isWebviewPage(SERVED, SERVED)).isTrue();
+            assertThat(WebviewPanel.isWebviewPage(SERVED + "index.html#pr", SERVED)).isTrue();
+        }
+
+        @Test
+        void rejectsThePlaceholderAndOtherOrigins() {
+            assertThat(
+                            WebviewPanel.isWebviewPage(
+                                    "file:///jbcefbrowser/123#url=about:blank", SERVED))
+                    .isFalse();
+            assertThat(WebviewPanel.isWebviewPage("http://127.0.0.1:1/", SERVED)).isFalse();
+            assertThat(WebviewPanel.isWebviewPage(null, SERVED)).isFalse();
+        }
+
+        @Test
+        void rejectsEveryPageBeforeTheServerStarts() {
+            assertThat(WebviewPanel.isWebviewPage(SERVED, null)).isFalse();
+        }
+    }
+
+    @Nested
     class BrowserHostLayout {
 
         @Test
