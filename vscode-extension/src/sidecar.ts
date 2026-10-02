@@ -294,6 +294,8 @@ export interface SidecarGenerateReviewParams {
     repoGuidelines?: string;
     /** Configured guidance globs; the engine reads matches from `baseSha` before its defaults. */
     guidanceGlobs?: string[];
+    /** Reviewer-configured local folder of extra review rules, read by the engine. */
+    rulesDirectory?: string;
     focusAreas?: string;
     customInstructions?: string;
     /** Pre-rendered CI state from `prs/getCheckStatus`. */

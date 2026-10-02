@@ -218,6 +218,7 @@ public class WebviewPanel implements Disposable {
             String focusAreas,
             String customInstructions,
             List<String> guidanceGlobs,
+            String rulesDirectory,
             String repositoryInstructions) {}
 
     record GeneratedReview(
@@ -1331,7 +1332,8 @@ public class WebviewPanel implements Disposable {
                 IntellijClaudeService.snapshotReviewRuntimeSettings().identity(),
                 settings.getResolvedReviewFocusAreas(),
                 settings.getResolvedReviewCustomInstructions(),
-                List.copyOf(settings.getResolvedReviewGuidanceGlobs()));
+                List.copyOf(settings.getResolvedReviewGuidanceGlobs()),
+                settings.getReviewRulesDirectory());
     }
 
     record FreshDeepPr(IntellijGitHubService.PRHeadInfo head, String diff) {}
@@ -1589,6 +1591,7 @@ public class WebviewPanel implements Disposable {
                         settings.getResolvedReviewFocusAreas(),
                         settings.getResolvedReviewCustomInstructions(),
                         List.copyOf(settings.getResolvedReviewGuidanceGlobs()),
+                        settings.getReviewRulesDirectory(),
                         settings.getRepositoryReviewInstructions(owner, repo));
         long generationId;
         IntellijClaudeService previousReviewService;
@@ -1859,6 +1862,7 @@ public class WebviewPanel implements Disposable {
                                             .ciAnnotations(finalCiAnnotations)
                                             .baseSha(finalBaseSha)
                                             .guidanceGlobs(generationSettings.guidanceGlobs())
+                                            .rulesDirectory(generationSettings.rulesDirectory())
                                             .build(),
                                     generationSettings.runtime(),
                                     chunkedReview,

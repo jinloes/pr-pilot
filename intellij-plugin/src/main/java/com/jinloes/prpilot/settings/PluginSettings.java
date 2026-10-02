@@ -140,6 +140,12 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
         public String reviewGuidanceGlobs = "";
 
         /**
+         * Absolute path of a local folder of extra review rules ({@code .md}, {@code .yaml}, {@code
+         * .yml}) appended to the repository guidance of every review. Blank disables it.
+         */
+        public String reviewRulesDirectory = "";
+
+        /**
          * Saved named review-guidance configurations. The legacy fields form the built-in default.
          */
         public List<ReviewGuidanceProfile> reviewGuidanceProfiles = new ArrayList<>();
@@ -321,6 +327,14 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
     public void setReviewCustomInstructions(String value) {
         myState.reviewCustomInstructions = value != null ? value.trim() : "";
+    }
+
+    public String getReviewRulesDirectory() {
+        return myState.reviewRulesDirectory != null ? myState.reviewRulesDirectory : "";
+    }
+
+    public void setReviewRulesDirectory(String value) {
+        myState.reviewRulesDirectory = value != null ? value.trim() : "";
     }
 
     /** Raw newline-separated guidance-globs text, as edited in settings (may be blank). */

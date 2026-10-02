@@ -45,6 +45,7 @@ function readState(notificationHealth: NotificationHealth = EMPTY_NOTIFICATION_H
         reviewSelfCritique: c.get<boolean>('reviewSelfCritique', true),
         reviewSupervisorEnabled: c.get<boolean>('reviewSupervisorEnabled', true),
         reviewSecondReviewerModel: c.get<string>('reviewSecondReviewerModel', '').trim(),
+        reviewRulesDirectory: c.get<string>('reviewRulesDirectory', '').trim(),
         experimentalIntellijAssistedReview: c.get<boolean>('experimentalIntellijAssistedReview', false),
         notificationsEnabled: c.get<boolean>('notificationsEnabled', false),
         notifyReviewRequested: c.get<boolean>('notifyReviewRequested', true),
@@ -59,7 +60,7 @@ const ALLOWED_KEYS = new Set([
     'copilotInheritMcp', 'copilotAutoEnableMcpOnReview', 'copilotConfigDir', 'reviewFocusAreas',
     'reviewCustomInstructions', 'reviewGuidanceProfiles',
     'activeReviewGuidanceProfileId', 'repositoryReviewInstructions', 'reviewSelfCritique', 'reviewSupervisorEnabled',
-    'reviewSecondReviewerModel',
+    'reviewSecondReviewerModel', 'reviewRulesDirectory',
     'experimentalIntellijAssistedReview',
     'notificationsEnabled', 'notifyReviewRequested', 'notifyStarredRepos', 'notificationPollMinutes',
 ]);

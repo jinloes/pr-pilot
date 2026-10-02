@@ -244,7 +244,12 @@
         "pr-pilot.reviewSupervisorEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Re-inspect coverage gaps: run bounded coverage supervision and at most one targeted follow-up pass for changed hunks and files the first pass did not record as inspected. On by default; turn it off to save latency."
+          "description": "Re-inspect coverage gaps: run bounded coverage supervision, then targeted follow-up passes that re-review changed files the first pass never mentioned and its uninspected high-risk hunks. On by default; turn it off to save latency."
+        },
+        "pr-pilot.reviewRulesDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path to a local folder of extra review rules (`.md`, `.yaml`, `.yml`), such as a checkout of your team's central review rules. They are added to every review's guidance. Leave blank to disable."
         },
         "pr-pilot.reviewSecondReviewerModel": {
           "type": "string",

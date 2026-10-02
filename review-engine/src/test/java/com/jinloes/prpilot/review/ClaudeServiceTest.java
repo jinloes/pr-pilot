@@ -767,7 +767,46 @@ class ClaudeServiceTest {
 
         @Test
         void promptVersionSegmentsContextConformanceChanges() {
-            assertThat(ClaudeService.PROMPT_VERSION).isEqualTo("2026-10-mae-methodology");
+            assertThat(ClaudeService.PROMPT_VERSION).isEqualTo("2026-10-bug-hunt-coverage");
+        }
+
+        @Test
+        void passBCarriesTheBugHuntChecklistAndScopeExceptions() {
+            String prompt =
+                    ClaudeService.buildPrompt(PRReviewRequest.builder(fakePr(), "").build());
+
+            assertThat(prompt).contains(ClaudeService.BUG_HUNT_CHECKLIST);
+            assertThat(prompt)
+                    .contains("A deleted ('-') line is in scope when removing it creates the")
+                    .contains("the removed code in \"rationale\"");
+            assertThat(prompt)
+                    .contains(
+                            "persisted, cached, queued, or exchanged between separately deployed");
+        }
+
+        @Test
+        void addsLanguageChecklistsOnlyForChangedLanguages() {
+            String javaDiff =
+                    """
+                    diff --git a/src/Api.java b/src/Api.java
+                    --- a/src/Api.java
+                    +++ b/src/Api.java
+                    @@ -1 +1 @@
+                    -int a = 1;
+                    +int a = 2;
+                    """;
+            String docsDiff = javaDiff.replace("src/Api.java", "README.md");
+
+            String javaPrompt =
+                    ClaudeService.buildPrompt(PRReviewRequest.builder(fakePr(), javaDiff).build());
+            String docsPrompt =
+                    ClaudeService.buildPrompt(PRReviewRequest.builder(fakePr(), docsDiff).build());
+
+            assertThat(javaPrompt)
+                    .contains("Language-specific checks.")
+                    .contains("\nJava:\n")
+                    .doesNotContain("\nPython:\n");
+            assertThat(docsPrompt).doesNotContain("Language-specific checks.");
         }
 
         @Test
@@ -1402,6 +1441,15 @@ class ClaudeServiceTest {
             c.setRationale("value can be null");
             return new com.jinloes.prpilot.model.ReviewResult(
                     "## Overview\nDoes X", "REQUEST_CHANGES", java.util.List.of(c));
+        }
+
+        @Test
+        void critiqueKeepsRemovedCodeAndStoredShapeCompatibilityFindings() {
+            String prompt = ClaudeService.buildCritiquePrompt(req(), draft());
+
+            assertThat(prompt)
+                    .contains("A finding about removed code anchored on a nearby added")
+                    .contains("persisted, cached, queued, or cross-process shape needs no");
         }
 
         @Test

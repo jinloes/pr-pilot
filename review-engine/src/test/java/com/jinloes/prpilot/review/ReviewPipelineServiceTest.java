@@ -10,7 +10,10 @@ import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewResult;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -301,9 +304,14 @@ class ReviewPipelineServiceTest {
         ReviewPassResult primary(PRReviewRequest request) throws IOException {
             assertThat(request.getSemanticContext()).isNotNull();
             observe("primary", ClaudeService.buildPrompt(request));
+            // Mention every file so only the hunk gaps remain and the selection stage runs.
+            Set<String> files = new HashSet<>();
+            InspectionManifest.fromDiff(request.getDiff())
+                    .files()
+                    .forEach(file -> files.add(file.id()));
             return new ReviewPassResult(
                     new ReviewResult("candidate", "APPROVE", List.of()),
-                    new InspectionLedger(true, Set.of(), List.of()));
+                    new InspectionLedger(true, files, List.of()));
         }
 
         String complete(String prompt, boolean reads) throws IOException {
@@ -377,6 +385,48 @@ class ReviewPipelineServiceTest {
                         }
                     },
                     "fake");
+        }
+    }
+
+    @Nested
+    class WithLocalRules {
+        @Test
+        void leavesTheRequestUnchangedWithoutARulesFolder() {
+            PRReviewRequest request = request(oneRiskyHunk());
+
+            assertThat(ReviewPipelineService.withLocalRules(request)).isSameAs(request);
+        }
+
+        @Test
+        void appendsTheRulesToTheRepositoryGuidanceSeenByThePrimaryPass() throws Exception {
+            Path rules = Files.createTempDirectory("pipeline-rules");
+            try {
+                Files.writeString(rules.resolve("team.md"), "Prefer Optional over null.");
+                PRReviewRequest request =
+                        request(oneRiskyHunk()).toBuilder()
+                                .repoGuidelines("## AGENTS.md\nrepo rule")
+                                .rulesDirectory(rules.toString())
+                                .build();
+                FakeProvider provider = new FakeProvider();
+                provider.primaryResult =
+                        ReviewPassResult.withoutLedger(
+                                new ReviewResult("baseline", "APPROVE", List.of()));
+                ReviewPipelineService pipeline =
+                        new ReviewPipelineService(
+                                provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
+
+                pipeline.review(request, false, false, false, ignored -> {}, null);
+
+                assertThat(provider.primaryRequests)
+                        .singleElement()
+                        .extracting(PRReviewRequest::getRepoGuidelines)
+                        .isEqualTo(
+                                "## AGENTS.md\nrepo rule\n\n"
+                                        + "## local-rules/team.md\nPrefer Optional over null.");
+            } finally {
+                Files.deleteIfExists(rules.resolve("team.md"));
+                Files.deleteIfExists(rules);
+            }
         }
     }
 
@@ -467,10 +517,11 @@ class ReviewPipelineServiceTest {
         void usesOneToolFreePrioritizationCallBeforeOneFollowUpWhenMoreThanThreeGapsExist()
                 throws Exception {
             FakeProvider provider = new FakeProvider();
+            String fileId = InspectionManifest.fromDiff(fourRiskyHunks()).files().get(0).id();
             provider.primaryResult =
                     new ReviewPassResult(
                             new ReviewResult("baseline", "APPROVE", List.of()),
-                            new InspectionLedger(true, Set.of(), List.of()));
+                            new InspectionLedger(true, Set.of(fileId), List.of()));
             provider.completions.add(
                     JSON.writeValueAsString(Map.of("selectedGapIds", List.of("G004", "G002"))));
             provider.completions.add(emptyReviewJson());
@@ -495,6 +546,110 @@ class ReviewPipelineServiceTest {
                                 assertThat(call.allowMcp()).isFalse();
                                 assertThat(call.timeoutMillis()).isEqualTo(6L * 60L * 1000L);
                             });
+        }
+
+        @Test
+        void reReviewsEveryUncoveredFileInBatches() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    new ReviewPassResult(
+                            new ReviewResult("baseline", "APPROVE", List.of()),
+                            new InspectionLedger(true, Set.of(), List.of()));
+            provider.completions.add(reviewJsonWithFinding("F0.java", 1));
+            provider.completions.add(reviewJsonWithFinding("F6.java", 1));
+            ReviewPipelineService pipeline =
+                    new ReviewPipelineService(
+                            provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
+
+            ReviewResult result =
+                    pipeline.review(request(fileDiff(7)), false, false, true, ignored -> {}, null);
+
+            assertThat(provider.completeCalls).hasSize(2);
+            assertThat(provider.completeCalls).allMatch(PromptCall::allowReadTools);
+            assertThat(provider.completeCalls.get(0).prompt())
+                    .contains("diff --git a/F0.java", "diff --git a/F5.java")
+                    .doesNotContain("diff --git a/F6.java");
+            assertThat(provider.completeCalls.get(1).prompt())
+                    .contains("diff --git a/F6.java")
+                    .doesNotContain("diff --git a/F0.java");
+            assertThat(result.getLineComments())
+                    .extracting(LineComment::getFile)
+                    .containsExactlyInAnyOrder("F0.java", "F6.java");
+        }
+
+        @Test
+        void capsTheNumberOfWholeFileFollowUps() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    new ReviewPassResult(
+                            new ReviewResult("baseline", "APPROVE", List.of()),
+                            new InspectionLedger(true, Set.of(), List.of()));
+            int files =
+                    ReviewPipelineService.FILES_PER_FOLLOW_UP
+                                    * (ReviewPipelineService.MAX_FILE_FOLLOW_UPS + 1)
+                            + 1;
+            for (int i = 0; i < ReviewPipelineService.MAX_FILE_FOLLOW_UPS; i++) {
+                provider.completions.add(emptyReviewJson());
+            }
+            ReviewPipelineService pipeline =
+                    new ReviewPipelineService(
+                            provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
+
+            pipeline.review(request(fileDiff(files)), false, false, true, ignored -> {}, null);
+
+            assertThat(provider.completeCalls).hasSize(ReviewPipelineService.MAX_FILE_FOLLOW_UPS);
+        }
+
+        @Test
+        void keepsOtherBatchesFindingsWhenOneFollowUpFails() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    new ReviewPassResult(
+                            new ReviewResult("baseline", "APPROVE", List.of()),
+                            new InspectionLedger(true, Set.of(), List.of()));
+            provider.completions.add(FAIL);
+            provider.completions.add(reviewJsonWithFinding("F6.java", 1));
+            ReviewPipelineService pipeline =
+                    new ReviewPipelineService(
+                            provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
+
+            ReviewResult result =
+                    pipeline.review(request(fileDiff(7)), false, false, true, ignored -> {}, null);
+
+            assertThat(provider.completeCalls).hasSize(2);
+            assertThat(result.getLineComments())
+                    .singleElement()
+                    .extracting(LineComment::getFile)
+                    .isEqualTo("F6.java");
+        }
+
+        @Test
+        void stillReReviewsUncoveredFilesWhenPrioritizationFails() throws Exception {
+            String diff = fourRiskyHunks() + fileDiff(1);
+            FakeProvider provider = new FakeProvider();
+            String apiId = InspectionManifest.fromDiff(diff).files().get(0).id();
+            provider.primaryResult =
+                    new ReviewPassResult(
+                            new ReviewResult("baseline", "APPROVE", List.of()),
+                            new InspectionLedger(true, Set.of(apiId), List.of()));
+            provider.completions.add(FAIL);
+            provider.completions.add(reviewJsonWithFinding("F0.java", 1));
+            ReviewPipelineService pipeline =
+                    new ReviewPipelineService(
+                            provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
+
+            ReviewResult result =
+                    pipeline.review(request(diff), false, false, true, ignored -> {}, null);
+
+            assertThat(provider.completeCalls).hasSize(2);
+            assertThat(provider.completeCalls.get(0).allowReadTools()).isFalse();
+            assertThat(provider.completeCalls.get(1).prompt())
+                    .contains("diff --git a/F0.java")
+                    .doesNotContain("diff --git a/src/Api.java");
+            assertThat(result.getLineComments())
+                    .singleElement()
+                    .extracting(LineComment::getFile)
+                    .isEqualTo("F0.java");
         }
 
         @Test
@@ -562,6 +717,9 @@ class ReviewPipelineServiceTest {
         }
     }
 
+    /** A scripted completion that makes that one {@code complete} call fail. */
+    private static final String FAIL = "<fail>";
+
     private static final class FakeProvider implements ReviewPipelineService.ProviderExecutor {
         private ReviewPassResult primaryResult;
         private final AtomicInteger primaryCalls = new AtomicInteger();
@@ -624,7 +782,9 @@ class ReviewPipelineServiceTest {
             if (completionFailure != null) {
                 throw completionFailure;
             }
-            return completions.remove(0);
+            String next = completions.remove(0);
+            if (FAIL.equals(next)) throw new IOException("scripted completion failure");
+            return next;
         }
 
         @Override
@@ -1399,8 +1559,12 @@ class ReviewPipelineServiceTest {
     }
 
     private static String sevenFileDiff() {
+        return fileDiff(7);
+    }
+
+    private static String fileDiff(int files) {
         StringBuilder diff = new StringBuilder();
-        for (int index = 0; index < 7; index++) {
+        for (int index = 0; index < files; index++) {
             diff.append("diff --git a/F")
                     .append(index)
                     .append(".java b/F")

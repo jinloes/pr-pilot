@@ -207,6 +207,30 @@ class PRReviewRequestTest {
     }
 
     @Nested
+    class GetRulesDirectory {
+        @Test
+        void isNullWhenUnsetOrBlank() {
+            assertThat(PRReviewRequest.builder(pr(), "diff").build().getRulesDirectory()).isNull();
+            assertThat(
+                            PRReviewRequest.builder(pr(), "diff")
+                                    .rulesDirectory("  ")
+                                    .build()
+                                    .getRulesDirectory())
+                    .isNull();
+        }
+
+        @Test
+        void isTrimmed() {
+            assertThat(
+                            PRReviewRequest.builder(pr(), "diff")
+                                    .rulesDirectory(" /tmp/rules ")
+                                    .build()
+                                    .getRulesDirectory())
+                    .isEqualTo("/tmp/rules");
+        }
+    }
+
+    @Nested
     class GetGuidanceGlobs {
         @Test
         void defaultsToEmptyWhenUnset() {
@@ -254,6 +278,7 @@ class PRReviewRequestTest {
                     .semanticContext(semantic)
                     .baseSha(SHA)
                     .guidanceGlobs(List.of("docs/rules/*.md"))
+                    .rulesDirectory("/rules")
                     .fileHistory("history")
                     .callSites("sites")
                     .candidateRecall(true)
@@ -271,6 +296,7 @@ class PRReviewRequestTest {
             assertThat(copy.getFileHistory()).isEqualTo("history");
             assertThat(copy.isCandidateRecall()).isTrue();
             assertThat(copy.getGuidanceGlobs()).containsExactly("docs/rules/*.md");
+            assertThat(copy.getRulesDirectory()).isEqualTo("/rules");
         }
 
         @Test

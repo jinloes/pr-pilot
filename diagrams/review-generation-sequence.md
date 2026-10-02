@@ -72,6 +72,10 @@ sequenceDiagram
         Pipeline->>Pipeline: BaseCommitContext reads guidance (configured guidance globs first, then built-in defaults), changed-file history and call sites of changed symbols from base-commit git objects only (fetch by SHA if missing; fail-open)
     end
 
+    opt reviewRulesDirectory configured
+        Pipeline->>Pipeline: LocalReviewRules appends bounded local rule files to repository guidance (fail-open)
+    end
+
     alt Direct review
         Pipeline->>Provider: Primary review with read-only worktree tools, of the 250 KB review diff for single-pass or the 1 MB validation diff for IntelliJ-assisted deep review
         Provider-->>Pipeline: Review JSON and inspection ledger
@@ -93,15 +97,17 @@ sequenceDiagram
     end
 
     Note over Pipeline,Provider: Deep execution brackets every stage with authority checks.<br/>All request copies retain evidence and separate pinned skill instructions.<br/>Invalid authority fails the whole deep result, including earlier candidates.
-    opt Supervisor enabled and high-risk gaps remain
+    opt Supervisor enabled and coverage gaps remain
         Pipeline->>Pipeline: Validate anchors and analyze inspection coverage
-        opt More than three candidate gaps
+        opt More than three high-risk hunk gaps outside uncovered files
             Pipeline->>Provider: Tool-free prioritization of supplied gap IDs
-            Provider-->>Pipeline: At most five selected targets
+            Provider-->>Pipeline: At most five selected targets (failure skips hunk follow-up only)
         end
-        Pipeline->>Provider: One targeted read-only follow-up with MCP disabled (gap hunks and uninspected files)
-        Provider-->>Pipeline: Follow-up review and inspection ledger
-        Pipeline->>Pipeline: Merge and deduplicate findings
+        loop Hunk follow-up, then uncovered files in batches of six (at most five file batches)
+            Pipeline->>Provider: Read-only follow-up with MCP disabled
+            Provider-->>Pipeline: Follow-up review (a failed batch is skipped)
+            Pipeline->>Pipeline: Merge and deduplicate findings
+        end
     end
 
     opt Recall mode (self-critique or a second reviewer)

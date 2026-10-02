@@ -31,6 +31,9 @@ public final class ReviewPipelineService {
     private static final Logger log = LoggerFactory.getLogger(ReviewPipelineService.class);
     private static final long SUPERVISOR_TIMEOUT_MS = 90_000;
     private static final long FOLLOW_UP_TIMEOUT_MS = 6L * 60L * 1000L;
+    // Whole uncovered files per follow-up call, and the most such calls one review makes.
+    static final int FILES_PER_FOLLOW_UP = 6;
+    static final int MAX_FILE_FOLLOW_UPS = 5;
     private static final long CRITIQUE_TIMEOUT_MS = 30L * 60L * 1000L;
     private static final long HYGIENE_TIMEOUT_MS = 15L * 60L * 1000L;
     private static final int DROPPED_BODY_MAX_CHARS = 120;
@@ -211,6 +214,7 @@ public final class ReviewPipelineService {
         provider.checkCancelled();
         InspectionManifest manifest = InspectionManifest.fromDiff(request.getDiff());
         request = withBaseCommitContext(request, manifest, onStatus);
+        request = withLocalRules(request);
         boolean recall = selfCritique || secondary != null;
         PRReviewRequest reviewRequest = request.withCandidateRecall(recall);
         ReviewPassResult primary = reviewPasses(reviewRequest, chunked, onStatus, onChunk);
@@ -365,6 +369,15 @@ public final class ReviewPipelineService {
                 guidelines, resolved.fileHistory(), resolved.callSites());
     }
 
+    /** Appends the reviewer's configured local rules folder to the repository guidance. */
+    static PRReviewRequest withLocalRules(PRReviewRequest request) {
+        String rules = LocalReviewRules.read(request.getRulesDirectory());
+        if (rules.isEmpty()) return request;
+        return request.toBuilder()
+                .repoGuidelines(LocalReviewRules.appendTo(request.getRepoGuidelines(), rules))
+                .build();
+    }
+
     private ReviewPassResult reviewPasses(
             PRReviewRequest request,
             boolean chunked,
@@ -501,68 +514,112 @@ public final class ReviewPipelineService {
             return primary.review();
         }
 
-        List<FollowUpDirective> directives;
-        if (gaps.size() <= 3) {
-            directives = ReviewSupervisorPrompts.deterministicDirectives(gaps);
-        } else {
-            onStatus.accept("Prioritizing missed areas…");
-            validateAuthority();
-            try {
-                String selected =
-                        provider.complete(
-                                ReviewSupervisorPrompts.selectionPrompt(
-                                        request, gaps, primary.review()),
-                                SUPERVISOR_TIMEOUT_MS,
-                                false,
-                                false,
-                                ignored -> {});
-                directives = ReviewSupervisorPrompts.parseDirectives(selected, gaps);
-            } catch (InterruptedException interrupted) {
-                throw interrupted;
-            } catch (IOException exception) {
-                log.warn(
-                        "Review supervisor prioritization failed; keeping baseline review",
-                        exception);
-                logCoverage(manifest, primary, gaps.size(), 0, 0, elapsedMillis(startedAt));
-                return primary.review();
+        List<CoverageGap> fileGaps = gaps.stream().filter(CoverageGap::wholeFile).toList();
+        Set<String> wholeFilePaths = new HashSet<>();
+        fileGaps.forEach(gap -> wholeFilePaths.add(gap.path()));
+        // A hunk inside a file that is re-reviewed in full needs no separate follow-up.
+        List<CoverageGap> hunkGaps =
+                gaps.stream()
+                        .filter(gap -> !gap.wholeFile() && !wholeFilePaths.contains(gap.path()))
+                        .toList();
+
+        List<List<FollowUpDirective>> batches = new ArrayList<>();
+        List<FollowUpDirective> hunkDirectives =
+                selectHunkDirectives(request, hunkGaps, primary, onStatus);
+        if (!hunkDirectives.isEmpty()) batches.add(hunkDirectives);
+        List<FollowUpDirective> fileDirectives = ReviewSupervisorPrompts.allDirectives(fileGaps);
+        int fileBatches = 0;
+        for (int i = 0; i < fileDirectives.size(); i += FILES_PER_FOLLOW_UP) {
+            if (fileBatches == MAX_FILE_FOLLOW_UPS) {
+                log.info(
+                        "Review supervision: {} uncovered files exceed the re-review limit;"
+                                + " skipping the rest",
+                        fileDirectives.size() - i);
+                break;
             }
+            batches.add(
+                    fileDirectives.subList(
+                            i, Math.min(i + FILES_PER_FOLLOW_UP, fileDirectives.size())));
+            fileBatches++;
         }
-        if (directives.isEmpty()) {
+        if (batches.isEmpty()) {
             logCoverage(manifest, primary, gaps.size(), 0, 0, elapsedMillis(startedAt));
             return primary.review();
         }
 
-        provider.checkCancelled();
-        onStatus.accept("Inspecting missed areas…");
+        ReviewResult merged = primary.review();
+        int directiveCount = 0;
+        int followUpFindings = 0;
+        for (int i = 0; i < batches.size(); i++) {
+            List<FollowUpDirective> directives = batches.get(i);
+            provider.checkCancelled();
+            onStatus.accept(
+                    batches.size() == 1
+                            ? "Inspecting missed areas…"
+                            : "Inspecting missed areas (%d/%d)…".formatted(i + 1, batches.size()));
+            validateAuthority();
+            try {
+                PRReviewRequest followUpRequest =
+                        ReviewSupervisorPrompts.followUpRequest(request, manifest, directives);
+                InspectionManifest followUpManifest =
+                        InspectionManifest.fromDiff(followUpRequest.getDiff());
+                String raw =
+                        provider.complete(
+                                ClaudeService.buildPrompt(followUpRequest, followUpManifest),
+                                FOLLOW_UP_TIMEOUT_MS,
+                                true,
+                                false,
+                                onStatus);
+                ReviewPassResult followUp = ReviewPassParser.parse(raw, followUpManifest, null);
+                directiveCount += directives.size();
+                followUpFindings += followUp.review().getLineComments().size();
+                merged = ReviewResultMerger.merge(merged, followUp.review());
+            } catch (InterruptedException interrupted) {
+                throw interrupted;
+            } catch (IOException exception) {
+                log.warn("Targeted review follow-up failed; keeping the review so far", exception);
+            }
+        }
+        logCoverage(
+                manifest,
+                primary,
+                gaps.size(),
+                directiveCount,
+                followUpFindings,
+                elapsedMillis(startedAt));
+        return merged;
+    }
+
+    /**
+     * Chooses which uncovered high-risk hunks to follow up on: all of them when there are at most
+     * three, otherwise the ones a tool-free supervisor call ranks highest. A failed ranking call
+     * yields no hunk directives rather than failing supervision, so uncovered files are still
+     * re-reviewed.
+     */
+    private List<FollowUpDirective> selectHunkDirectives(
+            PRReviewRequest request,
+            List<CoverageGap> hunkGaps,
+            ReviewPassResult primary,
+            Consumer<String> onStatus)
+            throws IOException, InterruptedException {
+        if (hunkGaps.isEmpty()) return List.of();
+        if (hunkGaps.size() <= 3) return ReviewSupervisorPrompts.deterministicDirectives(hunkGaps);
+        onStatus.accept("Prioritizing missed areas…");
         validateAuthority();
         try {
-            PRReviewRequest followUpRequest =
-                    ReviewSupervisorPrompts.followUpRequest(request, manifest, directives);
-            InspectionManifest followUpManifest =
-                    InspectionManifest.fromDiff(followUpRequest.getDiff());
-            String raw =
+            String selected =
                     provider.complete(
-                            ClaudeService.buildPrompt(followUpRequest, followUpManifest),
-                            FOLLOW_UP_TIMEOUT_MS,
-                            true,
+                            ReviewSupervisorPrompts.selectionPrompt(
+                                    request, hunkGaps, primary.review()),
+                            SUPERVISOR_TIMEOUT_MS,
                             false,
-                            onStatus);
-            ReviewPassResult followUp = ReviewPassParser.parse(raw, followUpManifest, null);
-            logCoverage(
-                    manifest,
-                    primary,
-                    gaps.size(),
-                    directives.size(),
-                    followUp.review().getLineComments().size(),
-                    elapsedMillis(startedAt));
-            return ReviewResultMerger.merge(primary.review(), followUp.review());
-        } catch (InterruptedException interrupted) {
-            throw interrupted;
+                            false,
+                            ignored -> {});
+            return ReviewSupervisorPrompts.parseDirectives(selected, hunkGaps);
         } catch (IOException exception) {
-            log.warn("Targeted review follow-up failed; keeping baseline review", exception);
-            logCoverage(
-                    manifest, primary, gaps.size(), directives.size(), 0, elapsedMillis(startedAt));
-            return primary.review();
+            log.warn(
+                    "Review supervisor prioritization failed; skipping hunk follow-ups", exception);
+            return List.of();
         }
     }
 

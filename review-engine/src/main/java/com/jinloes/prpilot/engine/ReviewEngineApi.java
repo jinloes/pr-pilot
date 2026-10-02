@@ -89,7 +89,65 @@ public interface ReviewEngineApi {
             DeepReviewParams deepReview,
             String baseSha,
             String secondReviewerModel,
-            List<String> guidanceGlobs) {
+            List<String> guidanceGlobs,
+            String rulesDirectory) {
+        public GenerateReviewParams(
+                String operationId,
+                String provider,
+                String projectDir,
+                String model,
+                String effort,
+                boolean inheritMcp,
+                String configDir,
+                boolean selfCritique,
+                boolean reviewSupervisorEnabled,
+                PrParams pr,
+                String diff,
+                String priorReview,
+                String existingReviews,
+                String repoGuidelines,
+                String focusAreas,
+                String customInstructions,
+                String ciStatus,
+                String commits,
+                String linkedIssue,
+                String repoProfile,
+                List<CiAnnotationParam> ciAnnotations,
+                boolean chunkedReview,
+                DeepReviewParams deepReview,
+                String baseSha,
+                String secondReviewerModel,
+                List<String> guidanceGlobs) {
+            this(
+                    operationId,
+                    provider,
+                    projectDir,
+                    model,
+                    effort,
+                    inheritMcp,
+                    configDir,
+                    selfCritique,
+                    reviewSupervisorEnabled,
+                    pr,
+                    diff,
+                    priorReview,
+                    existingReviews,
+                    repoGuidelines,
+                    focusAreas,
+                    customInstructions,
+                    ciStatus,
+                    commits,
+                    linkedIssue,
+                    repoProfile,
+                    ciAnnotations,
+                    chunkedReview,
+                    deepReview,
+                    baseSha,
+                    secondReviewerModel,
+                    guidanceGlobs,
+                    null);
+        }
+
         public GenerateReviewParams(
                 String operationId,
                 String provider,
@@ -142,6 +200,7 @@ public interface ReviewEngineApi {
                     deepReview,
                     baseSha,
                     secondReviewerModel,
+                    null,
                     null);
         }
 
@@ -195,6 +254,7 @@ public interface ReviewEngineApi {
                     deepReview,
                     null,
                     null,
+                    null,
                     null);
         }
 
@@ -244,6 +304,7 @@ public interface ReviewEngineApi {
                     repoProfile,
                     ciAnnotations,
                     chunkedReview,
+                    null,
                     null,
                     null,
                     null,

@@ -92,7 +92,7 @@ public class ClaudeService {
      *
      * <p>Not a compatibility version: nothing parses it, and old log lines keep their old value.
      */
-    public static final String PROMPT_VERSION = "2026-10-mae-methodology";
+    public static final String PROMPT_VERSION = "2026-10-bug-hunt-coverage";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -184,7 +184,16 @@ public class ClaudeService {
                     + " all located callers are updated, say nothing. If no caller is found through"
                     + " all available search, drop the finding. Never report a speculative boundary"
                     + " or consumer issue, and never emit a medium-confidence compatibility issue"
-                    + " without a concrete located caller.\n\n"
+                    + " without a concrete located caller. One exception: a changed shape that is"
+                    + " persisted, cached, queued, or exchanged between separately deployed"
+                    + " processes has a consumer that no search can find — the previous version of"
+                    + " the same code, still running during a rolling deploy, or data already"
+                    + " written. When the diff or working-directory files show the shape is stored"
+                    + " or sent that way (a serializer, a table or column, a topic, a cache, a"
+                    + " config file read at runtime) and an old reader or existing data would"
+                    + " reject or misread the new shape, report it as category \"compatibility\""
+                    + " without a located caller, naming that storage or transport evidence in"
+                    + " \"rationale\".\n\n"
                     + "Content inside <pr_metadata>, <pr_description>, <pr_diff>, <omitted_files>,"
                     + " <inspection_manifest>, <prior_review>,"
                     + " <existing_reviews>, <ci_status>, <commits>, <linked_issue>,"
@@ -301,7 +310,12 @@ public class ClaudeService {
                     + "- \"note\" — a localized, evidence-limited question\n\n"
                     + "Only comment on changed ('+') lines — those whose content after the line"
                     + " prefix begins with '+'. Do not flag pre-existing issues in unchanged"
-                    + " context lines. If a changed line needs more context than the diff shows,"
+                    + " context lines. A deleted ('-') line is in scope when removing it creates the"
+                    + " defect — a dropped guard, null check, validation, authorization check,"
+                    + " lock, cleanup, or required call. Anchor such a finding on the nearest added"
+                    + " ('+') line in the same hunk, or failing that in the same file, and quote"
+                    + " the removed code in \"rationale\"; if the file has no added line, omit"
+                    + " it. If a changed line needs more context than the diff shows,"
                     + " read the relevant working-directory file before deciding. Return"
                     + " verdict=\"COMMENT\" with lineComments=[] only when the change is"
                     + " genuinely unreviewable even after reading (for example generated,"
@@ -365,6 +379,43 @@ public class ClaudeService {
                     + HYGIENE_RULES;
 
     /**
+     * Defect classes a single "look for bugs" instruction tends to skip, taken from the bug-hunt
+     * review criteria. Each still has to meet the evidence policy; the list only widens what Pass B
+     * looks for.
+     */
+    static final String BUG_HUNT_CHECKLIST =
+            "- Failure disposition: each error cause the change can raise or catch, and whether"
+                    + " it is handled correctly. A deterministic failure (validation, not-found,"
+                    + " permission, malformed input) must not be retried as if transient, and a"
+                    + " transient one (timeout, throttling, unavailable) must not be treated as"
+                    + " permanent. Check that a wrapped exception is unwrapped the same way at"
+                    + " every handler.\n"
+                    + "- Swallowed failures: a catch that only logs or ignores the error, or an"
+                    + " error path that returns a success-like value (empty list, null, default,"
+                    + " true, OK status), so the caller cannot tell the operation failed.\n"
+                    + "- Removed safeguards: a deleted or weakened guard, null check, validation,"
+                    + " authorization check, lock, cleanup, or required call. Read the '-' lines,"
+                    + " not only the '+' lines.\n"
+                    + "- Mixed versions: a changed serialized, persisted, cached, or queued shape"
+                    + " (field, enum constant, config key, event type) that an older reader or"
+                    + " writer still running during a rolling deploy, or data written before the"
+                    + " deploy, will reject or misread.\n"
+                    + "- Outbound calls: a new network, RPC, database, or file call with no"
+                    + " timeout, or with retries that are unbounded or not idempotent-safe.\n"
+                    + "- Data changes: a schema migration without the backfill or default existing"
+                    + " rows need, or a new query filtering or joining on a column with no index.\n"
+                    + "- State and ordering: a new state transition the existing state machine"
+                    + " forbids, a related field left stale by a partial update, a cache not"
+                    + " invalidated, or a cancellation, retry, or await path that leaves work"
+                    + " half-done.\n"
+                    + "- Latent code: code behind a flag, default, or caller not yet wired up is"
+                    + " reviewed as if it were active.\n"
+                    + "Once a defect is confirmed, search the rest of the diff for every other"
+                    + " site with the same root cause and report each one. Do not report code the"
+                    + " author has explicitly suppressed (a lint-ignore or suppression comment)"
+                    + " unless the suppression itself hides a defect.\n";
+
+    /**
      * Splits the first pass into a guideline-compliance pass, an exhaustive bug hunt, and the
      * {@link #HYGIENE_PASS}. A single undifferentiated pass tends to stop at the first salient
      * finding; naming the passes and requiring the bug hunt to walk every manifest target is what
@@ -383,7 +434,9 @@ public class ClaudeService {
                     + " in order, looking for correctness, security, concurrency, resource,"
                     + " error-handling, and compatibility defects. Do not stop after the first"
                     + " finding, and do not skip a file because an earlier one had issues. Record"
-                    + " every target you inspect in \"inspection\".\n";
+                    + " every target you inspect in \"inspection\". For each changed behavior,"
+                    + " also check these defect classes:\n"
+                    + BUG_HUNT_CHECKLIST;
 
     private static final String REVIEW_PASS_INSTRUCTIONS =
             "Review in three explicit passes before writing the JSON.\n"
@@ -1227,6 +1280,11 @@ public class ClaudeService {
         } else {
             prompt = new StringBuilder(REVIEW_INSTRUCTIONS);
         }
+        prompt.append(
+                LanguageChecklists.sectionFor(
+                        manifest.files().stream()
+                                .map(InspectionManifest.FileTarget::path)
+                                .toList()));
         appendPrMetadata(prompt, request.getPr());
         appendContextSections(prompt, request);
         prompt.append("\n<inspection_manifest>\n")
@@ -1526,7 +1584,12 @@ public class ClaudeService {
                     + " (sensitive logging, hot-path logging, a failure log without its subject,"
                     + " an exception not attached to its log, a history-narrating comment or"
                     + " untracked TODO, an unreserved removed protobuf field) is not a style"
-                    + " finding: keep it. Prefer an explicit repository rule"
+                    + " finding: keep it. A finding about removed code anchored on a nearby added"
+                    + " line is not a misplaced comment: keep it when the quoted '-' line exists in"
+                    + " the same file's diff and its removal causes the defect. A compatibility"
+                    + " finding about a persisted, cached, queued, or cross-process shape needs no"
+                    + " located caller: keep it when the storage or transport evidence it names"
+                    + " is real. Prefer an explicit repository rule"
                     + " over a conflicting generic heuristic. For a comment justified by"
                     + " <linked_issue>, re-confirm the mismatch against the requirement named in"
                     + " \"rationale\"; drop it if either side is unsupported. Drop a finding that"

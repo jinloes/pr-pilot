@@ -53,6 +53,7 @@ export interface SettingsState {
     repositoryReviewInstructions: Record<string, string>;
     reviewSelfCritique: boolean;
     reviewSupervisorEnabled: boolean;
+    reviewRulesDirectory: string;
     reviewSecondReviewerModel: string;
     experimentalIntellijAssistedReview: boolean;
     notificationsEnabled: boolean;
@@ -387,6 +388,12 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       <textarea id="repositoryInstructionsText" rows="3" maxlength="10000" aria-label="Instructions for the selected repository" aria-describedby="repositoryInstructionsHint"></textarea>
       <div class="hint" id="repositoryInstructionsHint">Added to every review of that repository, together with the instructions above. Add a repository from a review's instructions with “Remember for this repository”.</div>
     </div>
+
+    <div class="field">
+      <label for="reviewRulesDirectory">Rules folder</label>
+      <input type="text" id="reviewRulesDirectory" aria-describedby="reviewRulesDirectoryHint" placeholder="/absolute/path/to/review-rules">
+      <div class="hint" id="reviewRulesDirectoryHint">Optional local folder of review rules (.md, .yaml, .yml), such as a checkout of your team's central review rules. Added to every review's guidance.</div>
+    </div>
   </div>
 
   <div class="section">
@@ -399,7 +406,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
 
     <div class="field">
       <label><input type="checkbox" id="reviewSupervisorEnabled" style="width:auto;margin-right:6px;">Re-inspect coverage gaps</label>
-      <div class="hint">Runs a bounded coverage check and at most one targeted follow-up for changed code the first pass did not inspect. On by default; turn off to save latency.</div>
+      <div class="hint">Runs a bounded coverage check, then targeted follow-ups that re-review changed files the first pass never mentioned and its uninspected high-risk hunks. On by default; turn off to save latency.</div>
     </div>
   </div>
 
@@ -725,6 +732,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
   $('inheritMcp').addEventListener('change', () => save('copilotInheritMcp', $('inheritMcp').checked));
   $('reviewAutoEnableMcp').addEventListener('change', () => save('copilotAutoEnableMcpOnReview', $('reviewAutoEnableMcp').checked));
   $('copilotConfigDir').addEventListener('change', () => save('copilotConfigDir', $('copilotConfigDir').value.trim()));
+  $('reviewRulesDirectory').addEventListener('change', () => save('reviewRulesDirectory', $('reviewRulesDirectory').value.trim()));
   $('baseUrl').addEventListener('change', () => save('githubBaseUrl', $('baseUrl').value.trim()));
   $('baseUrl').addEventListener('input', clearBaseUrlError);
   $('guidanceProfile').addEventListener('change', () => {
@@ -862,6 +870,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
       $('inheritMcp').checked = state.copilotInheritMcp === true;
       $('reviewAutoEnableMcp').checked = state.copilotAutoEnableMcpOnReview === true;
       $('copilotConfigDir').value = state.copilotConfigDir || '';
+      $('reviewRulesDirectory').value = state.reviewRulesDirectory || '';
       guidanceProfiles = Array.isArray(state.reviewGuidanceProfiles) ? state.reviewGuidanceProfiles : [];
       activeGuidanceProfileId = state.activeReviewGuidanceProfileId || '';
       renderGuidanceProfileOptions();

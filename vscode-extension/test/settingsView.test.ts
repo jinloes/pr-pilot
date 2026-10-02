@@ -171,6 +171,8 @@ test('buildSettingsHtml renders reusable review-guidance profile controls', () =
     assert.match(html, /id="deleteGuidanceProfile"/);
     assert.match(html, /id="reviewSelfCritique"/);
     assert.match(html, /id="reviewSupervisorEnabled"/);
+    assert.match(html, /<label for="reviewRulesDirectory">Rules folder<\/label>/);
+    assert.match(html, /save\('reviewRulesDirectory'/);
     assert.match(html, /Re-inspect coverage gaps/);
     assert.match(html, /<label for="reviewSecondReviewerModel">Second reviewer<\/label>/);
     assert.match(html, /<select id="reviewSecondReviewerModel" aria-describedby="reviewSecondReviewerModelHint"><\/select>/);
@@ -426,7 +428,7 @@ function initState(repositoryReviewInstructions: Record<string, string>): Record
         githubBaseUrl: 'https://github.com', copilotInheritMcp: false, copilotAutoEnableMcpOnReview: false,
         copilotConfigDir: '', reviewFocusAreas: '', reviewCustomInstructions: '', reviewGuidanceGlobs: [],
         reviewGuidanceProfiles: [], activeReviewGuidanceProfileId: '', repositoryReviewInstructions,
-        reviewSelfCritique: true, reviewSupervisorEnabled: true, reviewSecondReviewerModel: '',
+        reviewSelfCritique: true, reviewSupervisorEnabled: true, reviewSecondReviewerModel: '', reviewRulesDirectory: '',
         experimentalIntellijAssistedReview: false,
         notificationsEnabled: false, notifyReviewRequested: true, notifyStarredRepos: false,
         notificationPollMinutes: 5, notificationHealth: EMPTY_NOTIFICATION_HEALTH,

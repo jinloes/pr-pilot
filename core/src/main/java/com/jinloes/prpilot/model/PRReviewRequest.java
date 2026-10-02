@@ -34,6 +34,7 @@ public final class PRReviewRequest {
     private final SemanticReviewContext semanticContext;
     private final String baseSha;
     private final java.util.List<String> guidanceGlobs;
+    private final String rulesDirectory;
     private final String fileHistory;
     private final String callSites;
     private final boolean candidateRecall;
@@ -59,6 +60,7 @@ public final class PRReviewRequest {
                         : builder.guidanceGlobs.stream()
                                 .filter(java.util.Objects::nonNull)
                                 .toList();
+        this.rulesDirectory = builder.rulesDirectory;
         this.fileHistory = builder.fileHistory;
         this.callSites = builder.callSites;
         this.candidateRecall = builder.candidateRecall;
@@ -163,6 +165,15 @@ public final class PRReviewRequest {
         return guidanceGlobs;
     }
 
+    /**
+     * Absolute path of a local folder of extra review-rule files ({@code .md}, {@code .yaml},
+     * {@code .yml}) the user configured, or {@code null} when none is set. The engine reads it from
+     * the local filesystem and appends the rules to the repository guidance.
+     */
+    public String getRulesDirectory() {
+        return rulesDirectory;
+    }
+
     /** Rendered recent commit history of the changed files, reachable from the base commit. */
     public String getFileHistory() {
         return fileHistory;
@@ -235,6 +246,7 @@ public final class PRReviewRequest {
                 .semanticContext(semanticContext)
                 .baseSha(baseSha)
                 .guidanceGlobs(guidanceGlobs)
+                .rulesDirectory(rulesDirectory)
                 .fileHistory(fileHistory)
                 .callSites(callSites)
                 .candidateRecall(candidateRecall);
@@ -271,6 +283,7 @@ public final class PRReviewRequest {
         private SemanticReviewContext semanticContext;
         private String baseSha;
         private java.util.List<String> guidanceGlobs;
+        private String rulesDirectory;
         private String fileHistory;
         private String callSites;
         private boolean candidateRecall;
@@ -359,6 +372,11 @@ public final class PRReviewRequest {
 
         public Builder baseSha(String value) {
             this.baseSha = value;
+            return this;
+        }
+
+        public Builder rulesDirectory(String value) {
+            this.rulesDirectory = value == null || value.isBlank() ? null : value.strip();
             return this;
         }
 

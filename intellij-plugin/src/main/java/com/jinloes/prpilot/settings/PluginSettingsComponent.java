@@ -105,6 +105,7 @@ public class PluginSettingsComponent {
             new JCheckBox("Always enable MCP for Copilot reviews");
     private final JBTextField copilotConfigDirField = new JBTextField();
     private final JBTextField reviewFocusAreasField = new JBTextField();
+    private final JBTextField reviewRulesDirectoryField = new JBTextField();
     private final JComboBox<String> secondReviewerModelCombo =
             new JComboBox<>(COPILOT_MODEL_SUGGESTIONS);
     private final JBTextArea reviewCustomInstructionsArea = new JBTextArea(4, 0);
@@ -471,6 +472,14 @@ public class PluginSettingsComponent {
                                         + " with the instructions above. Add a repository from a"
                                         + " review's instructions with “Remember for this"
                                         + " repository”.</small></html>"));
+        JPanel rulesDirectoryField =
+                fieldWithHint(
+                        reviewRulesDirectoryField,
+                        hintLabel(
+                                "<html><small>Optional absolute path to a local folder of"
+                                        + " review rules (.md, .yaml, .yml), such as a checkout of"
+                                        + " your team's central review rules. Added to every"
+                                        + " review's guidance.</small></html>"));
         JPanel validationField =
                 fieldWithHint(
                         reviewSelfCritiqueBox,
@@ -481,10 +490,11 @@ public class PluginSettingsComponent {
                 fieldWithHint(
                         reviewSupervisorBox,
                         hintLabel(
-                                "<html><small>Runs a bounded coverage check and at most one"
-                                        + " targeted follow-up over uninspected high-risk hunks"
-                                        + " and changed files. Only adds latency when the review"
-                                        + " left a gap.</small></html>"));
+                                "<html><small>Runs a bounded coverage check, then targeted"
+                                        + " follow-ups that re-review changed files the review"
+                                        + " never mentioned and its uninspected high-risk hunks."
+                                        + " Only adds latency when the review left a"
+                                        + " gap.</small></html>"));
         JPanel secondReviewerField =
                 fieldWithHint(
                         secondReviewerModelCombo,
@@ -545,6 +555,11 @@ public class PluginSettingsComponent {
                                         "Remembered repository instructions:",
                                         repositoryInstructionsCombo),
                                 repositoryInstructionsField,
+                                1,
+                                false)
+                        .addLabeledComponent(
+                                fieldLabel("Rules folder:", reviewRulesDirectoryField),
+                                rulesDirectoryField,
                                 1,
                                 false)
                         .addSeparator(8)
@@ -691,6 +706,14 @@ public class PluginSettingsComponent {
 
     public void setCopilotAutoEnableMcpOnReview(boolean v) {
         copilotAutoEnableMcpOnReviewBox.setSelected(v);
+    }
+
+    public String getReviewRulesDirectory() {
+        return reviewRulesDirectoryField.getText().trim();
+    }
+
+    public void setReviewRulesDirectory(String dir) {
+        reviewRulesDirectoryField.setText(dir != null ? dir : "");
     }
 
     public void setCopilotConfigDir(String dir) {

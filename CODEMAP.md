@@ -85,12 +85,17 @@ guidance.
 - `review/BaseCommitContext.java` - Trusted guidance files (configured globs, then defaults), changed-file commit history and textual
   call sites read only from the PR base commit's git objects, time-bounded and fail-open. Tests:
   `BaseCommitContextTest`.
+- `review/LanguageChecklists.java` - Per-language Pass B checks (Java, Kotlin, JS/TS, Python, Go,
+  Rust) added only for languages in the diff. Tests: `LanguageChecklistsTest`.
+- `review/LocalReviewRules.java` - Bounded reader for the reviewer's `reviewRulesDirectory`, appended
+  to repository guidance by `ReviewPipelineService.withLocalRules`. Tests: `LocalReviewRulesTest`.
 - `review/ChangedSymbols.java` - Extracts the existing declarations a diff changes (removed-line
   declarations, then hunk-header context) for the call-site search. Tests: `ChangedSymbolsTest`.
 - `review/InspectionManifest.java`, `ReviewPassParser.java`, `InspectionLedger.java`, and
   `EvidenceRef.java` - Stable changed targets plus validated inspection/evidence accounting.
 - `review/ReviewCoverageAnalyzer.java`, `CoverageGap.java`, `ReviewSupervisorPrompts.java`, and
-  `FollowUpDirective.java` - High-risk gap detection and bounded follow-up selection.
+  `FollowUpDirective.java` - High-risk hunk and uncovered-file gap detection, hunk follow-up
+  selection, and batched whole-file re-review directives.
 - `review/ReviewAnchorValidator.java` and `ReviewResultMerger.java` - Changed-line filtering,
   baseline/follow-up/second-reviewer deduplication, low-confidence candidate removal, and the final cap.
 - `review/CancellationToken.java` - Shared cancellation state.

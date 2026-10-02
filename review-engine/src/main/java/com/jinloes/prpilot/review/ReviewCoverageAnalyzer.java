@@ -7,9 +7,13 @@ import java.util.List;
 /**
  * Deterministically identifies coverage gaps in a reported inspection ledger: high-risk changed
  * hunks that were not inspected, and changed files the ledger never mentions at all.
+ *
+ * <p>Only hunk gaps are capped. Every unmentioned changed file is returned, because the supervisor
+ * re-reviews each one in full rather than choosing among them — a file the reviewer skipped is the
+ * likeliest place for a missed finding.
  */
 final class ReviewCoverageAnalyzer {
-    private static final int MAX_GAPS = 12;
+    private static final int MAX_HUNK_GAPS = 12;
 
     List<CoverageGap> findGaps(InspectionManifest manifest, InspectionLedger ledger) {
         if (manifest == null || ledger == null || !ledger.reported()) {
@@ -30,7 +34,7 @@ final class ReviewCoverageAnalyzer {
                                 hunk.path(),
                                 hunk.newStart(),
                                 "High-risk changed hunk was not recorded as inspected.",
-                                100));
+                                CoverageGap.HUNK_PRIORITY));
             }
             if (!mentioned(file, ledger)) {
                 file.hunks().stream()
@@ -46,17 +50,19 @@ final class ReviewCoverageAnalyzer {
                                                         firstChanged.newStart(),
                                                         "Changed file was not recorded as"
                                                                 + " inspected.",
-                                                        50)));
+                                                        CoverageGap.FILE_PRIORITY)));
             }
         }
-        return gaps.stream()
-                .sorted(
-                        Comparator.comparingInt(CoverageGap::priority)
-                                .reversed()
-                                .thenComparing(CoverageGap::path)
-                                .thenComparingInt(CoverageGap::newStart))
-                .limit(MAX_GAPS)
-                .toList();
+        Comparator<CoverageGap> byLocation =
+                Comparator.comparing(CoverageGap::path).thenComparingInt(CoverageGap::newStart);
+        List<CoverageGap> ranked = new ArrayList<>();
+        gaps.stream()
+                .filter(gap -> !gap.wholeFile())
+                .sorted(byLocation)
+                .limit(MAX_HUNK_GAPS)
+                .forEach(ranked::add);
+        gaps.stream().filter(CoverageGap::wholeFile).sorted(byLocation).forEach(ranked::add);
+        return List.copyOf(ranked);
     }
 
     private static boolean mentioned(InspectionManifest.FileTarget file, InspectionLedger ledger) {

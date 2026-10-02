@@ -171,6 +171,18 @@ class ReviewSessionServiceTest {
             assertThat(ReviewSessionService.toReviewRequest(decoded).getBaseSha()).isNullOrEmpty();
             assertThat(decoded.guidanceGlobs()).isNull();
             assertThat(ReviewSessionService.toReviewRequest(decoded).getGuidanceGlobs()).isEmpty();
+            assertThat(decoded.rulesDirectory()).isNull();
+            assertThat(ReviewSessionService.toReviewRequest(decoded).getRulesDirectory()).isNull();
+        }
+
+        @Test
+        void carriesTheConfiguredRulesDirectory() {
+            Map<String, Object> params = params();
+            params.put("rulesDirectory", "/opt/review-rules");
+
+            PRReviewRequest request = ReviewSessionService.toReviewRequest(decode(params));
+
+            assertThat(request.getRulesDirectory()).isEqualTo("/opt/review-rules");
         }
 
         @Test

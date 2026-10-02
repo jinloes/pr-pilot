@@ -70,6 +70,16 @@ test('reviewSecondReviewerModel defaults to blank in the contribution and both r
     }
 });
 
+test('reviewRulesDirectory defaults to blank in the contribution and both readers', () => {
+    const property = packageJsonDefaults()['pr-pilot.reviewRulesDirectory'] as { type: string; default: string };
+    assert.equal(property.type, 'string');
+    assert.equal(property.default, '');
+    for (const file of ['extension.ts', 'settings.ts']) {
+        const source = fs.readFileSync(path.join(extensionRoot, 'src', file), 'utf8');
+        assert.match(source, /c\.get<string>\('reviewRulesDirectory', ''\)\.trim\(\)/, file);
+    }
+});
+
 test('reviewSupervisorEnabled settings reader fallback matches the contribution default', () => {
     const source = fs.readFileSync(path.join(extensionRoot, 'src', 'settings.ts'), 'utf8');
     assert.match(source, /c\.get<boolean>\('reviewSupervisorEnabled', true\)/);

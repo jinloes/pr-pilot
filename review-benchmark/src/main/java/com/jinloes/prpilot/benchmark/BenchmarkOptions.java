@@ -21,6 +21,7 @@ record BenchmarkOptions(
         boolean chunked,
         boolean callSites,
         List<String> guidanceGlobs,
+        String rulesDirectory,
         String judge,
         String judgeModel,
         int lineWindow,
@@ -44,6 +45,7 @@ record BenchmarkOptions(
                     "--config-dir",
                     "--second-reviewer",
                     "--guidance-glob",
+                    "--rules-dir",
                     "--judge",
                     "--judge-model",
                     "--line-window",
@@ -70,6 +72,7 @@ record BenchmarkOptions(
               --chunked               Review large diffs in per-file chunks
               --no-call-sites         Omit base-commit call-site context
               --guidance-glob GLOB    Also read base-commit guidance matching GLOB (repeatable)
+              --rules-dir DIR         Also read review rules (.md/.yaml) from this local folder
               --judge llm|location    How matches are decided (default llm)
               --judge-model ID        Judge model (defaults to --model)
               --line-window N         Max line distance for a candidate match (default 10)
@@ -93,6 +96,7 @@ record BenchmarkOptions(
         boolean chunked = false;
         boolean callSites = true;
         List<String> guidanceGlobs = new ArrayList<>();
+        String rulesDir = "";
         String judge = JUDGE_LLM;
         String judgeModel = "";
         int window = DEFAULT_LINE_WINDOW;
@@ -117,6 +121,7 @@ record BenchmarkOptions(
                             false,
                             true,
                             List.of(),
+                            "",
                             JUDGE_LLM,
                             "",
                             DEFAULT_LINE_WINDOW,
@@ -142,6 +147,7 @@ record BenchmarkOptions(
                         case "--config-dir" -> configDir = value;
                         case "--second-reviewer" -> second = value;
                         case "--guidance-glob" -> guidanceGlobs.add(value);
+                        case "--rules-dir" -> rulesDir = rulesDirectory(value);
                         case "--judge" -> judge = value;
                         case "--judge-model" -> judgeModel = value;
                         case "--line-window" -> window = lineWindow(value);
@@ -174,6 +180,7 @@ record BenchmarkOptions(
                 chunked,
                 callSites,
                 List.copyOf(guidanceGlobs),
+                rulesDir,
                 judge,
                 StringUtils.defaultIfBlank(judgeModel, model),
                 window,
@@ -182,6 +189,11 @@ record BenchmarkOptions(
                 out,
                 verbose,
                 false);
+    }
+
+    private static String rulesDirectory(String value) {
+        Path path = Path.of(value).toAbsolutePath().normalize();
+        return path.toString();
     }
 
     private static String value(List<String> args, int index, String option) {

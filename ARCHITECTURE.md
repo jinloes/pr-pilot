@@ -366,7 +366,17 @@ Three parts of the pipeline previously treated `"confidence": "low"` as a way to
 
 The self-critique directive is keyed on `confidence`, not on type, for a related reason: its input is `draftReviewJson` over an already-parsed draft, so by then no low-confidence `"issue"` exists and the old "drop a low-confidence issue" rule could never match anything. It now requires each surviving low-confidence comment to be confirmed and raised, or dropped.
 
-`PROMPT_VERSION` is `2026-10-mae-methodology`. The non-recall review prompt has a third pass of built-in
+`PROMPT_VERSION` is `2026-10-bug-hunt-coverage`. Pass B appends `BUG_HUNT_CHECKLIST` (failure
+disposition, swallowed failures, removed safeguards, mixed versions, and the other defect classes a
+generic "look for bugs" instruction skips) plus `LanguageChecklists` entries for only the languages
+the diff changes. Two scope rules close gaps the evidence policy used to open: a finding caused by a
+deleted line anchors on the nearest added line in the same hunk or file and quotes the removed code
+(omitted when the file has no added line), and a compatibility finding about a persisted, cached,
+queued, or cross-process shape needs named storage or transport evidence instead of a located
+caller, because its consumer is the previous deploy or already-written data. The critique has
+matching keep rules so it does not drop either kind as misplaced or unsupported.
+
+The non-recall review prompt has a third pass of built-in
 hygiene rules (sensitive or per-request logging, failure logs that omit the failing identifier or
 drop the exception, history-narrating comments, unreserved removed protobuf fields) with fixed
 type, category and severity. Pass A also compares each new type against the existing sibling it
@@ -496,7 +506,7 @@ the reviewer selecting the option.
 `ReviewPipelineService` owns the review pipeline for both hosts:
 
 `primary/chunk batches -> reconciliation -> coverage analysis -> optional prioritization ->
-one targeted follow-up -> final self-critique -> deterministic CI suppression`.
+targeted hunk follow-up and whole-file re-reviews -> final self-critique -> deterministic CI suppression`.
 
 The persisted `reviewSupervisorEnabled` setting defaults to `true`. The base review emits an
 engine-internal inspection ledger in both modes so the output contract stays stable; when the
@@ -507,12 +517,17 @@ anchors. When enabled:
   lines. `ReviewPassParser` accepts only manifest IDs and repository-confined evidence paths.
 - `ReviewCoverageAnalyzer` deterministically identifies uninspected high-risk hunks, plus changed
   files whose file ID and hunk IDs are all absent from the ledger (ranked below high-risk hunks). It
-  does not infer gaps when the provider omitted its ledger and caps candidates at 12.
-- Three or fewer gaps are prioritized deterministically. Larger sets get one tool-free,
-  90-second provider call that sees only gap metadata and baseline finding locations and may select
-  at most five supplied IDs.
-- The engine authors the follow-up objectives and allows one six-minute, read-only worktree pass
-  with MCP disabled. Baseline and follow-up findings are merged and deduplicated.
+  does not infer gaps when the provider omitted its ledger. Hunk gaps are capped at 12; file gaps
+  are not, because a file the reviewer never opened is the likeliest place for a missed finding.
+- Every uncovered file is re-reviewed in full, six files per follow-up and at most five such
+  follow-ups. Hunk gaps inside those files are dropped as redundant.
+- Three or fewer remaining hunk gaps are prioritized deterministically. Larger sets get one
+  tool-free, 90-second provider call that sees only gap metadata and baseline finding locations and
+  may select at most five supplied IDs; if it fails, hunk follow-up is skipped but file re-reviews
+  still run.
+- The engine authors the follow-up objectives and allows six-minute, read-only worktree passes with
+  MCP disabled. A failed batch is logged and skipped without discarding other batches. Baseline and
+  follow-up findings are merged and deduplicated.
 - `ReviewAnchorValidator` removes findings not attached to changed new-side lines before the
   existing final critique and CI suppression gates run once. Chunked reviews use their bounded
   contract index for the final critique rather than re-sending the full diff.
@@ -587,8 +602,16 @@ The `.vscode/launch.json` config `Run PR Pilot Extension Against Target Repo` pr
 - `activeReviewGuidanceProfileId` (default `""`) — selected profile ID; blank selects the built-in defaults stored in `reviewFocusAreas`, `reviewCustomInstructions`, and `reviewGuidanceGlobs`. Keeping those fields as the built-in profile makes upgrades migration-free.
 - `reviewSelfCritique` (default `true`) — runs a second validation pass (`ClaudeService.buildCritiquePrompt`) that re-checks every finding against a contract index derived from the changed files and the same context sections the first pass saw, dropping misattributed, unsupported, and CI-duplicated comments. On by default because a misattributed comment costs the reviewer more than the extra pass does; disabling it roughly halves review latency. Shared by both providers.
 - `reviewSupervisorEnabled` (default `true`; labeled "Re-inspect coverage gaps") — checks the primary
-  inspection ledger for unreviewed high-risk hunks and uninspected files and may run one bounded,
-  targeted read-only follow-up. Shared by both providers.
+  inspection ledger for unreviewed high-risk hunks and uninspected files, then runs bounded
+  read-only follow-ups: one for selected hunks and up to five whole-file re-reviews. Shared by both
+  providers.
+- `reviewRulesDirectory` (default `""`; VS Code `pr-pilot.reviewRulesDirectory`; benchmark
+  `--rules-dir`) — an absolute local folder of the reviewer's own rules. The engine
+  (`LocalReviewRules`) reads `.md`/`.yaml`/`.yml` regular files up to four levels deep, skipping
+  symbolic links inside the folder, files over 16 KB, and non-UTF-8 files, keeps at most 50 files and
+  32 KB sorted by path, and appends them to the repository guidance as `## local-rules/<path>`
+  sections so the critique can cite them. Unreadable or relative paths add nothing. It is carried on
+  `GenerateReviewParams.rulesDirectory` / `PRReviewRequest.rulesDirectory`.
 - `reviewSecondReviewerModel` (default `""`; VS Code `pr-pilot.reviewSecondReviewerModel`) — optional
   Copilot model run in parallel as a second reviewer whose findings are merged and cross-validated.
   Blank disables it. Uses the primary's effort when the primary is Copilot, otherwise Copilot's

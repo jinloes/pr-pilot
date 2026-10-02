@@ -143,6 +143,32 @@ class ReviewCoverageAnalyzerTest {
         }
 
         @Test
+        void capsHunkGapsButReturnsEveryUnmentionedFile() {
+            StringBuilder diff = new StringBuilder();
+            for (int index = 0; index < 20; index++) {
+                diff.append(
+                        """
+                        diff --git a/src/Api%1$02d.java b/src/Api%1$02d.java
+                        --- a/src/Api%1$02d.java
+                        +++ b/src/Api%1$02d.java
+                        @@ -1 +1 @@
+                        -private void oldApi() {}
+                        +public void newApi() {}
+                        """
+                                .formatted(index));
+            }
+
+            List<CoverageGap> gaps =
+                    analyzer.findGaps(
+                            InspectionManifest.fromDiff(diff.toString()),
+                            new InspectionLedger(true, Set.of(), List.of()));
+
+            assertThat(gaps).filteredOn(gap -> !gap.wholeFile()).hasSize(12);
+            assertThat(gaps).filteredOn(CoverageGap::wholeFile).hasSize(20);
+            assertThat(gaps.subList(0, 12)).noneMatch(CoverageGap::wholeFile);
+        }
+
+        @Test
         void doesNotGuessCoverageWhenTheProviderOmittedTheLedger() {
             InspectionManifest manifest =
                     InspectionManifest.fromDiff(

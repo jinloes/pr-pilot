@@ -89,6 +89,10 @@ reasoning-effort, and MCP options are advanced controls. PR Pilot checks the sel
 during onboarding and again before generating a review. Settings remain available from the setup
 screen so you can switch providers.
 
+To apply your own review rules everywhere, set **Rules folder** to an absolute local folder. PR
+Pilot adds its `.md`, `.yaml`, and `.yml` files (up to 50 files and 32 KB) to every review's
+repository guidance.
+
 ## Complete your first review
 
 1. Open the local GitHub repository that contains the pull request.
@@ -271,6 +275,9 @@ more from each PR's base commit, for example a repository that keeps review rule
 ./gradlew :review-benchmark:reviewBenchmark \
   --args="--prs prs.txt --repos-root ~/src --provider copilot --guidance-glob '.linkedin/ai-agent/*.md'"
 ```
+
+Pass `--rules-dir DIR` to add a local rules folder the same way the **Rules folder** setting does,
+and `--supervisor` to include coverage follow-ups.
 
 ### Build webview assets
 

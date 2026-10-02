@@ -834,6 +834,8 @@ interface ReviewGenerationSettings {
     supervisorEnabled: boolean;
     /** Optional parallel Copilot reviewer; blank disables it. */
     secondReviewerModel: string;
+    /** Local folder of extra review rules the engine reads; blank disables it. */
+    rulesDirectory: string;
     githubBaseUrl: string;
     guidance: ResolvedReviewGuidance;
 }
@@ -868,6 +870,7 @@ function snapshotReviewGenerationSettings(): ReviewGenerationSettings {
         selfCritique: c.get<boolean>('reviewSelfCritique', true),
         supervisorEnabled: c.get<boolean>('reviewSupervisorEnabled', true),
         secondReviewerModel: c.get<string>('reviewSecondReviewerModel', '').trim(),
+        rulesDirectory: c.get<string>('reviewRulesDirectory', '').trim(),
         githubBaseUrl: c.get<string>('githubBaseUrl', 'https://github.com'),
         guidance,
     };
@@ -1455,6 +1458,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 // never reads it; the engine resolves guidance and file history from baseSha.
                 repoGuidelines: '',
                 guidanceGlobs: guidance.guidanceGlobs,
+                rulesDirectory: settings.rulesDirectory || undefined,
                 focusAreas,
                 customInstructions,
                 ciStatus: checkStatus.summary,

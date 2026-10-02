@@ -207,6 +207,16 @@ class PluginSettingsTest {
     }
 
     @Test
+    void reviewRulesDirectoryDefaultsToEmptyAndTrims() {
+        PluginSettings s = new PluginSettings();
+        assertThat(s.getReviewRulesDirectory()).isEmpty();
+        s.setReviewRulesDirectory("  /team/rules  ");
+        assertThat(s.getReviewRulesDirectory()).isEqualTo("/team/rules");
+        s.setReviewRulesDirectory(null);
+        assertThat(s.getReviewRulesDirectory()).isEmpty();
+    }
+
+    @Test
     void copilotAutoEnableMcpOnReviewDefaultsToFalse() {
         PluginSettings s = new PluginSettings();
         assertThat(s.isCopilotAutoEnableMcpOnReview()).isFalse();

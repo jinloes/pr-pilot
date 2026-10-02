@@ -29,6 +29,7 @@ class BenchmarkOptionsTest {
             assertThat(options.chunked()).isFalse();
             assertThat(options.callSites()).isTrue();
             assertThat(options.guidanceGlobs()).isEmpty();
+            assertThat(options.rulesDirectory()).isEmpty();
             assertThat(options.judge()).isEqualTo(BenchmarkOptions.JUDGE_LLM);
             assertThat(options.lineWindow()).isEqualTo(10);
             assertThat(options.repeat()).isEqualTo(1);
@@ -47,6 +48,12 @@ class BenchmarkOptionsTest {
 
             assertThat(options.guidanceGlobs())
                     .containsExactly(".linkedin/ai-agent/*.md", "docs/x.md");
+        }
+
+        @Test
+        void resolvesTheRulesDirectoryToAnAbsolutePath() {
+            assertThat(parse("--rules-dir", "rules/../mae").rulesDirectory())
+                    .isEqualTo(Path.of("mae").toAbsolutePath().toString());
         }
 
         @Test
