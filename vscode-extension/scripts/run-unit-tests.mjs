@@ -11,7 +11,7 @@ if (status === 0) {
     .map((name) => `dist-test/test/${name}`)
   const tests = spawnSync(
     process.execPath,
-    ['--test', ...testFiles, '../scripts/portable-process.test.mjs', '../scripts/verify.test.mjs'],
+    ['--test', ...testFiles, '../scripts/portable-process.test.mjs', '../scripts/verify.test.mjs', '../scripts/reviewbench.test.mjs'],
     { stdio: 'inherit', shell: false },
   )
   status = tests.status ?? 1

@@ -133,7 +133,7 @@ final class LocalCheckout implements AutoCloseable {
         }
     }
 
-    private static int run(File dir, long timeoutSeconds, String... args)
+    static int run(File dir, long timeoutSeconds, String... args)
             throws IOException, InterruptedException {
         Process process =
                 new ProcessBuilder(gitCommand(args))

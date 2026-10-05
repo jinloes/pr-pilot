@@ -170,7 +170,8 @@ code, or sensitive pull-request content.
 - `core/` - Plain Java 17 shared models and diff parser used by both hosts
 - `github-engine/` - Plain Java 17 GitHub/repository/review engine shared by both hosts
 - `intellij-plugin/` - IntelliJ host integration
-- `review-benchmark/` - Developer CLI that measures review recall against Mae's comments
+- `review-benchmark/` - Developer CLIs that measure review recall against Mae's comments and on
+  [ReviewBench](https://github.com/review-bench/ReviewBench)
 - `sidecar/` - Thin stdio JSON-RPC process adapter used by the VS Code extension
 - `vscode-extension/` - VS Code host integration
 - `webview/` - Shared React webview UI
@@ -278,6 +279,34 @@ more from each PR's base commit, for example a repository that keeps review rule
 
 Pass `--rules-dir DIR` to add a local rules folder the same way the **Rules folder** setting does,
 and `--supervisor` to include coverage follow-ups.
+
+### Score reviews on ReviewBench
+
+[ReviewBench](https://github.com/review-bench/ReviewBench) is GitHub's open code-review benchmark:
+real pull requests with curated golden findings and an LLM judge that scores precision and recall.
+`scripts/reviewbench.mjs` runs it locally, using your Copilot seat for both the PR Pilot reviews and
+the judge:
+
+```bash
+node scripts/reviewbench.mjs --limit 1                 # one-PR smoke test
+node scripts/reviewbench.mjs                           # 25-PR test set
+node scripts/reviewbench.mjs --set full --rounds 3     # 219 PRs, three runs
+node scripts/reviewbench.mjs -- --model gpt-5.5 --chunked   # reviewer options after --
+```
+
+The script clones ReviewBench at a pinned commit into `build/reviewbench/ReviewBench`, reviews each
+pull request at its head commit from the `review-bench` mirrors (clones are cached in
+`build/reviewbench/repos`), writes findings to `<run>/findings/round-N/`, and runs ReviewBench's
+`npm run judge` once per round. Scores and per-finding details land in `<run>/scoring/`. A run
+directory defaults to `build/reviewbench/runs/<timestamp>`; pass `--run DIR` to resume an
+interrupted run, which skips pull requests that already have findings, or `--run DIR --skip-review`
+to re-judge. Judging stops when any review failed, because a partial set overstates recall.
+
+The judge authenticates with `COPILOT_GITHUB_TOKEN` or `gh auth token`, and uses
+`claude-sonnet-5` (the official judge model) through `https://api.githubcopilot.com`; change them
+with `--judge-model` and `--copilot-base-url`. Expect several minutes and several premium requests
+per pull request. Scores from a different judge provider are not comparable with the public
+leaderboard, and ReviewBench publishes only its own runs, so treat these numbers as internal.
 
 ### Build webview assets
 

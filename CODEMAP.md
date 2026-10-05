@@ -42,6 +42,9 @@ context makes them unambiguous.
 - `.github/workflows/release.yml` - Tag-driven IntelliJ ZIP and VSIX GitHub releases.
 - `scripts/portable-process.mjs` and `run-gradle.mjs` - Shell-free npm and Gradle wrapper
   invocation used by portable packaging/tests and targeted host CI.
+- `scripts/reviewbench.mjs` - Local ReviewBench run: pinned corpus checkout, the `reviewBench`
+  Gradle task, and ReviewBench's judge on Copilot via a generated pi `models.json`
+  (`reviewbench.test.mjs`, run by the extension runner).
 - `scripts/verify.mjs` - Change-aware verification: `planChecks` maps changed paths to the minimal
   Gradle/npm checks and prints only failing output (`verify.test.mjs`, run by the extension runner).
 - `gradle/intellij-sandbox.gradle` - Lazy installed-IDE selection and separate `runIdeLocal`
@@ -185,8 +188,9 @@ Thin Java 17, non-web Spring Boot stdio JSON-RPC adapter used only by VS Code.
 
 ### `review-benchmark/`
 
-Developer-only CLI (`./gradlew :review-benchmark:reviewBenchmark`) that measures PR Pilot's recall
-against Mae's GitHub review comments. It is not shipped with either host.
+Developer-only CLIs: `./gradlew :review-benchmark:reviewBenchmark` measures PR Pilot's recall
+against Mae's GitHub review comments, and `reviewBench` (driven by `scripts/reviewbench.mjs`) produces
+findings for ReviewBench's judge. It is not shipped with either host.
 
 - `benchmark/ReviewBenchmark.java` - Entry point and per-PR orchestration.
 - `benchmark/BenchmarkOptions.java` - Argument parsing (including repeatable `--guidance-glob`), defaults, and usage.
@@ -197,7 +201,12 @@ against Mae's GitHub review comments. It is not shipped with either host.
 - `benchmark/LlmJudge.java` - Model judge prompt and JSON verdict parsing for candidate pairs.
 - `benchmark/BenchmarkReport.java` - Totals (including complete-diff recall), dropped-by-validation findings with near-miss marking, and Markdown/JSON report rendering.
 - `benchmark/RepeatSummary.java` - Per-run recall spread and per-PR matched counts for `--repeat`.
-- Tests mirror each class; `LocalCheckoutTest` uses real git in temp directories.
+- `benchmark/ReviewBenchRunner.java` - ReviewBench entry point (`:review-benchmark:reviewBench`): reviews each corpus PR per round and writes judge-ready findings, resuming past existing files.
+- `benchmark/ReviewBenchOptions.java` - ReviewBench runner arguments, `--only`/`--limit` selection, and usage.
+- `benchmark/ReviewBenchTask.java` - Corpus entry loading and validation, golden-file key, and mirror URL.
+- `benchmark/ReviewBenchCheckout.java` - Cached partial clone of a `review-bench` mirror, fetch-by-SHA with upstream fallback, and the head worktree and diff.
+- `benchmark/ReviewBenchFindings.java` - Conversion of line comments to ReviewBench's judging input format.
+- Tests mirror each class; `LocalCheckoutTest` and `ReviewBenchCheckoutTest` use real git in temp directories.
 
 ### `intellij-plugin/`
 

@@ -46,6 +46,7 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [Review guidance, file history and call sites come from the base commit](docs/architecture/review-pipeline.md#review-guidance-file-history-and-call-sites-come-from-the-base-commit)
 - [Recall: second reviewer and candidate validation](docs/architecture/review-pipeline.md#recall-second-reviewer-and-candidate-validation)
 - [Recall benchmark withholds the reference answers](docs/architecture/review-pipeline.md#recall-benchmark-withholds-the-reference-answers)
+- [ReviewBench runs never consult GitHub and delegate scoring](docs/architecture/review-pipeline.md#reviewbench-runs-never-consult-github-and-delegate-scoring)
 - [Comment anchoring snaps within a hunk, never across one](docs/architecture/review-pipeline.md#comment-anchoring-snaps-within-a-hunk-never-across-one)
 - [Three comment keys exist on purpose](docs/architecture/review-pipeline.md#three-comment-keys-exist-on-purpose)
 - [Missing rationale drops a comment, never fabricates one](docs/architecture/review-pipeline.md#missing-rationale-drops-a-comment-never-fabricates-one)

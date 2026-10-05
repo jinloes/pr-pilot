@@ -46,3 +46,16 @@ tasks.register('reviewBenchmark', JavaExec) {
     standardInput = System.in
     systemProperty 'org.slf4j.simpleLogger.defaultLogLevel', 'warn'
 }
+
+// Developer tool: reviews ReviewBench PRs (https://github.com/review-bench/ReviewBench) and writes
+// findings in its judging format. Run it through scripts/reviewbench.mjs, which also fetches the
+// corpus and runs ReviewBench's judge.
+tasks.register('reviewBench', JavaExec) {
+    group = 'verification'
+    description = 'Reviews ReviewBench pull requests and writes findings for its judge.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.jinloes.prpilot.benchmark.ReviewBenchRunner'
+    workingDir = rootProject.projectDir
+    standardInput = System.in
+    systemProperty 'org.slf4j.simpleLogger.defaultLogLevel', 'warn'
+}
