@@ -8,7 +8,9 @@ Operational guide for coding agents working in this repository.
 - `ARCHITECTURE.md`: system boundaries, settings, local data files, and an index of design
   constraints whose full text lives in `docs/architecture/*.md`.
 - `CODEMAP.md`: implementation locations, task entry points, related tests, and cross-module paths.
-- Treat `AGENTS.md` as the single instruction file for agent workflows in this repo.
+- Treat `AGENTS.md` files as the only agent instruction files in this repo. This root file applies
+  everywhere; `intellij-plugin/AGENTS.md`, `webview/AGENTS.md`, and `vscode-extension/AGENTS.md`
+  add rules for work inside those directories. Read the nested file before editing files under it.
 - Read `ARCHITECTURE.md` when a change affects design or crosses module boundaries. Read
   `CODEMAP.md` when locating implementation and test files. Do not load either file when the task
   does not need that context.
@@ -41,7 +43,7 @@ engine is declared as an interface:
 - `review-engine`: `com.jinloes.prpilot.engine.ReviewEngineApi`
 
 Each interface carries an `RPC_METHODS` map from Java method name to JSON-RPC wire name.
-`sidecar/StdioJsonRpcServer` must register a handler for every entry, and
+`sidecar/StdioJsonRpcServer` (handlers in `StdioJsonRpcServerGitHubHandlers`/`StdioJsonRpcServerReviewHandlers`) must register a handler for every entry, and
 `SidecarBootstrapService.CAPABILITY_METHODS` must group every wire name under a logical capability
 (that grouping is what the `initialize` handshake advertises).
 
@@ -52,7 +54,7 @@ add the method to the interface, add its `RPC_METHODS` entry, register the handl
 `CAPABILITY_METHODS`; the tests tell you if you missed a step.
 
 **The client side is enforced too**, by `vscode-extension/test/wireCatalog.test.ts`, which reads the
-engine interfaces as the source of truth and fails if `sidecar.ts` has no client method for a wire
+engine interfaces as the source of truth and fails if the `vscode-extension/src/sidecar*.ts` clients have no method for a wire
 name (or calls one no engine declares), and if `REQUIRED_CAPABILITIES` drifts from
 `CAPABILITY_METHODS`. So a new capability is not "done" until VS Code can reach it.
 
@@ -69,15 +71,23 @@ capability by re-implementing it locally.
 
 **But record the lag as a lag.** The tests prove a capability is *reachable* and that a client method
 *exists* — not that any UI actually surfaces it. Phase 1's four context capabilities sat
-exposed-but-uncalled in VS Code for months while the plan read `✅ DONE`, so every VS Code review
+exposed-but-uncalled in VS Code for months while marked done, so every VS Code review
 shipped with empty CI/commits/issue/profile prompt sections. `wireCatalog.test.ts` now catches that
 exact shape, but a client method wired to no UI would still slip through. When you ship a capability
-a host does not yet consume, say so explicitly in the plan and the PR description — do not mark the
+a host does not yet consume, say so explicitly in the PR description — do not mark the
 work complete.
 
 If a genuine platform constraint makes a capability impossible in one host, document the gap and the
 reason as a section in the matching `docs/architecture/*.md` topic file (with an index line under
 `ARCHITECTURE.md` "Key design decisions") and call it out in the PR description.
+
+### Modularity guardrails
+
+1. No IntelliJ types in `core`, `github-engine`, or `review-engine`.
+2. Every new capability lands on the engine interface first, host wiring second.
+3. `webview/` stays host-neutral and shared — it is UI, not host code.
+4. `webview/src/bridge/types.ts` remains the host↔UI contract.
+5. Deleting a TypeScript reimplementation is always preferred over updating it.
 
 ### VS Code support floor
 
@@ -98,21 +108,21 @@ without justification.
 |---|---|
 | `review-engine/ReviewPrompts.java` `CHAT_PERSONA` | `vscode-extension/src/claude.ts` same constant |
 | `review-engine/ReviewPrompts.java` `buildFocusedChatPrompt` | `vscode-extension/src/claude.ts` same function |
-| `WebviewPanel.resolvePrClaudeService`/`WorktreeCoordinator` worktree lifecycle | `vscode-extension/src/extension.ts` `resolveWorkingDir`/`clearWorktree` — the *lifecycle* only (which dir belongs to the active PR, when to tear it down); the git work is no longer mirrored |
-| `PRNotificationService` poll/source-labeling/merge logic | `vscode-extension/src/notifications.ts` + `extension.ts` `PRNotificationPoller.poll` |
+| `WebviewWorktreeManager`/`WorktreeCoordinator` worktree lifecycle | `vscode-extension/src/worktree.ts` `resolveWorkingDir`/`clearWorktree` — the *lifecycle* only (which dir belongs to the active PR, when to tear it down); the git work is no longer mirrored |
+| `PRNotificationService` poll/source-labeling/merge logic | `vscode-extension/src/notifications.ts` + `notificationPoller.ts` `PRNotificationPoller.poll` |
 | `review-engine/BinaryLocator.java` | `vscode-extension/src/claude.ts` + `vscode-extension/src/copilot.ts` binary-probing candidates |
-| `review-engine/CopilotModelDiscovery.java` model probing / `PluginSettingsComponent` model combo | `vscode-extension/src/copilot.ts` `listModels`/`filterModelIds` + `extension.ts` `selectCopilotModel` command |
+| `review-engine/CopilotModelDiscovery.java` model probing / `settings/CopilotModelSelector` model combo | `vscode-extension/src/copilot.ts` `listModels`/`filterModelIds` + `copilotModel.ts` `selectCopilotModel` command |
 | `PluginSettingsComponent` settings UI (provider-aware model selector, effort, base URL) | `vscode-extension/src/settings.ts` + `settingsView.ts` settings webview |
 | `review-engine/CopilotService.DEFAULT_REASONING_EFFORT` | `vscode-extension/src/copilot.ts` |
-| `webview/src/bridge/types.ts` message schemas | `WebviewBridgeMessages.java`/`WebviewPanel.java` and `vscode-extension/src/extension.ts` handlers |
+| `webview/src/bridge/types.ts` message schemas | `WebviewBridgeMessages.java`/`WebviewBridgeHandler.java` and `vscode-extension/src/extension.ts` `setupMessageBridge` + `prHandlers.ts`/`reviewHandlers.ts` |
 | `core/.../model/DiffCoverage.java` trailer grammar (`split`, header/path format, limits) | `webview/src/lib/diffCoverage.ts` `splitDiffCoverage`/`parseDiffCoverage`; add accepted and rejected cases to the shared `core/src/test/resources/diff-coverage/trailer.golden.txt`, which both `DiffCoverageTest` and `diffCoverage.test.ts` read |
 | `github-engine/.../DraftReviewMutationService.java` `effectiveBody` fallback bodies and `DraftReviewCodec.encodeBody` general-note/detached-section rules | `webview/src/components/ReviewPane/publishBody.ts` `FALLBACK_REVIEW_BODY`/`publishedBodySections`; `publishBody.test.ts` and `DraftReviewMutationServiceTest` pin the strings. Retire it by adding a read-only publish-preview engine capability. |
 | `intellij-plugin/.../settings/RepositoryReviewInstructions.java` key normalization, limits and `compose` format | `vscode-extension/src/repositoryInstructions.ts` same functions; host-owned settings resolution like guidance profiles, so there is no engine capability to share |
 | `PluginSettings` adding new setting | `vscode-extension/package.json` config contribution + `vscode-extension/src/extension.ts` reader |
-| Any new **notification** shape (`reviews/status`, `reviews/chunk`, `reviews/chatChunk`) | `vscode-extension/src/sidecar.ts` dispatch — notifications are not in `RPC_METHODS`, so nothing enforces them |
+| Any new **notification** shape (`reviews/status`, `reviews/chunk`, `reviews/chatChunk`) | `vscode-extension/src/sidecarTransport.ts` dispatch — notifications are not in `RPC_METHODS`, so nothing enforces them |
 
 New **request** wire methods are no longer on this list: `wireCatalog.test.ts` fails the build when
-`sidecar.ts` lacks a client method for one. Notifications remain hand-mirrored because they are not
+the `sidecar*.ts` clients lack a method for one. Notifications remain hand-mirrored because they are not
 declared on either engine interface, so there is no source of truth to check them against.
 
 **Retiring a row is the preferred fix** (guardrail #5), and the mechanism is: expose the logic as an
@@ -144,56 +154,30 @@ Test framework and location rules:
 
 ## Required verification commands
 
-```bash
-./gradlew spotlessApply
-./gradlew spotlessCheck
-./gradlew check
-./gradlew :core:test :review-engine:test :intellij-plugin:unitTest
-```
+Use Node from `.nvmrc` (the script refuses Node older than 20.19). Run `./gradlew spotlessApply`
+after Java edits, then:
 
 ```bash
-(cd webview && npm run lint)
-(cd webview && npx tsc --noEmit)
-(cd webview && npm run test:unit)
-(cd webview && npm run test:a11y)
-(cd vscode-extension && npm run lint)
-(cd vscode-extension && npx tsc --noEmit)
-(cd vscode-extension && npm run test:unit)
+node scripts/verify.mjs            # checks affected by changes vs origin/main, incl. uncommitted
+node scripts/verify.mjs --dry-run  # show the plan only
+node scripts/verify.mjs --all      # everything; run before opening a PR
 ```
 
-The visual snapshots are canonical Ubuntu/Chromium artifacts and must not be verified natively on
-other operating systems. Run the required visual verification with the Playwright version pinned by
-`webview/package-lock.json`; for the current lockfile, use:
-
-```bash
-mkdir -p /tmp/pr-pilot-playwright-node-modules /tmp/pr-pilot-playwright-npm-cache
-docker run --rm --ipc=host \
-  --user "$(id -u):$(id -g)" \
-  -e HOME=/tmp -e npm_config_cache=/tmp/npm-cache -e CI=1 \
-  -v "$PWD:/work" \
-  -v /tmp/pr-pilot-playwright-node-modules:/work/webview/node_modules \
-  -v /tmp/pr-pilot-playwright-npm-cache:/tmp/npm-cache \
-  -w /work/webview \
-  mcr.microsoft.com/playwright:v1.61.1-noble \
-  bash -lc "npm ci && npm run test:visual -- --reporter=line"
-```
-
-For an intentional baseline regeneration, use the same command and image but change the final
-command to `npm ci && npm run test:visual -- --update-snapshots --reporter=line`. Review every image
-diff, then rerun the non-update command before accepting the baseline. Never raise visual tolerances
-merely to make a changed baseline pass.
+The script maps changed paths to the smallest covering set (a JVM module plus its downstream
+modules' `check`, which includes Spotless and `intellij-plugin:unitTest`; webview and extension
+lint/typecheck/tests; cross-toolchain tests for the engine interfaces and the diff-coverage golden).
+It prints one line per passing check and only the tail of failing output, with the full log path.
+When a webview UI file changes it reminds you to run the Docker visual check in `webview/AGENTS.md`.
+Update `planChecks` in `scripts/verify.mjs` when module dependencies or cross-toolchain tests change.
 
 ## Coding rules
 
 - Prefer Apache Commons helpers over hand-rolled equivalents (`CollectionUtils`, `StringUtils`, `Strings.CS`, `StringEscapeUtils`).
 - `core`'s shared model classes are plain Java (JavaBean getters/setters). Don't reintroduce Kotlin, kotlinx.serialization, or jackson-module-kotlin for these classes — Jackson (plain bean introspection) is the only runtime JSON serializer used against them.
 - For Java JSON, use the applicable Jackson `ObjectMapper` to serialize DTOs, maps, or tree nodes; do not concatenate raw JSON strings. Tests must build valid JSON fixtures through that serialization path, except when intentionally testing malformed JSON input.
-- In `intellij-plugin`, Jackson is allowed for webview bridge deserialization.
-- IntelliJ threading: background work on pooled threads, UI updates on EDT via `invokeLater()`.
 - Follow Google Java Style (Spotless-enforced), avoid FQNs in method bodies, keep imports explicit.
 - Use comments only for non-obvious "why", not to restate code.
 - No `Co-Authored-By` trailers in commit messages.
-- Do not add `eslint-disable` comments without a `--` explanation.
 
 ## Scope reminder
 

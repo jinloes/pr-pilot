@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * Enforces the capability-parity boundary described in {@code REVIEW_QUALITY_PLAN.md} §3.7.
+ * Enforces the capability-parity boundary described in {@code AGENTS.md} "Host parity obligations".
  *
  * <p>Hosts are allowed to lag in <em>consuming</em> an engine capability, but the engine's whole
  * surface must always be reachable over JSON-RPC — otherwise a host that needs a capability the

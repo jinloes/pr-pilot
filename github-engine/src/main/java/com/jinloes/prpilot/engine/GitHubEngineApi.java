@@ -26,10 +26,10 @@ import java.util.Map;
 /**
  * The complete host-neutral GitHub capability surface of this engine.
  *
- * <p>This interface is the parity boundary described in {@code REVIEW_QUALITY_PLAN.md} §3.7: every
- * capability is declared here exactly once, and the sidecar must expose <em>all</em> of them over
- * JSON-RPC. Individual hosts (IntelliJ, VS Code, a future CLI or GitHub Action) may lag in
- * <em>consuming</em> a capability, but none of them may re-implement one.
+ * <p>This interface is the parity boundary described in {@code AGENTS.md} "Host parity
+ * obligations": every capability is declared here exactly once, and the sidecar must expose
+ * <em>all</em> of them over JSON-RPC. Individual hosts (IntelliJ, VS Code, a future CLI or GitHub
+ * Action) may lag in <em>consuming</em> a capability, but none of them may re-implement one.
  *
  * <p>{@link #RPC_METHODS} maps each Java method name to its wire method name. Both directions are
  * enforced by {@code EngineCapabilityCoverageTest} in the sidecar module:

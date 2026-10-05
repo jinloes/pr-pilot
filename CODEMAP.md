@@ -9,11 +9,11 @@ Lookup guide for implementation work. Read this file when locating code or tests
 |---|---|---|---|
 | Inspect internal source coverage (not readiness) | `model/SourceInventory.java`, `review/SourceInventoryClient.java` | `SourceInventoryFiles.java`, IntelliJ `SourceInventoryService.java` and `SourceInventoryMcpProvider.java` | `SourceInventoryTest`, `SourceInventoryFilesTest`, `SourceInventoryClientTest`, `SourceInventoryServiceTest`, `SourceInventoryMcpProviderTest`; manual protocol recipe in `docs/intellij-assisted-review.md` |
 | Change review generation or prompts | `review-engine/.../ReviewPrompts.java`, `ReviewResultParser.java`, `ClaudeService.java`, `CopilotService.java` | `ReviewEngineApi.java`, `ReviewSessionService.java`, host request wiring | Matching `review-engine` service tests; prompt mirrors listed in `AGENTS.md` |
-| Add an engine capability | `GitHubEngineApi.java` or `ReviewEngineApi.java` | `StdioJsonRpcServer.java`, `SidecarBootstrapService.java`, `vscode-extension/src/sidecar.ts` | `EngineCapabilityCoverageTest.java`, `wireCatalog.test.ts` |
+| Add an engine capability | `GitHubEngineApi.java` or `ReviewEngineApi.java` | `StdioJsonRpcServerGitHubHandlers.java`/`StdioJsonRpcServerReviewHandlers.java`, `SidecarBootstrapService.java`, `vscode-extension/src/sidecarGitHubClient.ts`/`sidecarReviewClient.ts` | `EngineCapabilityCoverageTest.java`, `wireCatalog.test.ts` |
 | Change PR discovery, metadata, diff, or draft mutations | `github-engine/.../sidecar/pr/` | `GitHubEngine.java`, both host bridges, shared webview messages | Matching `github-engine` service test plus host bridge tests |
 | Change the shared review UI | `webview/src/App.tsx`, `webview/src/components/` | `webview/src/bridge/types.ts`, both host bridge handlers | Component tests plus accessibility/visual suites when behavior or layout changes |
-| Change IntelliJ host behavior | `intellij-plugin/.../ui/WebviewPanel.java`, `PrChatController.java`, `DeepReviewController.java` | `services/`, `settings/`, shared webview bridge | Matching IntelliJ JUnit tests |
-| Change VS Code host behavior | `vscode-extension/src/extension.ts` | `sidecar.ts`, `settings.ts`, `settingsView.ts` | `vscode-extension/test/` |
+| Change IntelliJ host behavior | `intellij-plugin/.../ui/WebviewBridgeHandler.java` and the `Webview*Controller` collaborators, `PrChatController.java`, `DeepReviewController.java` | `services/`, `settings/`, shared webview bridge | Matching IntelliJ JUnit tests |
+| Change VS Code host behavior | `vscode-extension/src/extension.ts`, `prHandlers.ts`, `reviewHandlers.ts` | `sidecar*.ts`, `settings.ts`, `settingsView.ts` | `vscode-extension/test/` |
 | Change settings | `intellij-plugin/.../settings/PluginSettings.java` | Both settings UIs, `vscode-extension/package.json`, host readers | IntelliJ settings tests and VS Code settings tests |
 | Change notifications | `intellij-plugin/.../PRNotificationService.java` | `vscode-extension/src/notifications.ts`, both host lifecycle entry points | Notification tests in both hosts |
 | Change local draft/index persistence | `PendingReviewIndex.java`, `DraftRecoveryStore.java`, `SeenPRSet.java`, `vscode-extension/src/draftRecovery.ts` | Both host lifecycle callers; persistence contract in `ARCHITECTURE.md` | Matching IntelliJ and VS Code service tests |
@@ -30,17 +30,20 @@ context makes them unambiguous.
 
 - `README.md` - User setup, development, checks, and release flow.
 - `docs/intellij-assisted-review.md` - Experimental IntelliJ-assisted review, native readiness and source-inventory protocol.
-- `AGENTS.md` - Agent workflow, testing rules, and cross-host obligations.
+- `AGENTS.md` - Agent workflow, testing rules, and cross-host obligations; `intellij-plugin/`,
+  `webview/`, and `vscode-extension/` each add a directory-scoped `AGENTS.md`.
+- `.nvmrc` - Node version for webview/extension tooling (matches CI).
+- `.ignore` - Hides lockfiles, visual snapshots, and build output from ripgrep-based search tools.
 - `ARCHITECTURE.md` - Design-constraint index, settings persistence, and local data.
 - `docs/architecture/*.md` - Full design-constraint sections by topic (review pipeline, providers,
   semantic review, hosts and sidecar, GitHub drafts and worktrees, webview).
-- `REVIEW_QUALITY_PLAN.md` - Active review-quality plan; completed phases are archived verbatim in
-  `docs/archive/review-quality-plan-completed.md`.
 - `diagrams/` - Mermaid architecture and PR review-generation sequence diagrams.
 - `.github/workflows/ci.yml` - Push/PR checks, Java 17 sidecar smoke test, and packaged-VSIX assertion.
 - `.github/workflows/release.yml` - Tag-driven IntelliJ ZIP and VSIX GitHub releases.
 - `scripts/portable-process.mjs` and `run-gradle.mjs` - Shell-free npm and Gradle wrapper
   invocation used by portable packaging/tests and targeted host CI.
+- `scripts/verify.mjs` - Change-aware verification: `planChecks` maps changed paths to the minimal
+  Gradle/npm checks and prints only failing output (`verify.test.mjs`, run by the extension runner).
 - `gradle/intellij-sandbox.gradle` - Lazy installed-IDE selection and separate `runIdeLocal`
   platform/runtime/sandbox wiring; compilation and ordinary `runIde` stay pinned.
 - `gradle/intellij-sandbox-tests.gradle` - Temporary metadata fixtures exercising the production
@@ -169,7 +172,10 @@ Thin Java 17, non-web Spring Boot stdio JSON-RPC adapter used only by VS Code.
 - `sidecar/PrPilotSidecarApplication.java` - Process entry point and stdio lifecycle.
 - `sidecar/SidecarConfiguration.java` - Engine composition.
 - `sidecar/StdioFrameCodec.java` - Bounded Content-Length UTF-8 framing.
-- `sidecar/StdioJsonRpcServer.java` - Validation, dispatch, errors, and async notifications.
+- `sidecar/StdioJsonRpcServer.java` - Read loop, handler registry, dispatch, errors, and async notifications.
+- `sidecar/StdioJsonRpcServerGitHubHandlers.java` and `StdioJsonRpcServerReviewHandlers.java` -
+  Per-engine handler registration and parameter mapping.
+- `sidecar/StdioJsonRpcServerSupport.java` - Shared JSON-RPC response and parameter-shape helpers.
   Tests: `StdioJsonRpcServerTest` (protocol), `StdioJsonRpcServerGitHubParamsTest`,
   `StdioJsonRpcServerReviewsTest`, sharing `StdioJsonRpcServerTestBase`.
 - `sidecar/SidecarBootstrapService.java` - Initialize response and advertised capability groups.
@@ -223,11 +229,26 @@ IntelliJ host integration. Depends directly on `core`, `github-engine`, and `rev
 - `services/PRNotificationStartup.java` - Notification lifecycle entry point.
 - `settings/PluginSettings.java` - Persisted settings model.
 - `settings/RepositoryReviewInstructions.java` - Remembered per-repository review instructions: key normalization, limits, and composition into `customInstructions` (mirrors `vscode-extension/src/repositoryInstructions.ts`).
-- `settings/PluginSettingsComponent.java` - Provider-aware settings UI.
+- `settings/PluginSettingsComponent.java` - Settings form composition root.
+- `settings/CopilotModelSelector.java` - Provider-aware Copilot model combo and advanced controls.
+- `settings/ReviewGuidanceEditor.java` - Guidance profiles, focus areas, and custom instructions UI.
+- `settings/RepositoryInstructionsEditor.java` - Remembered repository-instructions UI (`RepositoryInstructionsEditorTest`).
+- `settings/SettingsUi.java` - Shared Swing layout helpers.
 - `settings/PluginSettingsConfigurable.java` - Settings lifecycle integration.
 - `settings/GithubBaseUrlValidator.java` - HTTPS GitHub-origin normalization.
 - `ui/PRToolWindowFactory.java` - Tool-window entry point; title actions (Pop Out, Settings) and the gear-menu "Reload PR Pilot View" action, built by package-private helpers covered by `PRToolWindowFactoryTest`.
-- `ui/WebviewPanel.java` - JCEF host and Java/webview bridge dispatch.
+- `ui/WebviewPanel.java` - JCEF host composition root wiring the collaborators below.
+- `ui/WebviewBridgeHandler.java` - Bridge message parsing and dispatch.
+- `ui/WebviewBrowserController.java` - Browser/resource-server startup and repaint scheduling.
+- `ui/WebviewPanelLifecycle.java` - Selection transitions, cancellation, and disposal.
+- `ui/WebviewPrListController.java` and `WebviewPrSelectionController.java` - PR list loading and
+  PR selection/detail loading.
+- `ui/WebviewReviewController.java` - Review generation, streaming, and draft mutations.
+- `ui/WebviewWorktreeManager.java` - Worktree acquisition, reuse, cleanup, and per-PR Claude service
+  resolution (`resolve`, behind `WebviewPanel.resolvePrClaudeService`).
+- `ui/WebviewChatHost.java`, `WebviewDeepHost.java` - Host adapters for the chat and deep-review controllers.
+- `ui/WebviewThemeController.java` - Theme publication.
+- `ui/WebviewPanelSupport.java` - Shared panel helpers and provider readiness.
 - `ui/WebviewBridgeMessages.java` - Java records for bridge message payloads.
 - `ui/PrChatController.java` - PR chat state, ask/clear/cancel, and chat reset.
 - `ui/DeepReviewController.java` - IntelliJ-assisted review setup, continuation, maintenance, and
@@ -259,8 +280,12 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
   unverified provider sign-in uses localized, neutral information styling.
 - `src/components/Setup/` - App-level prerequisite recovery UI and the setup reason/action matrix.
 - `src/components/ReviewPane/ReviewPane.tsx` - Review feature composition root and public component API.
-- `src/components/ReviewPane/useReviewController.ts` - PR-scoped bridge events, autosave, mutation
-  watchdogs, review commands, chat sizing, and the view-model/action contract.
+- `src/components/ReviewPane/useReviewController.ts` - Review commands and the view-model/action
+  contract, composed from `useReviewHostMessages` (PR-scoped bridge events), `useReviewAutosave`
+  (autosave and mutation watchdogs), `useReviewGeneration` (normal/assisted/chunked generation), and
+  `useReviewChatEffects` (chat sizing/selection); pure types and helpers in `reviewControllerState.ts`.
+- `src/components/DiffViewer/DiffViewer.tsx` - Diff viewer composition; rows in `DiffViewerRows.tsx`,
+  line mapping/comment grouping in `diffHelpers.ts`, highlighting in `diffSyntax.ts`.
 - `src/components/ReviewPane/reviewState.ts` - Pure review lifecycle transitions and state selectors.
 - `src/components/ReviewPane/reviewActivity.ts`, `ReviewActivityLog.tsx` - Timestamped review-generation
   lifecycle/tool activity state and its expandable, privacy-safe timeline.
@@ -323,9 +348,18 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
 
 VS Code host integration. All GitHub and review generation routes through the Java sidecar.
 
-- `src/extension.ts` - Activation, commands, webview bridge, and host lifecycle.
+- `src/extension.ts` - Activation, commands, webview bridge switch (`setupMessageBridge`), and host lifecycle.
+- `src/prHandlers.ts` and `reviewHandlers.ts` - Bridge handlers for PR selection/refresh/instructions/deep
+  review, and for review generation/drafts/submission/chat. `extensionTypes.ts` holds shared state types.
+- `src/worktree.ts` - Worktree lifecycle (`resolveWorkingDir`/`clearWorktree`).
+- `src/notificationPoller.ts` - `PRNotificationPoller`.
+- `src/copilotModel.ts` - `selectCopilotModel` command.
 - `src/draftRecovery.ts` - Token-free `globalState` snapshots used until GitHub confirms a draft save.
-- `src/sidecar.ts` - Mandatory JSON-RPC client and notification dispatch.
+- `src/sidecar.ts` - Re-export facade for the mandatory JSON-RPC client (`SidecarClient`).
+- `src/sidecarGitHubClient.ts` and `sidecarReviewClient.ts` - Client methods per engine.
+- `src/sidecarTransport.ts` - Process lifecycle, recovery, and notification dispatch.
+- `src/sidecarProtocol.ts`, `sidecarTypes.ts`, `sidecarFraming.ts`, `sidecarJar.ts` - Capability
+  declarations and parsers, DTOs, framing, and JAR resolution.
 - `src/models.ts` - Host-neutral PR/review view models.
 - `src/claude.ts` - Claude preflight and remaining mirrored prompt helpers.
 - `src/copilot.ts` - Copilot model discovery and binary preflight.
@@ -367,12 +401,12 @@ enrichment through `PrReviewStatusService`; see
 
 ### VS Code transport
 
-`extension.ts` -> `sidecar.ts` -> stdio framing -> `StdioJsonRpcServer` -> engine API. IntelliJ skips
+`extension.ts`/handlers -> `sidecar*Client.ts` -> `sidecarTransport.ts` -> stdio framing -> `StdioJsonRpcServer` -> engine API. IntelliJ skips
 this adapter and calls the same engine implementations in-process.
 
 ### Settings
 
-IntelliJ: `PluginSettingsConfigurable` -> `PluginSettingsComponent` -> `PluginSettings`.
+IntelliJ: `PluginSettingsConfigurable` -> `PluginSettingsComponent` (+ `settings/` editors) -> `PluginSettings`.
 
 VS Code: configuration contributions in `package.json` -> `settings.ts`/`settingsView.ts` ->
 configuration reads in `extension.ts`.

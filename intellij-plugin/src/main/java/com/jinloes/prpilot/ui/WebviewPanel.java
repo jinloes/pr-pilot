@@ -2,94 +2,53 @@ package com.jinloes.prpilot.ui;
 
 import static com.intellij.openapi.application.ApplicationManager.getApplication;
 import static com.jinloes.prpilot.ui.WebviewPrSupport.bridgePrKey;
-import static com.jinloes.prpilot.ui.WebviewPrSupport.healthyDraftEntries;
-import static com.jinloes.prpilot.ui.WebviewPrSupport.hydratePullRequest;
 import static com.jinloes.prpilot.ui.WebviewPrSupport.isSamePr;
-import static com.jinloes.prpilot.ui.WebviewPrSupport.matchesPrRequest;
-import static com.jinloes.prpilot.ui.WebviewPrSupport.mergeActivatedPr;
-import static com.jinloes.prpilot.ui.WebviewPrSupport.normalizeSearchScope;
-import static com.jinloes.prpilot.ui.WebviewPrSupport.saveRepositoryInstructionsReply;
-import static com.jinloes.prpilot.ui.WebviewPrSupport.toWebviewPr;
-import static com.jinloes.prpilot.ui.WebviewPrSupport.worktreeKey;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.intellij.ide.BrowserUtil;
 import com.intellij.ide.ui.LafManagerListener;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
 import com.intellij.util.Alarm;
-import com.intellij.util.ui.UIUtil;
-import com.jinloes.prpilot.model.CiAnnotation;
 import com.jinloes.prpilot.model.LineComment;
-import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
-import com.jinloes.prpilot.review.ClaudeService;
-import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.ProviderSetupProbe;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
-import com.jinloes.prpilot.review.ReviewPrompts;
 import com.jinloes.prpilot.services.DraftRecoveryStore;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.services.PendingReviewIndex;
 import com.jinloes.prpilot.services.PendingReviewIndexNotifications;
-import com.jinloes.prpilot.services.UserFacingErrors;
 import com.jinloes.prpilot.settings.PluginSettings;
-import com.jinloes.prpilot.settings.PluginSettingsConfigurable;
-import com.jinloes.prpilot.settings.RepositoryReviewInstructions;
-import com.jinloes.prpilot.sidecar.pr.PrDetail;
 import com.jinloes.prpilot.ui.DeepReviewController.DeepInvocation;
 import com.jinloes.prpilot.ui.DeepReviewController.DeepPending;
 import com.jinloes.prpilot.ui.DeepReviewController.DeepReviewIo;
 import com.jinloes.prpilot.ui.DeepReviewController.FreshDeepPr;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.ActivatePrMsg;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftLoadedMsg;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftLoadingMsg;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftSaveErrorMsg;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftSavedMsg;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.ErrorMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.GeneratedReview;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrDraftStatusMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrListMessage;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrListStatus;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrWorktree;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ProviderReadinessDto;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewChunkMsg;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewGeneratingMsg;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewGenerationSettings;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewResultMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.SetupRequiredMsg;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.SimpleMsg;
-import com.jinloes.prpilot.ui.WebviewBridgeMessages.ThemeChangedMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.WebviewPr;
-import com.jinloes.prpilot.ui.WorktreeCoordinator.WorktreeLease;
-import com.sun.net.httpserver.HttpServer;
-import java.awt.BorderLayout;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
-import javax.swing.UIManager;
 import org.apache.commons.lang3.StringUtils;
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
@@ -118,9 +77,9 @@ public class WebviewPanel implements Disposable {
     /** Maximum PRs shown in the list. The search over-fetches by one to detect truncation. */
     static final int PR_SEARCH_LIMIT = 50;
 
-    private static final int LAYOUT_REPAINT_DELAY_MS = 50;
+    static final int LAYOUT_REPAINT_DELAY_MS = 50;
 
-    private record LifecycleTransition(
+    record LifecycleTransition(
             long selectionRevision,
             IntellijClaudeService reviewService,
             IntellijClaudeService chatService,
@@ -160,31 +119,30 @@ public class WebviewPanel implements Disposable {
 
     // --- Infrastructure ---
 
-    private final WebviewResourceServer resourceServer = new WebviewResourceServer();
-    private volatile String webviewUrl;
-    private volatile boolean disposed;
-    private final JBCefBrowser browser;
-    private final JPanel browserPanel;
-    private final JBCefJSQuery bridgeQuery;
-    private final Alarm layoutRepaintAlarm;
+    final WebviewResourceServer resourceServer = new WebviewResourceServer();
+    volatile String webviewUrl;
+    volatile boolean disposed;
+    final JBCefBrowser browser;
+    final JPanel browserPanel;
+    final JBCefJSQuery bridgeQuery;
+    final Alarm layoutRepaintAlarm;
     private final ObjectMapper mapper =
             new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-    private final PendingReviewIndex pendingIndex = new PendingReviewIndex();
-    private final Runnable pendingIndexRecoveryAction = this::reload;
-    private PendingReviewIndexNotifications.Registration pendingIndexRecoveryRegistration =
-            () -> {};
-    private final IntellijClaudeService claudeService;
+    final PendingReviewIndex pendingIndex = new PendingReviewIndex();
+    final Runnable pendingIndexRecoveryAction = this::reload;
+    PendingReviewIndexNotifications.Registration pendingIndexRecoveryRegistration = () -> {};
+    final IntellijClaudeService claudeService;
     private final GitWorktreeService worktreeService = new GitWorktreeService();
-    private final com.jinloes.prpilot.review.SemanticReviewService semanticReviews =
+    final com.jinloes.prpilot.review.SemanticReviewService semanticReviews =
             new com.jinloes.prpilot.review.SemanticReviewService();
 
-    private final IntellijGitHubService ghSvc;
-    private final DraftRecoveryStore draftRecoveryStore;
-    private final Project project;
+    final IntellijGitHubService ghSvc;
+    final DraftRecoveryStore draftRecoveryStore;
+    final Project project;
     private final Consumer<Object> testMessageSink;
 
     /** Experimental opt-in; while off, the webview hides the IntelliJ-assisted controls. */
-    private final java.util.function.BooleanSupplier intellijAssistedEnabled;
+    final java.util.function.BooleanSupplier intellijAssistedEnabled;
 
     private final java.util.function.BinaryOperator<String> repositoryInstructionsLookup;
 
@@ -195,36 +153,43 @@ public class WebviewPanel implements Disposable {
      * Points to the service that owns the currently running review process (may be a per-worktree
      * instance). Reset to {@code claudeService} after every review.
      */
-    private volatile IntellijClaudeService activeReviewService;
+    volatile IntellijClaudeService activeReviewService;
 
-    private volatile ReviewProvider activeReviewProvider = ReviewProvider.CLAUDE;
+    volatile ReviewProvider activeReviewProvider = ReviewProvider.CLAUDE;
 
-    private volatile List<PullRequest> cachedPRs = List.of();
-    private volatile PullRequest activePR = null;
-    private volatile ReviewResult lastResult = null;
+    volatile List<PullRequest> cachedPRs = List.of();
+    volatile PullRequest activePR = null;
+    volatile ReviewResult lastResult = null;
 
-    private final Map<String, GeneratedReview> generatedReviews = new ConcurrentHashMap<>();
-    private final AtomicLong generationSequence = new AtomicLong();
-    private volatile long activeGenerationId;
-    private volatile String activeReviewOperationId;
+    final Map<String, GeneratedReview> generatedReviews = new ConcurrentHashMap<>();
+    final AtomicLong generationSequence = new AtomicLong();
+    volatile long activeGenerationId;
+    volatile String activeReviewOperationId;
 
-    private final ReviewOutcomeLog outcomeLog = new ReviewOutcomeLog();
-    private volatile String pendingReviewId = null;
-    private volatile String pendingReviewKey = null;
-    private volatile long selectionRevision = 0;
-    private final Object draftMutationLock = new Object();
-    private volatile String prefetchedDiff = null;
-    private volatile String prefetchedValidationDiff = null;
-    private volatile String prefetchedExistingReviews = null;
-    private final WorktreeCoordinator<PrWorktree> worktrees;
-    private final PrChatController chats;
-    private final DeepReviewController assistedReviews;
+    final ReviewOutcomeLog outcomeLog = new ReviewOutcomeLog();
+    volatile String pendingReviewId = null;
+    volatile String pendingReviewKey = null;
+    volatile long selectionRevision = 0;
+    final Object draftMutationLock = new Object();
+    volatile String prefetchedDiff = null;
+    volatile String prefetchedValidationDiff = null;
+    volatile String prefetchedExistingReviews = null;
+    final WebviewWorktreeManager worktreeManager;
+    final PrChatController chats;
+    final DeepReviewController assistedReviews;
 
-    private volatile String prStateFilter = "open";
-    private volatile String searchScope = "currentRepo";
+    volatile String prStateFilter = "open";
+    volatile String searchScope = "currentRepo";
 
-    private Consumer<PullRequest> onPRSelected = pr -> {};
-    private Runnable onPageReady = () -> {};
+    Consumer<PullRequest> onPRSelected = pr -> {};
+    Runnable onPageReady = () -> {};
+    private final WebviewBridgeHandler bridgeHandler;
+    private final WebviewPrSelectionController selectionController;
+    private final WebviewReviewController reviewController;
+    private final WebviewPrListController prListController;
+    private final WebviewBrowserController browserController;
+    private final WebviewThemeController themeController;
+    private final WebviewPanelLifecycle lifecycleController;
 
     public WebviewPanel(Project project) {
         this.project = project;
@@ -237,6 +202,13 @@ public class WebviewPanel implements Disposable {
         this.repositoryInstructionsLookup =
                 (owner, repo) ->
                         PluginSettings.getInstance().getRepositoryReviewInstructions(owner, repo);
+        this.bridgeHandler = new WebviewBridgeHandler(this, mapper);
+        this.selectionController = new WebviewPrSelectionController(this);
+        this.reviewController = new WebviewReviewController(this);
+        this.prListController = new WebviewPrListController(this);
+        this.browserController = new WebviewBrowserController(this);
+        this.themeController = new WebviewThemeController(this);
+        this.lifecycleController = new WebviewPanelLifecycle(this);
         DeepReviewIo io =
                 new DeepReviewIo() {
                     public com.jinloes.prpilot.review.SemanticReviewService.Preparation prepare(
@@ -304,15 +276,17 @@ public class WebviewPanel implements Disposable {
                 };
         this.claudeService = new IntellijClaudeService(project.getBasePath());
         this.activeReviewService = this.claudeService;
-        this.chats = new PrChatController(this, new ChatHost());
+        this.chats = new PrChatController(this, new WebviewChatHost(this));
         this.assistedReviews =
                 new DeepReviewController(
                         this,
-                        new DeepHost(),
+                        new WebviewDeepHost(this),
                         io,
                         job -> getApplication().executeOnPooledThread(job),
                         this::readDeepSettingsIdentity);
-        this.worktrees = new WorktreeCoordinator<>();
+        this.worktreeManager =
+                new WebviewWorktreeManager(
+                        project.getBasePath(), ghSvc, worktreeService, new WorktreeCoordinator<>());
         browser = JBCefBrowser.createBuilder().setOffScreenRendering(true).build();
         browserPanel = createBrowserHostPanel(browser.getComponent());
         bridgeQuery = JBCefJSQuery.create((JBCefBrowserBase) browser);
@@ -402,650 +376,78 @@ public class WebviewPanel implements Disposable {
         ghSvc = null;
         draftRecoveryStore = null;
         claudeService = null;
-        worktrees = new WorktreeCoordinator<>();
-        chats = new PrChatController(this, new ChatHost());
-        assistedReviews = new DeepReviewController(this, new DeepHost(), io, background, settings);
+        worktreeManager =
+                new WebviewWorktreeManager(
+                        null, null, worktreeService, new WorktreeCoordinator<>());
+        chats = new PrChatController(this, new WebviewChatHost(this));
+        assistedReviews =
+                new DeepReviewController(this, new WebviewDeepHost(this), io, background, settings);
         activePR = selected;
         testMessageSink = messages;
         this.intellijAssistedEnabled = intellijAssistedEnabled;
         this.repositoryInstructionsLookup = (owner, repo) -> "";
+        this.bridgeHandler = new WebviewBridgeHandler(this, mapper);
+        this.selectionController = new WebviewPrSelectionController(this);
+        this.reviewController = new WebviewReviewController(this);
+        this.prListController = new WebviewPrListController(this);
+        this.browserController = new WebviewBrowserController(this);
+        this.themeController = new WebviewThemeController(this);
+        this.lifecycleController = new WebviewPanelLifecycle(this);
     }
 
     private void startServerAndLoad() {
-        HttpServer server = resourceServer.tryStart();
-        if (disposed) {
-            if (server != null) {
-                server.stop(0);
-            }
-            return;
-        }
-        resourceServer.adopt(server);
-        if (server == null) {
-            getApplication()
-                    .invokeLater(
-                            () -> {
-                                if (!disposed) {
-                                    browser.loadHTML(
-                                            "<html><body style='color:#e8a030;"
-                                                    + "background:#0a0805;"
-                                                    + "font-family:monospace'>"
-                                                    + "<p>Could not start webview server</p>"
-                                                    + "</body></html>");
-                                }
-                            });
-            return;
-        }
-        String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
-        webviewUrl = url;
-        log.info("Loading webview from {}", url);
-        getApplication()
-                .invokeLater(
-                        () -> {
-                            if (!disposed) {
-                                browser.loadURL(url);
-                            }
-                        });
+        browserController.startServerAndLoad();
     }
 
     /** Whether a finished main-frame load is the served webview rather than a placeholder. */
     static boolean isWebviewPage(String loadedUrl, String webviewUrl) {
-        return webviewUrl != null && loadedUrl != null && loadedUrl.startsWith(webviewUrl);
+        return WebviewPanelSupport.isWebviewPage(loadedUrl, webviewUrl);
     }
 
     static JPanel createBrowserHostPanel(JComponent browserComponent) {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.add(browserComponent, BorderLayout.CENTER);
-        return panel;
+        return WebviewPanelSupport.createBrowserHostPanel(browserComponent);
     }
 
     private void injectBridge(CefBrowser cefBrowser) {
-        String js =
-                "window.cefQuery = function(opts) { " + bridgeQuery.inject("opts.request") + " };";
-        cefBrowser.executeJavaScript(js, cefBrowser.getURL(), 0);
+        browserController.injectBridge(cefBrowser);
     }
 
-    private void scheduleWebviewLayoutRepaint() {
-        getApplication()
-                .invokeLater(
-                        () -> {
-                            if (disposed) {
-                                return;
-                            }
-                            layoutRepaintAlarm.cancelAllRequests();
-                            layoutRepaintAlarm.addRequest(
-                                    () -> {
-                                        if (disposed) {
-                                            return;
-                                        }
-                                        CefBrowser cefBrowser = browser.getCefBrowser();
-                                        if (cefBrowser != null) {
-                                            cefBrowser.invalidate();
-                                        }
-                                        browser.getComponent().revalidate();
-                                        browser.getComponent().repaint();
-                                        browserPanel.revalidate();
-                                        browserPanel.repaint();
-                                    },
-                                    LAYOUT_REPAINT_DELAY_MS);
-                        });
+    void scheduleWebviewLayoutRepaint() {
+        browserController.scheduleLayoutRepaint();
     }
 
     void handleIncoming(String json) {
-        try {
-            var node = mapper.readTree(json);
-            if (!isValidIncomingMessage(node)) {
-                log.warn("Invalid bridge message payload: {}", json);
-                return;
-            }
-            String type = node.path("type").asText();
-            int number = node.path("number").asInt();
-            String owner = node.path("owner").asText();
-            String repo = node.path("repo").asText();
-
-            switch (type) {
-                case "selectPR" -> handleSelectPR(number, owner, repo);
-                case "refreshPRs" -> {
-                    String state = node.path("state").asText("open");
-                    prStateFilter = StringUtils.defaultIfBlank(state, "open");
-                    String scope = node.path("searchScope").asText("");
-                    if (StringUtils.isNotBlank(scope)) {
-                        searchScope = normalizeSearchScope(scope);
-                    } else if (node.path("assignedToMe").asBoolean(false)) {
-                        searchScope = "assigned";
-                    } else if (node.path("reviewRequested").asBoolean(false)) {
-                        searchScope = "reviewRequested";
-                    }
-                    getApplication().invokeLater(onPageReady);
-                }
-                case "openUrl" -> {
-                    String url = node.path("url").asText();
-                    if (StringUtils.isNotBlank(url) && url.startsWith("https://")) {
-                        getApplication().invokeLater(() -> BrowserUtil.browse(url));
-                    }
-                }
-                case "openSettings" ->
-                        getApplication()
-                                .invokeLater(
-                                        () ->
-                                                ShowSettingsUtil.getInstance()
-                                                        .showSettingsDialog(
-                                                                project,
-                                                                PluginSettingsConfigurable.class));
-                case "runAuthLogin" ->
-                        getApplication()
-                                .invokeLater(
-                                        () ->
-                                                BrowserUtil.browse(
-                                                        "https://cli.github.com/manual/gh_auth_login"));
-                case "webviewLayoutChanged" -> scheduleWebviewLayoutRepaint();
-                case "generateReview" -> {
-                    if (node.path("intellijAssisted").asBoolean(false)) {
-                        assistedReviews.prepare(node.deepCopy());
-                    } else {
-                        synchronized (this) {
-                            assistedReviews.invalidateLocked();
-                        }
-                        handleGenerateReview(
-                                number,
-                                owner,
-                                repo,
-                                node.path("diff").asText(""),
-                                node.path("chunkedReview").asBoolean(false),
-                                node.path("focusAreas").asText(""),
-                                node.path("customInstructions").asText(""),
-                                node.path("operationId").asText(),
-                                null);
-                    }
-                }
-                case "continueDeepReview" -> assistedReviews.continueReview(node.deepCopy());
-                case "listDeepReviews", "cleanupDeepReview" ->
-                        assistedReviews.maintenance(node.deepCopy());
-                case "cancelReview" -> cancelActiveReview(node.path("operationId").asText());
-                case "saveDraft" -> {
-                    long saveId = node.path("saveId").asLong();
-                    ReviewResult bridgeResult = null;
-                    ReviewResult bridgeGeneratedResult = null;
-                    List<LineComment> bridgeOrphans = List.of();
-                    try {
-                        var resultNode = node.path("result");
-                        if (!resultNode.isMissingNode()) {
-                            bridgeResult = mapper.treeToValue(resultNode, ReviewResult.class);
-                        }
-                        var generatedResultNode = node.path("generatedResult");
-                        if (!generatedResultNode.isMissingNode()) {
-                            bridgeGeneratedResult =
-                                    mapper.treeToValue(generatedResultNode, ReviewResult.class);
-                        }
-                        var orphansNode = node.path("orphans");
-                        if (orphansNode.isArray()) {
-                            List<LineComment> parsed = new ArrayList<>();
-                            for (var el : orphansNode) {
-                                parsed.add(mapper.treeToValue(el, LineComment.class));
-                            }
-                            bridgeOrphans = parsed;
-                        }
-                    } catch (Exception e) {
-                        log.warn(
-                                "saveDraft: failed to parse review data from bridge: {}",
-                                e.getMessage());
-                    }
-                    final ReviewResult finalResult = bridgeResult;
-                    final ReviewResult finalGeneratedResult = bridgeGeneratedResult;
-                    final List<LineComment> finalOrphans = bridgeOrphans;
-                    getApplication()
-                            .executeOnPooledThread(
-                                    () -> {
-                                        synchronized (draftMutationLock) {
-                                            handleSaveDraft(
-                                                    number,
-                                                    owner,
-                                                    repo,
-                                                    saveId,
-                                                    finalResult,
-                                                    finalGeneratedResult,
-                                                    finalOrphans);
-                                        }
-                                    });
-                }
-                case "submitReview" -> {
-                    String verdict = node.path("verdict").asText();
-                    String comment = node.path("comment").asText("");
-                    getApplication()
-                            .executeOnPooledThread(
-                                    () -> {
-                                        synchronized (draftMutationLock) {
-                                            handleSubmitReview(
-                                                    number, owner, repo, verdict, comment);
-                                        }
-                                    });
-                }
-                case "deleteDraft" ->
-                        getApplication()
-                                .executeOnPooledThread(
-                                        () -> {
-                                            synchronized (draftMutationLock) {
-                                                handleDeleteDraft(number, owner, repo);
-                                            }
-                                        });
-                case "clearChat" -> chats.clear(node.path("operationId").asText());
-                case "cancelChat" -> chats.cancel(node.path("operationId").asText());
-                case "saveRepositoryInstructions" ->
-                        pushMessage(
-                                saveRepositoryInstructionsReply(
-                                        PluginSettings.getInstance(),
-                                        number,
-                                        owner,
-                                        repo,
-                                        node.path("instructions").asText("")));
-                case "askClaude" -> {
-                    String question = node.path("question").asText();
-                    String context = node.path("context").asText("");
-                    String operationId = node.path("operationId").asText();
-                    getApplication()
-                            .executeOnPooledThread(() -> chats.ask(question, context, operationId));
-                }
-                default -> log.warn("Unknown bridge message type: {}", type);
-            }
-        } catch (Exception e) {
-            log.warn("Bridge message error: {}", e.getMessage());
-        }
+        bridgeHandler.handle(json);
     }
 
     static boolean isValidIncomingMessage(JsonNode node) {
-        return BridgeMessageValidator.isValid(node);
+        return WebviewPanelSupport.isValidIncomingMessage(node);
     }
 
     // --- selectPR ---
 
     static PendingReviewLoad loadPendingReview(PendingReviewLoader loader) {
-        try {
-            IntellijGitHubService.PendingReview review = loader.load();
-            return review == null ? PendingReviewLoad.none() : PendingReviewLoad.loaded(review);
-        } catch (Exception e) {
-            return PendingReviewLoad.failed(e);
-        }
+        return WebviewPanelSupport.loadPendingReview(loader);
     }
 
     static Object pendingReviewFailureMessage(String prKey, PendingReviewLoad load) {
-        if (load.status() != PendingReviewLoadStatus.FAILED || load.failure() == null) {
-            throw new IllegalArgumentException("A failed pending-review load is required");
-        }
-        return new ErrorMsg(
-                "reviewError",
-                prKey,
-                UserFacingErrors.forGitHub(load.failure(), "load the pending review"));
+        return WebviewPanelSupport.pendingReviewFailureMessage(prKey, load);
     }
 
-    private void handleSelectPR(int number, String owner, String repo) {
-        String key = bridgePrKey(number, owner, repo);
-        PullRequest pr =
-                cachedPRs.stream()
-                        .filter(
-                                p ->
-                                        p.getNumber() == number
-                                                && p.getOwner().equals(owner)
-                                                && p.getRepo().equals(repo))
-                        .findFirst()
-                        .orElse(null);
-        if (pr == null) {
-            pushMessage(
-                    new DraftLoadedMsg(
-                            "draftLoaded",
-                            key,
-                            "NO_DRAFT",
-                            null,
-                            null,
-                            null,
-                            null,
-                            false,
-                            false,
-                            false,
-                            "Pull request is no longer available. Refresh the pull request list and try again.",
-                            currentProviderReadiness(),
-                            intellijAssistedEnabled.getAsBoolean(),
-                            rememberedRepositoryInstructions(owner, repo)));
-            return;
-        }
-
-        LifecycleTransition transition;
-        synchronized (this) {
-            transition = transitionToSelection(pr);
-        }
-        finishLifecycleTransition(transition);
-        long revision = transition.selectionRevision();
-
-        getApplication()
-                .invokeLater(
-                        () -> {
-                            if (isCurrentSelection(key, revision)) {
-                                onPRSelected.accept(pr);
-                            }
-                        });
-        publishIfCurrentSelection(key, revision, new DraftLoadingMsg("draftLoading", key));
-
-        getApplication()
-                .executeOnPooledThread(
-                        () -> {
-                            // Check local index upfront (no network) so we can prefetch
-                            // the current HEAD SHA in parallel if a staleness check is
-                            // likely to be needed.
-                            Optional<List<PendingReviewIndex.Entry>> localEntries =
-                                    loadHealthyDraftEntries();
-                            if (localEntries.isEmpty()) {
-                                publishIfCurrentSelection(
-                                        key,
-                                        revision,
-                                        new ErrorMsg(
-                                                "reviewError",
-                                                key,
-                                                PendingReviewIndexNotifications.userMessage()));
-                                return;
-                            }
-                            PendingReviewIndex.Entry localEntry =
-                                    localEntries.orElseThrow().stream()
-                                            .filter(
-                                                    e ->
-                                                            e.owner().equals(owner)
-                                                                    && e.repo().equals(repo)
-                                                                    && e.number() == number)
-                                            .findFirst()
-                                            .orElse(null);
-                            String savedHeadSha = localEntry != null ? localEntry.headSha() : "";
-
-                            // All calls are independent — run concurrently so total
-                            // latency is max(each) instead of sum(each).
-                            CompletableFuture<PrDetail> detailFuture =
-                                    CompletableFuture.supplyAsync(
-                                            () -> {
-                                                try {
-                                                    return ghSvc.getPRDetail(owner, repo, number);
-                                                } catch (Exception e) {
-                                                    log.warn(
-                                                            "getPRDetail prefetch failed: {}",
-                                                            e.getMessage());
-                                                    return null;
-                                                }
-                                            });
-
-                            CompletableFuture<PendingReviewLoad> pendingFuture =
-                                    CompletableFuture.supplyAsync(
-                                            () ->
-                                                    loadPendingReview(
-                                                            () ->
-                                                                    ghSvc.loadDraftReview(
-                                                                            owner, repo, number)));
-
-                            CompletableFuture<String> diffFuture =
-                                    CompletableFuture.supplyAsync(
-                                            () -> {
-                                                try {
-                                                    return ghSvc.getPRDiff(owner, repo, number);
-                                                } catch (Exception e) {
-                                                    log.warn(
-                                                            "getPRDiff prefetch failed: {}",
-                                                            e.getMessage());
-                                                    return null;
-                                                }
-                                            });
-
-                            CompletableFuture<String> validationDiffFuture =
-                                    CompletableFuture.supplyAsync(
-                                            () -> {
-                                                try {
-                                                    return ghSvc.getPRDiffFull(owner, repo, number);
-                                                } catch (Exception e) {
-                                                    log.warn(
-                                                            "getPRDiffFull prefetch failed: {}",
-                                                            e.getMessage());
-                                                    return null;
-                                                }
-                                            });
-
-                            CompletableFuture<String> reviewsFuture =
-                                    CompletableFuture.supplyAsync(
-                                            () -> {
-                                                try {
-                                                    return ghSvc.getExistingReviewsSummary(
-                                                            owner, repo, number);
-                                                } catch (Exception e) {
-                                                    log.warn(
-                                                            "getExistingReviewsSummary prefetch"
-                                                                    + " failed: {}",
-                                                            e.getMessage());
-                                                    return "";
-                                                }
-                                            });
-
-                            PrDetail detail = detailFuture.join();
-                            PullRequest hydratedPr = hydratePullRequest(pr, detail);
-                            boolean merged = detail != null && detail.merged();
-                            PendingReviewLoad pendingLoad = pendingFuture.join();
-                            IntellijGitHubService.PendingReview pending = pendingLoad.review();
-                            String fetchedDiff = diffFuture.join();
-                            String fetchedValidationDiff = validationDiffFuture.join();
-                            String fetchedReviews = reviewsFuture.join();
-                            String currentHeadSha =
-                                    detail != null && detail.head() != null
-                                            ? StringUtils.defaultString(detail.head().sha())
-                                            : "";
-                            String effectiveValidationDiff =
-                                    StringUtils.isNotBlank(fetchedValidationDiff)
-                                            ? fetchedValidationDiff
-                                            : fetchedDiff;
-                            ProviderReadinessDto providerReadiness = currentProviderReadiness();
-
-                            synchronized (WebviewPanel.this) {
-                                if (!isCurrentSelectionLocked(key, revision)) {
-                                    return;
-                                }
-                                activePR = hydratedPr;
-                                prefetchedDiff = fetchedDiff;
-                                prefetchedValidationDiff = effectiveValidationDiff;
-                                prefetchedExistingReviews = fetchedReviews;
-                            }
-
-                            if (pendingLoad.status() == PendingReviewLoadStatus.FAILED) {
-                                log.warn(
-                                        "loadDraftReview failed: {}",
-                                        pendingLoad.failure().getMessage());
-                                publishIfCurrentSelection(
-                                        key,
-                                        revision,
-                                        pendingReviewFailureMessage(key, pendingLoad));
-                                return;
-                            }
-
-                            // Delete stale draft on a merged PR, best-effort.
-                            if (merged && pending != null && isCurrentSelection(key, revision)) {
-                                try {
-                                    ghSvc.deleteDraftReview(owner, repo, number, pending.id());
-                                } catch (Exception e) {
-                                    log.warn("deleteDraftReview failed: {}", e.getMessage());
-                                }
-                                pending = null;
-                            }
-
-                            if (merged) {
-                                draftRecoveryStore.clear(key);
-                                synchronized (WebviewPanel.this) {
-                                    if (!isCurrentSelectionLocked(key, revision)) {
-                                        return;
-                                    }
-                                    pendingReviewId = null;
-                                    pendingReviewKey = null;
-                                    lastResult = null;
-                                }
-                                publishIfCurrentSelection(
-                                        key,
-                                        revision,
-                                        new PrDraftStatusMsg(
-                                                "prDraftStatusUpdated",
-                                                number,
-                                                owner,
-                                                repo,
-                                                false));
-                                publishIfCurrentSelection(
-                                        key,
-                                        revision,
-                                        new DraftLoadedMsg(
-                                                "draftLoaded",
-                                                key,
-                                                "MERGED",
-                                                null,
-                                                null,
-                                                fetchedDiff,
-                                                effectiveValidationDiff,
-                                                false,
-                                                false,
-                                                false,
-                                                "PR is merged.",
-                                                providerReadiness,
-                                                intellijAssistedEnabled.getAsBoolean(),
-                                                rememberedRepositoryInstructions(owner, repo)));
-                                return;
-                            }
-
-                            DraftRecoveryStore.Snapshot recovery = draftRecoveryStore.get(key);
-                            if (pending != null || recovery != null) {
-                                boolean stale =
-                                        pending != null
-                                                && StringUtils.isNotBlank(savedHeadSha)
-                                                && !savedHeadSha.equals(currentHeadSha);
-                                ReviewResult restored =
-                                        recovery != null ? recovery.result() : pending.result();
-                                String reviewId = pending != null ? pending.id() : null;
-                                ReviewResultDto dto = ReviewMapper.INSTANCE.toDto(restored);
-                                synchronized (WebviewPanel.this) {
-                                    if (!isCurrentSelectionLocked(key, revision)) {
-                                        return;
-                                    }
-                                    pendingReviewId = reviewId;
-                                    pendingReviewKey =
-                                            StringUtils.isNotBlank(reviewId) ? key : null;
-                                    lastResult = restored;
-                                }
-                                publishIfCurrentSelection(
-                                        key,
-                                        revision,
-                                        new PrDraftStatusMsg(
-                                                "prDraftStatusUpdated", number, owner, repo, true));
-                                publishIfCurrentSelection(
-                                        key,
-                                        revision,
-                                        new DraftLoadedMsg(
-                                                "draftLoaded",
-                                                key,
-                                                "DRAFT_PRESENT",
-                                                reviewId,
-                                                dto,
-                                                fetchedDiff,
-                                                effectiveValidationDiff,
-                                                stale,
-                                                pending != null && pending.importedFromGitHub(),
-                                                recovery != null,
-                                                recovery != null
-                                                        ? "Recovered a local draft snapshot; save is pending."
-                                                        : "Loaded pending draft review.",
-                                                providerReadiness,
-                                                intellijAssistedEnabled.getAsBoolean(),
-                                                rememberedRepositoryInstructions(owner, repo)));
-                                return;
-                            }
-
-                            synchronized (WebviewPanel.this) {
-                                if (!isCurrentSelectionLocked(key, revision)) {
-                                    return;
-                                }
-                                pendingReviewId = null;
-                                pendingReviewKey = null;
-                                lastResult = null;
-                            }
-                            publishIfCurrentSelection(
-                                    key,
-                                    revision,
-                                    new PrDraftStatusMsg(
-                                            "prDraftStatusUpdated", number, owner, repo, false));
-                            publishIfCurrentSelection(
-                                    key,
-                                    revision,
-                                    new DraftLoadedMsg(
-                                            "draftLoaded",
-                                            key,
-                                            "NO_DRAFT",
-                                            null,
-                                            null,
-                                            fetchedDiff,
-                                            effectiveValidationDiff,
-                                            false,
-                                            false,
-                                            false,
-                                            "",
-                                            providerReadiness,
-                                            intellijAssistedEnabled.getAsBoolean(),
-                                            rememberedRepositoryInstructions(owner, repo)));
-                        });
+    void handleSelectPR(int number, String owner, String repo) {
+        selectionController.handleSelectPR(number, owner, repo);
     }
 
-    private LifecycleTransition transitionToSelection(PullRequest pr) {
-        IntellijClaudeService reviewService = activeReviewService;
-        ReviewProvider reviewProvider = activeReviewProvider;
-        String reviewOperationId = activeReviewOperationId;
-        activeReviewService = claudeService;
-        activeReviewProvider = ReviewProvider.CLAUDE;
-        activeReviewOperationId = null;
-        activeGenerationId = generationSequence.incrementAndGet();
-        PrChatController.ChatReset chat = chats.resetLocked();
-        PrWorktree worktree = worktrees.clear();
-
-        boolean samePullRequest =
-                activePR != null
-                        && activePR.getNumber() == pr.getNumber()
-                        && StringUtils.equals(activePR.getOwner(), pr.getOwner())
-                        && StringUtils.equals(activePR.getRepo(), pr.getRepo());
-        activePR = pr;
-        if (!samePullRequest) {
-            lastResult = null;
-            pendingReviewId = null;
-            pendingReviewKey = null;
-        }
-        prefetchedDiff = null;
-        prefetchedValidationDiff = null;
-        prefetchedExistingReviews = null;
-        return new LifecycleTransition(
-                ++selectionRevision,
-                reviewService,
-                chat.service(),
-                reviewProvider,
-                chat.provider(),
-                reviewOperationId,
-                chat.operationId(),
-                worktree);
+    LifecycleTransition transitionToSelection(PullRequest pr) {
+        return lifecycleController.transitionToSelection(pr);
     }
 
-    private void finishLifecycleTransition(LifecycleTransition transition) {
-        if (transition.reviewOperationId() != null) {
-            transition.reviewService().cancelCurrentRequest(transition.reviewProvider());
-        }
-        if (transition.chatOperationId() != null) {
-            transition.chatService().cancelCurrentRequest(transition.chatProvider());
-        }
-        removeWorktreeAsync(transition.worktree());
+    void finishLifecycleTransition(LifecycleTransition transition) {
+        lifecycleController.finishLifecycleTransition(transition);
     }
 
-    private void cancelActiveReview(String operationId) {
-        IntellijClaudeService service;
-        ReviewProvider provider;
-        synchronized (this) {
-            assistedReviews.onReviewCancelledLocked(operationId);
-            if (!StringUtils.equals(activeReviewOperationId, operationId)) return;
-            activeGenerationId = generationSequence.incrementAndGet();
-            service = activeReviewService;
-            provider = activeReviewProvider;
-            activeReviewService = claudeService;
-            activeReviewProvider = ReviewProvider.CLAUDE;
-            activeReviewOperationId = null;
-        }
-        if (service != null) service.cancelCurrentRequest(provider);
+    void cancelActiveReview(String operationId) {
+        lifecycleController.cancelActiveReview(operationId);
     }
 
     // --- generateReview ---
@@ -1072,7 +474,7 @@ public class WebviewPanel implements Disposable {
         return new FreshDeepPr(after, diff);
     }
 
-    private void handleGenerateReview(
+    void handleGenerateReview(
             int number,
             String owner,
             String repo,
@@ -1081,11 +483,11 @@ public class WebviewPanel implements Disposable {
             String focus,
             String custom,
             String operationId) {
-        handleGenerateReview(
-                number, owner, repo, overrideDiff, chunkedReview, focus, custom, operationId, null);
+        reviewController.handleGenerateReview(
+                number, owner, repo, overrideDiff, chunkedReview, focus, custom, operationId);
     }
 
-    private void handleGenerateReview(
+    void handleGenerateReview(
             int number,
             String owner,
             String repo,
@@ -1095,472 +497,42 @@ public class WebviewPanel implements Disposable {
             String overrideCustomInstructions,
             String operationId,
             DeepInvocation deep) {
-        String key = bridgePrKey(number, owner, repo);
-        final PullRequest pr;
-        final long reviewRevision;
-        synchronized (this) {
-            pr = activePR;
-            reviewRevision = selectionRevision;
-        }
-        if (!matchesPrRequest(pr, number, owner, repo)) {
-            pushMessage(new ErrorMsg("reviewError", key, "PR not found."));
-            return;
-        }
-
-        PluginSettings settings = PluginSettings.getInstance();
-        ReviewGenerationSettings generationSettings =
-                new ReviewGenerationSettings(
-                        IntellijClaudeService.snapshotReviewRuntimeSettings(),
-                        settings.getResolvedReviewFocusAreas(),
-                        settings.getResolvedReviewCustomInstructions(),
-                        List.copyOf(settings.getResolvedReviewGuidanceGlobs()),
-                        settings.getReviewRulesDirectory(),
-                        settings.getRepositoryReviewInstructions(owner, repo));
-        long generationId;
-        IntellijClaudeService previousReviewService;
-        ReviewProvider previousReviewProvider;
-        synchronized (this) {
-            if (!isCurrentSelectionLocked(key, reviewRevision)) {
-                return;
-            }
-            generationId = generationSequence.incrementAndGet();
-            previousReviewService = activeReviewService;
-            previousReviewProvider = activeReviewProvider;
-            activeGenerationId = generationId;
-            activeReviewService = claudeService;
-            activeReviewProvider = generationSettings.runtime().provider();
-            activeReviewOperationId = operationId;
-        }
-        previousReviewService.cancelCurrentRequest(previousReviewProvider);
-
-        // Provider preflight: fail fast with actionable guidance instead of a raw CLI spawn error
-        // when the configured review provider's binary isn't installed/resolvable.
-        ReviewProvider provider = generationSettings.runtime().provider();
-        if (!isProviderBinaryAvailable(provider)) {
-            pushMessage(
-                    new ErrorMsg(
-                            "reviewError",
-                            key,
-                            UserFacingErrors.forProviderNotInstalled(provider)));
-            synchronized (this) {
-                if (isCurrentGenerationLocked(key, reviewRevision, generationId)) {
-                    activeReviewService = claudeService;
-                    activeReviewProvider = ReviewProvider.CLAUDE;
-                    activeReviewOperationId = null;
-                }
-            }
-            return;
-        }
-
-        // Dispatch all blocking work to a pooled thread so the JCEF bridge returns immediately
-        // and status messages can flow during the network-fetch phase.
-        getApplication()
-                .executeOnPooledThread(
-                        () -> {
-                            if (!isCurrentGeneration(key, reviewRevision, generationId)) {
-                                return;
-                            }
-                            // Atomically snapshot prefetched data to prevent check-then-act
-                            // races with a concurrent handleSelectPR on the JCEF bridge thread.
-                            String snapshotDiff;
-                            String snapshotValidationDiff;
-                            String snapshotReviews;
-                            PullRequest promptPr;
-                            synchronized (WebviewPanel.this) {
-                                if (!isCurrentGenerationLocked(key, reviewRevision, generationId)) {
-                                    return;
-                                }
-                                promptPr = activePR;
-                                snapshotDiff = prefetchedDiff;
-                                snapshotValidationDiff = prefetchedValidationDiff;
-                                snapshotReviews = prefetchedExistingReviews;
-                            }
-
-                            // Reuse prefetched diff; fall back to live fetch only if stale.
-                            String diff;
-                            if (StringUtils.isNotBlank(overrideDiff)) {
-                                diff = overrideDiff;
-                            } else if (StringUtils.isNotBlank(snapshotDiff)) {
-                                diff = snapshotDiff;
-                            } else {
-                                publishIfCurrentGeneration(
-                                        key,
-                                        reviewRevision,
-                                        generationId,
-                                        new ReviewGeneratingMsg(
-                                                "reviewGenerating", key, "Fetching diff…"));
-                                try {
-                                    diff = ghSvc.getPRDiff(owner, repo, number);
-                                } catch (Exception e) {
-                                    publishIfCurrentGeneration(
-                                            key,
-                                            reviewRevision,
-                                            generationId,
-                                            new ErrorMsg(
-                                                    "reviewError",
-                                                    key,
-                                                    UserFacingErrors.forGitHub(
-                                                            e, "load the PR diff")));
-                                    return;
-                                }
-                            }
-
-                            String validationDiff;
-                            if (StringUtils.isNotBlank(snapshotValidationDiff)) {
-                                validationDiff = snapshotValidationDiff;
-                            } else {
-                                try {
-                                    validationDiff = ghSvc.getPRDiffFull(owner, repo, number);
-                                } catch (Exception e) {
-                                    log.warn(
-                                            "getPRDiffFull failed; falling back to truncated diff: {}",
-                                            e.getMessage());
-                                    validationDiff = diff;
-                                }
-                            }
-
-                            // Reuse prefetched existing reviews; fall back to live fetch only if
-                            // stale.
-                            String existingReviews;
-                            if (snapshotReviews != null) {
-                                existingReviews = snapshotReviews;
-                            } else {
-                                try {
-                                    existingReviews =
-                                            ghSvc.getExistingReviewsSummary(owner, repo, number);
-                                } catch (Exception e) {
-                                    log.warn(
-                                            "getExistingReviewsSummary failed: {}", e.getMessage());
-                                    existingReviews = "";
-                                }
-                            }
-
-                            // Prompt context. Each of these is additive: a failure degrades the
-                            // prompt by one section and must never fail the review, so unlike the
-                            // diff none of them abort the flow.
-                            String ciStatus = "";
-                            List<CiAnnotation> ciAnnotations = List.of();
-                            String baseSha = "";
-                            try {
-                                IntellijGitHubService.PRRevisions revisions =
-                                        ghSvc.getPRRevisions(owner, repo, number);
-                                baseSha = revisions.baseSha();
-                                String headSha = revisions.headSha();
-                                if (StringUtils.isNotBlank(headSha)) {
-                                    IntellijGitHubService.CheckContext checks =
-                                            ghSvc.getCheckContext(owner, repo, headSha);
-                                    ciStatus = checks.summary();
-                                    ciAnnotations = checks.annotations();
-                                }
-                            } catch (Exception e) {
-                                log.warn("getCheckContext failed: {}", e.getMessage());
-                            }
-                            IntellijGitHubService.CommitContext commitContext =
-                                    new IntellijGitHubService.CommitContext("", List.of());
-                            try {
-                                commitContext = ghSvc.getCommitContext(owner, repo, number);
-                            } catch (Exception e) {
-                                log.warn("getCommitContext failed: {}", e.getMessage());
-                            }
-                            String linkedIssue = "";
-                            try {
-                                linkedIssue =
-                                        ghSvc.getLinkedIssueSummary(
-                                                owner,
-                                                repo,
-                                                promptPr.getBody(),
-                                                commitContext.closingIssueNumbers());
-                            } catch (Exception e) {
-                                log.warn("getLinkedIssueSummary failed: {}", e.getMessage());
-                            }
-
-                            publishIfCurrentGeneration(
-                                    key,
-                                    reviewRevision,
-                                    generationId,
-                                    new ReviewGeneratingMsg(
-                                            "reviewGenerating", key, "Preparing PR branch…"));
-                            IntellijClaudeService reviewService;
-                            try {
-                                reviewService =
-                                        deep == null
-                                                ? resolvePrClaudeService(promptPr)
-                                                : new IntellijClaudeService(
-                                                        deep.pending().preparation().worktree());
-                            } catch (Exception e) {
-                                log.warn(
-                                        "Worktree resolution for PR #{} failed: {}",
-                                        number,
-                                        e.getMessage());
-                                synchronized (WebviewPanel.this) {
-                                    if (isCurrentGenerationLocked(
-                                            key, reviewRevision, generationId)) {
-                                        activeReviewService = claudeService;
-                                        activeReviewProvider = ReviewProvider.CLAUDE;
-                                        activeReviewOperationId = null;
-                                    }
-                                }
-                                publishIfCurrentGeneration(
-                                        key,
-                                        reviewRevision,
-                                        generationId,
-                                        new ErrorMsg(
-                                                "reviewError",
-                                                key,
-                                                "Unable to create an isolated pull request worktree."
-                                                        + " Open the PR repository and try again."));
-                                return;
-                            }
-
-                            final IntellijClaudeService finalReviewService = reviewService;
-
-                            // Kick off the review — callbacks fired on EDT
-                            final String finalDiff = diff;
-                            final String finalValidationDiff = validationDiff;
-                            final String finalExisting = existingReviews;
-                            java.io.File guidelinesDir;
-                            ReviewResult priorResult;
-                            synchronized (this) {
-                                if (!isCurrentGenerationLocked(key, reviewRevision, generationId)) {
-                                    return;
-                                }
-                                activeReviewService = finalReviewService;
-                                activeReviewProvider = generationSettings.runtime().provider();
-                                PrWorktree activeWorktree = worktrees.activeValue();
-                                guidelinesDir =
-                                        deep != null
-                                                ? new java.io.File(
-                                                        deep.pending().preparation().worktree())
-                                                : activeWorktree != null
-                                                        ? activeWorktree.directory()
-                                                        : (project.getBasePath() != null
-                                                                ? new java.io.File(
-                                                                        project.getBasePath())
-                                                                : null);
-                                priorResult = lastResult;
-                            }
-                            publishIfCurrentGeneration(
-                                    key,
-                                    reviewRevision,
-                                    generationId,
-                                    new ReviewGeneratingMsg(
-                                            "reviewGenerating", key, "Sending review request…"));
-                            // Guidance in the PR worktree is authored by the change under review,
-                            // so the host never reads it. The engine resolves guidance and file
-                            // history from the trusted base commit identified by baseSha.
-                            final String finalGuidelines = "";
-                            final String finalBaseSha = baseSha;
-                            final String finalPriorReview = formatPriorReview(priorResult);
-                            final String finalFocusAreas =
-                                    StringUtils.isNotBlank(overrideFocusAreas)
-                                            ? overrideFocusAreas
-                                            : generationSettings.focusAreas();
-                            final String finalCustomInstructions =
-                                    RepositoryReviewInstructions.compose(
-                                            owner + "/" + repo,
-                                            generationSettings.repositoryInstructions(),
-                                            StringUtils.isNotBlank(overrideCustomInstructions)
-                                                    ? overrideCustomInstructions
-                                                    : generationSettings.customInstructions());
-                            final String finalCiStatus = ciStatus;
-                            final List<CiAnnotation> finalCiAnnotations = ciAnnotations;
-                            final String finalCommits = commitContext.summary();
-                            final String finalLinkedIssue = linkedIssue;
-                            final String finalRepoProfile =
-                                    guidelinesDir == null
-                                            ? ""
-                                            : ghSvc.getRepoProfileSummary(
-                                                    guidelinesDir.getAbsolutePath());
-                            finalReviewService.reviewPR(
-                                    PRReviewRequest.builder(promptPr, finalDiff)
-                                            .priorReview(finalPriorReview)
-                                            .existingReviews(finalExisting)
-                                            .repoGuidelines(finalGuidelines)
-                                            .focusAreas(finalFocusAreas)
-                                            .customInstructions(finalCustomInstructions)
-                                            .ciStatus(finalCiStatus)
-                                            .commits(finalCommits)
-                                            .linkedIssue(finalLinkedIssue)
-                                            .repoProfile(finalRepoProfile)
-                                            .ciAnnotations(finalCiAnnotations)
-                                            .baseSha(finalBaseSha)
-                                            .guidanceGlobs(generationSettings.guidanceGlobs())
-                                            .rulesDirectory(generationSettings.rulesDirectory())
-                                            .build(),
-                                    generationSettings.runtime(),
-                                    chunkedReview,
-                                    statusMsg ->
-                                            publishIfCurrentGeneration(
-                                                    key,
-                                                    reviewRevision,
-                                                    generationId,
-                                                    new ReviewGeneratingMsg(
-                                                            "reviewGenerating", key, statusMsg)),
-                                    (kind, chunk) ->
-                                            publishIfCurrentGeneration(
-                                                    key,
-                                                    reviewRevision,
-                                                    generationId,
-                                                    new ReviewChunkMsg(
-                                                            "reviewChunk", key, kind, chunk)),
-                                    result -> {
-                                        if (result == null) {
-                                            synchronized (WebviewPanel.this) {
-                                                if (isCurrentGenerationLocked(
-                                                        key, reviewRevision, generationId)) {
-                                                    activeReviewOperationId = null;
-                                                    activeReviewProvider = ReviewProvider.CLAUDE;
-                                                    activeReviewService = claudeService;
-                                                }
-                                            }
-                                            publishIfCurrentGeneration(
-                                                    key,
-                                                    reviewRevision,
-                                                    generationId,
-                                                    new ErrorMsg(
-                                                            "reviewError",
-                                                            key,
-                                                            UserFacingErrors.forProvider(
-                                                                    provider,
-                                                                    new Exception(
-                                                                            "Provider produced no output"),
-                                                                    "generate review")));
-                                            return;
-                                        }
-                                        synchronized (WebviewPanel.this) {
-                                            if (!isCurrentGenerationLocked(
-                                                    key, reviewRevision, generationId)) {
-                                                return;
-                                            }
-                                            activeReviewService = claudeService;
-                                            activeReviewOperationId = null;
-                                            activeReviewProvider = ReviewProvider.CLAUDE;
-                                            lastResult = result;
-                                            generatedReviews.put(
-                                                    key,
-                                                    new GeneratedReview(
-                                                            generationId,
-                                                            result,
-                                                            generationMetadata(
-                                                                    provider,
-                                                                    generationSettings
-                                                                            .runtime()
-                                                                            .model(),
-                                                                    generationSettings
-                                                                            .runtime()
-                                                                            .supervisorEnabled())));
-                                            pendingReviewId = null;
-                                        }
-                                        publishIfCurrentGeneration(
-                                                key,
-                                                reviewRevision,
-                                                generationId,
-                                                new ReviewResultMsg(
-                                                        "reviewResult",
-                                                        key,
-                                                        ReviewMapper.INSTANCE.toDto(result),
-                                                        finalDiff,
-                                                        finalValidationDiff));
-                                    },
-                                    err -> {
-                                        synchronized (WebviewPanel.this) {
-                                            if (!isCurrentGenerationLocked(
-                                                    key, reviewRevision, generationId)) {
-                                                return;
-                                            }
-                                            activeReviewService = claudeService;
-                                            activeReviewOperationId = null;
-                                            activeReviewProvider = ReviewProvider.CLAUDE;
-                                        }
-                                        // Cancellations are user-initiated — don't surface as
-                                        // errors.
-                                        String lower = err.toLowerCase(java.util.Locale.ROOT);
-                                        if (!lower.contains("cancel")
-                                                && !lower.contains("interrupt")) {
-                                            if (deep != null) {
-                                                synchronized (WebviewPanel.this) {
-                                                    if (isCurrentGenerationLocked(
-                                                            key, reviewRevision, generationId)) {
-                                                        assistedReviews
-                                                                .restoreAfterGenerationFailureLocked(
-                                                                        deep.pending(),
-                                                                        operationId,
-                                                                        err);
-                                                    }
-                                                }
-                                                return;
-                                            }
-                                            publishIfCurrentGeneration(
-                                                    key,
-                                                    reviewRevision,
-                                                    generationId,
-                                                    new ErrorMsg("reviewError", key, err));
-                                        }
-                                    },
-                                    deep == null
-                                            ? null
-                                            : new IntellijClaudeService.DeepReviewOperation(
-                                                    semanticReviews,
-                                                    deep.pending().preparation().retainedId(),
-                                                    deep.server(),
-                                                    owner + "/" + repo + "#" + number,
-                                                    operationId,
-                                                    () ->
-                                                            assistedReviews.validateHead(
-                                                                    deep.pending())));
-                        });
+        reviewController.handleGenerateReview(
+                number,
+                owner,
+                repo,
+                overrideDiff,
+                chunkedReview,
+                overrideFocusAreas,
+                overrideCustomInstructions,
+                operationId,
+                deep);
     }
 
-    private static boolean isProviderBinaryAvailable(ReviewProvider provider) {
-        return provider == ReviewProvider.COPILOT
-                ? CopilotService.isBinaryAvailable()
-                : ClaudeService.isBinaryAvailable();
+    static boolean canPersistDraft(boolean activePr, boolean hasExplicitResult) {
+        return WebviewReviewController.canPersistDraft(activePr, hasExplicitResult);
     }
 
-    private static ProviderReadinessDto currentProviderReadiness() {
-        ReviewProvider provider = PluginSettings.getInstance().getReviewProvider();
-        boolean available = isProviderBinaryAvailable(provider);
-        return new ProviderReadinessDto(
-                provider == ReviewProvider.COPILOT ? "copilot" : "claude",
-                available,
-                available
-                        ? "Provider CLI found. Authentication cannot be verified without starting a provider session."
-                        : UserFacingErrors.forProviderNotInstalled(provider),
-                available ? "ready" : "missing",
-                available ? "unverified" : "unavailable",
-                provider == ReviewProvider.COPILOT ? "copilot login" : "claude auth login");
+    static ReviewOutcomeLog.Metadata generationMetadata(
+            ReviewProvider provider, String reviewType, boolean includeDiff) {
+        return WebviewReviewController.generationMetadata(provider, reviewType, includeDiff);
     }
 
-    private static ProviderReadinessDto providerReadiness(ProviderSetupProbe.Result setup) {
-        ReviewProvider provider = PluginSettings.getInstance().getReviewProvider();
-        String detail;
-        if (!setup.available()) {
-            detail = UserFacingErrors.forProviderNotInstalled(provider);
-        } else if ("ready".equals(setup.authenticationStatus())) {
-            detail = "Provider CLI and authentication are ready.";
-        } else if ("unavailable".equals(setup.authenticationStatus())) {
-            detail =
-                    "Provider authentication is unavailable. Run '"
-                            + setup.authCommand()
-                            + "' and check again.";
-        } else {
-            detail =
-                    "Provider CLI found. Authentication cannot be verified non-interactively; run '"
-                            + setup.authCommand()
-                            + "' if sign-in is required.";
-        }
-        return new ProviderReadinessDto(
-                provider == ReviewProvider.COPILOT ? "copilot" : "claude",
-                setup.available(),
-                detail,
-                setup.binaryStatus(),
-                setup.authenticationStatus(),
-                setup.authCommand());
+    static boolean isProviderBinaryAvailable(ReviewProvider provider) {
+        return WebviewPanelSupport.isProviderBinaryAvailable(provider);
+    }
+
+    static ProviderReadinessDto currentProviderReadiness() {
+        return WebviewPanelSupport.currentProviderReadiness();
+    }
+
+    static ProviderReadinessDto providerReadiness(ProviderSetupProbe.Result setup) {
+        return WebviewPanelSupport.providerReadiness(setup);
     }
 
     // --- saveDraft ---
 
-    private void handleSaveDraft(
+    void handleSaveDraft(
             int number,
             String owner,
             String repo,
@@ -1568,222 +540,34 @@ public class WebviewPanel implements Disposable {
             ReviewResult bridgeResult,
             ReviewResult bridgeGeneratedResult,
             List<LineComment> orphans) {
-        String key = bridgePrKey(number, owner, repo);
-        boolean activeAtStart = isActivePrKey(key);
-        if (!canPersistDraft(activeAtStart, bridgeResult != null)) {
-            pushMessage(
-                    new DraftSaveErrorMsg(
-                            "draftSaveError",
-                            key,
-                            saveId,
-                            "The selected pull request changed before the draft could be saved."));
-            return;
-        }
-        long revision = selectionRevision;
-        ReviewResult result = bridgeResult != null ? bridgeResult : lastResult;
-        if (result == null) {
-            pushMessage(
-                    new DraftSaveErrorMsg(
-                            "draftSaveError", key, saveId, "No review result to save."));
-            return;
-        }
-
-        IntellijGitHubService.SaveDraftResult saved;
-        try {
-            draftRecoveryStore.save(key, result, orphans);
-            saved = ghSvc.saveDraftReview(owner, repo, number, result, orphans);
-            draftRecoveryStore.clear(key);
-        } catch (Exception e) {
-            pushMessage(
-                    new DraftSaveErrorMsg(
-                            "draftSaveError",
-                            key,
-                            saveId,
-                            UserFacingErrors.forGitHub(e, "save the draft review")));
-            return;
-        }
-
-        String headSha = "";
-        try {
-            headSha = ghSvc.getPRHeadSha(owner, repo, number);
-        } catch (Exception e) {
-            log.warn("getPRHeadSha failed during saveDraft: {}", e.getMessage());
-        }
-
-        PullRequest pr =
-                cachedPRs.stream()
-                        .filter(
-                                p ->
-                                        p.getNumber() == number
-                                                && p.getOwner().equals(owner)
-                                                && p.getRepo().equals(repo))
-                        .findFirst()
-                        .orElse(null);
-        String title = pr != null ? pr.getTitle() : "";
-        PendingReviewIndex.MutationResult indexResult =
-                pendingIndex.add(owner, repo, number, title, headSha);
-        reportPendingIndexMutation("saving draft", indexResult);
-        GeneratedReview generated = generatedReviews.get(key);
-        if (bridgeGeneratedResult != null && generated != null) {
-            generatedReviews.put(
-                    key,
-                    new GeneratedReview(
-                            generated.generationId(), bridgeGeneratedResult, generated.metadata()));
-        }
-        if (!isActivePrKey(key) || selectionRevision != revision) {
-            return;
-        }
-        pendingReviewId = saved.reviewId();
-        pendingReviewKey = key;
-        lastResult = result;
-
-        pushMessage(
-                new DraftSavedMsg(
-                        "draftSaved", key, saveId, saved.reviewId(), saved.commentsDropped()));
-        pushMessage(new PrDraftStatusMsg("prDraftStatusUpdated", number, owner, repo, true));
+        reviewController.handleSaveDraft(
+                number, owner, repo, saveId, bridgeResult, bridgeGeneratedResult, orphans);
     }
 
-    static boolean canPersistDraft(boolean activePr, boolean hasExplicitResult) {
-        return activePr || hasExplicitResult;
+    void handleSubmitReview(int number, String owner, String repo, String verdict, String comment) {
+        reviewController.handleSubmitReview(number, owner, repo, verdict, comment);
     }
 
-    // --- submitReview ---
-
-    private void handleSubmitReview(
-            int number, String owner, String repo, String verdict, String comment) {
-        String key = bridgePrKey(number, owner, repo);
-        String reviewId = pendingReviewId;
-        if (StringUtils.isBlank(reviewId)
-                || !isActivePrKey(key)
-                || !StringUtils.equals(pendingReviewKey, key)) {
-            pushMessage(
-                    new ErrorMsg(
-                            "reviewSubmitError",
-                            key,
-                            "No pending draft review belongs to the selected pull request."));
-            return;
-        }
-
-        try {
-            ghSvc.submitDraftReview(owner, repo, number, reviewId, verdict, comment);
-            draftRecoveryStore.clear(key);
-        } catch (Exception e) {
-            pushMessage(
-                    new ErrorMsg(
-                            "reviewSubmitError",
-                            key,
-                            UserFacingErrors.forGitHub(e, "submit the draft review")));
-            return;
-        }
-
-        PendingReviewIndex.MutationResult indexResult = pendingIndex.remove(owner, repo, number);
-        reportPendingIndexMutation("submitting draft", indexResult);
-        GeneratedReview generated = generatedReviews.remove(key);
-        if (generated != null) {
-            recordReviewOutcome(generated.result(), lastResult, generated.metadata());
-        }
-        if (StringUtils.equals(pendingReviewId, reviewId)
-                && StringUtils.equals(pendingReviewKey, key)) {
-            lastResult = null;
-            pendingReviewId = null;
-            pendingReviewKey = null;
-        }
-
-        pushMessage(new SimpleMsg("reviewSubmitted", key));
-        pushMessage(new PrDraftStatusMsg("prDraftStatusUpdated", number, owner, repo, false));
+    void handleDeleteDraft(int number, String owner, String repo) {
+        reviewController.handleDeleteDraft(number, owner, repo);
     }
 
-    static ReviewOutcomeLog.Metadata generationMetadata(
-            ReviewProvider provider, String model, boolean supervisorEnabled) {
-        return new ReviewOutcomeLog.Metadata(
-                ReviewPrompts.reviewPipelineVersion(supervisorEnabled),
-                provider.name().toLowerCase(java.util.Locale.ROOT),
-                model);
-    }
-
-    /**
-     * Logs what the reviewer did with each generated comment. Runs off the EDT and swallows
-     * everything: the review has already been submitted, so instrumentation must not report an
-     * error or block the UI. A no-op when the generated review is unavailable (a draft loaded from
-     * GitHub in a later session was never generated locally, so there is nothing to compare).
-     */
-    private void recordReviewOutcome(
-            ReviewResult generated, ReviewResult submitted, ReviewOutcomeLog.Metadata metadata) {
-        if (generated == null) return;
-        List<LineComment> generatedComments = generated.getLineComments();
-        List<LineComment> submittedComments =
-                submitted == null ? List.of() : submitted.getLineComments();
-        getApplication()
-                .executeOnPooledThread(
-                        () -> {
-                            try {
-                                outcomeLog.record(generatedComments, submittedComments, metadata);
-                            } catch (Exception e) {
-                                log.warn("Review outcome logging failed: {}", e.getMessage());
-                            }
-                        });
-    }
-
-    // --- deleteDraft ---
-
-    private void handleDeleteDraft(int number, String owner, String repo) {
-        String key = bridgePrKey(number, owner, repo);
-        String reviewId = pendingReviewId;
-        if (StringUtils.isBlank(reviewId)
-                || !isActivePrKey(key)
-                || !StringUtils.equals(pendingReviewKey, key)) {
-            pushMessage(
-                    new ErrorMsg(
-                            "draftDeleteError",
-                            key,
-                            "No pending draft review belongs to the selected pull request."));
-            return;
-        }
-
-        try {
-            ghSvc.deleteDraftReview(owner, repo, number, reviewId);
-            draftRecoveryStore.clear(key);
-        } catch (Exception e) {
-            pushMessage(
-                    new ErrorMsg(
-                            "draftDeleteError",
-                            key,
-                            UserFacingErrors.forGitHub(e, "delete the draft review")));
-            return;
-        }
-
-        PendingReviewIndex.MutationResult indexResult = pendingIndex.remove(owner, repo, number);
-        reportPendingIndexMutation("deleting draft", indexResult);
-        if (StringUtils.equals(pendingReviewId, reviewId)
-                && StringUtils.equals(pendingReviewKey, key)) {
-            lastResult = null;
-            generatedReviews.remove(key);
-            pendingReviewId = null;
-            pendingReviewKey = null;
-        }
-
-        pushMessage(new SimpleMsg("draftDeleted", key));
-        pushMessage(new PrDraftStatusMsg("prDraftStatusUpdated", number, owner, repo, false));
-    }
-
-    /** Remembered instructions for the PR's repository, or null so the bridge field is omitted. */
-    private String rememberedRepositoryInstructions(String owner, String repo) {
+    String rememberedRepositoryInstructions(String owner, String repo) {
         return StringUtils.defaultIfEmpty(repositoryInstructionsLookup.apply(owner, repo), null);
     }
 
-    private boolean isCurrentSelection(String expectedKey, long expectedRevision) {
+    boolean isCurrentSelection(String expectedKey, long expectedRevision) {
         synchronized (this) {
             return isCurrentSelectionLocked(expectedKey, expectedRevision);
         }
     }
 
-    private boolean isCurrentSelectionLocked(String expectedKey, long expectedRevision) {
+    boolean isCurrentSelectionLocked(String expectedKey, long expectedRevision) {
         return WebviewPrSupport.isCurrentSelection(
                 activePR, selectionRevision, expectedKey, expectedRevision);
     }
 
-    private void publishIfCurrentSelection(
-            String expectedKey, long expectedRevision, Object message) {
+    void publishIfCurrentSelection(String expectedKey, long expectedRevision, Object message) {
         synchronized (this) {
             if (isCurrentSelectionLocked(expectedKey, expectedRevision)) {
                 pushMessage(message);
@@ -1791,20 +575,20 @@ public class WebviewPanel implements Disposable {
         }
     }
 
-    private boolean isCurrentGeneration(
+    boolean isCurrentGeneration(
             String expectedKey, long expectedRevision, long expectedGenerationId) {
         synchronized (this) {
             return isCurrentGenerationLocked(expectedKey, expectedRevision, expectedGenerationId);
         }
     }
 
-    private boolean isCurrentGenerationLocked(
+    boolean isCurrentGenerationLocked(
             String expectedKey, long expectedRevision, long expectedGenerationId) {
         return activeGenerationId == expectedGenerationId
                 && isCurrentSelectionLocked(expectedKey, expectedRevision);
     }
 
-    private void publishIfCurrentGeneration(
+    void publishIfCurrentGeneration(
             String expectedKey, long expectedRevision, long expectedGenerationId, Object message) {
         synchronized (this) {
             if (isCurrentGenerationLocked(expectedKey, expectedRevision, expectedGenerationId)) {
@@ -1813,7 +597,7 @@ public class WebviewPanel implements Disposable {
         }
     }
 
-    private boolean isActivePrKey(String key) {
+    boolean isActivePrKey(String key) {
         PullRequest pr = activePR;
         return pr != null
                 && StringUtils.equals(
@@ -1821,7 +605,7 @@ public class WebviewPanel implements Disposable {
     }
 
     /** Formats a prior generated review as compact context for a re-generation prompt. */
-    private static String formatPriorReview(ReviewResult result) {
+    static String formatPriorReview(ReviewResult result) {
         if (result == null) {
             return "";
         }
@@ -1842,118 +626,21 @@ public class WebviewPanel implements Disposable {
         return sb.toString();
     }
 
-    private IntellijClaudeService resolvePrClaudeService(PullRequest pr) {
-        // Phase 1: quick local checks — hold the lock briefly to read shared fields.
-        final String key;
-        final java.io.File detectedRoot;
-        final WorktreeLease<PrWorktree> lease;
+    IntellijClaudeService resolvePrClaudeService(PullRequest pr) {
         synchronized (this) {
             if (pr == null || !isSamePr(activePR, pr)) {
                 throw new IllegalStateException("The selected pull request changed.");
             }
-            key = worktreeKey(pr.getNumber(), pr.getOwner(), pr.getRepo());
-            String projectPath = project.getBasePath();
-            if (projectPath == null) {
-                throw new IllegalStateException(
-                        "Open the pull request repository before starting a review or chat.");
-            }
-            java.io.File root = worktreeService.findGitRoot(new java.io.File(projectPath));
-            String currentRepo = ghSvc.detectCurrentRepo(projectPath);
-            boolean sameRepo =
-                    currentRepo != null
-                            && currentRepo.equalsIgnoreCase(pr.getOwner() + "/" + pr.getRepo());
-            if (root == null || !sameRepo) {
-                throw new IllegalStateException(
-                        "Open the pull request repository before starting a review or chat.");
-            }
-            detectedRoot = root;
-            lease = worktrees.acquire(key);
         }
-
-        if (!lease.owner()) {
-            return serviceForWorktree(lease.future().join().directory());
-        }
-
-        java.io.File wt = worktreeService.newWorktreePath(pr.getNumber());
-        try {
-            IntellijGitHubService.PRHeadInfo headInfo =
-                    ghSvc.getPRHeadInfo(pr.getOwner(), pr.getRepo(), pr.getNumber());
-            if (headInfo.ref().isBlank()) {
-                worktrees.fail(lease);
-                throw new IllegalStateException("Unable to determine the pull request branch.");
-            }
-
-            if (headInfo.isFork()) {
-                worktreeService.createWorktreeFromFork(
-                        detectedRoot, headInfo.forkCloneUrl(), headInfo.ref(), headInfo.sha(), wt);
-            } else {
-                worktreeService.createWorktree(detectedRoot, headInfo.ref(), headInfo.sha(), wt);
-            }
-
-            PrWorktree created = new PrWorktree(wt, detectedRoot);
-            if (worktrees.install(lease, created)) {
-                log.info("Using worktree {} for PR #{}", wt, pr.getNumber());
-                return serviceForWorktree(created.directory());
-            }
-            if (!worktreeService.removeWorktree(detectedRoot, wt)) {
-                log.warn("Failed to remove discarded worktree at {}", wt);
-            }
-            throw new IllegalStateException("The selected pull request changed.");
-        } catch (Exception e) {
-            worktrees.fail(lease);
-            if (wt.exists()) {
-                if (!worktreeService.removeWorktree(detectedRoot, wt)) {
-                    log.warn("Failed to remove incomplete worktree at {}", wt);
-                }
-            }
-            log.warn("Worktree creation for PR #{} failed: {}", pr.getNumber(), e.getMessage());
-            throw new IllegalStateException(
-                    "Unable to create an isolated pull request worktree.", e);
-        }
+        return worktreeManager.resolve(pr);
     }
 
     static IntellijClaudeService serviceForWorktree(java.io.File directory) {
-        return new IntellijClaudeService(directory.getAbsolutePath());
+        return WebviewWorktreeManager.serviceForWorktree(directory);
     }
 
-    private void removeWorktreeAsync(PrWorktree worktree) {
-        if (worktree != null && worktree.directory() != null && worktree.gitRoot() != null) {
-            getApplication()
-                    .executeOnPooledThread(
-                            () -> {
-                                if (!worktreeService.removeWorktree(
-                                        worktree.gitRoot(), worktree.directory())) {
-                                    log.warn(
-                                            "Failed to remove worktree at {}",
-                                            worktree.directory());
-                                }
-                            });
-        }
-    }
-
-    private String buildPrContext(PullRequest pr) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("PR #").append(pr.getNumber()).append(": ").append(pr.getTitle()).append("\n");
-        sb.append("Author: @").append(pr.getAuthor()).append("\n");
-        sb.append("Repo: ").append(pr.getOwner()).append("/").append(pr.getRepo()).append("\n");
-
-        String body = pr.getBody();
-        if (StringUtils.isNotBlank(body)) {
-            sb.append("\nPR Description:\n").append(body).append("\n");
-        }
-
-        ReviewResult result = lastResult;
-        if (result != null) {
-            sb.append("\nReview verdict: ").append(result.getVerdict()).append("\n");
-            sb.append("Review summary: ").append(result.getSummary()).append("\n");
-        }
-
-        String diff = prefetchedDiff;
-        if (StringUtils.isNotBlank(diff)) {
-            sb.append("\nDiff:\n").append(diff);
-        }
-
-        return sb.toString();
+    String buildPrContext(PullRequest pr) {
+        return WebviewPanelSupport.buildPrContext(this, pr);
     }
 
     // --- Helpers ---
@@ -1965,7 +652,7 @@ public class WebviewPanel implements Disposable {
      * content. U+2028/U+2029 are escaped because they are line terminators in JS but appear as
      * literal characters inside JSON strings.
      */
-    private void pushMessage(Object payload) {
+    void pushMessage(Object payload) {
         if (testMessageSink != null) {
             publishIfActive(this, () -> disposed, () -> testMessageSink.accept(payload));
             return;
@@ -1992,34 +679,13 @@ public class WebviewPanel implements Disposable {
 
     static void publishIfActive(
             Object lifecycleLock, BooleanSupplier disposed, Runnable browserCall) {
-        synchronized (lifecycleLock) {
-            if (!disposed.getAsBoolean()) {
-                browserCall.run();
-            }
-        }
+        WebviewPanelSupport.publishIfActive(lifecycleLock, disposed, browserCall);
     }
 
     private void pushCurrentTheme() {
-        getApplication()
-                .invokeLater(
-                        () -> {
-                            if (disposed) {
-                                return;
-                            }
-                            String lafName =
-                                    StringUtils.defaultString(
-                                                    UIManager.getLookAndFeel() == null
-                                                            ? null
-                                                            : UIManager.getLookAndFeel().getName())
-                                            .toLowerCase(java.util.Locale.ROOT);
-                            boolean highContrast = lafName.contains("contrast");
-                            boolean dark = UIUtil.isUnderDarcula();
-                            String theme = HostThemeClassifier.classify(dark, highContrast);
-                            pushMessage(new ThemeChangedMsg("themeChanged", theme));
-                        });
+        themeController.pushCurrentTheme();
     }
 
-    /** Pushes the PR list into the webview via the bridge. Call from the EDT. */
     public void loadPRs(
             List<PullRequest> prs,
             String defaultRepo,
@@ -2028,70 +694,22 @@ public class WebviewPanel implements Disposable {
             boolean limited,
             boolean reviewStatusAvailable,
             ProviderSetupProbe.Result providerSetup) {
-        cachedPRs = prs;
-        ProviderReadinessDto providerReadiness = providerReadiness(providerSetup);
-        if (!providerReadiness.available()) {
-            pushSetupRequired(
-                    "provider_not_installed", providerReadiness.detail(), providerReadiness);
-            return;
-        }
-        if ("unavailable".equals(providerReadiness.authenticationStatus())) {
-            pushSetupRequired(
-                    "provider_not_authenticated", providerReadiness.detail(), providerReadiness);
-            return;
-        }
-        Optional<List<PendingReviewIndex.Entry>> pendingEntries = loadHealthyDraftEntries();
-        if (pendingEntries.isEmpty()) {
-            pushSetupRequired(
-                    "draft_index_unavailable", PendingReviewIndexNotifications.userMessage());
-            return;
-        }
-        Set<String> draftKeys =
-                pendingEntries.orElseThrow().stream()
-                        .map(e -> e.owner() + "/" + e.repo() + "#" + e.number())
-                        .collect(java.util.stream.Collectors.toSet());
-        List<WebviewPr> dtos =
-                prs.stream()
-                        .map(
-                                pr ->
-                                        toWebviewPr(
-                                                pr,
-                                                draftKeys.contains(
-                                                        pr.getOwner()
-                                                                + "/"
-                                                                + pr.getRepo()
-                                                                + "#"
-                                                                + pr.getNumber())))
-                        .toList();
-        pushMessage(
-                prListMessage(
-                        dtos,
-                        defaultRepo,
-                        new PrListStatus(
-                                searchScope,
-                                currentRepo,
-                                PR_SEARCH_LIMIT,
-                                limited,
-                                reviewStatusAvailable),
-                        providerReadiness));
+        prListController.loadPRs(
+                prs,
+                defaultRepo,
+                searchScope,
+                currentRepo,
+                limited,
+                reviewStatusAvailable,
+                providerSetup);
     }
 
-    /**
-     * Carries the experimental setting on the session-level list message so PR-agnostic webview
-     * surfaces (retained-worktree maintenance) can honor it before any PR is selected.
-     */
     PrListMessage prListMessage(
             List<WebviewPr> prs,
             String defaultRepo,
             PrListStatus listStatus,
             ProviderReadinessDto providerReadiness) {
-        return new PrListMessage(
-                "prListLoaded",
-                prs,
-                defaultRepo,
-                listStatus,
-                providerReadiness,
-                intellijAssistedEnabled.getAsBoolean());
+        return prListController.prListMessage(prs, defaultRepo, listStatus, providerReadiness);
     }
 
     public void setOnPRSelected(Consumer<PullRequest> callback) {
@@ -2107,73 +725,20 @@ public class WebviewPanel implements Disposable {
         pushSetupRequired(reason, detail, currentProviderReadiness());
     }
 
-    private void pushSetupRequired(
-            String reason, String detail, ProviderReadinessDto providerReadiness) {
+    void pushSetupRequired(String reason, String detail, ProviderReadinessDto providerReadiness) {
         pushMessage(new SetupRequiredMsg("setupRequired", reason, detail, providerReadiness));
     }
 
     public void activatePr(PullRequest pr, String source) {
-        Optional<List<PendingReviewIndex.Entry>> pendingEntries = loadHealthyDraftEntries();
-        if (pendingEntries.isEmpty()) {
-            pushSetupRequired(
-                    "draft_index_unavailable", PendingReviewIndexNotifications.userMessage());
-            return;
-        }
-        boolean hasReviewDraft =
-                pendingEntries.orElseThrow().stream()
-                        .anyMatch(
-                                entry ->
-                                        entry.owner().equals(pr.getOwner())
-                                                && entry.repo().equals(pr.getRepo())
-                                                && entry.number() == pr.getNumber());
-        PullRequest activatedPr =
-                cachedPRs.stream()
-                        .filter(existing -> isSamePr(existing, pr))
-                        .findFirst()
-                        .map(existing -> mergeActivatedPr(existing, pr))
-                        .orElse(pr);
-        if (cachedPRs.stream().anyMatch(existing -> isSamePr(existing, activatedPr))) {
-            cachedPRs =
-                    cachedPRs.stream()
-                            .map(
-                                    existing ->
-                                            isSamePr(existing, activatedPr)
-                                                    ? activatedPr
-                                                    : existing)
-                            .toList();
-        } else {
-            List<PullRequest> next = new ArrayList<>();
-            next.add(activatedPr);
-            next.addAll(cachedPRs);
-            cachedPRs = next;
-        }
-        pushMessage(
-                new ActivatePrMsg("activatePR", toWebviewPr(activatedPr, hasReviewDraft), source));
+        prListController.activatePr(pr, source);
     }
 
-    private Optional<List<PendingReviewIndex.Entry>> loadHealthyDraftEntries() {
-        PendingReviewIndex.LoadResult result = pendingIndex.listResult();
-        observePendingIndex(result);
-        return healthyDraftEntries(result);
+    Optional<List<PendingReviewIndex.Entry>> loadHealthyDraftEntries() {
+        return prListController.loadHealthyDraftEntries();
     }
 
-    private void reportPendingIndexMutation(
-            String operation, PendingReviewIndex.MutationResult result) {
-        if (result == PendingReviewIndex.MutationResult.UPDATED) {
-            return;
-        }
-        log.warn("Pending review index was not updated after {}: {}", operation, result);
-        if (result == PendingReviewIndex.MutationResult.BLOCKED_CORRUPT) {
-            PendingReviewIndex.LoadResult loadResult = pendingIndex.listResult();
-            observePendingIndex(loadResult);
-        }
-    }
-
-    private void observePendingIndex(PendingReviewIndex.LoadResult result) {
-        pendingIndexRecoveryRegistration.close();
-        pendingIndexRecoveryRegistration =
-                PendingReviewIndexNotifications.observe(
-                        pendingIndex, result, pendingIndexRecoveryAction);
+    void reportPendingIndexMutation(String operation, PendingReviewIndex.MutationResult result) {
+        prListController.reportPendingIndexMutation(operation, result);
     }
 
     public String getPrStateFilter() {
@@ -2194,6 +759,10 @@ public class WebviewPanel implements Disposable {
         return browserPanel;
     }
 
+    boolean isDisposedForHost() {
+        return disposed;
+    }
+
     PrChatController chatController() {
         return chats;
     }
@@ -2202,96 +771,8 @@ public class WebviewPanel implements Disposable {
         return assistedReviews;
     }
 
-    /** Exposes the panel state the deep-review flow reads; lock-suffixed calls need the lock. */
-    private final class DeepHost implements DeepReviewController.Host {
-        @Override
-        public boolean isDisposed() {
-            return disposed;
-        }
-
-        @Override
-        public PullRequest activePR() {
-            return activePR;
-        }
-
-        @Override
-        public long selectionRevision() {
-            return selectionRevision;
-        }
-
-        @Override
-        public boolean isCurrentSelectionLocked(String expectedKey, long expectedRevision) {
-            return WebviewPanel.this.isCurrentSelectionLocked(expectedKey, expectedRevision);
-        }
-
-        @Override
-        public void pushMessage(Object payload) {
-            WebviewPanel.this.pushMessage(payload);
-        }
-
-        @Override
-        public String activeReviewOperationId() {
-            return activeReviewOperationId;
-        }
-
-        @Override
-        public void cancelActiveReview(String operationId) {
-            WebviewPanel.this.cancelActiveReview(operationId);
-        }
-
-        @Override
-        public boolean intellijAssistedEnabled() {
-            return intellijAssistedEnabled.getAsBoolean();
-        }
-    }
-
-    /** Exposes the panel state the chat flow reads; callers hold the panel lock when required. */
-    private final class ChatHost implements PrChatController.Host {
-        @Override
-        public PullRequest activePR() {
-            return activePR;
-        }
-
-        @Override
-        public long selectionRevision() {
-            return selectionRevision;
-        }
-
-        @Override
-        public IntellijClaudeService defaultService() {
-            return claudeService;
-        }
-
-        @Override
-        public IntellijClaudeService resolvePrClaudeService(PullRequest pr) {
-            return WebviewPanel.this.resolvePrClaudeService(pr);
-        }
-
-        @Override
-        public String buildPrContext(PullRequest pr) {
-            return WebviewPanel.this.buildPrContext(pr);
-        }
-
-        @Override
-        public void pushMessage(Object payload) {
-            WebviewPanel.this.pushMessage(payload);
-        }
-    }
-
     @Override
     public void dispose() {
-        LifecycleTransition transition;
-        synchronized (this) {
-            if (disposed) {
-                return;
-            }
-            disposed = true;
-            transition = transitionToSelection(null);
-        }
-        finishLifecycleTransition(transition);
-        pendingIndexRecoveryRegistration.close();
-        resourceServer.stop();
-        Disposer.dispose(bridgeQuery);
-        Disposer.dispose(browser);
+        lifecycleController.dispose();
     }
 }

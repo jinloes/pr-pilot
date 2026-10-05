@@ -54,18 +54,21 @@ function declaredWireNames(): Set<string> {
 }
 
 /**
- * Extracts the wire names this client actually calls. Only literals in the first argument position
- * of the request helpers count, so both directions are exact: `contextSummary` is included because
- * three context reads route through it, while its own internal `this.request(method, ...)` passes a
- * variable and correctly contributes nothing.
+ * Extracts the wire names this client actually calls from every sidecar client module. Only
+ * literals in the first argument position of the request helpers count, so the transport's
+ * variable-based `request(method, ...)` calls do not contribute false positives.
  */
 function calledWireNames(): Set<string> {
-    const source = readSource('vscode-extension', 'src', 'sidecar.ts');
+    const sourceDir = path.join(repoRoot, 'vscode-extension', 'src');
+    const source = fs.readdirSync(sourceDir)
+        .filter((name) => /^sidecar.*\.ts$/.test(name))
+        .map((name) => fs.readFileSync(path.join(sourceDir, name), 'utf8'))
+        .join('\n');
     const names = new Set<string>();
     for (const [, wire] of source.matchAll(/this\.(?:request|requestRaw|contextSummary)\(\s*'([^']+)'/g)) {
         names.add(wire);
     }
-    assert.ok(names.size > 0, 'parsed no wire calls from sidecar.ts');
+    assert.ok(names.size > 0, 'parsed no wire calls from sidecar client modules');
     return names;
 }
 
@@ -90,17 +93,17 @@ test('the parser finds the wire names it depends on', () => {
     assert.ok(calledWireNames().has('prs/getCheckStatus'));
 });
 
-test('sidecar.ts calls every engine capability exposed over RPC', () => {
+test('sidecar client modules call every engine capability exposed over RPC', () => {
     const missing = [...declaredWireNames()].filter((name) => !calledWireNames().has(name)).sort();
     assert.deepEqual(
         missing,
         [],
-        `these engine capabilities are exposed over RPC but have no SidecarClient method, so VS Code `
+        `these engine capabilities are exposed over RPC but have no sidecar client method, so VS Code `
         + `cannot reach them: ${missing.join(', ')}. Add a client method, or document the gap per AGENTS.md.`,
     );
 });
 
-test('sidecar.ts calls no wire method the engines do not declare', () => {
+test('sidecar client modules call no wire method the engines do not declare', () => {
     // `initialize` is sidecar bootstrap rather than an engine capability — the same exception the
     // Java-side coverage test makes.
     const declared = declaredWireNames();
@@ -119,20 +122,20 @@ test('REQUIRED_CAPABILITIES matches the sidecar capability groups exactly', () =
 });
 
 test('review generation reuses one commit fetch for linked-issue resolution', () => {
-    const source = readSource('vscode-extension', 'src', 'extension.ts');
+    const source = readSource('vscode-extension', 'src', 'reviewHandlers.ts');
     const start = source.indexOf('async function handleGenerateReview');
     const end = source.indexOf('\nasync function handleSaveDraft', start);
     assert.ok(start >= 0 && end > start, 'could not isolate handleGenerateReview');
     const generateReview = source.slice(start, end);
 
     assert.equal(
-        [...generateReview.matchAll(/sidecarClient\.getCommits\(/g)].length,
+        [...generateReview.matchAll(/deps\.client\(\)\.getCommits\(/g)].length,
         1,
         'handleGenerateReview must fetch commits exactly once',
     );
     assert.match(
         generateReview,
-        /const commitsPromise = sidecarClient\.getCommits\([\s\S]*commitsPromise\.then\(\(commitContext\) =>[\s\S]*sidecarClient\.getLinkedIssues\([\s\S]*commitContext\.closingIssueNumbers/,
+        /const commitsPromise = deps\.client\(\)\.getCommits\([\s\S]*commitsPromise\.then\(\(commitContext\) =>[\s\S]*deps\.client\(\)\.getLinkedIssues\([\s\S]*commitContext\.closingIssueNumbers/,
     );
     assert.match(generateReview, /commits:\s*commits\.summary/);
 });

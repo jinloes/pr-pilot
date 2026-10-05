@@ -585,4 +585,92 @@ class StdioJsonRpcServerReviewsTest extends StdioJsonRpcServerTestBase {
                     .isEqualTo(-32602);
         }
     }
+
+    @Nested
+    class WorktreeHandlers {
+
+        @Test
+        void routesCreateAndRemoveWorktreeRequestsToTheReviewEngine() throws Exception {
+            AtomicReference<ReviewEngineApi.CreateWorktreeParams> created = new AtomicReference<>();
+            AtomicReference<ReviewEngineApi.RemoveWorktreeParams> removed = new AtomicReference<>();
+            ReviewSessionService fake =
+                    new ReviewSessionService() {
+                        @Override
+                        public ReviewEngineApi.WorktreeResult createWorktree(
+                                ReviewEngineApi.CreateWorktreeParams params) {
+                            created.set(params);
+                            return new ReviewEngineApi.WorktreeResult(
+                                    "created", "/fixture/worktree", "ready");
+                        }
+
+                        @Override
+                        public ReviewEngineApi.WorktreeRemovalResult removeWorktree(
+                                ReviewEngineApi.RemoveWorktreeParams params) {
+                            removed.set(params);
+                            return new ReviewEngineApi.WorktreeRemovalResult(true);
+                        }
+                    };
+            server =
+                    new StdioJsonRpcServer(
+                            objectMapper,
+                            frameCodec,
+                            new SidecarBootstrapService(),
+                            new GitHubEngine(),
+                            fake,
+                            reviewExecutor);
+
+            ObjectNode create = rpcRequest(201, "reviews/createWorktree");
+            create.putObject("params")
+                    .put("gitRoot", "/fixture")
+                    .put("prNumber", 42)
+                    .put("branch", "feature")
+                    .put("headSha", "a".repeat(40))
+                    .put("forkCloneUrl", "https://example.test/fork.git");
+            JsonNode createResponse = server.handle(objectMapper.writeValueAsBytes(create));
+
+            ObjectNode remove = rpcRequest(202, "reviews/removeWorktree");
+            remove.putObject("params")
+                    .put("gitRoot", "/fixture")
+                    .put("worktreeDir", "/fixture/worktree");
+            JsonNode removeResponse = server.handle(objectMapper.writeValueAsBytes(remove));
+
+            assertThat(createResponse.path("result").path("status").asText()).isEqualTo("created");
+            assertThat(createResponse.path("result").path("worktreeDir").asText())
+                    .isEqualTo("/fixture/worktree");
+            assertThat(removeResponse.path("result").path("removed").asBoolean()).isTrue();
+            assertThat(created.get())
+                    .isEqualTo(
+                            new ReviewEngineApi.CreateWorktreeParams(
+                                    "/fixture",
+                                    42,
+                                    "feature",
+                                    "a".repeat(40),
+                                    "https://example.test/fork.git"));
+            assertThat(removed.get())
+                    .isEqualTo(
+                            new ReviewEngineApi.RemoveWorktreeParams(
+                                    "/fixture", "/fixture/worktree"));
+        }
+
+        @Test
+        void rejectsMissingWorktreeFieldsBeforeDispatch() throws Exception {
+            ObjectNode create = rpcRequest(203, "reviews/createWorktree");
+            create.putObject("params").put("gitRoot", "/fixture");
+            ObjectNode remove = rpcRequest(204, "reviews/removeWorktree");
+            remove.putObject("params").put("gitRoot", "/fixture");
+
+            assertThat(
+                            server.handle(objectMapper.writeValueAsBytes(create))
+                                    .path("error")
+                                    .path("code")
+                                    .asInt())
+                    .isEqualTo(-32602);
+            assertThat(
+                            server.handle(objectMapper.writeValueAsBytes(remove))
+                                    .path("error")
+                                    .path("code")
+                                    .asInt())
+                    .isEqualTo(-32602);
+        }
+    }
 }

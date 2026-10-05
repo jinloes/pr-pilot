@@ -1,0 +1,17 @@
+# Search-tool ignore file (ripgrep, fd, ag, and the agent search tools built on them).
+# Hides large generated or binary files from code search. They are still in git and
+# can still be opened directly by path.
+**/package-lock.json
+webview/visual/__snapshots__/
+.claude/logs/
+build/
+**/build/
+dist/
+**/dist/
+**/dist-test/
+**/node_modules/
+.gradle/
+.intellijPlatform/
+.kotlin/
+*.vsix
+webview/test-results/

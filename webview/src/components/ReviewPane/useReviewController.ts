@@ -1,318 +1,47 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
-import { toast } from 'sonner'
-import {
-  onHostMessage,
-  sendToHost,
-  type LineComment,
-  type PR,
-  type ReviewResult,
-  type DeepReviewPreparedMessage,
-  type RetainedDeepReview,
-} from '../../bridge/types'
+import type { PointerEvent as ReactPointerEvent } from 'react'
+import { sendToHost, type LineComment, type ReviewResult, type DeepReviewPreparedMessage, type RetainedDeepReview } from '../../bridge/types'
 import { MAX_REPOSITORY_INSTRUCTIONS } from '../../bridge/validation'
-import { autosaveDelayMs, isReviewDirty, reviewSnapshot } from '@/lib/autosave'
-import { coverageGain, parseDiffCoverage, type DiffCoverage } from '@/lib/diffCoverage'
+import { coverageGain, parseDiffCoverage } from '@/lib/diffCoverage'
 import { parseDiffSafely } from '@/lib/diffParse'
-import {
-  applyReviewQualityRepairs,
-  runReviewQualityCheck,
-  type ReviewQualityAction,
-  type ReviewQualityReport,
-} from '@/lib/reviewQuality'
+import { applyReviewQualityRepairs, runReviewQualityCheck, type ReviewQualityAction, type ReviewQualityReport } from '@/lib/reviewQuality'
 import { validateComments } from '@/lib/validateComments'
 import type { VerifyResult } from '../ChatPane/structuredResult'
-import {
-  CHAT_HEIGHT_KEY,
-  clampChatHeight,
-  effectiveChatAvailableHeight,
-  loadChatHeight,
-} from './chatHeight'
+import { CHAT_HEIGHT_KEY, clampChatHeight, loadChatHeight } from './chatHeight'
 import { adjacentCommentIndex, focusedIndexAfterCommentDeletion } from './commentNavigation'
-import {
-  diffOf,
-  initialPaneState,
-  normalizeReviewResult,
-  resultOf,
-  reviewReducer,
-  validationDiffOf,
-  type DraftPresentState,
-  type PaneState,
-  type Verdict,
-} from './reviewState'
-import {
-  appendReviewActivity,
-  emptyReviewActivity,
-  finishReviewActivity,
-  formatReviewActivityLabel,
-  startReviewActivity,
-  type ReviewActivity,
-} from './reviewActivity'
+import { diffOf, initialPaneState, resultOf, reviewReducer, validationDiffOf, type DraftPresentState, type PaneState, type Verdict } from './reviewState'
+import { emptyReviewActivity, finishReviewActivity, formatReviewActivityLabel, type ReviewActivity } from './reviewActivity'
 import { buildExampleFixPrompt, buildVerifyCommentPrompt, resolveVerifyTarget } from './verifyPrompt'
-import { publishedBodySections, type PublishedBodySections } from './publishBody'
+import { publishedBodySections } from './publishBody'
+import {
+  armWatchdog,
+  clearWatchdog,
+  chatContextSummary,
+  chunkRecommendation,
+  newOperationId,
+  prKey,
+  summarizeDiffPreflight,
+  type PendingChatMessage,
+  type InFlightSave,
+  type PendingAutosave,
+  type ReviewController,
+  type UseReviewControllerProps,
+} from './reviewControllerState'
+import { useReviewAutosave } from './useReviewAutosave'
+import { useReviewChatEffects } from './useReviewChatEffects'
+import { useReviewGeneration } from './useReviewGeneration'
+import { useReviewHostMessages } from './useReviewHostMessages'
 
-export interface DiffPreflight {
-  fileCount: number
-  changedLines: number
-}
-
-export interface ChunkRecommendation {
-  recommendChunked: boolean
-  reason: string
-}
-
-export interface PendingChatMessage {
-  q: string
-  ctx: string
-  id: number
-  token?: string
-  contextSummary?: string[]
-}
-
-export interface ReviewViewModel {
-  intellijAssisted: boolean
-  intellijAssistedEnabled: boolean
-  deepSetup: DeepReviewPreparedMessage | null
-  retainedDeepReviews: RetainedDeepReview[]
-  deepMaintenanceError: string
-  deepBusy: boolean
-  pr: PR | null
-  state: PaneState
-  activity: ReviewActivity
-  result: ReviewResult | null
-  diff: string
-  validationDiff: string
-  diffUnavailable: boolean
-  inlineComments: LineComment[]
-  orphanComments: LineComment[]
-  qualityReport: ReviewQualityReport | null
-  qualityRiskCount: number
-  preflight: DiffPreflight | null
-  recommendation: ChunkRecommendation
-  /** Changed files chunked review would add over the standard review diff. */
-  coverageGain: number
-  /** What the engine appends below the reviewer's text when publishing. */
-  publishSections: PublishedBodySections
-  /** True once a save this session moved comments GitHub rejected inline into the review body. */
-  commentsMovedToBody: boolean
-  focusAreasOverride: string
-  customInstructionsOverride: string
-  /** Remembered instructions the host applies to every review of this repository. */
-  repositoryInstructions: string
-  repositoryInstructionsDraft: string
-  repositoryInstructionsSaving: boolean
-  repositoryInstructionsError: string
-  /** True after the host confirmed the latest save, until the draft is edited again. */
-  repositoryInstructionsSaved: boolean
-  chunkedMode: boolean
-  showReviewOverrides: boolean
-  saving: boolean
-  submitting: boolean
-  deleting: boolean
-  autosaveDirty: boolean
-  focusedCommentIdx: number
-  commentFocusRequestId: number
-  showChat: boolean
-  chatVisible: boolean
-  selectedContext: string
-  pendingChatMessage: PendingChatMessage | null
-  chatHeight: number
-  chatAvailableHeight: number
-  contextSummary: string[]
-  qualityExpanded: boolean
-  hasReview: boolean
-  statusMessage: string
-}
-
-export interface ReviewActions {
-  setIntellijAssisted: (value: boolean) => void
-  continueDeepReview: (server: string) => void
-  ordinaryReview: () => void
-  listDeepReviews: () => void
-  cleanupDeepReview: (id: string) => void
-  setFocusAreasOverride: (value: string) => void
-  setCustomInstructionsOverride: (value: string) => void
-  setRepositoryInstructionsDraft: (value: string) => void
-  saveRepositoryInstructions: () => void
-  setChunkedMode: (value: boolean) => void
-  generate: () => void
-  cancel: () => void
-  save: () => void
-  deleteDraft: () => void
-  reloadDraft: () => void
-  keepDraft: () => void
-  reanchorDraft: () => void
-  submit: (verdict: Verdict, comment?: string) => void
-  verifyComment: (comment: LineComment) => void
-  suggestFixComment: (comment: LineComment) => void
-  applyVerifyAction: (verify: VerifyResult, token: string) => void
-  editCommentHandlers: {
-    onEditComment: (index: number, body: string) => void
-    onDeleteComment: (index: number) => void
-    onAddComment: (comment: LineComment) => void
-  }
-  orphanHandlers: {
-    onEditOrphan: (orphan: LineComment, body: string) => void
-    onDeleteOrphan: (orphan: LineComment) => void
-  }
-  runQualityCheck: () => void
-  applyQualityRepair: (action: ReviewQualityAction) => void
-  collapseQualityCheck: () => void
-  focusComment: (index: number) => void
-  focusPreviousComment: () => void
-  focusNextComment: () => void
-  toggleChat: () => void
-  openChat: () => void
-  clearSelectedContext: () => void
-  askAboutSelection: (question: string) => void
-  pendingMessageSent: () => void
-  setChatHeight: (height: number) => void
-  commitChatHeight: (height: number) => void
-  startChatResize: (event: ReactPointerEvent) => void
-  openPr: () => void
-  openSettings: () => void
-  openAuthGuide: () => void
-  discardPendingChanges: () => boolean
-}
-
-export interface ReviewRefs {
-  paneRef: RefObject<HTMLDivElement | null>
-  reviewBodyRef: RefObject<HTMLDivElement | null>
-}
-
-export interface ReviewController {
-  model: ReviewViewModel
-  actions: ReviewActions
-  refs: ReviewRefs
-}
-
-interface UseReviewControllerProps {
-  pr: PR | null
-  onDirtyStateChange?: (dirty: boolean) => void
-}
-
-interface InFlightSave {
-  saveId: number
-  prKey: string
-  snapshot: string
-  isAuto: boolean
-}
-
-interface PendingAutosave {
-  pr: PR
-  result: ReviewResult
-  orphans: LineComment[]
-  snapshot: string
-}
-
-interface WatchdogRef {
-  current: ReturnType<typeof setTimeout> | null
-}
-
-export const MUTATION_WATCHDOG_MS = 45_000
-export const SELECTION_CAPTURE_DEBOUNCE_MS = 150
-
-/** Selections inside the chat composer or any text field are typing, not context to attach. */
-function isSelectionInFormField(selection: Selection | null): boolean {
-  const anchor = selection?.anchorNode ?? null
-  const element = anchor instanceof Element ? anchor : anchor?.parentElement ?? null
-  if (!element) return false
-  if (element.closest('.chat-pane__input, input, textarea, [contenteditable="true"]')) return true
-  const active = document.activeElement
-  return active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement
-}
-
-function newOperationId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
-function prKey(pr: Pick<PR, 'owner' | 'repo' | 'number'>): string {
-  return `${pr.owner}/${pr.repo}#${pr.number}`
-}
-
-function summarizeDiffPreflight(diff: string): DiffPreflight | null {
-  if (!diff.trim()) return null
-  const rows = diff.split(/\r?\n/)
-  const files = new Set<string>()
-  let changedLines = 0
-  for (const row of rows) {
-    if (row.startsWith('+++ b/')) {
-      files.add(row.slice('+++ b/'.length).trim())
-      continue
-    }
-    if ((row.startsWith('+') && !row.startsWith('+++')) || (row.startsWith('-') && !row.startsWith('---'))) {
-      changedLines += 1
-    }
-  }
-  return { fileCount: files.size, changedLines }
-}
-
-function sizeRecommendation(preflight: DiffPreflight): ChunkRecommendation {
-  if (preflight.fileCount >= 8) {
-    return { recommendChunked: true, reason: 'Many changed files.' }
-  }
-  if (preflight.changedLines >= 300) {
-    return { recommendChunked: true, reason: 'Large changed-line count.' }
-  }
-  return { recommendChunked: false, reason: 'Single-pass review is likely sufficient.' }
-}
-
-/**
- * Chunked review reads the validation diff, so it only adds coverage when that diff omits fewer
- * changed files than the single-pass review diff. Never claim a gain that the trailers do not show.
- */
-function chunkRecommendation(
-  preflight: DiffPreflight | null,
-  reviewCoverage: DiffCoverage | null,
-  chunkCoverage: DiffCoverage | null,
-): ChunkRecommendation {
-  if (!preflight) {
-    return { recommendChunked: false, reason: 'Recommendation appears once the diff is loaded.' }
-  }
-  const gain = coverageGain(reviewCoverage, chunkCoverage)
-  if (gain > 0) {
-    return {
-      recommendChunked: true,
-      reason: `Chunked review includes ${gain} changed file${gain === 1 ? '' : 's'} that single-pass review omits.`,
-    }
-  }
-  const bySize = sizeRecommendation(preflight)
-  if (!reviewCoverage) return bySize
-  return bySize.recommendChunked
-    ? { recommendChunked: true, reason: `${bySize.reason} Chunked review would not add coverage.` }
-    : { recommendChunked: false, reason: 'Chunked review would not add coverage.' }
-}
-
-function chatContextSummary(
-  pr: PR | null,
-  diff: string,
-  reviewCoverage: DiffCoverage | null,
-  result: ReviewResult | null,
-  selectedContext: string,
-): string[] {
-  if (!pr) return []
-  const items = ['PR title/body']
-  if (diff) items.push(reviewCoverage ? 'diff excerpt' : 'diff')
-  if (result) items.push('generated review')
-  if (selectedContext) items.push('selected text')
-  return items
-}
-
-function clearWatchdog(ref: WatchdogRef) {
-  if (ref.current !== null) {
-    clearTimeout(ref.current)
-    ref.current = null
-  }
-}
-
-function armWatchdog(ref: WatchdogRef, onTimeout: () => void) {
-  clearWatchdog(ref)
-  ref.current = setTimeout(() => {
-    ref.current = null
-    onTimeout()
-  }, MUTATION_WATCHDOG_MS)
-}
+export type {
+  ChunkRecommendation,
+  DiffPreflight,
+  PendingChatMessage,
+  ReviewActions,
+  ReviewController,
+  ReviewRefs,
+  ReviewViewModel,
+} from './reviewControllerState'
+export { MUTATION_WATCHDOG_MS, SELECTION_CAPTURE_DEBOUNCE_MS } from './reviewControllerState'
 
 export function useReviewController({
   pr,
@@ -430,305 +159,59 @@ export function useReviewController({
     clearAllWatchdogs()
   }, [pr, clearAllWatchdogs])
 
-  useEffect(() => {
-    const cleanup = onHostMessage((message) => {
-      const activePr = currentPrRef.current
-      if ('prKey' in message && message.prKey && (!activePr || message.prKey !== prKey(activePr))) return
-
-      switch (message.type) {
-        case 'deepReviewPrepared':
-          if (message.operationId !== activeReviewOperationIdRef.current) break
-          setDeepSetup(message)
-          setDeepBusy(false)
-          activeReviewOperationIdRef.current = null
-          generationStartedAtRef.current = null
-          setReviewActivity(emptyReviewActivity())
-          dispatch({ type: 'restoreBeforeDeepPause', previous: beforeDeepPauseRef.current })
-          break
-        case 'retainedDeepReviews':
-          if (message.operationId !== maintenanceOperationRef.current) break
-          maintenanceOperationRef.current = null
-          setRetainedDeepReviews(message.retained)
-          setDeepMaintenanceError('')
-          break
-        case 'deepReviewMaintenanceError':
-          if (message.operationId !== maintenanceOperationRef.current) break
-          maintenanceOperationRef.current = null
-          setDeepMaintenanceError(message.message)
-          break
-        case 'draftLoading':
-          dispatch({ type: 'draftLoading' })
-          break
-
-        case 'draftLoaded': {
-          generatedBaselineRef.current = null
-          {
-            const remembered = message.repositoryInstructions ?? ''
-            // A reload must not discard instructions the reviewer is still editing.
-            if (repositoryInstructionsDraftRef.current === repositoryInstructionsRef.current) {
-              repositoryInstructionsDraftRef.current = remembered
-              setRepositoryInstructionsDraftState(remembered)
-            }
-            repositoryInstructionsRef.current = remembered
-            setRepositoryInstructions(remembered)
-          }
-          setCommentsMovedToBody(false)
-          const assistedEnabled = message.intellijAssistedEnabled === true
-          setIntellijAssistedEnabled(assistedEnabled)
-          if (!assistedEnabled) setIntellijAssisted(false)
-          const diff = message.diff ?? message.validationDiff ?? ''
-          const validationDiff = message.validationDiff ?? diff
-          const normalizedResult = message.result
-            ? normalizeReviewResult(message.result, validationDiff)
-            : undefined
-          if (message.prState === 'DRAFT_PRESENT' && normalizedResult) {
-            lastSavedSnapshotRef.current = message.recoveryPending ? null : reviewSnapshot(normalizedResult)
-            setFocusedCommentIdx(0)
-          }
-          dispatch({
-            type: 'draftLoaded',
-            prState: message.prState,
-            result: normalizedResult,
-            reviewId: message.reviewId,
-            staleCommits: message.staleCommits,
-            importedFromGitHub: message.importedFromGitHub,
-            diff,
-            validationDiff,
-            status: message.status,
-            providerReadiness: message.providerReadiness,
-          })
-          break
-        }
-
-        case 'reviewGenerating': {
-          const nowMs = Date.now()
-          setReviewActivity((current) => appendReviewActivity(current, message.message, nowMs))
-          break
-        }
-
-        case 'reviewChunk':
-          break
-
-        case 'reviewResult': {
-          setCommentsMovedToBody(false)
-          setDeepSetup(null)
-          setDeepBusy(false)
-          const diff = message.diff ?? message.validationDiff ?? ''
-          const validationDiff = message.validationDiff ?? diff
-          const result = normalizeReviewResult(message.result, validationDiff)
-          const nowMs = Date.now()
-          const generationElapsedSec = generationStartedAtRef.current == null
-            ? undefined
-            : Math.max(0, Math.round((nowMs - generationStartedAtRef.current) / 1000))
-          const inlineCommentCount = validateComments(validationDiff, result.lineComments).adjusted.length
-          setFocusedCommentIdx((index) => Math.min(index, Math.max(0, inlineCommentCount - 1)))
-          activeReviewOperationIdRef.current = null
-          generationStartedAtRef.current = null
-          generatedBaselineRef.current = result
-          setReviewActivity((current) =>
-            finishReviewActivity(current, 'completed', 'Review complete', nowMs),
-          )
-          dispatch({ type: 'reviewResult', result, diff, validationDiff, generationElapsedSec })
-          break
-        }
-
-        case 'reviewError': {
-          setDeepBusy(false)
-          const nowMs = Date.now()
-          activeReviewOperationIdRef.current = null
-          generationStartedAtRef.current = null
-          setReviewActivity((current) =>
-            finishReviewActivity(current, 'failed', 'Review failed', nowMs),
-          )
-          dispatch({ type: 'reviewError', message: message.message })
-          break
-        }
-
-        case 'validationDiffUpdated':
-          if (generatedBaselineRef.current) {
-            generatedBaselineRef.current = normalizeReviewResult(
-              generatedBaselineRef.current,
-              message.validationDiff,
-            )
-          }
-          dispatch({ type: 'validationDiffUpdated', validationDiff: message.validationDiff })
-          break
-
-        case 'draftSaved': {
-          const inFlight = inFlightSaveRef.current
-          if (!inFlight || message.saveId !== inFlight.saveId) break
-          lastSavedSnapshotRef.current = inFlight.snapshot
-          inFlightSaveRef.current = null
-          clearWatchdog(saveWatchdogRef)
-          setSaving(false)
-          if (message.commentsDropped) setCommentsMovedToBody(true)
-          if (message.commentsDropped && !inFlight.isAuto) {
-            toast.warning('Some comments were dropped', {
-              description: 'Outdated line references were removed when saving to GitHub.',
-            })
-          }
-          dispatch({ type: 'draftSaved', reviewId: message.reviewId })
-
-          const pending = pendingSubmitRef.current
-          const submitPr = currentPrRef.current
-          if (pending && submitPr) {
-            pendingSubmitRef.current = null
-            setSubmitting(true)
-            armWatchdog(submitWatchdogRef, () => {
-              submitInFlightRef.current = false
-              setSubmitting(false)
-              dispatch({
-                type: 'reviewSubmitError',
-                message: 'The host did not respond in time. Check your connection and try again.',
-              })
-            })
-            sendToHost({
-              type: 'submitReview',
-              number: submitPr.number,
-              owner: submitPr.owner,
-              repo: submitPr.repo,
-              verdict: pending.verdict,
-              comment: pending.comment,
-            })
-          }
-          break
-        }
-
-        case 'draftSaveError':
-          if (message.saveId !== inFlightSaveRef.current?.saveId) break
-          inFlightSaveRef.current = null
-          clearWatchdog(saveWatchdogRef)
-          setSaving(false)
-          pendingSubmitRef.current = null
-          submitInFlightRef.current = false
-          dispatch({ type: 'saveError', message: message.message })
-          break
-
-        case 'reviewSubmitted':
-          setCommentsMovedToBody(false)
-          clearWatchdog(submitWatchdogRef)
-          submitInFlightRef.current = false
-          setSubmitting(false)
-          dispatch({ type: 'reviewSubmitted' })
-          break
-
-        case 'reviewSubmitError':
-          clearWatchdog(submitWatchdogRef)
-          submitInFlightRef.current = false
-          setSubmitting(false)
-          dispatch({ type: 'reviewSubmitError', message: message.message })
-          break
-
-        case 'draftDeleted':
-          setCommentsMovedToBody(false)
-          clearWatchdog(deleteWatchdogRef)
-          setDeleting(false)
-          deleteDraftStateRef.current = null
-          dispatch({ type: 'draftDeleted' })
-          break
-
-        case 'repositoryInstructionsSaved':
-          clearWatchdog(repositoryInstructionsWatchdogRef)
-          repositoryInstructionsRef.current = message.instructions
-          repositoryInstructionsDraftRef.current = message.instructions
-          setRepositoryInstructions(message.instructions)
-          setRepositoryInstructionsDraftState(message.instructions)
-          setRepositoryInstructionsSaving(false)
-          setRepositoryInstructionsError('')
-          setRepositoryInstructionsSaved(true)
-          break
-
-        case 'repositoryInstructionsSaveError':
-          clearWatchdog(repositoryInstructionsWatchdogRef)
-          setRepositoryInstructionsSaving(false)
-          setRepositoryInstructionsSaved(false)
-          setRepositoryInstructionsError(message.message)
-          break
-
-        case 'draftDeleteError':
-          clearWatchdog(deleteWatchdogRef)
-          setDeleting(false)
-          dispatch({
-            type: 'draftDeleteError',
-            message: message.message,
-            draft: deleteDraftStateRef.current,
-          })
-          break
-
-        default:
-          break
-      }
-    })
-    return cleanup
-  }, [])
+  useReviewHostMessages({
+    currentPrRef,
+    activeReviewOperationIdRef,
+    generationStartedAtRef,
+    maintenanceOperationRef,
+    beforeDeepPauseRef,
+    repositoryInstructionsRef,
+    repositoryInstructionsDraftRef,
+    generatedBaselineRef,
+    lastSavedSnapshotRef,
+    inFlightSaveRef,
+    pendingSubmitRef,
+    submitInFlightRef,
+    deleteDraftStateRef,
+    saveWatchdogRef,
+    submitWatchdogRef,
+    deleteWatchdogRef,
+    repositoryInstructionsWatchdogRef,
+    dispatch,
+    setDeepSetup,
+    setDeepBusy,
+    setReviewActivity,
+    setRetainedDeepReviews,
+    setDeepMaintenanceError,
+    setRepositoryInstructions,
+    setRepositoryInstructionsDraftState,
+    setRepositoryInstructionsSaving,
+    setRepositoryInstructionsError,
+    setRepositoryInstructionsSaved,
+    setCommentsMovedToBody,
+    setIntellijAssistedEnabled,
+    setIntellijAssisted,
+    setFocusedCommentIdx,
+    setSaving,
+    setSubmitting,
+    setDeleting,
+  })
 
   const showChat = Boolean(pr)
 
-  useEffect(() => {
-    if (showChat && chatVisible) {
-      sendToHost({ type: 'webviewLayoutChanged', reason: 'chat-panel' })
-    }
-  }, [showChat, chatVisible, chatHeight])
-
-  useEffect(() => {
-    const pane = paneRef.current
-    if (!pane) return
-    const updateBounds = () => {
-      const containerHeight = pane.getBoundingClientRect().height || window.innerHeight
-      const reviewBodyHeight = reviewBodyRef.current?.getBoundingClientRect().height ?? containerHeight
-      const availableHeight = effectiveChatAvailableHeight(
-        containerHeight,
-        chatHeightRef.current,
-        reviewBodyHeight,
-      )
-      setChatAvailableHeight(availableHeight)
-      const clamped = clampChatHeight(chatHeightRef.current, availableHeight)
-      chatHeightRef.current = clamped
-      setChatHeightState(clamped)
-      localStorage.setItem(CHAT_HEIGHT_KEY, String(clamped))
-    }
-    updateBounds()
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(updateBounds)
-    observer.observe(pane)
-    if (reviewBodyRef.current) observer.observe(reviewBodyRef.current)
-    return () => observer.disconnect()
-  }, [chatVisible, showChat, state.kind])
-
-  useEffect(() => {
-    if (!pr) {
-      setSelectedContext('')
-      return
-    }
-
-    function handleMouseUp(event: MouseEvent) {
-      if ((event.target as HTMLElement).closest?.('.chat-pane__input')) return
-      const text = window.getSelection()?.toString().trim() ?? ''
-      if (text) setSelectedContext(text)
-    }
-
-    // Keyboard selections fire no mouseup; capture them once the selection settles.
-    let selectionTimer: ReturnType<typeof setTimeout> | null = null
-    function captureKeyboardSelection() {
-      selectionTimer = null
-      const selection = window.getSelection()
-      if (isSelectionInFormField(selection)) return
-      const text = selection?.toString().trim() ?? ''
-      if (text) setSelectedContext(text)
-    }
-    function handleSelectionChange() {
-      if (selectionTimer !== null) clearTimeout(selectionTimer)
-      selectionTimer = setTimeout(captureKeyboardSelection, SELECTION_CAPTURE_DEBOUNCE_MS)
-    }
-
-    document.addEventListener('mouseup', handleMouseUp)
-    document.addEventListener('selectionchange', handleSelectionChange)
-    return () => {
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.removeEventListener('selectionchange', handleSelectionChange)
-      if (selectionTimer !== null) clearTimeout(selectionTimer)
-    }
-  }, [pr])
+  useReviewChatEffects({
+    pr,
+    showChat,
+    chatVisible,
+    chatHeight,
+    stateKind: state.kind,
+    paneRef,
+    reviewBodyRef,
+    chatHeightRef,
+    setChatAvailableHeight,
+    setChatHeightState,
+    setSelectedContext,
+  })
 
   const handleChatResizeMove = useCallback((event: PointerEvent) => {
     if (!chatDragRef.current) return
@@ -780,204 +263,44 @@ export function useReviewController({
     () => publishedBodySections(result?.lineComments ?? [], partition.orphans),
     [result?.lineComments, partition.orphans],
   )
-  const savableResult = state.kind === 'reviewUnsaved' || state.kind === 'draftPresent'
-    ? state.result
-    : null
-  const savableSnapshot = savableResult ? reviewSnapshot(savableResult) : null
-  const autosaveDirty = isReviewDirty(savableSnapshot, lastSavedSnapshotRef.current)
-
-  useEffect(() => {
-    const dirty = autosaveDirty || state.kind === 'reviewUnsaved' || state.kind === 'saveError'
-    onDirtyStateChange?.(dirty)
-  }, [autosaveDirty, state.kind, onDirtyStateChange])
-
-  const dispatchSave = useCallback(
-    (targetPr: PR, review: ReviewResult, orphans: LineComment[], isAuto: boolean) => {
-      const saveId = allocateSaveId()
-      inFlightSaveRef.current = {
-        saveId,
-        prKey: prKey(targetPr),
-        snapshot: reviewSnapshot(review),
-        isAuto,
-      }
-      if (autosaveTimerRef.current !== null) {
-        clearTimeout(autosaveTimerRef.current)
-        autosaveTimerRef.current = null
-      }
-      setSaving(true)
-      armWatchdog(saveWatchdogRef, () => {
-        if (inFlightSaveRef.current?.saveId !== saveId) return
-        inFlightSaveRef.current = null
-        if (pendingSubmitRef.current !== null) submitInFlightRef.current = false
-        setSaving(false)
-        pendingSubmitRef.current = null
-        dispatch({
-          type: 'saveError',
-          message: 'The host did not respond in time. Check your connection and try again.',
-        })
-      })
-      sendToHost({
-        type: 'saveDraft',
-        number: targetPr.number,
-        owner: targetPr.owner,
-        repo: targetPr.repo,
-        saveId,
-        result: review,
-        generatedResult: generatedBaselineRef.current ?? undefined,
-        orphans,
-      })
-    },
-    [allocateSaveId],
-  )
-
-  useEffect(() => {
-    if (!pr || !savableResult || !savableSnapshot || !autosaveDirty) {
-      pendingAutosaveRef.current = null
-      return
-    }
-    pendingAutosaveRef.current = {
-      pr,
-      result: savableResult,
-      orphans: partition.orphans,
-      snapshot: savableSnapshot,
-    }
-    if (saving || submitting || deleting) return
-    const delay = autosaveDelayMs(state.kind === 'reviewUnsaved' ? 'reviewUnsaved' : 'draftPresent')
-    if (delay === 0) {
-      dispatchSave(pr, savableResult, partition.orphans, true)
-      return
-    }
-    autosaveTimerRef.current = setTimeout(() => {
-      autosaveTimerRef.current = null
-      dispatchSave(pr, savableResult, partition.orphans, true)
-    }, delay)
-    return () => {
-      if (autosaveTimerRef.current !== null) {
-        clearTimeout(autosaveTimerRef.current)
-        autosaveTimerRef.current = null
-      }
-    }
-  }, [
+  const { autosaveDirty, dispatchSave, discardPendingChanges } = useReviewAutosave({
     pr,
-    savableResult,
-    savableSnapshot,
-    autosaveDirty,
+    state,
+    partitionOrphans: partition.orphans,
     saving,
     submitting,
     deleting,
+    onDirtyStateChange,
+    pendingSubmitRef,
+    submitInFlightRef,
+    lastSavedSnapshotRef,
+    generatedBaselineRef,
+    inFlightSaveRef,
+    pendingAutosaveRef,
+    autosaveTimerRef,
+    saveWatchdogRef,
+    suppressOutgoingAutosaveRef,
+    allocateSaveId,
+    dispatch,
+    setSaving,
+  })
+
+  const handleGenerate = useReviewGeneration({
+    pr,
     state,
-    partition,
-    dispatchSave,
-  ])
-
-  useEffect(() => {
-    function flushPending() {
-      const pending = pendingAutosaveRef.current
-      if (!pending || pending.snapshot === lastSavedSnapshotRef.current) return
-      const inFlight = inFlightSaveRef.current
-      if (inFlight?.prKey === prKey(pending.pr) && inFlight.snapshot === pending.snapshot) return
-      if (autosaveTimerRef.current !== null) {
-        clearTimeout(autosaveTimerRef.current)
-        autosaveTimerRef.current = null
-      }
-      dispatchSave(pending.pr, pending.result, pending.orphans, true)
-    }
-    function onVisibilityChange() {
-      if (document.visibilityState === 'hidden') flushPending()
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange)
-    window.addEventListener('pagehide', flushPending)
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-      window.removeEventListener('pagehide', flushPending)
-    }
-  }, [dispatchSave])
-
-  useEffect(() => {
-    return () => {
-      if (autosaveTimerRef.current !== null) {
-        clearTimeout(autosaveTimerRef.current)
-        autosaveTimerRef.current = null
-      }
-      const suppressSave = suppressOutgoingAutosaveRef.current
-      suppressOutgoingAutosaveRef.current = false
-      const pending = suppressSave ? null : pendingAutosaveRef.current
-      const inFlight = inFlightSaveRef.current
-      const alreadyInFlight = pending
-        && inFlight?.prKey === prKey(pending.pr)
-        && inFlight.snapshot === pending.snapshot
-      if (pending && pending.snapshot !== lastSavedSnapshotRef.current && !alreadyInFlight) {
-        const saveId = allocateSaveId()
-        sendToHost({
-          type: 'saveDraft',
-          number: pending.pr.number,
-          owner: pending.pr.owner,
-          repo: pending.pr.repo,
-          saveId,
-          result: pending.result,
-          generatedResult: generatedBaselineRef.current ?? undefined,
-          orphans: pending.orphans,
-        })
-      }
-      pendingAutosaveRef.current = null
-    }
-  }, [pr, allocateSaveId])
-
-  function handleGenerate(ordinary = false) {
-    if (!pr) return
-    setDeepSetup(null)
-    beforeDeepPauseRef.current = state
-    const assisted = intellijAssisted && intellijAssistedEnabled && !ordinary
-    setDeepBusy(assisted)
-    const focusAreas = focusAreasOverride.trim()
-    const customInstructions = customInstructionsOverride.trim()
-
-    if (chunkedMode) {
-      const sourceDiff = validationDiffOf(state)
-      if (!sourceDiff.trim()) {
-        toast.error('Chunked mode needs a loaded diff. Reload the PR and try again.')
-        return
-      }
-      const operationId = newOperationId()
-      const nowMs = Date.now()
-      activeReviewOperationIdRef.current = operationId
-      generationStartedAtRef.current = nowMs
-      setReviewActivity((current) =>
-        startReviewActivity(current, 'Preparing engine-owned review batches…', nowMs),
-      )
-      dispatch({ type: 'startGenerating' })
-      sendToHost({
-        type: 'generateReview',
-        operationId,
-        number: pr.number,
-        owner: pr.owner,
-        repo: pr.repo,
-        diff: sourceDiff,
-        chunkedReview: true,
-        ...(assisted ? { intellijAssisted: true } : {}),
-        focusAreas: focusAreas || undefined,
-        customInstructions: customInstructions || undefined,
-      })
-      return
-    }
-
-    const operationId = newOperationId()
-    const nowMs = Date.now()
-    activeReviewOperationIdRef.current = operationId
-    generationStartedAtRef.current = nowMs
-    setReviewActivity((current) => startReviewActivity(current, 'Starting review…', nowMs))
-    dispatch({ type: 'startGenerating' })
-    sendToHost({
-      type: 'generateReview',
-      operationId,
-      number: pr.number,
-      owner: pr.owner,
-      repo: pr.repo,
-      ...(assisted ? { intellijAssisted: true } : {}),
-      focusAreas: focusAreas || undefined,
-      customInstructions: customInstructions || undefined,
-    })
-  }
+    chunkedMode,
+    intellijAssisted,
+    intellijAssistedEnabled,
+    focusAreasOverride,
+    customInstructionsOverride,
+    beforeDeepPauseRef,
+    activeReviewOperationIdRef,
+    generationStartedAtRef,
+    setDeepSetup,
+    setDeepBusy,
+    setReviewActivity,
+    dispatch,
+  })
 
   function setRepositoryInstructionsDraft(value: string) {
     repositoryInstructionsDraftRef.current = value
@@ -1209,17 +532,6 @@ export function useReviewController({
     chatHeightRef.current = height
     setChatHeightState(height)
   }
-
-  const discardPendingChanges = useCallback(() => {
-    if (inFlightSaveRef.current) return false
-    suppressOutgoingAutosaveRef.current = true
-    if (autosaveTimerRef.current !== null) {
-      clearTimeout(autosaveTimerRef.current)
-      autosaveTimerRef.current = null
-    }
-    pendingAutosaveRef.current = null
-    return true
-  }, [])
 
   const hasReview = result !== null
   const showReviewOverrides = state.kind !== 'draftLoading'

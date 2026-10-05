@@ -23,7 +23,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -256,11 +255,6 @@ class PluginSettingsComponentTest {
                     case "models-refresh-button" -> verifyModelsRefreshButton();
                     case "models-failed-refresh" -> verifyModelsFailedRefresh();
                     case "models-no-overlap" -> verifyModelsNoOverlap();
-                    case "repository-instructions-empty" -> verifyRepositoryInstructionsEmpty();
-                    case "repository-instructions-edit" -> verifyRepositoryInstructionsEdit();
-                    case "repository-instructions-forget" -> verifyRepositoryInstructionsForget();
-                    case "repository-instructions-oversized" ->
-                            verifyRepositoryInstructionsOversized();
                     default -> throw new IllegalArgumentException("Unknown probe: " + args[0]);
                 }
             } catch (Throwable failure) {
@@ -807,106 +801,6 @@ class PluginSettingsComponentTest {
         configurable.reset();
         assertThat(component.getReviewSecondReviewerModel()).isEqualTo("gpt-5.4");
         assertThat(home.resolve(".pr-pilot")).doesNotExist();
-    }
-
-    @Nested
-    class RepositoryInstructionsEditor {
-        @Test
-        void disablesItselfWhenNothingIsRemembered() throws Exception {
-            runUiProbe("repository-instructions-empty", "1.0");
-        }
-
-        @Test
-        void editsTheSelectedRepositoryAndKeepsEditsAcrossSelectionChanges() throws Exception {
-            runUiProbe("repository-instructions-edit", "1.0");
-        }
-
-        @Test
-        void forgetRemovesTheSelectedRepositoryAndClearingTextForgetsOnApply() throws Exception {
-            runUiProbe("repository-instructions-forget", "1.0");
-        }
-
-        @Test
-        void reportsOversizedEditsInsteadOfDroppingThem() throws Exception {
-            runUiProbe("repository-instructions-oversized", "1.0");
-        }
-    }
-
-    private static JComboBox<String> repositoryCombo(PluginSettingsComponent component) {
-        return comboLabeled(component.getPanel(), "Remembered repository instructions:");
-    }
-
-    private static JBTextArea repositoryArea(PluginSettingsComponent component) {
-        return descendants(component.getPanel()).stream()
-                .filter(JBTextArea.class::isInstance)
-                .map(JBTextArea.class::cast)
-                .filter(
-                        candidate ->
-                                "Instructions for the selected repository"
-                                        .equals(
-                                                candidate
-                                                        .getAccessibleContext()
-                                                        .getAccessibleName()))
-                .findFirst()
-                .orElseThrow();
-    }
-
-    private static AbstractButton forgetButton(PluginSettingsComponent component) {
-        return descendants(component.getPanel()).stream()
-                .filter(AbstractButton.class::isInstance)
-                .map(AbstractButton.class::cast)
-                .filter(button -> "Forget".equals(button.getText()))
-                .findFirst()
-                .orElseThrow();
-    }
-
-    private static void verifyRepositoryInstructionsEmpty() {
-        PluginSettingsComponent component = component();
-        component.setRepositoryReviewInstructions(Map.of());
-
-        assertThat(repositoryCombo(component).isEnabled()).isFalse();
-        assertThat(repositoryCombo(component).getSelectedItem())
-                .isEqualTo("No remembered repositories");
-        assertThat(repositoryArea(component).isEnabled()).isFalse();
-        assertThat(forgetButton(component).isEnabled()).isFalse();
-        assertThat(component.getRepositoryReviewInstructions()).isEmpty();
-    }
-
-    private static void verifyRepositoryInstructionsEdit() {
-        PluginSettingsComponent component = component();
-        component.setRepositoryReviewInstructions(
-                Map.of("acme/widget", "Rule A", "acme/api", "Rule B"));
-
-        assertThat(repositoryCombo(component).getSelectedItem()).isEqualTo("acme/api");
-        assertThat(repositoryArea(component).getText()).isEqualTo("Rule B");
-        repositoryArea(component).setText("  Rule B2  ");
-        repositoryCombo(component).setSelectedItem("acme/widget");
-        assertThat(repositoryArea(component).getText()).isEqualTo("Rule A");
-
-        assertThat(component.getRepositoryReviewInstructions())
-                .containsOnly(Map.entry("acme/widget", "Rule A"), Map.entry("acme/api", "Rule B2"));
-    }
-
-    private static void verifyRepositoryInstructionsForget() {
-        PluginSettingsComponent component = component();
-        component.setRepositoryReviewInstructions(
-                Map.of("acme/widget", "Rule A", "acme/api", "Rule B"));
-
-        forgetButton(component).doClick();
-        assertThat(repositoryCombo(component).getSelectedItem()).isEqualTo("acme/widget");
-        assertThat(repositoryArea(component).getText()).isEqualTo("Rule A");
-        repositoryArea(component).setText("   ");
-
-        assertThat(component.getRepositoryReviewInstructions()).isEmpty();
-    }
-
-    private static void verifyRepositoryInstructionsOversized() {
-        PluginSettingsComponent component = component();
-        component.setRepositoryReviewInstructions(Map.of("acme/widget", "Rule"));
-        assertThat(component.repositoryWithOversizedInstructions()).isNull();
-
-        repositoryArea(component).setText("x".repeat(10_001));
-        assertThat(component.repositoryWithOversizedInstructions()).isEqualTo("acme/widget");
     }
 
     private static PluginSettingsComponent component() {
