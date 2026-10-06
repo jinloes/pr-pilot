@@ -171,28 +171,15 @@ IDE JBR25 also runs as an ordinary JVM without IDE arguments/classpath; running 
 same library *in-process* under IntelliJ's routed filesystem is not sufficient.
 Unsupported runtime/filesystem support returns `UNSUPPORTED_RUNTIME`/`UNSUPPORTED_API`,
 never path-based fallback. No automatic provisioning occurs; ordinary reviews are unaffected.
-Use a supported JDK/filesystem for positive tests; do not change global Gradle settings.
-Use a session-only init script selecting `Test.javaLauncher` 25 for all Java projects
-(not only the Gradle daemon), then:
+Positive tests need a supported JDK/filesystem. On macOS the root `build.gradle` runs every
+`Test` task (including `:intellij-plugin:unitTest`) on an installed JDK 25 toolchain when
+`/usr/libexec/java_home -F -v 25` finds one, regardless of the Gradle daemon JDK; do not change
+global Gradle settings to get there. Without JDK 25, tests annotated `@RequiresSecureTraversal`
+(review-engine test sources, reused by the plugin tests) are skipped with that reason rather than
+failing on the correct `UNSUPPORTED_API` result. Annotate any new test that needs a positive
+traversal. `-PtestOnJdk25=false` keeps the daemon JDK so the skip path can be checked. Linux CI on
+JDK 17 supplies secure traversal and runs everything.
 
-```bash
-./gradlew -Dorg.gradle.java.home=/absolute/supported-jdk/Contents/Home -I /absolute/session-test-runtime.gradle \
-  :core:test --tests '*SourceInventoryTest' \
-  :review-engine:test --tests '*SourceInventoryFilesTest'
-./gradlew -Dorg.gradle.java.home=/absolute/supported-jdk/Contents/Home -I /absolute/session-test-runtime.gradle \
-  :review-engine:sourceInventoryWorkerJar :review-engine:test \
-  --tests '*SourceInventoryClientTest' --tests '*BoundedProcessRunnerTest' \
-  :intellij-plugin:unitTest --tests '*SourceInventoryServiceTest' --tests '*SourceInventoryMcpProviderTest' \
-  -x :intellij-plugin:buildWebview -x :intellij-plugin:installWebviewDeps
-./gradlew spotlessCheck :intellij-plugin:buildPlugin
-```
-
-The IntelliJ Gradle plugin independently selects its unit-test JVM from the pinned
-261 SDK. A daemon-JDK override alone does not change that launcher. If it lacks
-secure traversal, positive worker-boundary tests are blocked on that launcher;
-run the same compiled JUnit classes with a supported JVM and the Gradle test
-runtime classpath, recording the alternate command and JVM. Do not treat a
-launcher failure as a native membership regression or hide it as live evidence.
 The SDK wrapper regressions use the actual compiled SDK provider, plus an isolated
 loader for the installed SDK262 under `~/Applications/IntelliJ IDEA.app/Contents`.
 The installed-SDK test is explicitly skipped when that separate installation is absent;

@@ -16,7 +16,31 @@ idea {
     }
 }
 
+// macOS JDKs before 25 do not supply SecureDirectoryStream, so source-inventory tests would only
+// exercise their fail-closed UNSUPPORTED_API path. Run tests on an installed JDK 25 when there is
+// one; otherwise those tests skip themselves (see SecureTraversal in review-engine tests).
+// -PtestOnJdk25=false keeps the Gradle JVM, e.g. to check the skip path.
+def secureTraversalJdk = providers.provider {
+    if (providers.gradleProperty('testOnJdk25').getOrElse('true') == 'false'
+            || !System.getProperty('os.name').toLowerCase().contains('mac')) {
+        return false
+    }
+    def probe = ['/usr/libexec/java_home', '-F', '-v', '25'].execute()
+    probe.waitFor()
+    probe.exitValue() == 0
+}
+
 subprojects {
+    plugins.withId('java') {
+        if (secureTraversalJdk.get()) {
+            tasks.withType(Test).configureEach {
+                javaLauncher = javaToolchains.launcherFor {
+                    languageVersion = JavaLanguageVersion.of(25)
+                }
+            }
+        }
+    }
+
     apply plugin: 'idea'
     idea {
         module {

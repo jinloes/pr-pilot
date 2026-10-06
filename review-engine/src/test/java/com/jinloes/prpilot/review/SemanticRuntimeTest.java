@@ -222,6 +222,7 @@ class SemanticRuntimeTest {
             }
         }
 
+        @RequiresSecureTraversal
         @Test
         void packagedRuntimeOwnsWorkerUntilActualSettingsForkTerminates() throws Exception {
             Path config = config("v20.20.2", "0.3.0");

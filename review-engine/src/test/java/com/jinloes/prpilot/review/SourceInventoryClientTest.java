@@ -205,6 +205,7 @@ public class SourceInventoryClientTest {
 
     @Nested
     class Collect {
+        @RequiresSecureTraversal
         @Test
         void settingsAreForkedWithoutAnyMcpCallAndBindAbsentPaths() throws Exception {
             Path setting =
@@ -255,6 +256,7 @@ public class SourceInventoryClientTest {
             assertThat(Files.exists(log)).isFalse();
         }
 
+        @RequiresSecureTraversal
         @Test
         void crossCollectionIdentityIgnoresMetadataContentsButDetectsSourceReplacement()
                 throws Exception {
@@ -270,6 +272,7 @@ public class SourceInventoryClientTest {
                     .isNotEqualTo(first.physicalFingerprint());
         }
 
+        @RequiresSecureTraversal
         @Test
         void strictWorkerEnvelopeRejectsEveryUnboundOrPartialSuccess() throws Exception {
             var coverage = client().collect(root, head);
@@ -410,6 +413,7 @@ public class SourceInventoryClientTest {
                     .isInstanceOf(IllegalArgumentException.class);
         }
 
+        @RequiresSecureTraversal
         @Test
         void poisonedAmbientOptionsNeverReachWorkerOrTool() throws Exception {
             var valid = launch(config);
@@ -461,6 +465,7 @@ public class SourceInventoryClientTest {
             assertThat(Files.exists(log)).isFalse();
         }
 
+        @RequiresSecureTraversal
         @Test
         void reconcilesVirtualOnlyAndUnsafeOrMissingEmptyRoots() throws Exception {
             for (String name :
@@ -484,6 +489,7 @@ public class SourceInventoryClientTest {
                     .hasMessageContaining("UNSAFE_PATH");
         }
 
+        @RequiresSecureTraversal
         @Test
         void rejectsGitlinksAndFilterTransformedSourceBytes() throws Exception {
             Files.writeString(root.resolve(".gitattributes"), "src/extensionless text\n");
@@ -500,6 +506,7 @@ public class SourceInventoryClientTest {
                     .hasMessageContaining("UNSUPPORTED_GIT_ENTRY");
         }
 
+        @RequiresSecureTraversal
         @Test
         void cancellationTerminatesTheChildAndDeletesPrivateRequest() throws Exception {
             scenario("wait");
@@ -518,6 +525,7 @@ public class SourceInventoryClientTest {
             }
         }
 
+        @RequiresSecureTraversal
         @Test
         void hashesExtensionlessSourceAndAllowsProvenNonSourceIdeaMetadata() throws Exception {
             var coverage = client().collect(root, head);
@@ -537,6 +545,7 @@ public class SourceInventoryClientTest {
             assertThat(Files.readAllLines(log)).hasSize(3);
         }
 
+        @RequiresSecureTraversal
         @Test
         void rejectsTheSameIdeaPathWhenNativeMarksItSource() throws Exception {
             scenario("idea-source");
@@ -544,6 +553,7 @@ public class SourceInventoryClientTest {
                     .hasMessageContaining("SOURCE_CONTAMINATION");
         }
 
+        @RequiresSecureTraversal
         @Test
         void rejectsIgnoredGeneratedAndOtherUntrackedSource() throws Exception {
             Files.writeString(root.resolve("generated"), "ignored generated source");
@@ -555,6 +565,7 @@ public class SourceInventoryClientTest {
                     .hasMessageContaining("SOURCE_CONTAMINATION");
         }
 
+        @RequiresSecureTraversal
         @Test
         void rejectsOmissionExtraManifestPathAndChangedSourceBytes() throws Exception {
             scenario("omitted");
@@ -569,6 +580,7 @@ public class SourceInventoryClientTest {
                     .hasMessageContaining("CONTENT_MISMATCH");
         }
 
+        @RequiresSecureTraversal
         @Test
         void rejectsMissingTrackedLeavesAndIndexChangesBeforeDiscovery() throws Exception {
             Files.delete(root.resolve("src/extensionless"));
@@ -580,6 +592,7 @@ public class SourceInventoryClientTest {
                     .hasMessageContaining("GIT_CHANGED");
         }
 
+        @RequiresSecureTraversal
         @Test
         void rejectsHeadIndexAndBytesChangedByVerificationProcess() throws Exception {
             scenario("change-bytes");
@@ -632,12 +645,14 @@ public class SourceInventoryClientTest {
             }
         }
 
+        @RequiresSecureTraversal
         @Test
         void textOnlyEnvelopeUsesTheSameStrictConsumer() throws Exception {
             scenario("text");
             assertThat(client().collect(root, head).coverage().getFileCount()).isEqualTo(1);
         }
 
+        @RequiresSecureTraversal
         @Test
         void rejectsExecutableAndConfigInsideWorktreeAndNonRootPaths() throws Exception {
             Path inside = Files.copy(config, root.resolve("config"));

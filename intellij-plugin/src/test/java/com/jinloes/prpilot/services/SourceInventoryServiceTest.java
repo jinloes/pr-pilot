@@ -19,6 +19,7 @@ import com.jinloes.prpilot.model.SourceInventory.Scope;
 import com.jinloes.prpilot.model.SourceInventory.Source;
 import com.jinloes.prpilot.model.SourceInventory.Status;
 import com.jinloes.prpilot.model.SourceInventory.VerifyRequest;
+import com.jinloes.prpilot.review.RequiresSecureTraversal;
 import com.jinloes.prpilot.review.SourceInventoryFiles;
 import com.jinloes.prpilot.review.SourceInventoryFiles.Budget;
 import com.jinloes.prpilot.review.SourceInventoryFiles.Leaf;
@@ -452,6 +453,7 @@ class SourceInventoryServiceTest {
         }
     }
 
+    @RequiresSecureTraversal
     @Test
     void sdkWrappedFilesystemMustNotBeThePhysicalVerificationBoundary() throws Exception {
         var provider =
@@ -465,6 +467,7 @@ class SourceInventoryServiceTest {
                 provider::wrapDelegatePath);
     }
 
+    @RequiresSecureTraversal
     @Test
     void installed262WrapperAlsoRequiresAndPassesExternalWorker() throws Exception {
         Path sdk =
@@ -574,6 +577,7 @@ class SourceInventoryServiceTest {
 
     @Nested
     class Discovery {
+        @RequiresSecureTraversal
         @Test
         void completeLeavesAndExplicitRootsAreNotReadiness() throws IOException {
             Files.createDirectories(root.resolve("excluded/reincluded"));
@@ -594,6 +598,7 @@ class SourceInventoryServiceTest {
                     .isEqualTo(Status.VFS_VERIFIED);
         }
 
+        @RequiresSecureTraversal
         @Test
         void unknownMembershipBlocksRatherThanGuessing() {
             authority.memberships.put("extensionless", Membership.UNKNOWN);
@@ -610,6 +615,7 @@ class SourceInventoryServiceTest {
             reason(service.execute(request), ReasonCode.WRONG_PROJECT);
         }
 
+        @RequiresSecureTraversal
         @Test
         void sourceSymlinksBlockButNonSourceLinksAreNotRead() throws IOException {
             Files.createSymbolicLink(root.resolve("link"), Path.of("/missing"));
@@ -618,6 +624,7 @@ class SourceInventoryServiceTest {
             assertThat(service.execute(discoverRequest()).getStatus()).isEqualTo(Status.DISCOVERED);
         }
 
+        @RequiresSecureTraversal
         @Test
         void epochChangesDuringCaptureBlock() {
             authority.classifyHook = () -> authority.epoch++;
@@ -627,6 +634,7 @@ class SourceInventoryServiceTest {
 
     @Nested
     class Verification {
+        @RequiresSecureTraversal
         @Test
         void emptyModelSourceRootLinksAndOversizedResponsesFailClosed() throws IOException {
             authority.emptyModel = true;
@@ -646,6 +654,7 @@ class SourceInventoryServiceTest {
             reason(service.execute(discoverRequest()), ReasonCode.LIMIT);
         }
 
+        @RequiresSecureTraversal
         @Test
         void exactManifestAndIndependentVfsBytesAreRequired() throws IOException {
             VerifyRequest request = verifyRequest(service.execute(discoverRequest()));
@@ -656,6 +665,7 @@ class SourceInventoryServiceTest {
             reason(service.execute(request), ReasonCode.CONTENT_MISMATCH);
         }
 
+        @RequiresSecureTraversal
         @Test
         void omittedAndExtraHashesFail() throws IOException {
             Files.writeString(root.resolve("second"), "second");
@@ -669,6 +679,7 @@ class SourceInventoryServiceTest {
             reason(service.execute(request), ReasonCode.MANIFEST_MISMATCH);
         }
 
+        @RequiresSecureTraversal
         @Test
         void externalUnresolvedEmptyAndUnloadedModelsAreDiscoverableButNotCovered()
                 throws IOException {
@@ -688,6 +699,7 @@ class SourceInventoryServiceTest {
                     ReasonCode.UNLOADED_MODULE);
         }
 
+        @RequiresSecureTraversal
         @Test
         void editRevertEpochAndMembershipChangesInvalidateDiscovery() throws IOException {
             VerifyRequest request = verifyRequest(service.execute(discoverRequest()));
@@ -698,6 +710,7 @@ class SourceInventoryServiceTest {
             reason(service.execute(request), ReasonCode.INVENTORY_CHANGED);
         }
 
+        @RequiresSecureTraversal
         @Test
         void physicalContentChangeAndMidHashMutationBlock() throws IOException {
             VerifyRequest request = verifyRequest(service.execute(discoverRequest()));
@@ -715,6 +728,7 @@ class SourceInventoryServiceTest {
             reason(service.execute(request), ReasonCode.INVENTORY_CHANGED);
         }
 
+        @RequiresSecureTraversal
         @Test
         void expiryCloseReopenReplacementAndConcurrentReplacementInvalidate() throws IOException {
             VerifyRequest request = verifyRequest(service.execute(discoverRequest()));
@@ -733,6 +747,7 @@ class SourceInventoryServiceTest {
             reason(service.execute(request), ReasonCode.STALE_DISCOVERY);
         }
 
+        @RequiresSecureTraversal
         @Test
         void retainedDiscoveryIsDeepCopied() throws IOException {
             Response response = service.execute(discoverRequest());

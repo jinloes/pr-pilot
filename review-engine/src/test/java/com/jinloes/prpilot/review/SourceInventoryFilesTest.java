@@ -43,6 +43,7 @@ class SourceInventoryFilesTest {
         return Files.writeString(target, value);
     }
 
+    @RequiresSecureTraversal
     @Nested
     class Settings {
         private SourceInventoryFiles.Setting capture(Path path) throws IOException {
@@ -260,6 +261,7 @@ class SourceInventoryFilesTest {
         }
     }
 
+    @RequiresSecureTraversal
     @Nested
     class Walk {
         @Test
@@ -389,6 +391,7 @@ class SourceInventoryFilesTest {
 
     @Nested
     class Hash {
+        @RequiresSecureTraversal
         @Test
         void hashesExtensionlessBytesAndGitHeader() throws IOException {
             write("source", "hello");
@@ -422,6 +425,7 @@ class SourceInventoryFilesTest {
             }
         }
 
+        @RequiresSecureTraversal
         @Test
         void enforcesBytesDeadlineAndCancellation() throws IOException {
             write("source", "too much");
@@ -475,6 +479,7 @@ class SourceInventoryFilesTest {
                     .hasMessageContaining("read failed");
         }
 
+        @RequiresSecureTraversal
         @Test
         void detectsComponentReplacementAfterOpeningWithoutReadingTheReplacement()
                 throws IOException {
@@ -502,6 +507,7 @@ class SourceInventoryFilesTest {
                     .hasMessageContaining("UNSAFE_PATH");
         }
 
+        @RequiresSecureTraversal
         @Test
         void detectsContentMutationAfterOpening() throws IOException {
             write("source", "before");
