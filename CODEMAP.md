@@ -108,6 +108,9 @@ guidance.
   to repository guidance by `ReviewPipelineService.withLocalRules`. Tests: `LocalReviewRulesTest`.
 - `review/ChangedSymbols.java` - Extracts the existing declarations a diff changes (removed-line
   declarations, then hunk-header context) for the call-site search. Tests: `ChangedSymbolsTest`.
+- `review/ChangedLogStatements.java` - Mechanically extracts the production log statements a diff
+  adds or edits (multi-line calls included) into the hygiene pass's `<changed_log_statements>`
+  inventory. Tests: `ChangedLogStatementsTest`.
 - `review/InspectionManifest.java`, `ReviewPassParser.java`, `InspectionLedger.java`, and
   `EvidenceRef.java` - Stable changed targets plus validated inspection/evidence accounting.
 - `review/ReviewCoverageAnalyzer.java`, `CoverageGap.java`, `ReviewSupervisorPrompts.java`, and

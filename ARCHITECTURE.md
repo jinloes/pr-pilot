@@ -62,6 +62,7 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [Review quality gate and chunked review mode](docs/architecture/review-pipeline.md#review-quality-gate-and-chunked-review-mode)
 - [Bounded review supervision](docs/architecture/review-pipeline.md#bounded-review-supervision)
 - [Comment anchoring policy](docs/architecture/review-pipeline.md#comment-anchoring-policy)
+- [Hygiene pass gets a mechanical log inventory](docs/architecture/review-pipeline.md#hygiene-pass-gets-a-mechanical-log-inventory)
 
 **Providers** ([providers.md](docs/architecture/providers.md))
 

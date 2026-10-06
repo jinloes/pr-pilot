@@ -182,3 +182,20 @@ arguments. User-visible activity reports generic stages (`Checking review covera
 
 ### Comment anchoring policy
 Client-side validation partitions comments: keep in-hunk, snap within +-3 lines, orphan otherwise. Orphans are excluded from inline POST and appended to review body section.
+
+### Hygiene pass gets a mechanical log inventory
+
+`ReviewPipelineService.hygieneFindings` passes `ChangedLogStatements.extract(manifest)` into the
+hygiene prompt as `<changed_log_statements>`, and the prompt treats that list as the complete log
+inventory to judge entry by entry. Asking the model to build the inventory itself proved erratic: on
+the same PR, repeated runs reported between 0 and 4 log findings. It also missed multi-line calls
+whose opening `logger.info(` line was unchanged context but whose arguments changed. Rules to keep:
+
+- Build the inventory from the manifest of the **full** diff. In chunked mode the hygiene request
+  carries only the condensed final-validation index, so a diff-derived inventory would be empty.
+- A statement counts as changed if any of its lines is added. Anchor it on its first added line so
+  the finding lands on a commentable line.
+- Keep the list bounded (`MAX_STATEMENTS`, `MAX_STATEMENT_LINES`, `MAX_TEXT_CHARS`). When it is
+  capped, the prompt tells the model to inventory the remainder itself.
+- The inventory is untrusted PR content and goes through `escapeClosingTag` like every other section.
+

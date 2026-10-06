@@ -292,7 +292,8 @@ public final class ReviewPipelineService {
      * keeps its budget; this pass restores them as a focused, best-effort call whose failure never
      * loses the draft. Its rules inventory every changed log statement and comment, so it needs the
      * full diff; only a chunked review, whose diff may exceed one prompt, falls back to the
-     * condensed index.
+     * condensed index. Either way the log inventory is extracted from the full diff in {@code
+     * manifest}.
      */
     private ReviewResult hygieneFindings(
             PRReviewRequest request,
@@ -307,7 +308,8 @@ public final class ReviewPipelineService {
                             ReviewPrompts.buildHygienePrompt(
                                     chunked
                                             ? chunkedReviewService.finalValidationRequest(request)
-                                            : request),
+                                            : request,
+                                    ChangedLogStatements.extract(manifest)),
                             HYGIENE_TIMEOUT_MS,
                             true,
                             false,
