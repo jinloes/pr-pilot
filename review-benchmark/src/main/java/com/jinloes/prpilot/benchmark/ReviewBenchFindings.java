@@ -69,9 +69,13 @@ record ReviewBenchFindings(Pr pr, String agent, List<Item> findings, Usage usage
 
     /** Writes atomically so an interrupted run never leaves a half-written file to resume past. */
     void write(Path file, ObjectMapper mapper) throws IOException {
+        writeJson(file, this, mapper);
+    }
+
+    static void writeJson(Path file, Object value, ObjectMapper mapper) throws IOException {
         Files.createDirectories(file.getParent());
         Path temp = file.resolveSibling(file.getFileName() + ".tmp");
-        mapper.writerWithDefaultPrettyPrinter().writeValue(temp.toFile(), this);
+        mapper.writerWithDefaultPrettyPrinter().writeValue(temp.toFile(), value);
         Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 }

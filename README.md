@@ -308,6 +308,21 @@ with `--judge-model` and `--copilot-base-url`. Expect several minutes and severa
 per pull request. Scores from a different judge provider are not comparable with the public
 leaderboard, and ReviewBench publishes only its own runs, so treat these numbers as internal.
 
+After judging, the script writes `<run>/report.md`: each metric's mean and range across rounds,
+recall by severity and category, every golden finding not caught in all rounds, and the false
+positives. Each miss shows our findings near it and any finding the critique dropped near it
+(recorded in `<run>/diagnostics/`), which separates detection gaps from validation drops. To check a
+prompt or pipeline change, pass `--baseline <earlier run>`; the comparison only calls a change
+beyond noise when the two runs' per-round ranges do not overlap, so use `--rounds 3` or more for
+both. Re-render a report from existing scores with:
+
+```bash
+node scripts/reviewbench-report.mjs --run build/reviewbench/runs/new --baseline build/reviewbench/runs/old
+```
+
+Iterate on a few pull requests (`-- --only <key> --only <key>`), then confirm on the full set before
+keeping a change, so it does not overfit the pull requests you studied.
+
 ### Build webview assets
 
 ```bash

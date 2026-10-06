@@ -13,6 +13,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gradleWrapperInvocation } from './portable-process.mjs'
+import { DEFAULT_WINDOW, writeReport } from './reviewbench-report.mjs'
 import { nodeVersionSupported, MIN_NODE } from './verify.mjs'
 
 export const REVIEWBENCH_URL = 'https://github.com/review-bench/ReviewBench'
@@ -44,14 +45,17 @@ const USAGE = `Usage: node scripts/reviewbench.mjs [options] [-- reviewer option
   --judge-concurrency N     PRs judged in parallel (default 2)
   --copilot-base-url URL    Copilot API endpoint for the judge (default ${DEFAULT_COPILOT_BASE_URL})
   --ref SHA                 ReviewBench commit (default ${REVIEWBENCH_REF.slice(0, 12)})
+  --baseline DIR            Earlier run to compare against in the report
   --help                    Show this help
 
-Reviewer options after -- are passed to ./gradlew :review-benchmark:reviewBench; run
+After judging, <run>/report.md summarizes metrics, missed golden findings, and false positives
+(see scripts/reviewbench-report.mjs). Reviewer options after -- are passed to ./gradlew :review-benchmark:reviewBench; run
 "./gradlew :review-benchmark:reviewBench --args=--help" to list them.
 
 The Copilot judge authenticates with COPILOT_GITHUB_TOKEN, or "gh auth token" when it is unset.`
 
 const VALUE_OPTIONS = new Set([
+  '--baseline',
   '--set',
   '--rounds',
   '--limit',
@@ -80,6 +84,7 @@ export function parseArgs(argv, now = new Date()) {
     judgeConcurrency: 2,
     copilotBaseUrl: DEFAULT_COPILOT_BASE_URL,
     ref: REVIEWBENCH_REF,
+    baseline: '',
     help: false,
     reviewerArgs,
   }
@@ -276,6 +281,13 @@ function main(argv) {
   const workDir = path.join(repoRoot, 'build', 'reviewbench')
   const corpusDir = path.join(workDir, 'ReviewBench')
   opts.run = path.resolve(repoRoot, opts.run)
+  if (opts.baseline) {
+    opts.baseline = path.resolve(repoRoot, opts.baseline)
+    if (!fs.existsSync(path.join(opts.baseline, 'scoring'))) {
+      console.error(`--baseline ${opts.baseline} has no scoring directory; judge it first.`)
+      return 2
+    }
+  }
 
   ensureCorpus(corpusDir, opts.ref)
 
@@ -312,8 +324,16 @@ function main(argv) {
     const args = judgeArgs(opts, corpusDir, round, path.join(workDir, 'judge-repos'))
     if (npm(args, corpusDir, env) !== 0) failed++
   }
-  console.log(failed === 0 ? `\nScores: ${path.join(opts.run, 'scoring')}` : `\n${failed} round(s) failed to judge.`)
-  return failed === 0 ? 0 : 1
+  if (failed > 0) {
+    console.error(`\n${failed} round(s) failed to judge.`)
+    return 1
+  }
+  const report = writeReport(
+    { run: opts.run, baseline: opts.baseline, golden: path.join(corpusDir, 'golden'), window: DEFAULT_WINDOW },
+    repoRoot,
+  )
+  console.log(`\nScores: ${path.join(opts.run, 'scoring')}\nReport: ${report}`)
+  return 0
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

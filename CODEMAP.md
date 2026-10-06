@@ -45,6 +45,9 @@ context makes them unambiguous.
 - `scripts/reviewbench.mjs` - Local ReviewBench run: pinned corpus checkout, the `reviewBench`
   Gradle task, and ReviewBench's judge on Copilot via a generated pi `models.json`
   (`reviewbench.test.mjs`, run by the extension runner).
+- `scripts/reviewbench-report.mjs` - ReviewBench run report: metric spread across rounds, missed
+  golden findings with nearby and critique-dropped findings, false positives, and a noise-aware
+  baseline comparison (`reviewbench-report.test.mjs`, run by the extension runner).
 - `scripts/verify.mjs` - Change-aware verification: `planChecks` maps changed paths to the minimal
   Gradle/npm checks and prints only failing output (`verify.test.mjs`, run by the extension runner).
 - `gradle/intellij-sandbox.gradle` - Lazy installed-IDE selection and separate `runIdeLocal`
@@ -206,6 +209,7 @@ findings for ReviewBench's judge. It is not shipped with either host.
 - `benchmark/ReviewBenchTask.java` - Corpus entry loading and validation, golden-file key, and mirror URL.
 - `benchmark/ReviewBenchCheckout.java` - Cached partial clone of a `review-bench` mirror, fetch-by-SHA with upstream fallback, and the head worktree and diff.
 - `benchmark/ReviewBenchFindings.java` - Conversion of line comments to ReviewBench's judging input format.
+- `benchmark/ReviewBenchDiagnostics.java` - Per-review stage lines and critique-dropped findings, written to `<run>/diagnostics/` for the report.
 - Tests mirror each class; `LocalCheckoutTest` and `ReviewBenchCheckoutTest` use real git in temp directories.
 
 ### `intellij-plugin/`

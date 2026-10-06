@@ -25,6 +25,8 @@ test('defaults to one judged round of the test set with the official judge model
   assert.equal(opts.ref, REVIEWBENCH_REF)
   assert.equal(opts.run, path.join('build', 'reviewbench', 'runs', '2026-10-05T12-34-56-789Z'))
   assert.deepEqual(opts.reviewerArgs, [])
+  assert.equal(opts.baseline, '')
+  assert.equal(parseArgs(['--baseline', 'runs/a'], NOW).baseline, 'runs/a')
 })
 
 test('passes everything after -- to the reviewer untouched', () => {

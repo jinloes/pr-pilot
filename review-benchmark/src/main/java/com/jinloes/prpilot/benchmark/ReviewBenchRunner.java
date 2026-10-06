@@ -76,6 +76,12 @@ public final class ReviewBenchRunner {
         return findingsRoot(out).resolve("round-" + round).resolve(task.key() + ".json");
     }
 
+    static Path diagnosticsFile(Path out, int round, ReviewBenchTask task) {
+        return out.resolve("diagnostics").resolve("round-" + round).resolve(task.key() + ".json");
+    }
+
+    private record Reviewed(ReviewBenchFindings findings, ReviewBenchDiagnostics diagnostics) {}
+
     /** Returns how many reviews failed; their findings files are not written. */
     int run() throws IOException, InterruptedException {
         List<ReviewBenchTask> tasks =
@@ -84,6 +90,7 @@ public final class ReviewBenchRunner {
         Files.createDirectories(options.out());
         System.setProperty(
                 ReviewBenchmark.CALL_SITES_PROPERTY, Boolean.toString(options.callSites()));
+        System.setProperty(ReviewBenchmark.REPORT_DROPPED_PROPERTY, "true");
         reviews =
                 new ReviewSessionService(
                         new ReviewOutcomeLog(options.out().resolve("outcomes.jsonl")));
@@ -109,10 +116,12 @@ public final class ReviewBenchRunner {
                     continue;
                 }
                 try {
-                    ReviewBenchFindings findings =
-                            review(task, status -> log.println(prefix + status));
-                    findings.write(file, mapper);
-                    log.println(prefix + findings.findings().size() + " findings");
+                    Reviewed reviewed = review(task, status -> log.println(prefix + status));
+                    // Diagnostics first: an existing findings file marks the review complete.
+                    reviewed.diagnostics()
+                            .write(diagnosticsFile(options.out(), round, task), mapper);
+                    reviewed.findings().write(file, mapper);
+                    log.println(prefix + reviewed.findings().findings().size() + " findings");
                 } catch (IOException | RuntimeException failure) {
                     String message =
                             StringUtils.defaultIfBlank(
@@ -132,7 +141,7 @@ public final class ReviewBenchRunner {
         return failures.size();
     }
 
-    private ReviewBenchFindings review(ReviewBenchTask task, Consumer<String> say)
+    private Reviewed review(ReviewBenchTask task, Consumer<String> say)
             throws IOException, InterruptedException {
         say.accept("preparing " + task.cloneName());
         File clone =
@@ -154,16 +163,26 @@ public final class ReviewBenchRunner {
             String profile = github.getRepoProfile(worktree).summary();
             say.accept("reviewing");
             long start = System.nanoTime();
+            List<String> stages = new ArrayList<>();
+            List<Finding> dropped = new ArrayList<>();
             ReviewResult result =
                     reviews.generate(
                             params(task, worktree, checkout.diff().diff(), profile),
                             status -> {
+                                Finding droppedFinding = ReviewBenchmark.parseDropped(status);
+                                if (droppedFinding != null) {
+                                    dropped.add(droppedFinding);
+                                } else if (ReviewBenchmark.isStage(status)) {
+                                    stages.add(status);
+                                }
                                 if (options.verbose()) say.accept(status);
                             },
                             (a, b) -> {});
             long millis = (System.nanoTime() - start) / 1_000_000;
-            return ReviewBenchFindings.of(
-                    task, result.getLineComments(), millis, options.includeNotes());
+            return new Reviewed(
+                    ReviewBenchFindings.of(
+                            task, result.getLineComments(), millis, options.includeNotes()),
+                    ReviewBenchDiagnostics.of(stages, dropped));
         }
     }
 
