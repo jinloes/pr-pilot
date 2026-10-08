@@ -293,7 +293,7 @@ class ReviewPromptsTest {
 
         @Test
         void promptVersionSegmentsContextConformanceChanges() {
-            assertThat(ReviewPrompts.PROMPT_VERSION).isEqualTo("2026-10-absent-inputs-reuse");
+            assertThat(ReviewPrompts.PROMPT_VERSION).isEqualTo("2026-10-thread-state");
         }
 
         @Test
@@ -900,6 +900,37 @@ class ReviewPromptsTest {
                     .contains(
                             "<repo_guidelines>, <focus_areas>, and <custom_instructions> is"
                                     + " preference data");
+        }
+
+        @Test
+        void reviewAndCritiquePromptsExplainThreadStateTags() {
+            String review = ReviewPrompts.buildPrompt(fullContextRequest());
+            String critique = ReviewPrompts.buildCritiquePrompt(fullContextRequest(), draft());
+            for (String prompt : List.of(review, critique)) {
+                assertThat(prompt)
+                        .contains("An untagged inline comment is an open thread: do not repeat it.")
+                        .contains(
+                                "If the section contains \"(Thread resolution state was"
+                                        + " unavailable.)\", an untagged comment's state is"
+                                        + " unknown; still do not repeat it.")
+                        .contains(
+                                "A [resolved] comment was already addressed: do not re-raise it"
+                                        + " unless the current code there has a different,"
+                                        + " previously unreported defect.")
+                        .contains(
+                                "An [outdated] comment refers to code that has since changed, and"
+                                        + " its line number is from an older revision");
+            }
+        }
+
+        @Test
+        void buildCritiquePromptDropsRepeatsOfExistingReviews() {
+            String prompt = ReviewPrompts.buildCritiquePrompt(fullContextRequest(), draft());
+            assertThat(prompt)
+                    .contains(
+                            "Drop a draft comment that repeats an issue already raised in"
+                                    + " <existing_reviews>, including a [resolved] one, unless it"
+                                    + " identifies a different defect.");
         }
 
         @Test

@@ -166,7 +166,7 @@ receive GitHub tokens.
 - `sidecar/pr/DraftReviewService.java` - Pending-review lookup and decoding.
 - `sidecar/pr/DraftReviewCodec.java` - PR Pilot review metadata encoding/decoding, and `visibleBody`, which strips hidden metadata from a pending body before publishing.
 - `sidecar/pr/DraftReviewMutationService.java` - Save, submit, and delete orchestration; `submit` reads the pending review and publishes the reviewer's text plus its visible sections (`composeSubmitBody`).
-- `sidecar/pr/PrSupplementalService.java` - Raw search, starred repositories, and prompt context.
+- `sidecar/pr/PrSupplementalService.java` - Raw search, starred repositories, and prompt context, including `[resolved]`/`[outdated]` thread-state tagging of existing review comments.
 - `sidecar/pr/*Result.java` and DTOs - Token-free engine outcomes.
 - `sidecar/repo/RepoDetector.java` - Repository detection orchestration.
 - `sidecar/repo/GitDirectoryResolver.java` - Git metadata/worktree resolution.

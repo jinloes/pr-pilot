@@ -31,7 +31,7 @@ public final class ReviewPrompts {
      *
      * <p>Not a compatibility version: nothing parses it, and old log lines keep their old value.
      */
-    public static final String PROMPT_VERSION = "2026-10-absent-inputs-reuse";
+    public static final String PROMPT_VERSION = "2026-10-thread-state";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -679,7 +679,14 @@ public final class ReviewPrompts {
                 "existing_reviews",
                 request.getExistingReviews(),
                 "The following reviews have already been submitted by other reviewers. Do not"
-                        + " repeat their findings — focus on issues they missed:");
+                        + " repeat their findings — focus on issues they missed. An untagged inline"
+                        + " comment is an open thread: do not repeat it. If the section contains"
+                        + " \"(Thread resolution state was unavailable.)\", an untagged comment's"
+                        + " state is unknown; still do not repeat it. A [resolved] comment was"
+                        + " already addressed: do not re-raise it unless the current code there has"
+                        + " a different, previously unreported defect. An [outdated] comment refers"
+                        + " to code that has since changed, and its line number is from an older"
+                        + " revision:");
         appendOptionalSection(
                 prompt,
                 "prior_review",
@@ -906,6 +913,9 @@ public final class ReviewPrompts {
                     + " <linked_issue>, re-confirm the mismatch against the requirement named in"
                     + " \"rationale\"; drop it if either side is unsupported. Drop a finding that"
                     + " <ci_status> shows CI already reports, since the author already sees it."
+                    + " Drop a draft comment that repeats an issue already raised in"
+                    + " <existing_reviews>, including a [resolved] one, unless it identifies a"
+                    + " different defect."
                     + " Keep the well-supported comments and tighten wording only where needed."
                     + " Add a comment only for a clear blocker or major issue the draft missed."
                     + " Re-derive \"verdict\" from the surviving comments. Respond ONLY with the"

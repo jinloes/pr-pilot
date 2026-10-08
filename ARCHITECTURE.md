@@ -53,6 +53,7 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [Comments on deleted files orphan by design](docs/architecture/review-pipeline.md#comments-on-deleted-files-orphan-by-design)
 - [CI annotations are selected by whether they exist, not by whether the check failed](docs/architecture/review-pipeline.md#ci-annotations-are-selected-by-whether-they-exist-not-by-whether-the-check-failed)
 - [CI-duplicate suppression is conservative by design](docs/architecture/review-pipeline.md#ci-duplicate-suppression-is-conservative-by-design)
+- [Existing review comments carry thread state](docs/architecture/review-pipeline.md#existing-review-comments-carry-thread-state)
 - [Review JSON parsing is self-healing, not all-or-nothing](docs/architecture/review-pipeline.md#review-json-parsing-is-self-healing-not-all-or-nothing)
 - [Low confidence is a gate, not a label](docs/architecture/review-pipeline.md#low-confidence-is-a-gate-not-a-label)
 - [Prompt-injection hardening](docs/architecture/review-pipeline.md#prompt-injection-hardening)
