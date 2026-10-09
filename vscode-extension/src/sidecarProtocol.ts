@@ -65,6 +65,9 @@ export function parseReviewResult(value: unknown): ReviewResult | null {
             confidence: typeof comment.confidence === 'string' ? (comment.confidence as LineComment['confidence']) : undefined,
             rationale: typeof comment.rationale === 'string' ? comment.rationale : undefined,
         };
+        if (Array.isArray(comment.sources) && comment.sources.every((source) => typeof source === 'string')) {
+            parsed.sources = [...comment.sources];
+        }
         return parsed;
     });
     if (lineComments.some((comment) => comment === null)) return null;

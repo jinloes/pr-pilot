@@ -32,6 +32,34 @@ void test('accepts complete rich review result messages', () => {
   assert.notEqual(parsed, null)
 })
 
+void test('accepts absent, null, and bounded reviewer sources', () => {
+  for (const sources of [undefined, null, [], ['claude-opus'], ['a', 'b', 'c', 'x'.repeat(120)]]) {
+    const parsed = parseIncomingMessage({
+      ...version,
+      type: 'reviewResult',
+      prKey: 'acme/platform#42',
+      result: { ...review, lineComments: [{ ...review.lineComments[0], sources }] },
+      diff: 'diff',
+    })
+
+    assert.notEqual(parsed, null, `sources ${JSON.stringify(sources)} should be accepted`)
+  }
+})
+
+void test('rejects malformed reviewer sources', () => {
+  for (const sources of ['claude-opus', [1], ['a', 'b', 'c', 'd', 'e'], ['x'.repeat(121)], { 0: 'a' }]) {
+    const parsed = parseIncomingMessage({
+      ...version,
+      type: 'reviewResult',
+      prKey: 'acme/platform#42',
+      result: { ...review, lineComments: [{ ...review.lineComments[0], sources }] },
+      diff: 'diff',
+    })
+
+    assert.equal(parsed, null, `sources ${JSON.stringify(sources)} should be rejected`)
+  }
+})
+
 void test('keeps a well-formed review scope on a result', () => {
   const sha = '0123456789abcdef0123456789abcdef01234567'
   const incremental = parseIncomingMessage({

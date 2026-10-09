@@ -3,8 +3,10 @@ package com.jinloes.prpilot.review;
 import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.emptyReviewJson;
 import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.oneRiskyHunk;
 import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.request;
+import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.reviewJsonWithFinding;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.model.LineComment;
@@ -154,6 +156,154 @@ class ReviewPipelineRecallTest {
             assertThat(result.getLineComments())
                     .extracting(LineComment::getBody)
                     .containsExactly("Primary finding.");
+            assertThat(result.getLineComments())
+                    .allSatisfy(comment -> assertThat(comment.getSources()).isEmpty());
+        }
+
+        @Test
+        void attributesFindingsAndMarksCorroboratedOnesForCritique() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    pass(result(comment("src/A.java", 1, "high", "Primary finding.")));
+            FakeSecondary secondary = new FakeSecondary();
+            secondary.result =
+                    pass(
+                            result(
+                                    comment("src/A.java", 2, "medium", "Second phrasing."),
+                                    comment("src/B.java", 5, "medium", "Second only.")));
+            provider.hygieneCompletions.add(
+                    reviewJson(hygiene("src/Api.java", 1, "high", "Hot-path log.")));
+            provider.completions.add(
+                    reviewJson(
+                            comment("src/A.java", 1, "high", "Primary finding, tightened."),
+                            comment("src/B.java", 5, "medium", "Second only."),
+                            comment("src/C.java", 9, "high", "Critique added.")));
+            List<String> statuses = new CopyOnWriteArrayList<>();
+
+            ReviewResult result =
+                    withSecondary(provider, secondary)
+                            .review(
+                                    request(oneRiskyHunk()),
+                                    false,
+                                    true,
+                                    false,
+                                    statuses::add,
+                                    null);
+
+            assertThat(statuses).contains("Merged reviewers into 2 findings");
+            assertThat(provider.completeCalls)
+                    .singleElement()
+                    .extracting(PromptCall::prompt)
+                    .asString()
+                    .contains("\"corroborated\":true", "reported independently by two reviewers")
+                    .doesNotContain("Second phrasing.", "\"sources\"");
+            assertThat(result.getLineComments())
+                    .extracting(LineComment::getBody, LineComment::getSources)
+                    .containsExactlyInAnyOrder(
+                            tuple("Primary finding, tightened.", List.of("claude-opus", "gpt-5.5")),
+                            tuple("Second only.", List.of("gpt-5.5")),
+                            tuple("Critique added.", List.of("claude-opus")),
+                            tuple("Hot-path log.", List.of("claude-opus")));
+        }
+
+        @Test
+        void attributesTheDraftWhenCritiqueFails() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    pass(result(comment("src/A.java", 1, "high", "Primary finding.")));
+            FakeSecondary secondary = new FakeSecondary();
+            secondary.result =
+                    pass(
+                            result(
+                                    comment("src/A.java", 1, "medium", "Second phrasing."),
+                                    comment("src/B.java", 5, "medium", "Second only.")));
+            provider.hygieneCompletions.add(
+                    reviewJson(hygiene("src/Api.java", 1, "high", "Hot-path log.")));
+            provider.completionFailure = new IOException("validator unavailable");
+
+            ReviewResult result =
+                    withSecondary(provider, secondary)
+                            .review(request(oneRiskyHunk()), false, true, false, s -> {}, null);
+
+            assertThat(result.getLineComments())
+                    .extracting(LineComment::getBody, LineComment::getSources)
+                    .containsExactlyInAnyOrder(
+                            tuple("Primary finding.", List.of("claude-opus", "gpt-5.5")),
+                            tuple("Second only.", List.of("gpt-5.5")),
+                            tuple("Hot-path log.", List.of("claude-opus")));
+        }
+
+        @Test
+        void critiqueFailureAttributionDoesNotChainThroughNearbyFindings() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    pass(
+                            result(
+                                    severity(comment("src/A.java", 10, "high", "Nit."), "nit"),
+                                    severity(comment("src/A.java", 12, "high", "Minor."), "minor"),
+                                    severity(
+                                            comment("src/A.java", 14, "high", "Major."), "major")));
+            FakeSecondary secondary = new FakeSecondary();
+            secondary.result = pass(result(comment("src/A.java", 14, "high", "Second.")));
+            provider.hygieneCompletions.add(reviewJson());
+            provider.completionFailure = new IOException("validator unavailable");
+
+            ReviewResult result =
+                    withSecondary(provider, secondary)
+                            .review(request(oneRiskyHunk()), false, true, false, s -> {}, null);
+
+            assertThat(result.getLineComments())
+                    .extracting(LineComment::getLine, LineComment::getSources)
+                    .containsExactlyInAnyOrder(
+                            tuple(14, List.of("claude-opus", "gpt-5.5")),
+                            tuple(12, List.of("claude-opus", "gpt-5.5")),
+                            tuple(10, List.of("claude-opus")));
+        }
+
+        @Test
+        void attributesSupervisorFollowUpFindingsToThePrimaryReviewer() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    new ReviewPassResult(result(), new InspectionLedger(true, Set.of(), List.of()));
+            FakeSecondary secondary = new FakeSecondary();
+            secondary.result =
+                    new ReviewPassResult(
+                            result(comment("src/B.java", 5, "medium", "Second only.")),
+                            new InspectionLedger(true, Set.of(), List.of()));
+            provider.completions.add(reviewJsonWithFinding("src/Api.java", 1));
+            provider.completions.add(
+                    reviewJson(
+                            comment("src/B.java", 5, "medium", "Second only."),
+                            comment("src/Api.java", 1, "high", "Follow-up finding.")));
+
+            ReviewResult result =
+                    withSecondary(provider, secondary)
+                            .review(request(oneRiskyHunk()), false, false, true, s -> {}, null);
+
+            assertThat(provider.callOrder).containsSubsequence("supervisor", "critique");
+
+            assertThat(result.getLineComments())
+                    .extracting(LineComment::getFile, LineComment::getSources)
+                    .containsExactly(tuple("src/Api.java", List.of("claude-opus")));
+        }
+
+        @Test
+        void leavesFindingsUnattributedWithoutASecondReviewer() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    pass(result(comment("src/A.java", 1, "high", "Primary finding.")));
+            provider.completions.add(
+                    reviewJson(comment("src/A.java", 1, "high", "Primary finding.")));
+
+            ReviewResult result =
+                    pipeline(provider)
+                            .review(request(oneRiskyHunk()), false, true, false, s -> {}, null);
+
+            assertThat(provider.completeCalls.get(0).prompt())
+                    .doesNotContain("corroborated", "reported independently by two reviewers");
+            assertThat(result.getLineComments())
+                    .singleElement()
+                    .satisfies(comment -> assertThat(comment.getSources()).isEmpty());
         }
 
         @Test
@@ -673,6 +823,11 @@ class ReviewPipelineRecallTest {
             comment.setCategory("correctness");
             comment.setConfidence(confidence);
             comment.setRationale("Rationale for " + body);
+            return comment;
+        }
+
+        private static LineComment severity(LineComment comment, String severity) {
+            comment.setSeverity(severity);
             return comment;
         }
 

@@ -39,3 +39,17 @@ test('returns copies so callers cannot mutate persisted recovery data', async ()
 
     assert.equal(store.get('acme/repo#1')?.result.lineComments.length, 1);
 });
+
+test('omits reviewer sources from recovery snapshots', async () => {
+    const memento = new MemoryMemento();
+    const store = new DraftRecoveryStore(memento);
+    const attributed = { file: 'a.ts', line: 1, type: 'note' as const, body: 'note', sources: ['claude-opus', 'gpt-5.5'] };
+    await store.save('acme/repo#1', { ...result, lineComments: [attributed] }, [attributed]);
+
+    const stored = JSON.stringify(memento.values.get('pr-pilot.draftRecovery.v1'));
+    assert.equal(stored.includes('sources'), false);
+    const restored = store.get('acme/repo#1');
+    assert.deepEqual(restored?.result.lineComments, [{ file: 'a.ts', line: 1, type: 'note', body: 'note' }]);
+    assert.deepEqual(restored?.orphans, [{ file: 'a.ts', line: 1, type: 'note', body: 'note' }]);
+    assert.deepEqual(attributed.sources, ['claude-opus', 'gpt-5.5']);
+});

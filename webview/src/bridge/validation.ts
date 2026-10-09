@@ -21,6 +21,16 @@ function isOptionalString(value: unknown, maxLength = MAX_TEXT): boolean {
   return value === undefined || isString(value, maxLength)
 }
 
+const MAX_SOURCES = 4
+const MAX_SOURCE_LENGTH = 120
+
+function isOptionalSources(value: unknown): boolean {
+  if (value === undefined || value === null) return true
+  return Array.isArray(value)
+    && value.length <= MAX_SOURCES
+    && value.every(source => isString(source, MAX_SOURCE_LENGTH))
+}
+
 function isPrKey(value: unknown): boolean {
   return value === undefined || (isString(value, 512) && /^[^/\s]+\/[^#\s]+#[1-9]\d*$/.test(value))
 }
@@ -48,6 +58,7 @@ function isLineComment(value: unknown): value is LineComment {
     && (value.category === undefined || ['correctness', 'security', 'performance', 'tests', 'maintainability', 'compatibility', 'style'].includes(value.category as string))
     && (value.confidence === undefined || ['low', 'medium', 'high'].includes(value.confidence as string))
     && isOptionalString(value.rationale)
+    && isOptionalSources(value.sources)
 }
 
 function isReviewResult(value: unknown): value is ReviewResult {

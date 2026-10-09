@@ -48,6 +48,9 @@ Draft mutations are serialized per host view and bind the pending review ID to i
 ### Incremental review button and scope banner
 The no-draft generation card shows a secondary "Review changes since last review" button (`generate-incremental-review`) only when the selected PR's `reviewStatus` is `UPDATED_SINCE_REVIEW`. It is disabled when the provider is unavailable. It sends `generateReview` with `incremental: true` and no `diff`, `chunkedReview` or `intellijAssisted`, regardless of chunked mode. Bridge validation drops a malformed `reviewScope` but keeps the rest of the `reviewResult`. The scope is stored with the result, carried through a draft save, and cleared on a new generation or a PR change. `ReviewScopeBanner` states either that only changes since the given short SHA were reviewed, or why the review fell back to the full PR.
 
+### Reviewer sources chip
+A finding with `sources` shows a `finding-sources` chip in the comment header naming its reviewers joined by " + ", with the tooltip "Found by both reviewers" when there are two or more. No chip appears when `sources` is absent, `null` or empty. Bridge validation accepts absent, `null`, or at most 4 strings of at most 120 characters, and rejects any other shape like other invalid comment fields. Sources are display-only and are not saved to GitHub drafts.
+
 ### VS Code webview surfaces
 The VS Code host exposes PR Pilot as an editor-tab `WebviewPanel` opened by `pr-pilot.open`. The Activity Bar view (`pr-pilot.main`) is an empty native tree view whose `viewsWelcome` content offers an Open PR Pilot command button and a Settings link; it hosts no webview. Opening or revealing the editor panel never changes the sidebar's visibility. The full PR loading, review generation, chat, and worktree lifecycle run only in the editor-tab panel.
 

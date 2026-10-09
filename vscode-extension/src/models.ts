@@ -25,6 +25,8 @@ export interface LineComment {
     category?: Category;
     confidence?: Confidence;
     rationale?: string;
+    /** Display-only reviewer attribution; never persisted to GitHub drafts. */
+    sources?: string[];
 }
 
 export interface ReviewResult {

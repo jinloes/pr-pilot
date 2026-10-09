@@ -31,7 +31,8 @@ public final class ReviewPrompts {
      *
      * <p>Not a compatibility version: nothing parses it, and old log lines keep their old value.
      */
-    public static final String PROMPT_VERSION = "2026-10-thread-state-incremental-scope";
+    public static final String PROMPT_VERSION =
+            "2026-10-thread-state-incremental-scope-corroboration";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -939,6 +940,12 @@ public final class ReviewPrompts {
                     + " Re-derive \"verdict\" from the surviving comments. Respond ONLY with the"
                     + " corrected review JSON in the schema above.\n";
 
+    /** Appended only when the draft marks a comment both reviewers reported. */
+    private static final String CORROBORATION_DIRECTIVE =
+            "A comment marked \"corroborated\": true was reported independently by two"
+                    + " reviewers; treat that as supporting evidence, but still drop it when the"
+                    + " diff contradicts it.\n";
+
     /**
      * Builds the self-critique prompt: a lean validation preamble plus the shared {@link
      * #OUTPUT_CONTRACT}, the PR metadata, the same context sections the first pass saw, the
@@ -957,6 +964,9 @@ public final class ReviewPrompts {
                 .append(escapeClosingTag(draftReviewJson(draft), "draft_review"))
                 .append("\n</draft_review>\n\n")
                 .append(CRITIQUE_DIRECTIVE);
+        if (draft.getLineComments().stream().anyMatch(ReviewPrompts::corroborated)) {
+            prompt.append(CORROBORATION_DIRECTIVE);
+        }
         return prompt.toString();
     }
 
@@ -984,12 +994,19 @@ public final class ReviewPrompts {
             if (StringUtils.isNotBlank(c.getRationale())) {
                 node.put("rationale", c.getRationale());
             }
+            if (corroborated(c)) {
+                node.put("corroborated", true);
+            }
         }
         try {
             return JSON.writeValueAsString(root);
         } catch (Exception e) {
             return "{}";
         }
+    }
+
+    private static boolean corroborated(LineComment comment) {
+        return comment.getSources().size() >= 2;
     }
 
     private static final Pattern HUNK_HEADER =

@@ -1,5 +1,8 @@
 package com.jinloes.prpilot.model;
 
+import java.util.List;
+import java.util.Objects;
+
 /**
  * A single inline comment on a diff line. Mutable setters are preserved for Jackson deserialization
  * and for Java interop from intellij-plugin.
@@ -8,6 +11,9 @@ package com.jinloes.prpilot.model;
  * {@link #getRationale()}) are optional and default to empty/null so legacy drafts and older
  * provider output deserialize unchanged. They let the UI sort, filter, and explain findings beyond
  * the coarse {@link #getType()} bucket.
+ *
+ * <p>{@link #getSources()} names the reviewer model(s) that reported the finding. The review engine
+ * sets it; model output never does.
  */
 public final class LineComment {
 
@@ -19,6 +25,7 @@ public final class LineComment {
     private String category;
     private String confidence;
     private String rationale;
+    private List<String> sources = List.of();
 
     public LineComment() {}
 
@@ -95,5 +102,14 @@ public final class LineComment {
 
     public void setRationale(String value) {
         this.rationale = value;
+    }
+
+    /** Reviewer labels that reported this finding; never null, empty when unattributed. */
+    public List<String> getSources() {
+        return sources;
+    }
+
+    public void setSources(List<String> value) {
+        this.sources = value != null ? value.stream().filter(Objects::nonNull).toList() : List.of();
     }
 }

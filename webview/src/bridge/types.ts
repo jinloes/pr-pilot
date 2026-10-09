@@ -278,6 +278,8 @@ export interface LineComment {
   category?: Category
   confidence?: Confidence
   rationale?: string
+  /** Reviewers that reported this finding; display-only. */
+  sources?: string[] | null
 }
 
 export type Severity = 'blocker' | 'major' | 'minor' | 'nit'

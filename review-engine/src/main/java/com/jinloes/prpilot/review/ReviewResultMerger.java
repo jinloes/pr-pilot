@@ -74,7 +74,7 @@ final class ReviewResultMerger {
                 + comment.getBody().trim().toLowerCase(Locale.ROOT);
     }
 
-    private static int priority(LineComment comment) {
+    static int priority(LineComment comment) {
         int severity =
                 switch (comment.getSeverity()) {
                     case "blocker" -> 40;

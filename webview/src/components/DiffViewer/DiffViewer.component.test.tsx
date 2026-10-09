@@ -224,6 +224,37 @@ describe('DiffViewer', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete comment' })).toBeVisible()
   })
 
+  it('shows which reviewers found a corroborated finding', async () => {
+    const user = userEvent.setup()
+    render(<DiffViewer diff={diff} comments={[{ ...comments[0], sources: ['claude-opus', 'gpt-5.5'] }]} />)
+
+    const chip = screen.getByTestId('finding-sources')
+    expect(chip).toHaveTextContent('claude-opus + gpt-5.5')
+    await user.hover(chip)
+    expect((await screen.findAllByText('Found by both reviewers')).length).toBeGreaterThan(0)
+  })
+
+  it('shows a single reviewer without the corroboration tooltip', async () => {
+    const user = userEvent.setup()
+    render(<DiffViewer diff={diff} comments={[{ ...comments[0], sources: ['gpt-5.5'] }]} />)
+
+    const chip = screen.getByTestId('finding-sources')
+    expect(chip).toHaveTextContent('gpt-5.5')
+    await user.hover(chip)
+    expect(screen.queryByText('Found by both reviewers')).not.toBeInTheDocument()
+  })
+
+  it('omits the sources chip when a finding has no attribution', () => {
+    render(
+      <DiffViewer
+        diff={diff}
+        comments={[{ ...comments[0], sources: [] }, { ...comments[0], line: comments[0].line, sources: null }]}
+      />,
+    )
+
+    expect(screen.queryByTestId('finding-sources')).not.toBeInTheDocument()
+  })
+
   it('explains that a deleted comment is saved by autosave and offers Save now', async () => {
     const user = userEvent.setup()
     const onDeleteComment = vi.fn()

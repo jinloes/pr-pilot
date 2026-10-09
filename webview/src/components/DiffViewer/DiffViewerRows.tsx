@@ -335,6 +335,25 @@ const SEVERITY_BADGE_CLASS: Record<NonNullable<LineComment['severity']>, string>
   nit:     'text-status-note border-status-note/40 bg-status-note/10',
 }
 
+function FindingSources({ sources }: { sources: string[] }) {
+  const chip = (
+    <Badge
+      variant="outline"
+      data-testid="finding-sources"
+      className={cn('text-[9px] font-medium px-1.5 py-0 text-muted-foreground', sources.length > 1 && 'cursor-help')}
+    >
+      {sources.join(' + ')}
+    </Badge>
+  )
+  if (sources.length < 2) return chip
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{chip}</TooltipTrigger>
+      <TooltipContent side="top">Found by both reviewers</TooltipContent>
+    </Tooltip>
+  )
+}
+
 interface InlineCommentRowProps {
   comment: LineComment
   globalIdx: number
@@ -419,6 +438,7 @@ function InlineCommentRow({
                   )}
                 </span>
               )}
+              {comment.sources && comment.sources.length > 0 && <FindingSources sources={comment.sources} />}
             </div>
             {(onVerify || onSuggestFix || onEdit || onDelete) && !editing && (
               <div className="diff-comment__actions">

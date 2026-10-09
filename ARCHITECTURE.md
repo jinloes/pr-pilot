@@ -45,6 +45,7 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [Repository guidance confinement](docs/architecture/review-pipeline.md#repository-guidance-confinement)
 - [Review guidance, file history and call sites come from the base commit](docs/architecture/review-pipeline.md#review-guidance-file-history-and-call-sites-come-from-the-base-commit)
 - [Recall: second reviewer and candidate validation](docs/architecture/review-pipeline.md#recall-second-reviewer-and-candidate-validation)
+- [Reviewer attribution and corroboration](docs/architecture/review-pipeline.md#reviewer-attribution-and-corroboration)
 - [Recall benchmark withholds the reference answers](docs/architecture/review-pipeline.md#recall-benchmark-withholds-the-reference-answers)
 - [ReviewBench runs never consult GitHub and delegate scoring](docs/architecture/review-pipeline.md#reviewbench-runs-never-consult-github-and-delegate-scoring)
 - [Comment anchoring snaps within a hunk, never across one](docs/architecture/review-pipeline.md#comment-anchoring-snaps-within-a-hunk-never-across-one)
@@ -120,6 +121,7 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [DTO mapping in IntelliJ webview bridge](docs/architecture/webview.md#dto-mapping-in-intellij-webview-bridge)
 - [Webview bridge PR correlation](docs/architecture/webview.md#webview-bridge-pr-correlation)
 - [Incremental review button and scope banner](docs/architecture/webview.md#incremental-review-button-and-scope-banner)
+- [Reviewer sources chip](docs/architecture/webview.md#reviewer-sources-chip)
 - [VS Code webview surfaces](docs/architecture/webview.md#vs-code-webview-surfaces)
 - [IntelliJ webview surfaces](docs/architecture/webview.md#intellij-webview-surfaces)
 

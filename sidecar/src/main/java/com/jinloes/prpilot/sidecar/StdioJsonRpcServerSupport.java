@@ -62,6 +62,16 @@ final class StdioJsonRpcServerSupport {
         return node.isMissingNode() || node.isNull() || node.isTextual();
     }
 
+    // Reviewer attribution is display-only, so drafts accept it but never persist it.
+    boolean isTextArrayOrAbsent(JsonNode node) {
+        if (node.isMissingNode() || node.isNull()) return true;
+        if (!node.isArray()) return false;
+        for (JsonNode item : node) {
+            if (!item.isTextual()) return false;
+        }
+        return true;
+    }
+
     String optionalText(JsonNode object, String field) {
         JsonNode value = object.get(field);
         return value == null ? null : value.textValue();
@@ -82,7 +92,8 @@ final class StdioJsonRpcServerSupport {
                                     "severity",
                                     "category",
                                     "confidence",
-                                    "rationale"))
+                                    "rationale",
+                                    "sources"))
                     || !comment.path("file").isTextual()
                     || !comment.path("line").isIntegralNumber()
                     || !comment.path("line").canConvertToInt()
@@ -91,7 +102,8 @@ final class StdioJsonRpcServerSupport {
                     || (comment.has("severity") && !comment.path("severity").isTextual())
                     || (comment.has("category") && !comment.path("category").isTextual())
                     || (comment.has("confidence") && !comment.path("confidence").isTextual())
-                    || (comment.has("rationale") && !comment.path("rationale").isTextual())) {
+                    || (comment.has("rationale") && !comment.path("rationale").isTextual())
+                    || !isTextArrayOrAbsent(comment.path("sources"))) {
                 return null;
             }
             comments.add(

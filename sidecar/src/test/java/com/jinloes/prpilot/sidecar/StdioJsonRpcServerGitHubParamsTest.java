@@ -3,8 +3,10 @@ package com.jinloes.prpilot.sidecar;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -257,6 +259,58 @@ class StdioJsonRpcServerGitHubParamsTest extends StdioJsonRpcServerTestBase {
         assertThat(missingLineComments.path("error").path("code").asInt()).isEqualTo(-32602);
         assertThat(malformedComment.path("error").path("code").asInt()).isEqualTo(-32602);
         assertThat(extraField.path("error").path("code").asInt()).isEqualTo(-32602);
+    }
+
+    @Test
+    void acceptsAndIgnoresReviewerSourcesOnSavedComments() throws IOException {
+        ObjectNode comment = draftComment();
+        comment.putArray("sources").add("claude-opus").add("gpt-5.5");
+
+        JsonNode response = server.handle(saveDraftRequest("save-sources", comment));
+
+        assertThat(response.has("error")).isFalse();
+        assertThat(response.path("result").path("status").asText()).isEqualTo("invalid_base_url");
+    }
+
+    @Test
+    void rejectsMalformedSourcesAndOtherUnknownCommentFields() throws IOException {
+        ObjectNode nonArraySources = draftComment();
+        nonArraySources.put("sources", "claude-opus");
+        ObjectNode nonTextSource = draftComment();
+        nonTextSource.putArray("sources").add(1);
+        ObjectNode unknownField = draftComment();
+        unknownField.put("corroborated", true);
+
+        for (ObjectNode comment : List.of(nonArraySources, nonTextSource, unknownField)) {
+            JsonNode response = server.handle(saveDraftRequest("save-bad", comment));
+
+            assertThat(response.path("error").path("code").asInt()).isEqualTo(-32602);
+        }
+    }
+
+    private ObjectNode draftComment() {
+        ObjectNode comment = objectMapper.createObjectNode();
+        comment.put("file", "a.java");
+        comment.put("line", 1);
+        comment.put("type", "suggestion");
+        comment.put("body", "Body.");
+        return comment;
+    }
+
+    private byte[] saveDraftRequest(String id, ObjectNode comment) throws IOException {
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("jsonrpc", "2.0");
+        request.put("id", id);
+        request.put("method", "prs/saveDraftReview");
+        ObjectNode params = request.putObject("params");
+        params.put("githubBaseUrl", "http://github.com");
+        params.put("owner", "acme");
+        params.put("repo", "widgets");
+        params.put("number", 42);
+        params.put("summary", "s");
+        params.put("verdict", "APPROVE");
+        params.putArray("lineComments").add(comment);
+        return objectMapper.writeValueAsBytes(request);
     }
 
     @Test

@@ -222,7 +222,8 @@ public final class ReviewPipelineService {
         request = withLocalRules(request);
         boolean recall = selfCritique || secondary != null;
         PRReviewRequest reviewRequest = request.withCandidateRecall(recall);
-        ReviewPassResult primary = reviewPasses(reviewRequest, chunked, onStatus, onChunk);
+        Passes passes = reviewPasses(reviewRequest, chunked, onStatus, onChunk);
+        ReviewPassResult primary = passes.result();
         provider.checkCancelled();
 
         if (supervisorEnabled) {
@@ -236,6 +237,8 @@ public final class ReviewPipelineService {
             candidate = supervise(reviewRequest, manifest, primary, onStatus);
         }
         provider.checkCancelled();
+        List<ReviewerAttribution.Evidence> attributed =
+                ReviewerAttribution.Evidence.snapshot(candidate.getLineComments());
 
         if (recall) {
             ReviewResult hygiene = hygieneFindings(request, chunked, manifest, onStatus);
@@ -276,6 +279,10 @@ public final class ReviewPipelineService {
                 droppedStatuses(draft, candidate).forEach(onStatus);
             }
             onStatus.accept(validatedStatus(candidate.getLineComments().size(), draftCount));
+        }
+        if (passes.labels() != null) {
+            candidate =
+                    ReviewerAttribution.reattach(candidate, attributed, passes.labels().primary());
         }
         provider.checkCancelled();
         if (supervisorEnabled) {
@@ -423,13 +430,17 @@ public final class ReviewPipelineService {
                 .build();
     }
 
-    private ReviewPassResult reviewPasses(
+    /** The merged first-pass result, with the reviewer labels when both reviewers succeeded. */
+    private record Passes(ReviewPassResult result, ReviewerAttribution.Labels labels) {}
+
+    private Passes reviewPasses(
             PRReviewRequest request,
             boolean chunked,
             Consumer<String> onStatus,
             BiConsumer<String, String> onChunk)
             throws IOException, InterruptedException {
-        if (secondary == null) return runPrimary(request, chunked, onStatus, onChunk);
+        if (secondary == null)
+            return new Passes(runPrimary(request, chunked, onStatus, onChunk), null);
 
         ExecutorService executor =
                 Executors.newSingleThreadExecutor(
@@ -455,16 +466,22 @@ public final class ReviewPipelineService {
             ReviewPassResult second = awaitSecondary(future);
             if (second == null) {
                 onStatus.accept(secondReviewerStatus("failed; using primary findings"));
-                return primary;
+                return new Passes(primary, null);
             }
             onStatus.accept(secondReviewerStatus("finished with " + findings(second)));
+            ReviewerAttribution.Labels labels =
+                    ReviewerAttribution.Labels.of(
+                            provider.displayModel(),
+                            StringUtils.defaultIfBlank(secondary.displayModel(), secondaryModel));
+            ReviewerAttribution.Collapsed collapsed =
+                    ReviewerAttribution.collapse(primary.review(), second.review(), labels);
             ReviewPassResult merged =
                     new ReviewPassResult(
                             ReviewResultMerger.merge(
-                                    primary.review(), second.review(), MERGED_CANDIDATE_CAP),
+                                    collapsed.primary(), collapsed.second(), MERGED_CANDIDATE_CAP),
                             InspectionLedger.merge(List.of(primary.ledger(), second.ledger())));
             onStatus.accept("Merged reviewers into " + findings(merged));
-            return merged;
+            return new Passes(merged, labels);
         } finally {
             if (!primaryCompleted) {
                 if (cancelSecondary != null) cancelSecondary.run();

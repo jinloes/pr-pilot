@@ -294,7 +294,7 @@ class ReviewPromptsTest {
         @Test
         void promptVersionSegmentsContextConformanceChanges() {
             assertThat(ReviewPrompts.PROMPT_VERSION)
-                    .isEqualTo("2026-10-thread-state-incremental-scope");
+                    .isEqualTo("2026-10-thread-state-incremental-scope-corroboration");
         }
 
         @Test
@@ -797,6 +797,41 @@ class ReviewPromptsTest {
                     .contains("\"confidence\":\"high\"")
                     .contains("\"body\":\"Null deref\"")
                     .contains("\"rationale\":\"value can be null\"");
+        }
+
+        @Test
+        void draftReviewJsonMarksOnlyCommentsWithTwoSourcesAsCorroborated() {
+            com.jinloes.prpilot.model.ReviewResult draft = draft();
+            draft.getLineComments().get(0).setSources(java.util.List.of("claude"));
+
+            assertThat(ReviewPrompts.draftReviewJson(draft))
+                    .doesNotContain("corroborated")
+                    .doesNotContain("sources")
+                    .doesNotContain("claude");
+
+            draft.getLineComments().get(0).setSources(java.util.List.of("claude", "gpt"));
+
+            assertThat(ReviewPrompts.draftReviewJson(draft))
+                    .contains("\"corroborated\":true")
+                    .doesNotContain("sources")
+                    .doesNotContain("gpt");
+        }
+
+        @Test
+        void critiqueAddsTheCorroborationSentenceOnlyForACorroboratedDraft() {
+            String sentence = "was reported independently by two reviewers";
+            com.jinloes.prpilot.model.ReviewResult draft = draft();
+            draft.getLineComments().get(0).setSources(java.util.List.of("claude"));
+
+            assertThat(ReviewPrompts.buildCritiquePrompt(req(), draft())).doesNotContain(sentence);
+            assertThat(ReviewPrompts.buildCritiquePrompt(req(), draft)).doesNotContain(sentence);
+
+            draft.getLineComments().get(0).setSources(java.util.List.of("claude", "gpt"));
+            String prompt = ReviewPrompts.buildCritiquePrompt(req(), draft);
+
+            assertThat(prompt).contains(sentence, "still drop it when the diff contradicts it");
+            assertThat(prompt.indexOf(sentence))
+                    .isGreaterThan(prompt.indexOf("Respond ONLY with the corrected review JSON"));
         }
 
         @Test

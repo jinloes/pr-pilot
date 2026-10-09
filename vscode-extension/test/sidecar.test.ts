@@ -27,6 +27,7 @@ import {
   resolveSidecarJarPath,
   type SidecarSpawn,
 } from '../src/sidecar';
+import { parseReviewResult } from '../src/sidecarProtocol';
 
 const tempRoot = mkdtempSync(path.join(tmpdir(), 'pr-pilot-sidecar-test-'));
 const fakeJar = path.join(tempRoot, 'pr-pilot-sidecar.jar');
@@ -314,6 +315,21 @@ test('parsePrDiffResult accepts a diff_too_large result and still rejects unknow
     { status: 'diff_too_large', message: 'Too large.', diff: null, truncated: false, limitBytes: 250000 });
   assert.equal(parsePrDiffResult({ status: 'diff_too_large', message: 'Too large.', diff: 'diff', truncated: false, limitBytes: 250000 }), null);
   assert.equal(parsePrDiffResult({ status: 'too_large', message: 'x', diff: null, truncated: false, limitBytes: 250000 }), null);
+});
+
+test('parseReviewResult carries reviewer sources only when they are an array of strings', () => {
+  const comment = { file: 'a.ts', line: 1, type: 'issue', body: 'Body.' };
+  const parse = (extra: Record<string, unknown>) =>
+    parseReviewResult({ summary: 's', verdict: 'COMMENT', lineComments: [{ ...comment, ...extra }] })
+      ?.lineComments[0];
+
+  assert.deepEqual(parse({ sources: ['claude-opus', 'gpt-5.5'] })?.sources, ['claude-opus', 'gpt-5.5']);
+  assert.deepEqual(parse({ sources: [] })?.sources, []);
+  for (const sources of [undefined, null, 'claude-opus', ['claude-opus', 1], { 0: 'x' }]) {
+    const parsed = parse({ sources });
+    assert.ok(parsed, `comment with sources ${JSON.stringify(sources)} still parses`);
+    assert.equal('sources' in parsed, false);
+  }
 });
 
 test('parseDraftReviewResult accepts a decoded pending review', () => {

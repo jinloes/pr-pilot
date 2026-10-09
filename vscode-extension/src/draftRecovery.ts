@@ -17,11 +17,17 @@ export interface DraftRecoverySnapshot {
 
 type RecoveryState = Record<string, DraftRecoverySnapshot>;
 
+// Reviewer attribution belongs to one generation run, so recovered drafts never carry it.
+function copyComment(comment: LineComment): LineComment {
+    const { sources: _sources, ...rest } = comment;
+    return rest;
+}
+
 function copyResult(result: ReviewResult): ReviewResult {
     return {
         summary: result.summary,
         verdict: result.verdict,
-        lineComments: result.lineComments.map((comment) => ({ ...comment })),
+        lineComments: result.lineComments.map(copyComment),
     };
 }
 
@@ -34,7 +40,7 @@ export class DraftRecoveryStore {
         return {
             prKey,
             result: copyResult(snapshot.result),
-            orphans: snapshot.orphans.map((comment) => ({ ...comment })),
+            orphans: snapshot.orphans.map(copyComment),
             savedAt: snapshot.savedAt,
         };
     }
@@ -44,7 +50,7 @@ export class DraftRecoveryStore {
         state[prKey] = {
             prKey,
             result: copyResult(result),
-            orphans: orphans.map((comment) => ({ ...comment })),
+            orphans: orphans.map(copyComment),
             savedAt: Date.now(),
         };
         const ordered = Object.values(state).sort((left, right) => right.savedAt - left.savedAt);

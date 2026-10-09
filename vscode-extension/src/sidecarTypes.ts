@@ -194,6 +194,8 @@ export interface SidecarCommentInput {
     category?: string;
     confidence?: string;
     rationale?: string;
+    /** Accepted and ignored by the sidecar. */
+    sources?: string[];
 }
 
 export interface SidecarDraftReviewResult {

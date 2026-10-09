@@ -20,6 +20,7 @@ class ReviewMapperTest {
         comment.setCategory("correctness");
         comment.setConfidence("high");
         comment.setRationale("The value is nullable on this path.");
+        comment.setSources(List.of("claude-opus", "gpt-5.5"));
         ReviewResult result = new ReviewResult("Summary", "REQUEST_CHANGES", List.of(comment));
 
         ReviewResultDto dto = ReviewMapper.INSTANCE.toDto(result);
@@ -38,6 +39,9 @@ class ReviewMapperTest {
         assertThat(commentJson.path("confidence").asText()).isEqualTo("high");
         assertThat(commentJson.path("rationale").asText())
                 .isEqualTo("The value is nullable on this path.");
+        assertThat(commentJson.path("sources"))
+                .extracting(JsonNode::asText)
+                .containsExactly("claude-opus", "gpt-5.5");
     }
 
     @Test
@@ -51,5 +55,6 @@ class ReviewMapperTest {
         assertThat(json.has("category")).isFalse();
         assertThat(json.has("confidence")).isFalse();
         assertThat(json.has("rationale")).isFalse();
+        assertThat(json.has("sources")).isFalse();
     }
 }

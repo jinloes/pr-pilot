@@ -23,4 +23,5 @@ record LineCommentDto(
         String severity,
         String category,
         String confidence,
-        String rationale) {}
+        String rationale,
+        List<String> sources) {}
