@@ -278,6 +278,8 @@ export interface LineComment {
   category?: Category
   confidence?: Confidence
   rationale?: string
+  /** Replacement text for the anchored line, published as a GitHub suggestion block. */
+  suggestedChange?: string
   /** Reviewers that reported this finding; display-only. */
   sources?: string[] | null
 }

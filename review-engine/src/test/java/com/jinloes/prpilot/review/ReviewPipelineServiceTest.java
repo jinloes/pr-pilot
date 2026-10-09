@@ -602,6 +602,29 @@ class ReviewPipelineServiceTest {
         }
 
         @Test
+        void clearsAnUnsafeSuggestedChangeAsTheLastStep() throws Exception {
+            LineComment valid = suggestedFinding("public void call(String value) {}");
+            LineComment unchanged = suggestedFinding("public void call() {}");
+            unchanged.setCategory("compatibility");
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    ReviewPassResult.withoutLedger(
+                            new ReviewResult("baseline", "COMMENT", List.of(valid, unchanged)));
+            ReviewPipelineService pipeline =
+                    new ReviewPipelineService(
+                            provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
+
+            ReviewResult result =
+                    pipeline.review(
+                            request(oneRiskyHunk()), false, false, false, ignored -> {}, null);
+
+            assertThat(result.getLineComments())
+                    .extracting(LineComment::getSuggestedChange)
+                    .containsExactlyInAnyOrder("public void call(String value) {}", "");
+            assertThat(result.getLineComments()).hasSize(2);
+        }
+
+        @Test
         void followsUpOnAnUninspectedHighRiskHunkAndMergesTheFinding() throws Exception {
             String diff = oneRiskyHunk();
             InspectionManifest manifest = InspectionManifest.fromDiff(diff);
@@ -876,6 +899,16 @@ class ReviewPipelineServiceTest {
                                             null))
                     .isInstanceOf(InterruptedException.class);
         }
+    }
+
+    private static LineComment suggestedFinding(String suggestion) {
+        LineComment comment = new LineComment("src/Api.java", 1, "issue", "Keep the parameter.");
+        comment.setSeverity("major");
+        comment.setCategory("correctness");
+        comment.setConfidence("high");
+        comment.setRationale("Line 1 drops the parameter.");
+        comment.setSuggestedChange(suggestion);
+        return comment;
     }
 
     @Nested

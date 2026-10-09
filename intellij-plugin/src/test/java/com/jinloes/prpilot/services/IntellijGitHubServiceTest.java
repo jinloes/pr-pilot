@@ -4,12 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jinloes.prpilot.engine.GitHubEngineApi;
+import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PullRequest;
+import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.model.ReviewStatus;
 import com.jinloes.prpilot.sidecar.github.CheckAuthResult;
 import com.jinloes.prpilot.sidecar.pr.CheckAnnotation;
 import com.jinloes.prpilot.sidecar.pr.CheckRunService;
 import com.jinloes.prpilot.sidecar.pr.CheckStatusResult;
+import com.jinloes.prpilot.sidecar.pr.DraftReviewCodec;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewMutationResult;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewMutationService;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewResult;
@@ -33,6 +36,7 @@ import com.jinloes.prpilot.sidecar.pr.StarredReposResult;
 import com.jinloes.prpilot.sidecar.repo.DetectResult;
 import com.jinloes.prpilot.sidecar.repo.RepoProfileResult;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -584,6 +588,80 @@ class IntellijGitHubServiceTest {
                     .isInstanceOfSatisfying(
                             IntellijGitHubService.GitHubOperationException.class,
                             error -> assertThat(error.status()).isEqualTo("not_authenticated"));
+        }
+    }
+
+    @Nested
+    class SuggestedChange {
+
+        @Test
+        void saveForwardsTheSuggestedChangeToTheEngine() throws IOException {
+            List<DraftReviewMutationService.SaveParams> seen = new ArrayList<>();
+            StubEngine engine =
+                    new StubEngine() {
+                        @Override
+                        public DraftReviewMutationResult saveDraftReview(
+                                DraftReviewMutationService.SaveParams params) {
+                            seen.add(params);
+                            return new DraftReviewMutationResult("ok", "", "R1", false, false);
+                        }
+                    };
+            LineComment withSuggestion = new LineComment("a.java", 3, "issue", "fix");
+            withSuggestion.setSuggestedChange("  return a;");
+            LineComment without = new LineComment("a.java", 4, "note", "note");
+
+            serviceOver(engine)
+                    .saveDraftReview(
+                            "acme",
+                            "repo",
+                            1,
+                            new ReviewResult("s", "COMMENT", List.of(withSuggestion, without)),
+                            List.of());
+
+            assertThat(seen.get(0).lineComments())
+                    .extracting(DraftReviewMutationService.CommentInput::suggestedChange)
+                    .containsExactly("  return a;", "");
+        }
+
+        @Test
+        void loadMapsTheDecodedSuggestedChangeOntoTheHostModel() throws IOException {
+            StubEngine engine =
+                    new StubEngine() {
+                        @Override
+                        public DraftReviewResult getDraftReview(
+                                String githubBaseUrl, String owner, String repo, int number) {
+                            return new DraftReviewResult(
+                                    "ok",
+                                    "",
+                                    "R1",
+                                    "abc",
+                                    new DraftReviewCodec.DecodedReview(
+                                            "s",
+                                            "COMMENT",
+                                            List.of(
+                                                    new DraftReviewCodec.LineComment(
+                                                            "a.java",
+                                                            3,
+                                                            "issue",
+                                                            "fix",
+                                                            "",
+                                                            "",
+                                                            "",
+                                                            "",
+                                                            "  return a;"),
+                                                    new DraftReviewCodec.LineComment(
+                                                            "a.java", 4, "note", "note", "", "", "",
+                                                            "", null)),
+                                            false));
+                        }
+                    };
+
+            IntellijGitHubService.PendingReview review =
+                    serviceOver(engine).loadDraftReview("acme", "repo", 1);
+
+            assertThat(review.result().getLineComments())
+                    .extracting(LineComment::getSuggestedChange)
+                    .containsExactly("  return a;", "");
         }
     }
 }

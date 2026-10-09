@@ -68,6 +68,8 @@ export function parseReviewResult(value: unknown): ReviewResult | null {
         if (Array.isArray(comment.sources) && comment.sources.every((source) => typeof source === 'string')) {
             parsed.sources = [...comment.sources];
         }
+        const suggestedChange = presentSuggestedChange(comment.suggestedChange);
+        if (suggestedChange !== undefined) parsed.suggestedChange = suggestedChange;
         return parsed;
     });
     if (lineComments.some((comment) => comment === null)) return null;
@@ -463,9 +465,12 @@ export function parseDraftReviewResult(value: unknown): SidecarDraftReviewResult
             || (comment.severity !== null && typeof comment.severity !== 'string')
             || (comment.category !== null && typeof comment.category !== 'string')
             || (comment.confidence !== null && typeof comment.confidence !== 'string')
-            || (comment.rationale !== null && typeof comment.rationale !== 'string')) {
+            || (comment.rationale !== null && typeof comment.rationale !== 'string')
+            || (comment.suggestedChange !== undefined && comment.suggestedChange !== null
+                && typeof comment.suggestedChange !== 'string')) {
             return null;
         }
+        const suggestedChange = presentSuggestedChange(comment.suggestedChange);
         return {
             file: comment.file,
             line: comment.line,
@@ -475,6 +480,7 @@ export function parseDraftReviewResult(value: unknown): SidecarDraftReviewResult
             category: typeof comment.category === 'string' ? comment.category : null,
             confidence: typeof comment.confidence === 'string' ? comment.confidence : null,
             rationale: typeof comment.rationale === 'string' ? comment.rationale : null,
+            ...(suggestedChange === undefined ? {} : { suggestedChange }),
         };
     });
     if (lineComments.some((comment) => comment === null)) return null;
@@ -517,3 +523,8 @@ export function parseDraftReviewMutationResult(value: unknown): SidecarDraftRevi
 /** Encodes a JSON-RPC payload with the same bounded Content-Length framing the sidecar's
  * StdioFrameCodec (Java) reads/writes. Kept as a pure function so framing can be unit tested
  * without spawning a real process. */
+
+/** The sidecar reports "no suggestion" as "" (review results) or null (drafts); both mean absent. */
+function presentSuggestedChange(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() !== '' ? value : undefined;
+}

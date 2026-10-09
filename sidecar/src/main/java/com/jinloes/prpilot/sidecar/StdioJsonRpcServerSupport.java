@@ -93,6 +93,7 @@ final class StdioJsonRpcServerSupport {
                                     "category",
                                     "confidence",
                                     "rationale",
+                                    "suggestedChange",
                                     "sources"))
                     || !comment.path("file").isTextual()
                     || !comment.path("line").isIntegralNumber()
@@ -103,6 +104,8 @@ final class StdioJsonRpcServerSupport {
                     || (comment.has("category") && !comment.path("category").isTextual())
                     || (comment.has("confidence") && !comment.path("confidence").isTextual())
                     || (comment.has("rationale") && !comment.path("rationale").isTextual())
+                    || (comment.has("suggestedChange")
+                            && !comment.path("suggestedChange").isTextual())
                     || !isTextArrayOrAbsent(comment.path("sources"))) {
                 return null;
             }
@@ -115,7 +118,8 @@ final class StdioJsonRpcServerSupport {
                             optionalText(comment, "severity"),
                             optionalText(comment, "category"),
                             optionalText(comment, "confidence"),
-                            optionalText(comment, "rationale")));
+                            optionalText(comment, "rationale"),
+                            optionalText(comment, "suggestedChange")));
         }
         return comments;
     }

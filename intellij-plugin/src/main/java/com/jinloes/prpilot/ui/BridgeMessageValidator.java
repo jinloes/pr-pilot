@@ -8,6 +8,8 @@ final class BridgeMessageValidator {
 
     static final int PROTOCOL_VERSION = 1;
     private static final int MAX_TEXT = 100_000;
+    // Matches the draft codec limit; a longer stored suggestion would make the draft undecodable.
+    private static final int MAX_SUGGESTED_CHANGE = 1_000;
     private static final int MAX_REVIEW_DIFF = 1_100_000;
     private static final int MAX_COMMENTS = 1_000;
     private static final int MAX_OPERATION_ID_LENGTH = 128;
@@ -171,7 +173,8 @@ final class BridgeMessageValidator {
                                 "compatibility",
                                 "style"))
                 && optionalEnum(node.get("confidence"), Set.of("low", "medium", "high"))
-                && optionalText(node.get("rationale"), MAX_TEXT);
+                && optionalText(node.get("rationale"), MAX_TEXT)
+                && optionalText(node.get("suggestedChange"), MAX_SUGGESTED_CHANGE);
     }
 
     private static boolean boundedText(JsonNode node, int maxLength) {

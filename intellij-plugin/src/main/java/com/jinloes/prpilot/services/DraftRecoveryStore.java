@@ -40,6 +40,7 @@ public final class DraftRecoveryStore
         public String category = "";
         public String confidence = "";
         public String rationale = "";
+        public String suggestedChange = "";
     }
 
     public record Snapshot(
@@ -114,6 +115,7 @@ public final class DraftRecoveryStore
             copy.category = comment.getCategory();
             copy.confidence = comment.getConfidence();
             copy.rationale = comment.getRationale();
+            copy.suggestedChange = comment.getSuggestedChange();
             result.add(copy);
         }
         return result;
@@ -129,6 +131,7 @@ public final class DraftRecoveryStore
             comment.setCategory(stored.category);
             comment.setConfidence(stored.confidence);
             comment.setRationale(stored.rationale);
+            comment.setSuggestedChange(stored.suggestedChange);
             result.add(comment);
         }
         return result;

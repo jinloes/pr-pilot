@@ -4,6 +4,8 @@ export const BRIDGE_PROTOCOL_VERSION = 1;
 const MAX_TEXT = 100_000;
 const MAX_REVIEW_DIFF = 1_100_000;
 const MAX_COMMENTS = 1_000;
+// Matches the draft codec limit; a longer stored suggestion would make the draft undecodable.
+const MAX_SUGGESTED_CHANGE = 1_000;
 
 const MESSAGE_TYPES = new Set([
   'refreshPRs',
@@ -61,7 +63,8 @@ function isLineComment(value: unknown): boolean {
     && (comment.severity === undefined || ['blocker', 'major', 'minor', 'nit'].includes(comment.severity as string))
     && (comment.category === undefined || ['correctness', 'security', 'performance', 'tests', 'maintainability', 'compatibility', 'style'].includes(comment.category as string))
     && (comment.confidence === undefined || ['low', 'medium', 'high'].includes(comment.confidence as string))
-    && (comment.rationale === undefined || isBoundedString(comment.rationale));
+    && (comment.rationale === undefined || isBoundedString(comment.rationale))
+    && (comment.suggestedChange === undefined || isBoundedString(comment.suggestedChange, MAX_SUGGESTED_CHANGE));
 }
 
 function isReviewResult(value: unknown): boolean {

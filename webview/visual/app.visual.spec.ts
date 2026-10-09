@@ -195,6 +195,7 @@ async function openLongestRiskySubmit(page: Page) {
           body: 'Document the trust boundary.',
           severity: 'minor',
           confidence: 'high',
+          suggestedChange: 'export const ready = true // trusted only after verifyToken()',
         },
         {
           file: 'src/auth.ts',

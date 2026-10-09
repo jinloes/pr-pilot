@@ -200,6 +200,7 @@ final class ReviewResultParser {
         result.setCategory(category);
         result.setConfidence(confidence);
         result.setRationale(rationale);
+        result.setSuggestedChange(optionalString(element, "suggestedChange"));
         return result;
     }
 

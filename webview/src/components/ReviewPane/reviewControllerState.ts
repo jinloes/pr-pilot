@@ -112,6 +112,7 @@ export interface ReviewActions {
   editCommentHandlers: {
     onEditComment: (index: number, body: string) => void
     onDeleteComment: (index: number) => void
+    onRemoveSuggestion: (index: number) => void
     onAddComment: (comment: LineComment) => void
   }
   orphanHandlers: {

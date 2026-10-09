@@ -47,6 +47,7 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [Recall: second reviewer and candidate validation](docs/architecture/review-pipeline.md#recall-second-reviewer-and-candidate-validation)
 - [Reviewer attribution and corroboration](docs/architecture/review-pipeline.md#reviewer-attribution-and-corroboration)
 - [Review rules are trigger-gated and applied one agent per rule](docs/architecture/review-pipeline.md#review-rules-are-trigger-gated-and-applied-one-agent-per-rule)
+- [Suggested changes are literal, one-line, high-confidence replacements](docs/architecture/review-pipeline.md#suggested-changes-are-literal-one-line-high-confidence-replacements)
 - [Recall benchmark withholds the reference answers](docs/architecture/review-pipeline.md#recall-benchmark-withholds-the-reference-answers)
 - [ReviewBench runs never consult GitHub and delegate scoring](docs/architecture/review-pipeline.md#reviewbench-runs-never-consult-github-and-delegate-scoring)
 - [Comment anchoring snaps within a hunk, never across one](docs/architecture/review-pipeline.md#comment-anchoring-snaps-within-a-hunk-never-across-one)

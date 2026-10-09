@@ -281,6 +281,16 @@ describe('reviewReducer comment outcomes', () => {
       result: normalizeReviewResult(result, diff),
     })
   })
+  it('clears every suggested change when re-anchoring a stale draft', () => {
+    const suggested: DraftPresentState = {
+      ...draft,
+      result: { ...result, lineComments: [{ ...comment, suggestedChange: 'const value = readValue() ?? 0' }] },
+    }
+
+    const reanchored = reviewReducer(suggested, { type: 'reanchorDraft' })
+
+    expect(resultOf(reanchored)?.lineComments).toEqual([comment])
+  })
 })
 
 describe('review state selectors', () => {

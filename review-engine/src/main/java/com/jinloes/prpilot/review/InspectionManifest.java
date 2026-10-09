@@ -23,7 +23,10 @@ import java.util.regex.Pattern;
  */
 final class InspectionManifest {
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final Pattern FILE_START = Pattern.compile("(?m)^diff --git ");
+    // Git separates diff records with LF (CRLF on some transports). Broader separators such as
+    // U+2028 can appear inside source text, so neither splitting nor ^ may treat them as breaks.
+    private static final Pattern FILE_START = Pattern.compile("(?md)^diff --git ");
+    private static final Pattern DIFF_RECORD = Pattern.compile("\r?\n");
     private static final Pattern HUNK_HEADER =
             Pattern.compile("^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@");
     private static final Pattern CONTRACT_SIGNAL =
@@ -91,6 +94,21 @@ final class InspectionManifest {
                 .findFirst();
     }
 
+    /**
+     * Returns the new-side text (diff marker removed) of an added or context line, or empty when
+     * the line is absent from the file's diff or the diff only removes it.
+     */
+    Optional<String> newSideLineText(String path, int newLine) {
+        if (path == null || newLine <= 0) {
+            return Optional.empty();
+        }
+        return files.stream()
+                .filter(file -> file.path().equals(normalizePath(path)))
+                .map(file -> file.newSideLines().get(newLine))
+                .filter(text -> text != null)
+                .findFirst();
+    }
+
     String toPromptJson() {
         List<Map<String, Object>> encodedFiles = new ArrayList<>();
         for (FileTarget file : files) {
@@ -134,14 +152,14 @@ final class InspectionManifest {
 
     private static Optional<FileTarget> parseFile(String section) {
         String path = "";
-        for (String line : section.split("\\R")) {
+        for (String line : DIFF_RECORD.split(section)) {
             if (line.startsWith("+++ b/")) {
                 path = normalizePath(line.substring(6).trim());
                 break;
             }
         }
         if (path.isBlank()) {
-            String header = section.lines().findFirst().orElse("");
+            String header = DIFF_RECORD.split(section, 2)[0];
             int destination = header.indexOf(" b/");
             if (destination >= 0) {
                 path = normalizePath(header.substring(destination + 3).trim());
@@ -152,7 +170,8 @@ final class InspectionManifest {
         }
 
         List<HunkTarget> hunks = new ArrayList<>();
-        String[] lines = section.split("\\R");
+        Map<Integer, String> newSideLines = new LinkedHashMap<>();
+        String[] lines = DIFF_RECORD.split(section);
         for (int index = 0; index < lines.length; ) {
             Matcher header = HUNK_HEADER.matcher(lines[index]);
             if (!header.find()) {
@@ -166,14 +185,18 @@ final class InspectionManifest {
             boolean highRisk = isHighRiskPath(path);
             int next = index + 1;
             while (next < lines.length && !lines[next].startsWith("@@")) {
+                // File headers precede the first hunk, so inside a hunk "+++x" and "---x" are an
+                // added "++x" and a removed "--x", classified by their first character alone.
                 String line = lines[next];
-                if (line.startsWith("+") && !line.startsWith("+++")) {
+                if (line.startsWith("+")) {
                     changedNewLines.add(newLine);
+                    newSideLines.put(newLine, line.substring(1));
                     highRisk |= CONTRACT_SIGNAL.matcher(line.substring(1)).find();
                     newLine++;
-                } else if (line.startsWith("-") && !line.startsWith("---")) {
+                } else if (line.startsWith("-")) {
                     highRisk |= CONTRACT_SIGNAL.matcher(line.substring(1)).find();
                 } else if (!line.startsWith("\\")) {
+                    newSideLines.put(newLine, line.isEmpty() ? "" : line.substring(1));
                     newLine++;
                 }
                 next++;
@@ -192,7 +215,13 @@ final class InspectionManifest {
         }
         boolean highRisk = isHighRiskPath(path) || hunks.stream().anyMatch(HunkTarget::highRisk);
         return Optional.of(
-                new FileTarget(stableId("F", path), path, highRisk, List.copyOf(hunks), section));
+                new FileTarget(
+                        stableId("F", path),
+                        path,
+                        highRisk,
+                        List.copyOf(hunks),
+                        section,
+                        Collections.unmodifiableMap(newSideLines)));
     }
 
     static boolean isSafeRelativePath(String path) {
@@ -278,7 +307,14 @@ final class InspectionManifest {
         boolean highRisk();
     }
 
-    record FileTarget(String id, String path, boolean highRisk, List<HunkTarget> hunks, String diff)
+    /** {@code newSideLines} maps each added or context new-file line number to its text. */
+    record FileTarget(
+            String id,
+            String path,
+            boolean highRisk,
+            List<HunkTarget> hunks,
+            String diff,
+            Map<Integer, String> newSideLines)
             implements Target {}
 
     record HunkTarget(

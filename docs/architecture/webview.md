@@ -51,6 +51,9 @@ The no-draft generation card shows a secondary "Review changes since last review
 ### Reviewer sources chip
 A finding with `sources` shows a `finding-sources` chip in the comment header naming its reviewers joined by " + ", with the tooltip "Found by both reviewers" when there are two or more. No chip appears when `sources` is absent, `null` or empty. Bridge validation accepts absent, `null`, or at most 4 strings of at most 120 characters, and rejects any other shape like other invalid comment fields. Sources are display-only and are not saved to GitHub drafts.
 
+### Suggested change preview and removal
+A finding with `suggestedChange` shows a read-only `suggested-change` region under the comment: the anchored line's current text from the rendered diff as "before" and the replacement as "after", in monospace with diff colors, plus a "Remove suggestion" button that is hidden when the pane is read-only. Removing goes through `EditCommentHandlers.onRemoveSuggestion(index)`, clears only the field and marks the draft changed like an edit. Because a suggestion replaces one specific line, `withoutSuggestion` clears it whenever that pairing may no longer hold: a body edit (inline or orphan), a verifier "revise", a `validateComments` snap that changes `line`, and `reanchorDraft` on every comment of a stale draft. Both bridges accept it as an optional string bounded at 1,000 characters, matching the codec limit.
+
 ### VS Code webview surfaces
 The VS Code host exposes PR Pilot as an editor-tab `WebviewPanel` opened by `pr-pilot.open`. The Activity Bar view (`pr-pilot.main`) is an empty native tree view whose `viewsWelcome` content offers an Open PR Pilot command button and a Settings link; it hosts no webview. Opening or revealing the editor panel never changes the sidebar's visibility. The full PR loading, review generation, chat, and worktree lifecycle run only in the editor-tab panel.
 

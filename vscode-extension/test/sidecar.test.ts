@@ -332,6 +332,46 @@ test('parseReviewResult carries reviewer sources only when they are an array of 
   }
 });
 
+test('parseReviewResult keeps a non-blank suggestedChange and treats blank or non-string as absent', () => {
+  const comment = { file: 'a.ts', line: 1, type: 'issue', body: 'Body.' };
+  const parse = (extra: Record<string, unknown>) =>
+    parseReviewResult({ summary: 's', verdict: 'COMMENT', lineComments: [{ ...comment, ...extra }] })
+      ?.lineComments[0];
+
+  assert.equal(parse({ suggestedChange: '  return a;' })?.suggestedChange, '  return a;');
+  for (const suggestedChange of [undefined, null, '', '  ', 3]) {
+    const parsed = parse({ suggestedChange });
+    assert.ok(parsed, `comment with suggestedChange ${JSON.stringify(suggestedChange)} still parses`);
+    assert.equal('suggestedChange' in parsed, false);
+  }
+});
+
+test('parseDraftReviewResult maps a suggestedChange and treats empty or null as absent', () => {
+  const draft = (suggestedChange: unknown) => parseDraftReviewResult({
+    status: 'ok',
+    message: 'm',
+    id: '7',
+    commitId: 'sha',
+    review: {
+      summary: 's',
+      verdict: 'COMMENT',
+      importedFromGitHub: false,
+      lineComments: [{
+        file: 'a.ts', line: 10, type: 'issue', body: 'b',
+        severity: null, category: null, confidence: 'high', rationale: null, suggestedChange,
+      }],
+    },
+  })?.review?.lineComments[0];
+
+  assert.equal(draft('return a;')?.suggestedChange, 'return a;');
+  for (const absent of [null, '', undefined]) {
+    const parsed = draft(absent);
+    assert.ok(parsed);
+    assert.equal('suggestedChange' in parsed, false);
+  }
+  assert.equal(draft(3), undefined);
+});
+
 test('parseDraftReviewResult accepts a decoded pending review', () => {
   assert.deepEqual(
     parseDraftReviewResult({

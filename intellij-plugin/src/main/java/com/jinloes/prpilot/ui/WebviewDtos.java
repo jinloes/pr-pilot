@@ -24,4 +24,10 @@ record LineCommentDto(
         String category,
         String confidence,
         String rationale,
-        List<String> sources) {}
+        String suggestedChange,
+        List<String> sources) {
+    LineCommentDto {
+        // NON_EMPTY drops "" but not whitespace; a blank suggestion must never reach the webview.
+        if (suggestedChange != null && suggestedChange.isBlank()) suggestedChange = null;
+    }
+}

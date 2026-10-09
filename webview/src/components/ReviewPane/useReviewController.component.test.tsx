@@ -441,6 +441,75 @@ describe('useReviewController', () => {
     ])
   })
 
+  describe('suggested changes', () => {
+    const suggestedReview: ReviewResult = {
+      ...review,
+      lineComments: [{
+        ...review.lineComments[0],
+        severity: 'major',
+        rationale: 'Null on this path.',
+        suggestedChange: 'const value = readValue() ?? 0',
+      }],
+    }
+
+    function loadSuggestedDraft() {
+      const rendered = renderHook(() => useReviewController({ pr }))
+      act(() => {
+        hostMessage({
+          type: 'draftLoaded',
+          prKey: 'acme/widget#42',
+          prState: 'DRAFT_PRESENT',
+          reviewId: 'draft-1',
+          result: suggestedReview,
+          diff,
+          validationDiff: diff,
+        })
+      })
+      return rendered
+    }
+
+    it('removes only the suggestion and marks the draft changed', () => {
+      const { result } = loadSuggestedDraft()
+      expect(result.current.model.autosaveDirty).toBe(false)
+
+      act(() => result.current.actions.editCommentHandlers.onRemoveSuggestion(0))
+
+      const { suggestedChange, ...rest } = suggestedReview.lineComments[0]
+      expect(suggestedChange).toBeDefined()
+      expect(result.current.model.result?.lineComments).toEqual([rest])
+      expect(result.current.model.autosaveDirty).toBe(true)
+    })
+
+    it('clears the suggestion when the body is edited', () => {
+      const { result } = loadSuggestedDraft()
+
+      act(() => result.current.actions.editCommentHandlers.onEditComment(0, 'Default the value.'))
+
+      const edited = result.current.model.result?.lineComments[0]
+      expect(edited?.body).toBe('Default the value.')
+      expect(edited).not.toHaveProperty('suggestedChange')
+    })
+
+    it('clears the suggestion when a verifier revision is applied', () => {
+      const { result } = loadSuggestedDraft()
+      act(() => result.current.actions.verifyComment(suggestedReview.lineComments[0]))
+      const token = result.current.model.pendingChatMessage?.token ?? ''
+
+      act(() => result.current.actions.applyVerifyAction({
+        kind: 'verify',
+        verdict: 'valid',
+        why: 'Confirmed.',
+        evidence: [],
+        action: 'revise',
+        replacementComment: 'Return a default instead.',
+      }, token))
+
+      const revised = result.current.model.result?.lineComments[0]
+      expect(revised?.body).toBe('Return a default instead.')
+      expect(revised).not.toHaveProperty('suggestedChange')
+    })
+  })
+
   describe('keyboard selection capture', () => {
     function selectContents(element: Element) {
       const range = document.createRange()

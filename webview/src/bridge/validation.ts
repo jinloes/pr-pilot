@@ -58,6 +58,7 @@ function isLineComment(value: unknown): value is LineComment {
     && (value.category === undefined || ['correctness', 'security', 'performance', 'tests', 'maintainability', 'compatibility', 'style'].includes(value.category as string))
     && (value.confidence === undefined || ['low', 'medium', 'high'].includes(value.confidence as string))
     && isOptionalString(value.rationale)
+    && isOptionalString(value.suggestedChange)
     && isOptionalSources(value.sources)
 }
 

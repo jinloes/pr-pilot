@@ -401,7 +401,9 @@ class ReviewPromptsTest {
         @Test
         void promptVersionSegmentsContextConformanceChanges() {
             assertThat(ReviewPrompts.PROMPT_VERSION)
-                    .isEqualTo("2026-10-thread-state-incremental-scope-corroboration-rule-gating");
+                    .isEqualTo(
+                            "2026-10-thread-state-incremental-scope-corroboration-rule-gating"
+                                    + "-suggested-changes");
         }
 
         @Test
@@ -904,6 +906,48 @@ class ReviewPromptsTest {
                     .contains("\"confidence\":\"high\"")
                     .contains("\"body\":\"Null deref\"")
                     .contains("\"rationale\":\"value can be null\"");
+        }
+
+        @Test
+        void draftReviewJsonIncludesANonBlankSuggestedChange() {
+            com.jinloes.prpilot.model.ReviewResult draft = draft();
+
+            assertThat(ReviewPrompts.draftReviewJson(draft)).doesNotContain("suggestedChange");
+
+            draft.getLineComments().get(0).setSuggestedChange("   ");
+            assertThat(ReviewPrompts.draftReviewJson(draft)).doesNotContain("suggestedChange");
+
+            draft.getLineComments().get(0).setSuggestedChange("if (x != null) x.run();");
+            assertThat(ReviewPrompts.draftReviewJson(draft))
+                    .contains("\"suggestedChange\":\"if (x != null) x.run();\"");
+        }
+
+        @Test
+        void critiqueKeepsASuggestedChangeOnlyWhileItIsStillCorrect() {
+            String prompt = ReviewPrompts.buildCritiquePrompt(req(), draft());
+
+            assertThat(prompt)
+                    .contains(
+                            "Keep a comment's \"suggestedChange\" only when it is still a"
+                                    + " correct, complete replacement for the anchored line;"
+                                    + " otherwise remove the field.");
+        }
+
+        @Test
+        void outputContractDocumentsTheOptionalSuggestedChange() {
+            String prompt = ReviewPrompts.buildCritiquePrompt(req(), draft());
+
+            assertThat(prompt)
+                    .contains("\"suggestedChange\" is optional")
+                    .contains("The literal full replacement for the anchored line")
+                    .contains("with its indentation preserved")
+                    .contains("without the \"N| \" prefix or the \"+\"/space diff marker")
+                    .contains("at most 6 lines; no code fences and no prose")
+                    .contains("the fix is complete, local to that one line")
+                    .contains("your \"confidence\" is \"high\"")
+                    .contains("repeat its \"suggestedChange\" unchanged");
+            assertThat(ReviewPrompts.buildPrompt(PRReviewRequest.builder(fakePr(), "").build()))
+                    .contains("\"suggestedChange\": optional.");
         }
 
         @Test

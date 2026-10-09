@@ -20,6 +20,7 @@ class ReviewMapperTest {
         comment.setCategory("correctness");
         comment.setConfidence("high");
         comment.setRationale("The value is nullable on this path.");
+        comment.setSuggestedChange("    return value;");
         comment.setSources(List.of("claude-opus", "gpt-5.5"));
         ReviewResult result = new ReviewResult("Summary", "REQUEST_CHANGES", List.of(comment));
 
@@ -39,6 +40,7 @@ class ReviewMapperTest {
         assertThat(commentJson.path("confidence").asText()).isEqualTo("high");
         assertThat(commentJson.path("rationale").asText())
                 .isEqualTo("The value is nullable on this path.");
+        assertThat(commentJson.path("suggestedChange").asText()).isEqualTo("    return value;");
         assertThat(commentJson.path("sources"))
                 .extracting(JsonNode::asText)
                 .containsExactly("claude-opus", "gpt-5.5");
@@ -55,6 +57,17 @@ class ReviewMapperTest {
         assertThat(json.has("category")).isFalse();
         assertThat(json.has("confidence")).isFalse();
         assertThat(json.has("rationale")).isFalse();
+        assertThat(json.has("suggestedChange")).isFalse();
         assertThat(json.has("sources")).isFalse();
+    }
+
+    @Test
+    void omitsAWhitespaceOnlySuggestedChange() {
+        LineComment comment = new LineComment("src/Main.kt", 7, "note", "Legacy comment");
+        comment.setSuggestedChange(" \n ");
+
+        JsonNode json = objectMapper.valueToTree(ReviewMapper.INSTANCE.toDto(comment));
+
+        assertThat(json.has("suggestedChange")).isFalse();
     }
 }

@@ -23,6 +23,7 @@ import type { PaneState } from './reviewState'
 export interface EditCommentHandlers {
   onEditComment: (index: number, body: string) => void
   onDeleteComment: (index: number) => void
+  onRemoveSuggestion: (index: number) => void
   onAddComment: (comment: LineComment) => void
 }
 
@@ -311,6 +312,7 @@ function ReviewAndDiff({
             onFocusComment={onFocusComment}
             onEditComment={editCommentHandlers.onEditComment}
             onDeleteComment={editCommentHandlers.onDeleteComment}
+            onRemoveSuggestion={editCommentHandlers.onRemoveSuggestion}
             onAddComment={editCommentHandlers.onAddComment}
             onVerifyComment={onVerifyComment}
             onSuggestFixComment={onSuggestFixComment}

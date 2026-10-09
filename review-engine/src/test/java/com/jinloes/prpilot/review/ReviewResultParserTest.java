@@ -492,4 +492,78 @@ class ReviewResultParserTest {
             assertThat(copy.getBody()).isEqualTo("Guard the nullable value.");
         }
     }
+
+    @Nested
+    class LineCommentSuggestedChange {
+
+        private ObjectNode modelComment() {
+            ObjectNode comment = JSON.createObjectNode();
+            comment.put("file", "src/Foo.java");
+            comment.put("line", 10);
+            comment.put("type", "issue");
+            comment.put("severity", "major");
+            comment.put("category", "correctness");
+            comment.put("confidence", "high");
+            comment.put("rationale", "The diff dereferences the nullable value.");
+            comment.put("body", "Guard the nullable value.");
+            return comment;
+        }
+
+        private ReviewResult parse(ObjectNode comment) throws Exception {
+            ObjectNode review = JSON.createObjectNode();
+            review.put("summary", "s");
+            review.put("verdict", "REQUEST_CHANGES");
+            review.putArray("lineComments").add(comment);
+            return ReviewResultParser.parseReview(JSON.writeValueAsString(review));
+        }
+
+        @Test
+        void readsAStringSuggestedChange() throws Exception {
+            ObjectNode comment = modelComment();
+            comment.put("suggestedChange", "    if (value != null) use(value);");
+
+            ReviewResult result = parse(comment);
+
+            assertThat(result.getLineComments())
+                    .singleElement()
+                    .extracting(LineComment::getSuggestedChange)
+                    .isEqualTo("    if (value != null) use(value);");
+        }
+
+        @Test
+        void ignoresANonStringValueWithoutDroppingTheComment() throws Exception {
+            ObjectNode comment = modelComment();
+            comment.putArray("suggestedChange").add("x");
+
+            ReviewResult result = parse(comment);
+
+            assertThat(result.getLineComments()).singleElement();
+            assertThat(result.getLineComments().get(0).getSuggestedChange()).isEmpty();
+        }
+
+        @Test
+        void absentFieldLeavesItEmpty() throws Exception {
+            ReviewResult result = parse(modelComment());
+
+            assertThat(result.getLineComments().get(0).getSuggestedChange()).isEmpty();
+        }
+
+        @Test
+        void jacksonRoundTripsSuggestedChange() throws Exception {
+            LineComment comment = new LineComment("src/Foo.java", 10, "issue", "b");
+            comment.setSuggestedChange("    use(value);");
+
+            LineComment copy = JSON.readValue(JSON.writeValueAsString(comment), LineComment.class);
+
+            assertThat(copy.getSuggestedChange()).isEqualTo("    use(value);");
+        }
+
+        @Test
+        void legacyJsonWithoutSuggestedChangeDeserializesToEmpty() throws Exception {
+            LineComment copy =
+                    JSON.readValue(JSON.writeValueAsString(modelComment()), LineComment.class);
+
+            assertThat(copy.getSuggestedChange()).isEmpty();
+        }
+    }
 }

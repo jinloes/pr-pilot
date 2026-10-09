@@ -44,4 +44,20 @@ class DraftRecoveryStoreTest {
 
         assertThat(store.get("acme/repo#1").result().getLineComments()).hasSize(1);
     }
+
+    @Test
+    void preservesASuggestedChangeAcrossSaveAndRestore() {
+        DraftRecoveryStore store = new DraftRecoveryStore();
+        LineComment comment = new LineComment("a.java", 3, "issue", "fix");
+        comment.setSuggestedChange("  return a;");
+        LineComment plain = new LineComment("a.java", 4, "note", "note");
+        store.save(
+                "acme/repo#1",
+                new ReviewResult("summary", "COMMENT", List.of(comment, plain)),
+                List.of());
+
+        assertThat(store.get("acme/repo#1").result().getLineComments())
+                .extracting(LineComment::getSuggestedChange)
+                .containsExactly("  return a;", "");
+    }
 }

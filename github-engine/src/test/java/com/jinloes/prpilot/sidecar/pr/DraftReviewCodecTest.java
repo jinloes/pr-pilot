@@ -3,6 +3,8 @@ package com.jinloes.prpilot.sidecar.pr;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -62,9 +64,10 @@ class DraftReviewCodecTest {
                                 "major",
                                 "correctness",
                                 "high",
-                                "because"),
+                                "because",
+                                null),
                         new DraftReviewCodec.LineComment(
-                                "", 0, "note", "general note", null, null, null, null));
+                                "", 0, "note", "general note", null, null, null, null, null));
 
         String body = codec.encodeBody("overall summary", "REQUEST_CHANGES", comments);
 
@@ -104,7 +107,8 @@ class DraftReviewCodecTest {
                         "severity " + injected,
                         "category " + injected,
                         "confidence " + injected,
-                        "rationale " + injected);
+                        "rationale " + injected,
+                        null);
 
         DraftReviewCodec.DecodedReview decoded =
                 codec.decode(
@@ -135,16 +139,16 @@ class DraftReviewCodecTest {
     void buildCommentArrayDedupesAndExcludesOrphansAndBlankEntries() {
         DraftReviewCodec.LineComment orphan =
                 new DraftReviewCodec.LineComment(
-                        "b.java", 9, "note", "orphaned", null, null, null, null);
+                        "b.java", 9, "note", "orphaned", null, null, null, null, null);
         List<DraftReviewCodec.LineComment> comments =
                 List.of(
                         new DraftReviewCodec.LineComment(
-                                "a/x.java", 1, "issue", "dup", null, null, null, null),
+                                "a/x.java", 1, "issue", "dup", null, null, null, null, null),
                         new DraftReviewCodec.LineComment(
-                                "x.java", 1, "issue", "dup", null, null, null, null),
+                                "x.java", 1, "issue", "dup", null, null, null, null, null),
                         orphan,
                         new DraftReviewCodec.LineComment(
-                                "", 0, "note", "general", null, null, null, null));
+                                "", 0, "note", "general", null, null, null, null, null));
 
         var array = codec.buildCommentArray(comments, List.of(orphan));
 
@@ -161,9 +165,17 @@ class DraftReviewCodecTest {
         List<DraftReviewCodec.LineComment> comments =
                 List.of(
                         new DraftReviewCodec.LineComment(
-                                "x.java", 1, "issue", "same body", null, null, null, null),
+                                "x.java", 1, "issue", "same body", null, null, null, null, null),
                         new DraftReviewCodec.LineComment(
-                                "x.java", 1, "suggestion", "same body", null, null, null, null));
+                                "x.java",
+                                1,
+                                "suggestion",
+                                "same body",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null));
 
         var array = codec.buildCommentArray(comments, List.of());
 
@@ -176,9 +188,9 @@ class DraftReviewCodecTest {
         List<DraftReviewCodec.LineComment> comments =
                 List.of(
                         new DraftReviewCodec.LineComment(
-                                "x.java", 1, "issue", "first", null, null, null, null),
+                                "x.java", 1, "issue", "first", null, null, null, null, null),
                         new DraftReviewCodec.LineComment(
-                                "x.java", 1, "issue", "second", null, null, null, null));
+                                "x.java", 1, "issue", "second", null, null, null, null, null));
 
         var array = codec.buildCommentArray(comments, List.of());
 
@@ -190,10 +202,10 @@ class DraftReviewCodecTest {
         // orphanKey includes type, so an orphaned "note" must not suppress a same-line "issue".
         DraftReviewCodec.LineComment orphan =
                 new DraftReviewCodec.LineComment(
-                        "x.java", 1, "note", "same body", null, null, null, null);
+                        "x.java", 1, "note", "same body", null, null, null, null, null);
         DraftReviewCodec.LineComment kept =
                 new DraftReviewCodec.LineComment(
-                        "x.java", 1, "issue", "same body", null, null, null, null);
+                        "x.java", 1, "issue", "same body", null, null, null, null, null);
 
         var array = codec.buildCommentArray(List.of(orphan, kept), List.of(orphan));
 
@@ -205,10 +217,10 @@ class DraftReviewCodecTest {
     void buildCommentArrayNormalizesOrphanPathPrefixes() {
         DraftReviewCodec.LineComment comment =
                 new DraftReviewCodec.LineComment(
-                        "b/x.java", 1, "note", "same body", null, null, null, null);
+                        "b/x.java", 1, "note", "same body", null, null, null, null, null);
         DraftReviewCodec.LineComment orphan =
                 new DraftReviewCodec.LineComment(
-                        "x.java", 1, "note", "same body", null, null, null, null);
+                        "x.java", 1, "note", "same body", null, null, null, null, null);
 
         assertThat(codec.buildCommentArray(List.of(comment), List.of(orphan))).isEmpty();
     }
@@ -217,10 +229,10 @@ class DraftReviewCodecTest {
     void withoutDroppedCommentsMatchesNormalizedPostedPayloadIdentity() {
         DraftReviewCodec.LineComment dropped =
                 new DraftReviewCodec.LineComment(
-                        "b/x.java", 4, "issue", "rejected", null, null, null, null);
+                        "b/x.java", 4, "issue", "rejected", null, null, null, null, null);
         DraftReviewCodec.LineComment accepted =
                 new DraftReviewCodec.LineComment(
-                        "x.java", 5, "note", "accepted", null, null, null, null);
+                        "x.java", 5, "note", "accepted", null, null, null, null, null);
         ObjectMapper mapper = new ObjectMapper();
         var payload = mapper.createObjectNode();
         payload.put("path", "x.java");
@@ -235,7 +247,7 @@ class DraftReviewCodecTest {
     void buildOrphanAndDroppedSectionsFormatDetachedComments() {
         DraftReviewCodec.LineComment orphan =
                 new DraftReviewCodec.LineComment(
-                        "a.java", 5, "note", "no position", null, null, null, null);
+                        "a.java", 5, "note", "no position", null, null, null, null, null);
         String orphanSection = codec.buildOrphanSection(List.of(orphan));
         assertThat(orphanSection)
                 .contains("**Comments not attached inline (invalid diff positions):**");
@@ -251,10 +263,164 @@ class DraftReviewCodecTest {
     }
 
     @Nested
+    class SuggestedChange {
+        private DraftReviewCodec.LineComment suggested(String body, String suggestion) {
+            return new DraftReviewCodec.LineComment(
+                    "x.java", 3, "issue", body, null, null, "high", null, suggestion);
+        }
+
+        @Test
+        void postsTheBodyFollowedByASuggestionFence() {
+            var array =
+                    codec.buildCommentArray(
+                            List.of(suggested("fix it", "    return a;\n    // done")), List.of());
+
+            assertThat(array.get(0).path("body").asText())
+                    .isEqualTo("fix it\n\n```suggestion\n    return a;\n    // done\n```");
+        }
+
+        @Test
+        void stripsTrailingNewlinesBeforeFencing() {
+            assertThat(DraftReviewCodec.postedBody(suggested("fix", "return a;\n\n")))
+                    .isEqualTo("fix\n\n```suggestion\nreturn a;\n```");
+        }
+
+        @Test
+        void postsTheBodyUnchangedForUnpublishableSuggestions() {
+            assertThat(DraftReviewCodec.postedBody(suggested("fix", null))).isEqualTo("fix");
+            assertThat(DraftReviewCodec.postedBody(suggested("fix", "  \n"))).isEqualTo("fix");
+            assertThat(DraftReviewCodec.postedBody(suggested("fix", "a ``` b"))).isEqualTo("fix");
+            assertThat(DraftReviewCodec.postedBody(suggested("fix", "1\n2\n3\n4\n5\n6\n7")))
+                    .isEqualTo("fix");
+            assertThat(DraftReviewCodec.postedBody(suggested("fix", "x".repeat(1001))))
+                    .isEqualTo("fix");
+        }
+
+        @Test
+        void postsSixLinesAndOneThousandCharacters() {
+            assertThat(DraftReviewCodec.postedBody(suggested("fix", "1\n2\n3\n4\n5\n6")))
+                    .endsWith("```suggestion\n1\n2\n3\n4\n5\n6\n```");
+            assertThat(DraftReviewCodec.postedBody(suggested("fix", "x".repeat(1000))))
+                    .contains("```suggestion\n");
+        }
+
+        @Test
+        void dedupesOnThePostedBody() {
+            var array =
+                    codec.buildCommentArray(
+                            List.of(
+                                    suggested("fix", "a;"),
+                                    suggested("fix", "a;"),
+                                    suggested("fix", "b;")),
+                            List.of());
+
+            assertThat(array).hasSize(2);
+        }
+
+        @Test
+        void matchesDroppedAndAcceptedCommentsByPostedBody() {
+            DraftReviewCodec.LineComment comment = suggested("fix", "a;");
+            ObjectMapper mapper = new ObjectMapper();
+            var posted = codec.buildCommentArray(List.of(comment), List.of());
+
+            assertThat(codec.acceptedComments(List.of(comment), List.of(), posted, List.of()))
+                    .containsExactly(comment);
+            assertThat(codec.withoutDroppedComments(List.of(comment), List.of(posted.get(0))))
+                    .isEmpty();
+            var rawBody = mapper.createObjectNode();
+            rawBody.put("path", "x.java");
+            rawBody.put("line", 3);
+            rawBody.put("body", "fix");
+            assertThat(codec.withoutDroppedComments(List.of(comment), List.of(rawBody)))
+                    .containsExactly(comment);
+        }
+
+        @Test
+        void roundTripsTheSuggestionAsSg() {
+            DraftReviewCodec.LineComment comment = suggested("fix", "  return a;\n");
+            String body = codec.encodeBody("s", "COMMENT", List.of(comment));
+
+            assertThat(codec.decode(body, List.of()).lineComments()).containsExactly(comment);
+            assertThat(payloadJson(body)).contains("\"sg\":\"  return a;\\n\"");
+        }
+
+        @Test
+        void storesABlankSuggestionAsNull() {
+            String body = codec.encodeBody("s", "COMMENT", List.of(suggested("fix", "  ")));
+
+            assertThat(codec.decode(body, List.of()).lineComments().get(0).suggestedChange())
+                    .isNull();
+        }
+
+        @Test
+        void encodesACommentWithoutASuggestionByteIdentically() {
+            DraftReviewCodec.LineComment without = suggested("fix", null);
+            DraftReviewCodec.LineComment blank = suggested("fix", "");
+
+            assertThat(codec.encodeBody("s", "COMMENT", List.of(blank)))
+                    .isEqualTo(codec.encodeBody("s", "COMMENT", List.of(without)));
+            assertThat(payloadJson(codec.encodeBody("s", "COMMENT", List.of(without))))
+                    .isEqualTo(
+                            "{\"summary\":\"s\",\"verdict\":\"COMMENT\",\"comments\":[{\"f\":\"x.java\","
+                                    + "\"l\":3,\"t\":\"issue\",\"b\":\"fix\",\"s\":null,\"c\":null,"
+                                    + "\"cf\":\"high\",\"r\":null}]}");
+            assertThat(DraftReviewCodec.postedBody(without)).isEqualTo("fix");
+        }
+
+        private String payloadJson(String body) {
+            String payload =
+                    body.substring("<!-- pr-pilot-review:v1:".length(), body.indexOf(" -->"));
+            return new String(Base64.getDecoder().decode(payload), StandardCharsets.UTF_8);
+        }
+
+        @Test
+        void decodesLegacyPayloadsAndImportedCommentsWithoutASuggestion() {
+            DraftReviewCodec.DecodedReview legacy =
+                    codec.decode(
+                            "<!-- claude-comments: [{\"f\":\"a.java\",\"l\":2,\"t\":\"issue\",\"b\":\"body\"}] -->",
+                            List.of());
+            DraftReviewCodec.DecodedReview imported =
+                    codec.decode(
+                            "",
+                            List.of(
+                                    new DraftReviewCodec.ApiComment(
+                                            "a.java", 2, null, "[NOTE] x")));
+
+            assertThat(legacy.lineComments().get(0).suggestedChange()).isNull();
+            assertThat(imported.lineComments().get(0).suggestedChange()).isNull();
+        }
+
+        @Test
+        void rejectsAnEncodedSuggestionOverTheLimit() {
+            String body =
+                    codec.encodeBody("s", "COMMENT", List.of(suggested("fix", "x".repeat(1001))));
+
+            DraftReviewCodec.DecodedReview decoded =
+                    codec.decode(
+                            body,
+                            List.of(
+                                    new DraftReviewCodec.ApiComment(
+                                            "x.java", 3, null, "[NOTE] x")));
+
+            assertThat(decoded.importedFromGitHub()).isTrue();
+        }
+
+        @Test
+        void rendersOrphanSectionsWithoutTheSuggestion() {
+            DraftReviewCodec.LineComment orphan = suggested("no position", "a;");
+
+            assertThat(codec.buildOrphanSection(List.of(orphan)))
+                    .contains("- `x.java:3`: no position")
+                    .doesNotContain("suggestion");
+            assertThat(codec.buildCommentArray(List.of(orphan), List.of(orphan))).isEmpty();
+        }
+    }
+
+    @Nested
     class VisibleBody {
         private DraftReviewCodec.LineComment comment(String file, int line, String body) {
             return new DraftReviewCodec.LineComment(
-                    file, line, "note", body, null, null, null, null);
+                    file, line, "note", body, null, null, null, null, null);
         }
 
         @Test

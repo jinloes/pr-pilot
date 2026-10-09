@@ -53,3 +53,13 @@ test('omits reviewer sources from recovery snapshots', async () => {
     assert.deepEqual(restored?.orphans, [{ file: 'a.ts', line: 1, type: 'note', body: 'note' }]);
     assert.deepEqual(attributed.sources, ['claude-opus', 'gpt-5.5']);
 });
+
+test('preserves a suggested change in recovery snapshots', async () => {
+    const store = new DraftRecoveryStore(new MemoryMemento());
+    const suggested = { file: 'a.ts', line: 1, type: 'issue' as const, body: 'fix', suggestedChange: '  return a;' };
+    await store.save('acme/repo#1', { ...result, lineComments: [suggested] }, [suggested]);
+
+    const restored = store.get('acme/repo#1');
+    assert.deepEqual(restored?.result.lineComments, [suggested]);
+    assert.deepEqual(restored?.orphans, [suggested]);
+});

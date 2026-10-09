@@ -309,6 +309,7 @@ test('longest risky submit dialog is accessible, viewport-safe, and requires ack
           body: 'Document the trust boundary.',
           severity: 'minor',
           confidence: 'high',
+          suggestedChange: 'export const ready = true // trusted only after verifyToken()',
         },
         {
           file: 'src/auth.ts',
@@ -491,6 +492,7 @@ test('finding navigation is keyboard operable and has no axe violations', async 
           type: 'issue',
           severity: 'blocker',
           body: 'Stop when authentication cannot be verified.',
+          suggestedChange: 'export const accessible = verifyToken()',
         },
         {
           file: 'src/auth.ts',
@@ -510,6 +512,7 @@ test('finding navigation is keyboard operable and has no axe violations', async 
   await page.keyboard.press('Enter')
   await expect(finding).toHaveAttribute('aria-current', 'location')
   await expect(page.getByRole('list', { name: 'Unanchored findings' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Suggested change' })).toBeVisible()
   await expectNoViolations(page)
 })
 

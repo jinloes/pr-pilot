@@ -346,3 +346,19 @@ void test('validates PR-scoped repository instruction save replies', () => {
   assert.equal(parseIncomingMessage({ ...failed, message: undefined }), null)
   assert.equal(parseIncomingMessage({ ...failed, prKey: undefined }), null)
 })
+
+void test('accepts an optional string suggested change and rejects other types', () => {
+  const withSuggestion = (suggestedChange: unknown) => parseIncomingMessage({
+    ...version,
+    type: 'reviewResult',
+    prKey: 'acme/platform#42',
+    result: { ...review, lineComments: [{ ...review.lineComments[0], suggestedChange }] },
+    diff: 'diff',
+    validationDiff: 'diff',
+  })
+
+  assert.notEqual(withSuggestion(undefined), null)
+  assert.notEqual(withSuggestion('  return a'), null)
+  assert.equal(withSuggestion(3), null)
+  assert.equal(withSuggestion(null), null)
+})

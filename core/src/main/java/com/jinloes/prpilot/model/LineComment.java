@@ -12,6 +12,9 @@ import java.util.Objects;
  * provider output deserialize unchanged. They let the UI sort, filter, and explain findings beyond
  * the coarse {@link #getType()} bucket.
  *
+ * <p>{@link #getSuggestedChange()} is the literal replacement text for the anchored line, published
+ * as a GitHub suggestion block. The review engine validates it before it reaches any host.
+ *
  * <p>{@link #getSources()} names the reviewer model(s) that reported the finding. The review engine
  * sets it; model output never does.
  */
@@ -25,6 +28,7 @@ public final class LineComment {
     private String category;
     private String confidence;
     private String rationale;
+    private String suggestedChange;
     private List<String> sources = List.of();
 
     public LineComment() {}
@@ -102,6 +106,15 @@ public final class LineComment {
 
     public void setRationale(String value) {
         this.rationale = value;
+    }
+
+    /** Literal replacement for the anchored line, or empty when the finding has no suggestion. */
+    public String getSuggestedChange() {
+        return suggestedChange != null ? suggestedChange : "";
+    }
+
+    public void setSuggestedChange(String value) {
+        this.suggestedChange = value;
     }
 
     /** Reviewer labels that reported this finding; never null, empty when unattributed. */

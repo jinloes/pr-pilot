@@ -255,6 +255,44 @@ describe('DiffViewer', () => {
     expect(screen.queryByTestId('finding-sources')).not.toBeInTheDocument()
   })
 
+  it('previews a suggested change against the anchored line and removes it on request', async () => {
+    const user = userEvent.setup()
+    const onRemoveSuggestion = vi.fn()
+    render(
+      <DiffViewer
+        diff={diff}
+        comments={[{ ...comments[0], suggestedChange: 'export const accessible = false' }]}
+        onRemoveSuggestion={onRemoveSuggestion}
+      />,
+    )
+
+    const preview = screen.getByRole('region', { name: 'Suggested change' })
+    expect(within(preview).getByTestId('suggested-change-before')).toHaveTextContent('export const accessible = true')
+    expect(within(preview).getByTestId('suggested-change-after')).toHaveTextContent('export const accessible = false')
+    await user.click(within(preview).getByRole('button', { name: 'Remove suggestion' }))
+    expect(onRemoveSuggestion).toHaveBeenCalledWith(0)
+  })
+
+  it('shows no suggestion block for a finding without one', () => {
+    render(<DiffViewer diff={diff} comments={comments} onRemoveSuggestion={vi.fn()} />)
+
+    expect(screen.queryByTestId('suggested-change')).not.toBeInTheDocument()
+  })
+
+  it('hides the remove button while the diff is read-only', () => {
+    render(
+      <DiffViewer
+        diff={diff}
+        comments={[{ ...comments[0], suggestedChange: 'export const accessible = false' }]}
+        onRemoveSuggestion={vi.fn()}
+        readOnly
+      />,
+    )
+
+    expect(screen.getByTestId('suggested-change')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Remove suggestion' })).not.toBeInTheDocument()
+  })
+
   it('explains that a deleted comment is saved by autosave and offers Save now', async () => {
     const user = userEvent.setup()
     const onDeleteComment = vi.fn()

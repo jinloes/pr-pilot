@@ -5,7 +5,7 @@ import { MAX_REPOSITORY_INSTRUCTIONS } from '../../bridge/validation'
 import { coverageGain, parseDiffCoverage } from '@/lib/diffCoverage'
 import { parseDiffSafely } from '@/lib/diffParse'
 import { applyReviewQualityRepairs, runReviewQualityCheck, type ReviewQualityAction, type ReviewQualityReport } from '@/lib/reviewQuality'
-import { validateComments } from '@/lib/validateComments'
+import { validateComments, withoutSuggestion } from '@/lib/validateComments'
 import type { VerifyResult } from '../ChatPane/structuredResult'
 import { CHAT_HEIGHT_KEY, clampChatHeight, loadChatHeight } from './chatHeight'
 import { adjacentCommentIndex, focusedIndexAfterCommentDeletion } from './commentNavigation'
@@ -431,13 +431,16 @@ export function useReviewController({
 
   const editCommentHandlers = {
     onEditComment: (index: number, body: string) => {
-      updateAtOriginal(inlineToOriginal(index), (comment) => ({ ...comment, body }))
+      updateAtOriginal(inlineToOriginal(index), (comment) => withoutSuggestion({ ...comment, body }))
     },
     onDeleteComment: (index: number) => {
       setFocusedCommentIdx((focusedIndex) =>
         focusedIndexAfterCommentDeletion(focusedIndex, index, partition.adjusted.length),
       )
       updateAtOriginal(inlineToOriginal(index), () => null)
+    },
+    onRemoveSuggestion: (index: number) => {
+      updateAtOriginal(inlineToOriginal(index), withoutSuggestion)
     },
     onAddComment: (comment: LineComment) => {
       if (state.kind !== 'draftPresent' && state.kind !== 'reviewUnsaved') return
@@ -452,7 +455,7 @@ export function useReviewController({
 
   const orphanHandlers = {
     onEditOrphan: (orphan: LineComment, body: string) => {
-      updateAtOriginal(orphanToOriginal(orphan), (comment) => ({ ...comment, body }))
+      updateAtOriginal(orphanToOriginal(orphan), (comment) => withoutSuggestion({ ...comment, body }))
     },
     onDeleteOrphan: (orphan: LineComment) => {
       updateAtOriginal(orphanToOriginal(orphan), () => null)
@@ -493,7 +496,7 @@ export function useReviewController({
     }
     const replacement = verify.replacementComment?.trim()
     if (verify.action === 'revise' && replacement) {
-      updateAtOriginal(index, (comment) => ({ ...comment, body: replacement }))
+      updateAtOriginal(index, (comment) => withoutSuggestion({ ...comment, body: replacement }))
     }
   }
 

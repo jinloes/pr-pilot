@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.jinloes.prpilot.sidecar.pr.DraftReviewMutationService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -270,6 +271,42 @@ class StdioJsonRpcServerGitHubParamsTest extends StdioJsonRpcServerTestBase {
 
         assertThat(response.has("error")).isFalse();
         assertThat(response.path("result").path("status").asText()).isEqualTo("invalid_base_url");
+    }
+
+    @Test
+    void acceptsAStringSuggestedChangeOnSavedComments() throws IOException {
+        ObjectNode comment = draftComment();
+        comment.put("suggestedChange", "    return a;");
+
+        JsonNode response = server.handle(saveDraftRequest("save-suggestion", comment));
+
+        assertThat(response.has("error")).isFalse();
+        assertThat(
+                        new StdioJsonRpcServerSupport(objectMapper)
+                                .parseComments(objectMapper.createArrayNode().add(comment)))
+                .singleElement()
+                .extracting(DraftReviewMutationService.CommentInput::suggestedChange)
+                .isEqualTo("    return a;");
+        assertThat(
+                        new StdioJsonRpcServerSupport(objectMapper)
+                                .parseComments(objectMapper.createArrayNode().add(draftComment())))
+                .singleElement()
+                .extracting(DraftReviewMutationService.CommentInput::suggestedChange)
+                .isNull();
+    }
+
+    @Test
+    void rejectsANonStringSuggestedChange() throws IOException {
+        ObjectNode numeric = draftComment();
+        numeric.put("suggestedChange", 3);
+        ObjectNode nulled = draftComment();
+        nulled.putNull("suggestedChange");
+
+        for (ObjectNode comment : List.of(numeric, nulled)) {
+            JsonNode response = server.handle(saveDraftRequest("save-bad-suggestion", comment));
+
+            assertThat(response.path("error").path("code").asInt()).isEqualTo(-32602);
+        }
     }
 
     @Test

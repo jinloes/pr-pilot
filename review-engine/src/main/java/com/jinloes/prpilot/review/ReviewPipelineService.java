@@ -303,7 +303,8 @@ public final class ReviewPipelineService {
         }
         candidate = ReviewResultMerger.capFinal(candidate);
         validateAuthority();
-        return CiFindingSuppressor.suppress(candidate, request.getCiAnnotations());
+        return ReviewSuggestionGuard.apply(
+                CiFindingSuppressor.suppress(candidate, request.getCiAnnotations()), manifest);
     }
 
     /**

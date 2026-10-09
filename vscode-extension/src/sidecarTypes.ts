@@ -182,6 +182,8 @@ export interface SidecarLineComment {
     category: string | null;
     confidence: string | null;
     rationale: string | null;
+    /** Absent when the draft comment carries no suggestion; never null. */
+    suggestedChange?: string;
 }
 
 /** Request-shaped comment sent to `prs/saveDraftReview` — optional fields may be omitted. */
@@ -194,6 +196,7 @@ export interface SidecarCommentInput {
     category?: string;
     confidence?: string;
     rationale?: string;
+    suggestedChange?: string;
     /** Accepted and ignored by the sidecar. */
     sources?: string[];
 }

@@ -1,5 +1,5 @@
 import type { LineComment, ProviderReadiness, ReviewResult, ReviewScope } from '../../bridge/types'
-import { validateComments } from '@/lib/validateComments'
+import { validateComments, withoutSuggestion } from '@/lib/validateComments'
 
 export type Verdict = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
 
@@ -306,13 +306,16 @@ export function reviewReducer(state: PaneState, event: ReviewStateEvent): PaneSt
     case 'keepDraft':
       return state.kind === 'deleteError' ? state.draft : state
 
-    case 'reanchorDraft':
+    case 'reanchorDraft': {
       if (state.kind !== 'draftPresent') return state
+      // A stale draft's suggestions were written against code that has since changed.
+      const reanchored = normalizeReviewResult(state.result, validationDiffOf(state))
       return {
         ...state,
-        result: normalizeReviewResult(state.result, validationDiffOf(state)),
+        result: { ...reanchored, lineComments: reanchored.lineComments.map(withoutSuggestion) },
         importedFromGitHub: false,
       }
+    }
 
     case 'replaceComments':
       return mutateComments(state, event.kinds, () => event.comments)

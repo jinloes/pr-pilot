@@ -1,5 +1,6 @@
 package com.jinloes.prpilot.sidecar.pr;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,6 +31,8 @@ public final class DraftReviewCodec {
     private static final Set<String> VALID_VERDICTS =
             Set.of("APPROVE", "REQUEST_CHANGES", "COMMENT");
     private static final Set<String> VALID_TYPES = Set.of("issue", "suggestion", "note");
+    static final int MAX_SUGGESTION_LINES = 6;
+    static final int MAX_SUGGESTION_CHARS = 1_000;
     private final ObjectMapper mapper;
 
     DraftReviewCodec(ObjectMapper mapper) {
@@ -113,6 +116,7 @@ public final class DraftReviewCodec {
                             null,
                             null,
                             null,
+                            null,
                             null));
         }
         return new DecodedReview(summary, verdict, lines, true);
@@ -127,7 +131,8 @@ public final class DraftReviewCodec {
                 comment.s(),
                 comment.c(),
                 comment.cf(),
-                comment.r());
+                comment.r(),
+                comment.sg());
     }
 
     private String tag(String body, String start, String fallback) {
@@ -177,7 +182,8 @@ public final class DraftReviewCodec {
                             blankToNull(c.severity()),
                             blankToNull(c.category()),
                             blankToNull(c.confidence()),
-                            blankToNull(c.rationale())));
+                            blankToNull(c.rationale()),
+                            blankToNull(c.suggestedChange())));
         }
         String serialized;
         try {
@@ -240,16 +246,42 @@ public final class DraftReviewCodec {
             String file = normalizePath(c.file());
             if (file.isBlank() || c.line() <= 0 || c.body() == null || c.body().isBlank()) continue;
             if (orphanKeys.contains(orphanKey(c))) continue;
-            String dedupeKey = file + "\u0000" + c.line() + "\u0000" + c.body();
+            String body = postedBody(c);
+            String dedupeKey = file + "\u0000" + c.line() + "\u0000" + body;
             if (!seen.add(dedupeKey)) continue;
             ObjectNode obj = mapper.createObjectNode();
             obj.put("path", file);
             obj.put("line", c.line());
             obj.put("side", "RIGHT");
-            obj.put("body", c.body());
+            obj.put("body", body);
             result.add(obj);
         }
         return result;
+    }
+
+    /**
+     * The inline-comment body GitHub receives: the comment body, followed by a {@code suggestion}
+     * block when the comment carries a publishable suggested change. Every key that matches a
+     * comment against what was posted or dropped must use this, not the raw body.
+     */
+    static String postedBody(LineComment c) {
+        String body = c.body() == null ? "" : c.body();
+        String suggestion = publishableSuggestion(c.suggestedChange());
+        return suggestion == null ? body : body + "\n\n```suggestion\n" + suggestion + "\n```";
+    }
+
+    private static String publishableSuggestion(String value) {
+        if (value == null) return null;
+        int end = value.length();
+        while (end > 0 && (value.charAt(end - 1) == '\n' || value.charAt(end - 1) == '\r')) end--;
+        String suggestion = value.substring(0, end);
+        if (suggestion.isBlank()
+                || suggestion.length() > MAX_SUGGESTION_CHARS
+                || suggestion.split("\n", -1).length > MAX_SUGGESTION_LINES
+                || suggestion.contains("```")) {
+            return null;
+        }
+        return suggestion;
     }
 
     private static String orphanKey(LineComment c) {
@@ -270,7 +302,10 @@ public final class DraftReviewCodec {
                 .filter(
                         comment ->
                                 !droppedKeys.contains(
-                                        payloadKey(comment.file(), comment.line(), comment.body())))
+                                        payloadKey(
+                                                comment.file(),
+                                                comment.line(),
+                                                postedBody(comment))))
                 .toList();
     }
 
@@ -302,7 +337,7 @@ public final class DraftReviewCodec {
         Set<String> emitted = new LinkedHashSet<>();
         List<LineComment> accepted = new ArrayList<>();
         for (LineComment comment : lineComments) {
-            String key = payloadKey(comment.file(), comment.line(), comment.body());
+            String key = payloadKey(comment.file(), comment.line(), postedBody(comment));
             if (orphanKeys.contains(orphanKey(comment))
                     || !acceptedKeys.contains(key)
                     || !emitted.add(key)) {
@@ -318,7 +353,8 @@ public final class DraftReviewCodec {
                 && comment.l() >= 0
                 && VALID_TYPES.contains(comment.t())
                 && comment.b() != null
-                && !comment.b().isBlank();
+                && !comment.b().isBlank()
+                && (comment.sg() == null || comment.sg().length() <= MAX_SUGGESTION_CHARS);
     }
 
     private static String payloadKey(String file, int line, String body) {
@@ -375,7 +411,8 @@ public final class DraftReviewCodec {
             String severity,
             String category,
             String confidence,
-            String rationale) {}
+            String rationale,
+            String suggestedChange) {}
 
     public record DecodedReview(
             String summary,
@@ -384,7 +421,16 @@ public final class DraftReviewCodec {
             boolean importedFromGitHub) {}
 
     private record EncodedComment(
-            String f, int l, String t, String b, String s, String c, String cf, String r) {}
+            String f,
+            int l,
+            String t,
+            String b,
+            String s,
+            String c,
+            String cf,
+            String r,
+            // Omitted when absent so a comment without a suggestion encodes as it did before.
+            @JsonInclude(JsonInclude.Include.NON_NULL) String sg) {}
 
     private record EncodedReview(String summary, String verdict, List<EncodedComment> comments) {}
 }

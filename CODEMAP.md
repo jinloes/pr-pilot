@@ -125,6 +125,9 @@ guidance.
   baseline/follow-up/second-reviewer deduplication, low-confidence candidate removal, and the final cap.
 - `review/ReviewerAttribution.java` - Second-reviewer near-duplicate collapse and reviewer `sources`
   re-attachment after critique. Tests: `ReviewerAttributionTest`, `ReviewPipelineRecallTest`.
+- `review/ReviewSuggestionGuard.java` - Final pipeline step that clears unsafe `suggestedChange`
+  values against the anchored new-side line (`InspectionManifest.newSideLineText`). Tests:
+  `ReviewSuggestionGuardTest`, `ReviewPipelineServiceTest`.
 - `review/CancellationToken.java` - Shared cancellation state.
 - `review/BoundedProcessRunner.java` - Bounded subprocess lifecycle and output draining;
   opt-in owned-tree termination/waiting and separate stderr rejection for inventory launches.

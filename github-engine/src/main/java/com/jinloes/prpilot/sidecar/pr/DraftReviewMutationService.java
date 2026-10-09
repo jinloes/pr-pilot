@@ -329,9 +329,14 @@ public final class DraftReviewMutationService {
                             c.severity(),
                             c.category(),
                             c.confidence(),
-                            c.rationale()));
+                            c.rationale(),
+                            blankToNull(c.suggestedChange())));
         }
         return result;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     private static String pullPath(String owner, String repo, int number) {
@@ -416,7 +421,8 @@ public final class DraftReviewMutationService {
             String severity,
             String category,
             String confidence,
-            String rationale) {}
+            String rationale,
+            String suggestedChange) {}
 
     public record SaveParams(
             String baseUrl,

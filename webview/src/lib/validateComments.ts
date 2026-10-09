@@ -16,6 +16,13 @@ export interface ValidationResult {
 // rather than guess — the prompt warns "a misattributed comment is worse than no comment".
 const SNAP_RADIUS = 3
 
+/** Copy of `comment` without a suggested change; the replacement only fits the line it targeted. */
+export function withoutSuggestion(comment: LineComment): LineComment {
+  const copy = { ...comment }
+  delete copy.suggestedChange
+  return copy
+}
+
 function safeParse(diff: string): FileData[] {
   if (!diff) return []
   try {
@@ -170,7 +177,7 @@ export function validateComments(diff: string, comments: LineComment[]): Validat
       continue
     }
     if (resolved.snapped) {
-      adjusted.push({ ...c, line: resolved.line })
+      adjusted.push(withoutSuggestion({ ...c, line: resolved.line }))
       snappedCount++
     } else {
       adjusted.push(c)

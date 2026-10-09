@@ -140,6 +140,7 @@ interface FileViewProps {
   onPendingSave: (type: LineComment['type'], body: string) => void
   onEditComment?: (idx: number, body: string) => void
   onDeleteComment?: (idx: number) => void
+  onRemoveSuggestion?: (idx: number) => void
   onVerifyComment?: (comment: LineComment) => void
   onSuggestFixComment?: (comment: LineComment) => void
   readOnly: boolean
@@ -159,6 +160,7 @@ export function FileView({
   onPendingSave,
   onEditComment,
   onDeleteComment,
+  onRemoveSuggestion,
   onVerifyComment,
   onSuggestFixComment,
   readOnly,
@@ -197,6 +199,7 @@ export function FileView({
               onPendingSave={onPendingSave}
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
+              onRemoveSuggestion={onRemoveSuggestion}
               onVerifyComment={onVerifyComment}
               onSuggestFixComment={onSuggestFixComment}
               readOnly={readOnly}
@@ -222,6 +225,7 @@ interface HunkRowsProps {
   onPendingSave: (type: LineComment['type'], body: string) => void
   onEditComment?: (idx: number, body: string) => void
   onDeleteComment?: (idx: number) => void
+  onRemoveSuggestion?: (idx: number) => void
   onVerifyComment?: (comment: LineComment) => void
   onSuggestFixComment?: (comment: LineComment) => void
   readOnly: boolean
@@ -239,6 +243,7 @@ function HunkRows({
   onPendingSave,
   onEditComment,
   onDeleteComment,
+  onRemoveSuggestion,
   onVerifyComment,
   onSuggestFixComment,
   readOnly,
@@ -304,6 +309,8 @@ function HunkRows({
                 focused={globalIdx === focusedCommentIdx}
                 onEdit={onEditComment ? (body) => onEditComment(globalIdx, body) : undefined}
                 onDelete={onDeleteComment ? () => onDeleteComment(globalIdx) : undefined}
+                onRemoveSuggestion={onRemoveSuggestion ? () => onRemoveSuggestion(globalIdx) : undefined}
+                anchoredLineText={change.content}
                 onVerify={onVerifyComment ? () => onVerifyComment(comment) : undefined}
                 onSuggestFix={onSuggestFixComment ? () => onSuggestFixComment(comment) : undefined}
                 readOnly={readOnly}
@@ -360,6 +367,9 @@ interface InlineCommentRowProps {
   focused: boolean
   onEdit?: (body: string) => void
   onDelete?: () => void
+  onRemoveSuggestion?: () => void
+  /** Current text of the diff line the comment renders under, shown as the suggestion's "before". */
+  anchoredLineText?: string
   onVerify?: () => void
   onSuggestFix?: () => void
   readOnly: boolean
@@ -371,6 +381,8 @@ function InlineCommentRow({
   focused,
   onEdit,
   onDelete,
+  onRemoveSuggestion,
+  anchoredLineText,
   onVerify,
   onSuggestFix,
   readOnly,
@@ -559,9 +571,59 @@ function InlineCommentRow({
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{comment.body}</ReactMarkdown>
           </div>
           )}
+          {comment.suggestedChange && !editing && (
+            <SuggestedChangePreview
+              before={anchoredLineText}
+              after={comment.suggestedChange}
+              onRemove={readOnly ? undefined : onRemoveSuggestion}
+            />
+          )}
         </div>
       </td>
     </tr>
+  )
+}
+
+const SUGGESTION_CODE_CLASS =
+  'm-0 whitespace-pre-wrap break-all px-2 py-1 font-mono text-[12px] leading-5 text-foreground'
+
+function SuggestedChangePreview({
+  before,
+  after,
+  onRemove,
+}: {
+  before?: string
+  after: string
+  onRemove?: () => void
+}) {
+  return (
+    <section
+      className="mt-2 overflow-hidden rounded border border-border"
+      data-testid="suggested-change"
+      aria-label="Suggested change"
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-2 py-0.5">
+        <span className="text-[11px] font-semibold text-muted-foreground">Suggested change</span>
+        {onRemove && (
+          <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={onRemove}>
+            <X className="w-3 h-3" />
+            Remove suggestion
+          </Button>
+        )}
+      </div>
+      {before !== undefined && (
+        <pre className={cn(SUGGESTION_CODE_CLASS, 'bg-[hsl(var(--diff-delete-background))]')} data-testid="suggested-change-before">
+          <span className="sr-only">Before: </span>
+          <span aria-hidden="true" className="select-none font-bold text-[hsl(var(--diff-delete-foreground))]">- </span>
+          {before}
+        </pre>
+      )}
+      <pre className={cn(SUGGESTION_CODE_CLASS, 'bg-[hsl(var(--diff-add-background))]')} data-testid="suggested-change-after">
+        <span className="sr-only">After: </span>
+        <span aria-hidden="true" className="select-none font-bold text-[hsl(var(--diff-add-foreground))]">+ </span>
+        {after}
+      </pre>
+    </section>
   )
 }
 

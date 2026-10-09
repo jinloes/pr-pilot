@@ -32,6 +32,7 @@ interface Props {
   onFocusComment?: (idx: number) => void
   onEditComment?: (idx: number, body: string) => void
   onDeleteComment?: (idx: number) => void
+  onRemoveSuggestion?: (idx: number) => void
   onAddComment?: (comment: LineComment) => void
   onVerifyComment?: (comment: LineComment) => void
   onSuggestFixComment?: (comment: LineComment) => void
@@ -47,6 +48,7 @@ export function DiffViewer({
   onFocusComment,
   onEditComment,
   onDeleteComment,
+  onRemoveSuggestion,
   onAddComment,
   onVerifyComment,
   onSuggestFixComment,
@@ -472,6 +474,7 @@ export function DiffViewer({
                   }}
                   onEditComment={onEditComment}
                   onDeleteComment={onDeleteComment}
+                  onRemoveSuggestion={onRemoveSuggestion}
                   onVerifyComment={onVerifyComment}
                   onSuggestFixComment={onSuggestFixComment}
                   readOnly={readOnly}

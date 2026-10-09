@@ -330,7 +330,8 @@ public final class IntellijGitHubService {
                 comment.getSeverity(),
                 comment.getCategory(),
                 comment.getConfidence(),
-                comment.getRationale());
+                comment.getRationale(),
+                comment.getSuggestedChange());
     }
 
     private static LineComment toCore(DraftReviewCodec.LineComment comment) {
@@ -340,6 +341,7 @@ public final class IntellijGitHubService {
         mapped.setCategory(comment.category());
         mapped.setConfidence(comment.confidence());
         mapped.setRationale(comment.rationale());
+        mapped.setSuggestedChange(comment.suggestedChange());
         return mapped;
     }
 

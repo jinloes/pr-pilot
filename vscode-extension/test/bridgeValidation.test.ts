@@ -141,6 +141,25 @@ test('rejects invalid rich comment metadata', () => {
   }), false);
 });
 
+test('accepts an optional bounded suggestedChange and rejects null or non-strings', () => {
+  const base = { ...version, type: 'saveDraft', number: 42, owner: 'acme', repo: 'platform', saveId: 1 };
+  const save = (suggestedChange: unknown) => isValidBridgeRequest({
+    ...base,
+    result: {
+      summary: 'Summary',
+      verdict: 'COMMENT',
+      lineComments: [{ file: 'src/a.ts', line: 1, type: 'issue', body: 'Body', suggestedChange }],
+    },
+  });
+
+  assert.equal(save(undefined), true);
+  assert.equal(save('  return a;'), true);
+  assert.equal(save('x'.repeat(1_000)), true);
+  assert.equal(save('x'.repeat(1_001)), false);
+  assert.equal(save(null), false);
+  assert.equal(save(3), false);
+});
+
 test('accepts cancelChat only with a bounded operation ID', () => {
   assert.equal(isValidBridgeRequest({ ...version, type: 'cancelChat', operationId: 'chat-1' }), true);
   assert.equal(isValidBridgeRequest({ ...version, type: 'cancelChat' }), false);

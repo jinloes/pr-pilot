@@ -214,3 +214,16 @@ void test('validateComments does not snap across a hunk boundary', () => {
   assert.equal(result.snappedCount, 0)
 })
 
+void test('validateComments keeps a suggested change on an exact anchor', () => {
+  const result = validateComments(twoHunkDiff, [{ ...comment('src/Far.ts', 201), suggestedChange: 'two hundred and one' }])
+
+  assert.equal(result.adjusted[0].suggestedChange, 'two hundred and one')
+})
+
+void test('validateComments clears a suggested change when snapping moves the line', () => {
+  const result = validateComments(twoHunkDiff, [{ ...comment('src/Far.ts', 14), suggestedChange: 'fourteen' }])
+
+  assert.equal(result.adjusted[0].line, 12)
+  assert.equal('suggestedChange' in result.adjusted[0], false)
+  assert.equal(result.adjusted[0].body, 'note')
+})

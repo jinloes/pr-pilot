@@ -32,7 +32,7 @@ public final class ReviewPrompts {
      * <p>Not a compatibility version: nothing parses it, and old log lines keep their old value.
      */
     public static final String PROMPT_VERSION =
-            "2026-10-thread-state-incremental-scope-corroboration-rule-gating";
+            "2026-10-thread-state-incremental-scope-corroboration-rule-gating-suggested-changes";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -146,7 +146,8 @@ public final class ReviewPrompts {
                     + "\"severity\", \"category\", \"confidence\", and \"body\". \"rationale\" is"
                     + " required for \"issue\" and \"suggestion\", and for any comment whose"
                     + " \"confidence\" is \"low\"; it is optional only for a \"note\" you rate"
-                    + " \"medium\" or \"high\". Do not emit other fields.\n\n"
+                    + " \"medium\" or \"high\". \"suggestedChange\" is optional. Do not emit"
+                    + " other fields.\n\n"
                     + "Example line comments (they illustrate the field shape — do not copy the"
                     + " content):\n"
                     + "[\n"
@@ -184,6 +185,12 @@ public final class ReviewPrompts {
                     + " \"rationale\".\n"
                     + "- \"rationale\": one sentence citing concrete evidence from supplied"
                     + " context.\n"
+                    + "- \"suggestedChange\": optional. The literal full replacement for the"
+                    + " anchored line, with its indentation preserved, without the \"N| \""
+                    + " prefix or the \"+\"/space diff marker; at most 6 lines; no code fences"
+                    + " and no prose. Emit it only when the fix is complete, local to that one"
+                    + " line, and your \"confidence\" is \"high\". When re-emitting an existing"
+                    + " comment, repeat its \"suggestedChange\" unchanged.\n"
                     + "- \"lineComments\": at most 20. Keep highest priority by severity (blocker"
                     + " > major > minor > nit), then confidence.\n\n"
                     + "\"inspection\" is an audit ledger, not prose. Copy only IDs from"
@@ -1042,6 +1049,8 @@ public final class ReviewPrompts {
                     + " Drop a draft comment that repeats an issue already raised in"
                     + " <existing_reviews>, including a [resolved] one, unless it identifies a"
                     + " different defect."
+                    + " Keep a comment's \"suggestedChange\" only when it is still a correct,"
+                    + " complete replacement for the anchored line; otherwise remove the field."
                     + " Keep the well-supported comments and tighten wording only where needed."
                     + " Add a comment only for a clear blocker or major issue the draft missed."
                     + " Re-derive \"verdict\" from the surviving comments. Respond ONLY with the"
@@ -1100,6 +1109,9 @@ public final class ReviewPrompts {
             node.put("body", c.getBody());
             if (StringUtils.isNotBlank(c.getRationale())) {
                 node.put("rationale", c.getRationale());
+            }
+            if (StringUtils.isNotBlank(c.getSuggestedChange())) {
+                node.put("suggestedChange", c.getSuggestedChange());
             }
             if (corroborated(c)) {
                 node.put("corroborated", true);

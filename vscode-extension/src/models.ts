@@ -25,6 +25,8 @@ export interface LineComment {
     category?: Category;
     confidence?: Confidence;
     rationale?: string;
+    /** Literal replacement for the anchored line, published as a GitHub suggestion block. */
+    suggestedChange?: string;
     /** Display-only reviewer attribution; never persisted to GitHub drafts. */
     sources?: string[];
 }
