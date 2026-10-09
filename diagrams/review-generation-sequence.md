@@ -89,7 +89,7 @@ sequenceDiagram
     end
 
     opt reviewRulesDirectory configured
-        Pipeline->>Pipeline: LocalReviewRules appends bounded local rule files to repository guidance (fail-open)
+        Pipeline->>Pipeline: LocalReviewRules loads bounded local rule files (fail-open)
     end
 
     alt Direct review
@@ -126,6 +126,18 @@ sequenceDiagram
         end
     end
 
+    opt Review rules loaded
+        opt Any structured rule
+            Pipeline->>Provider: Tool-free trigger selection over metadata, changed files and rule triggers
+            Provider-->>Pipeline: Triggered rule names (failure or bad output applies every rule)
+        end
+        loop Each selected rule (at most 25, 3 concurrently, 12-minute phase deadline)
+            Pipeline->>Provider: Read-only rule agent with MCP disabled, one rule only
+            Provider-->>Pipeline: Rule findings tagged "(rule: name)" (a failed rule is skipped)
+        end
+        Pipeline->>Pipeline: Merge rule findings into the draft
+    end
+
     opt Recall mode (self-critique or a second reviewer)
         Pipeline->>Provider: Read-only hygiene pass with MCP disabled (logging, comments, removed protobuf fields)
         Provider-->>Pipeline: Hygiene findings (failure is reported and skipped)
@@ -136,7 +148,7 @@ sequenceDiagram
         Pipeline->>Pipeline: Build contract index from changed files, even for direct/single-batch reviews
         Pipeline->>Provider: Validate findings against bounded context and contract index; confirm or drop recall candidates
         Provider-->>Pipeline: Refined review
-        Pipeline->>Pipeline: Restore anchored hygiene findings the critique dropped (dedup by file, ±2 lines, category)
+        Pipeline->>Pipeline: Restore anchored hygiene and rule findings the critique dropped (dedup by file, ±2 lines, category)
         opt prpilot.review.reportDropped=true
             Pipeline-->>Host: One status per draft finding validation dropped
         end

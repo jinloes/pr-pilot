@@ -392,7 +392,7 @@ export function buildSettingsHtml(cspSource: string, nonce: string): string {
     <div class="field">
       <label for="reviewRulesDirectory">Rules folder</label>
       <input type="text" id="reviewRulesDirectory" aria-describedby="reviewRulesDirectoryHint" placeholder="/absolute/path/to/review-rules">
-      <div class="hint" id="reviewRulesDirectoryHint">Optional local folder of review rules (.md, .yaml, .yml), such as a checkout of your team's central review rules. Added to every review's guidance.</div>
+      <div class="hint" id="reviewRulesDirectoryHint">Optional local folder of review rules (.md, .yaml, .yml), such as a checkout of your team's central review rules. Structured rules run when their trigger matches; each rule is applied by its own agent.</div>
     </div>
   </div>
 

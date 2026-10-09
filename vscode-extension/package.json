@@ -249,7 +249,7 @@
         "pr-pilot.reviewRulesDirectory": {
           "type": "string",
           "default": "",
-          "description": "Optional absolute path to a local folder of extra review rules (`.md`, `.yaml`, `.yml`), such as a checkout of your team's central review rules. They are added to every review's guidance. Leave blank to disable."
+          "description": "Optional absolute path to a local folder of extra review rules (`.md`, `.yaml`, `.yml`), such as a checkout of your team's central review rules. Structured YAML rules are selected by their trigger, and each selected rule is applied by its own agent. Leave blank to disable."
         },
         "pr-pilot.reviewSecondReviewerModel": {
           "type": "string",

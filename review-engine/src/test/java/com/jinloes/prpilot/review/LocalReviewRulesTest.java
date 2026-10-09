@@ -2,10 +2,12 @@ package com.jinloes.prpilot.review;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jinloes.prpilot.review.LocalReviewRules.Rule;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,29 +37,109 @@ class LocalReviewRulesTest {
         return Files.writeString(file, content);
     }
 
+    private static String yamlRule(String name, String trigger) {
+        return "name: "
+                + name
+                + "\n"
+                + "description: Checks "
+                + name
+                + "\n"
+                + "trigger: "
+                + trigger
+                + "\n"
+                + "prompt: |\n  Apply "
+                + name
+                + ".\n";
+    }
+
+    private List<Rule> load() {
+        return LocalReviewRules.load(rules.toString());
+    }
+
     @Nested
-    class Read {
+    class Load {
         @Test
         void returnsEmptyForUnsetRelativeOrMissingDirectories() {
-            assertThat(LocalReviewRules.read(null)).isEmpty();
-            assertThat(LocalReviewRules.read("  ")).isEmpty();
-            assertThat(LocalReviewRules.read("relative/rules")).isEmpty();
-            assertThat(LocalReviewRules.read(tempDir.resolve("absent").toString())).isEmpty();
+            assertThat(LocalReviewRules.load(null)).isEmpty();
+            assertThat(LocalReviewRules.load("  ")).isEmpty();
+            assertThat(LocalReviewRules.load("relative/rules")).isEmpty();
+            assertThat(LocalReviewRules.load(tempDir.resolve("absent").toString())).isEmpty();
         }
 
         @Test
-        void readsRuleFilesSortedByPathUnderLocalRulesHeadings() throws IOException {
-            write("b.yaml", "rule: b\n");
-            write("a.md", "  Rule A  \n");
-            write("nested/c.yml", "rule: c");
+        void parsesAStructuredYamlRule() throws IOException {
+            write(
+                    "team/null-safety.yaml",
+                    "name: null-safety\n"
+                            + "description: Flags nullable returns\n"
+                            + "trigger: Java files changed\n"
+                            + "prompt: |\n  Check null handling.\n"
+                            + "severity: high\n"
+                            + "model: ignored\n");
 
-            String result = LocalReviewRules.read(rules.toString());
+            assertThat(load())
+                    .containsExactly(
+                            new Rule(
+                                    "null-safety",
+                                    "team/null-safety.yaml",
+                                    "Flags nullable returns",
+                                    "Java files changed",
+                                    "Check null handling."));
+            assertThat(load().get(0).structured()).isTrue();
+        }
 
-            assertThat(result)
+        @Test
+        void skipsDisabledRules() throws IOException {
+            write("inactive.yaml", yamlRule("inactive", "always") + "enabled: false\n");
+            write("off-text.yml", "enabled: \"false\"\nnotes: x\n");
+            write("active.yaml", yamlRule("active", "always") + "enabled: true\n");
+
+            assertThat(load()).extracting(Rule::name).containsExactly("active");
+        }
+
+        @Test
+        void treatsIncompleteOrInvalidYamlAsUnstructuredByPath() throws IOException {
+            write("a-no-trigger.yaml", "name: a\ndescription: d\nprompt: p\n");
+            write("b-blank-prompt.yaml", "name: b\ndescription: d\ntrigger: t\nprompt: \"  \"\n");
+            write("c-bad-name.yaml", yamlRule("-bad", "t"));
+            write("d-long-name.yaml", yamlRule("n".repeat(65), "t"));
+            write("e-broken.yaml", "name: [unclosed\n");
+            write("f-list.yaml", "- one\n- two\n");
+            write("g-notes.md", "  Prefer Optional.  \n");
+
+            List<Rule> loaded = load();
+
+            assertThat(loaded)
+                    .extracting(Rule::name)
+                    .containsExactly(
+                            "a-no-trigger.yaml",
+                            "b-blank-prompt.yaml",
+                            "c-bad-name.yaml",
+                            "d-long-name.yaml",
+                            "e-broken.yaml",
+                            "f-list.yaml",
+                            "g-notes.md");
+            assertThat(loaded).allSatisfy(rule -> assertThat(rule.structured()).isFalse());
+            assertThat(loaded.get(6))
                     .isEqualTo(
-                            "## local-rules/a.md\nRule A\n\n"
-                                    + "## local-rules/b.yaml\nrule: b\n\n"
-                                    + "## local-rules/nested/c.yml\nrule: c");
+                            new Rule("g-notes.md", "g-notes.md", null, null, "Prefer Optional."));
+            assertThat(loaded.get(4).prompt()).isEqualTo("name: [unclosed");
+        }
+
+        @Test
+        void acceptsASixtyFourCharacterName() throws IOException {
+            String name = "n".repeat(64);
+            write("long.yaml", yamlRule(name, "t"));
+
+            assertThat(load()).extracting(Rule::name).containsExactly(name);
+        }
+
+        @Test
+        void skipsADuplicateStructuredName() throws IOException {
+            write("a.yaml", yamlRule("same", "first"));
+            write("b.yaml", yamlRule("same", "second"));
+
+            assertThat(load()).extracting(Rule::trigger).containsExactly("first");
         }
 
         @Test
@@ -68,8 +150,7 @@ class LocalReviewRulesTest {
             Files.write(rules.resolve("binary.md"), new byte[] {(byte) 0xff, (byte) 0xfe, 0});
             write("kept.md", "kept");
 
-            assertThat(LocalReviewRules.read(rules.toString()))
-                    .isEqualTo("## local-rules/kept.md\nkept");
+            assertThat(load()).extracting(Rule::name).containsExactly("kept.md");
         }
 
         @Test
@@ -81,8 +162,7 @@ class LocalReviewRulesTest {
             Files.createSymbolicLink(rules.resolve("dir"), outsideDir);
             write("real.md", "real");
 
-            assertThat(LocalReviewRules.read(rules.toString()))
-                    .isEqualTo("## local-rules/real.md\nreal");
+            assertThat(load()).extracting(Rule::name).containsExactly("real.md");
         }
 
         @Test
@@ -90,30 +170,37 @@ class LocalReviewRulesTest {
             write("a.md", "a");
             Path link = Files.createSymbolicLink(tempDir.resolve("linked"), rules);
 
-            assertThat(LocalReviewRules.read(link.toString())).isEqualTo("## local-rules/a.md\na");
+            assertThat(LocalReviewRules.load(link.toString()))
+                    .extracting(Rule::name)
+                    .containsExactly("a.md");
         }
 
         @Test
-        void skipsFilesOverTheSizeLimit() throws IOException {
-            write("big.md", "x".repeat(LocalReviewRules.MAX_FILE_BYTES + 1));
-            write("small.md", "small");
+        void keepsA20KbFileAndSkipsA33KbFile() throws IOException {
+            write("big.md", "x".repeat(33 * 1024));
+            write("medium.md", "m".repeat(20 * 1024));
 
-            assertThat(LocalReviewRules.read(rules.toString()))
-                    .isEqualTo("## local-rules/small.md\nsmall");
+            assertThat(load()).extracting(Rule::name).containsExactly("medium.md");
         }
 
         @Test
-        void stopsAddingFilesOnceTheTotalBudgetIsSpent() throws IOException {
+        void hasNoTotalSizeCap() throws IOException {
             String body = "y".repeat(LocalReviewRules.MAX_FILE_BYTES - 100);
-            write("1.md", body);
-            write("2.md", body);
-            write("3.md", body);
+            for (int i = 1; i <= 5; i++) write(i + ".md", body);
 
-            String result = LocalReviewRules.read(rules.toString());
+            assertThat(load()).hasSize(5);
+        }
 
-            assertThat(result).contains("## local-rules/1.md", "## local-rules/2.md");
-            assertThat(result).doesNotContain("## local-rules/3.md");
-            assertThat(result.length()).isLessThanOrEqualTo(LocalReviewRules.MAX_TOTAL_BYTES);
+        @Test
+        void keepsAtMostTheFileLimitInPathOrder() throws IOException {
+            for (int i = 0; i < LocalReviewRules.MAX_FILES + 2; i++) {
+                write(String.format("%03d.md", i), "rule " + i);
+            }
+
+            List<Rule> loaded = load();
+
+            assertThat(loaded).hasSize(LocalReviewRules.MAX_FILES);
+            assertThat(loaded.get(0).name()).isEqualTo("000.md");
         }
 
         @Test
@@ -121,20 +208,7 @@ class LocalReviewRulesTest {
             write("a/b/c/d/deep.md", "too deep");
             write("a/b/c/shallow.md", "ok");
 
-            assertThat(LocalReviewRules.read(rules.toString()))
-                    .isEqualTo("## local-rules/a/b/c/shallow.md\nok");
-        }
-    }
-
-    @Nested
-    class AppendTo {
-        @Test
-        void joinsWithABlankLineAndHandlesEmptySides() {
-            assertThat(LocalReviewRules.appendTo("g", "r")).isEqualTo("g\n\nr");
-            assertThat(LocalReviewRules.appendTo("", "r")).isEqualTo("r");
-            assertThat(LocalReviewRules.appendTo(null, "r")).isEqualTo("r");
-            assertThat(LocalReviewRules.appendTo("g", "")).isEqualTo("g");
-            assertThat(LocalReviewRules.appendTo(null, null)).isNull();
+            assertThat(load()).extracting(Rule::name).containsExactly("a/b/c/shallow.md");
         }
     }
 }

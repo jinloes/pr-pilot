@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -662,6 +663,108 @@ class CopilotServiceTest {
         @Test
         void noActiveRunDoesNotThrow() {
             new CopilotService().cancelCurrentRequest();
+        }
+
+        private FakeRuntimeSession blockingSession(CountDownLatch started, CountDownLatch release) {
+            FakeRuntimeSession session = new FakeRuntimeSession();
+            session.sendAction =
+                    ignored -> {
+                        started.countDown();
+                        try {
+                            release.await(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    };
+            session.sendFailure = new IOException("cancelled by test");
+            return session;
+        }
+
+        private Thread chatInBackground(
+                CopilotService service, String prompt, AtomicReference<Throwable> failure) {
+            Thread worker =
+                    new Thread(
+                            () -> {
+                                try {
+                                    service.chatWithPrompt(prompt, "medium", ignored -> {});
+                                } catch (Throwable t) {
+                                    failure.set(t);
+                                }
+                            });
+            worker.start();
+            return worker;
+        }
+
+        @Test
+        void oneCancelStopsEveryConcurrentRun() throws Exception {
+            CountDownLatch started = new CountDownLatch(2);
+            CountDownLatch release = new CountDownLatch(1);
+            List<FakeRuntimeSession> sessions = new CopyOnWriteArrayList<>();
+            List<FakeRuntimeClient> clients = new CopyOnWriteArrayList<>();
+            FakeRuntimeFactory factory =
+                    new FakeRuntimeFactory(
+                            () -> {
+                                FakeRuntimeClient client =
+                                        new FakeRuntimeClient(
+                                                request -> {
+                                                    FakeRuntimeSession session =
+                                                            blockingSession(started, release);
+                                                    sessions.add(session);
+                                                    return session;
+                                                });
+                                clients.add(client);
+                                return client;
+                            });
+            CopilotService service = new CopilotService(null, factory);
+            AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+            AtomicReference<Throwable> secondFailure = new AtomicReference<>();
+
+            Thread first = chatInBackground(service, "first", firstFailure);
+            Thread second = chatInBackground(service, "second", secondFailure);
+            try {
+                assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+                service.cancelCurrentRequest();
+            } finally {
+                release.countDown();
+            }
+            first.join(5_000);
+            second.join(5_000);
+
+            assertThat(sessions).hasSize(2);
+            assertThat(sessions).allSatisfy(s -> assertThat(s.abortCount.get()).isEqualTo(1));
+            assertThat(clients).allSatisfy(c -> assertThat(c.forceStopCount.get()).isEqualTo(1));
+            assertThat(firstFailure.get()).isInstanceOf(InterruptedException.class);
+            assertThat(secondFailure.get()).isInstanceOf(InterruptedException.class);
+        }
+
+        @Test
+        void aFinishedRunDoesNotUntrackAnotherRun() throws Exception {
+            CountDownLatch started = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            AtomicInteger calls = new AtomicInteger();
+            FakeRuntimeSession blocking = blockingSession(started, release);
+            FakeRuntimeSession quick = new FakeRuntimeSession();
+            quick.sendResult = "done";
+            CopilotService service =
+                    new CopilotService(
+                            null,
+                            factoryFor(() -> calls.getAndIncrement() == 0 ? blocking : quick));
+            AtomicReference<Throwable> failure = new AtomicReference<>();
+
+            Thread worker = chatInBackground(service, "slow", failure);
+            try {
+                assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(service.chatWithPrompt("fast", "medium", ignored -> {}))
+                        .isEqualTo("done");
+                service.cancelCurrentRequest();
+            } finally {
+                release.countDown();
+            }
+            worker.join(5_000);
+
+            assertThat(blocking.abortCount.get()).isEqualTo(1);
+            assertThat(quick.abortCount.get()).isZero();
+            assertThat(failure.get()).isInstanceOf(InterruptedException.class);
         }
 
         @Test

@@ -219,7 +219,7 @@ public final class ReviewPipelineService {
         provider.checkCancelled();
         InspectionManifest manifest = InspectionManifest.fromDiff(request.getDiff());
         request = withBaseCommitContext(request, manifest, onStatus);
-        request = withLocalRules(request);
+        List<LocalReviewRules.Rule> rules = LocalReviewRules.load(request.getRulesDirectory());
         boolean recall = selfCritique || secondary != null;
         PRReviewRequest reviewRequest = request.withCandidateRecall(recall);
         Passes passes = reviewPasses(reviewRequest, chunked, onStatus, onChunk);
@@ -239,6 +239,12 @@ public final class ReviewPipelineService {
         provider.checkCancelled();
         List<ReviewerAttribution.Evidence> attributed =
                 ReviewerAttribution.Evidence.snapshot(candidate.getLineComments());
+        ReviewResult ruleFindings = ruleFindings(rules, request, chunked, manifest, onStatus);
+        List<RuleSite> ruleSites = RuleSite.of(ruleFindings.getLineComments());
+        if (!ruleFindings.getLineComments().isEmpty()) {
+            candidate = ReviewResultMerger.merge(candidate, ruleFindings, MERGED_CANDIDATE_CAP);
+        }
+        provider.checkCancelled();
 
         if (recall) {
             ReviewResult hygiene = hygieneFindings(request, chunked, manifest, onStatus);
@@ -275,6 +281,12 @@ public final class ReviewPipelineService {
             if (restored > 0) {
                 onStatus.accept("Kept " + findings(restored) + " from the hygiene pass");
             }
+            int beforeRules = candidate.getLineComments().size();
+            candidate = restoreHygieneFindings(candidate, ruleFindings, manifest);
+            int restoredRules = candidate.getLineComments().size() - beforeRules;
+            if (restoredRules > 0) {
+                onStatus.accept("Kept " + findings(restoredRules) + " from review rules");
+            }
             if (Boolean.getBoolean(REPORT_DROPPED_PROPERTY)) {
                 droppedStatuses(draft, candidate).forEach(onStatus);
             }
@@ -283,6 +295,7 @@ public final class ReviewPipelineService {
         if (passes.labels() != null) {
             candidate =
                     ReviewerAttribution.reattach(candidate, attributed, passes.labels().primary());
+            unattributeUnmatchedRuleFindings(candidate, attributed, ruleSites, rules);
         }
         provider.checkCancelled();
         if (supervisorEnabled) {
@@ -338,12 +351,13 @@ public final class ReviewPipelineService {
     }
 
     /**
-     * Re-adds confirmed hygiene findings that validation dropped. The hygiene rules are mechanical
-     * (log level, attached exception, comment wording), and the validator reliably discards them as
-     * low-value even when told to keep them, which loses exactly the findings production reviewers
-     * such as Mae report. A hygiene finding is kept unless it is low confidence, does not anchor to
-     * a changed line, or a validated finding of the same category already sits within {@link
-     * #HYGIENE_COVER_LINES} lines of it in the same file (the validator reworded or merged it).
+     * Re-adds confirmed hygiene findings that validation dropped; review-rule findings are restored
+     * the same way. The hygiene rules are mechanical (log level, attached exception, comment
+     * wording), and the validator reliably discards them as low-value even when told to keep them,
+     * which loses exactly the findings production reviewers such as Mae report. A hygiene finding
+     * is kept unless it is low confidence, does not anchor to a changed line, or a validated
+     * finding of the same category already sits within {@link #HYGIENE_COVER_LINES} lines of it in
+     * the same file (the validator reworded or merged it).
      */
     static ReviewResult restoreHygieneFindings(
             ReviewResult validated, ReviewResult hygiene, InspectionManifest manifest) {
@@ -421,13 +435,81 @@ public final class ReviewPipelineService {
                 guidelines, resolved.fileHistory(), resolved.callSites());
     }
 
-    /** Appends the reviewer's configured local rules folder to the repository guidance. */
-    static PRReviewRequest withLocalRules(PRReviewRequest request) {
-        String rules = LocalReviewRules.read(request.getRulesDirectory());
-        if (rules.isEmpty()) return request;
-        return request.toBuilder()
-                .repoGuidelines(LocalReviewRules.appendTo(request.getRepoGuidelines(), rules))
-                .build();
+    /**
+     * Where a rule finding sat before critique. Captured as values so later edits to the comment
+     * objects cannot change which final comments count as rule findings.
+     */
+    record RuleSite(String file, String category, int line) {
+        static List<RuleSite> of(List<LineComment> ruleFindings) {
+            return ruleFindings.stream()
+                    .filter(comment -> StringUtils.isNotBlank(comment.getCategory()))
+                    .map(
+                            comment ->
+                                    new RuleSite(
+                                            comment.getFile(),
+                                            comment.getCategory(),
+                                            comment.getLine()))
+                    .toList();
+        }
+
+        boolean matches(LineComment comment) {
+            return Objects.equals(file, comment.getFile())
+                    && Objects.equals(category, comment.getCategory())
+                    && Math.abs(line - comment.getLine()) <= HYGIENE_COVER_LINES;
+        }
+    }
+
+    /**
+     * Clears the primary-label fallback {@code reattach} gives a rule finding that no reviewer
+     * candidate matched, so a rule finding carries reviewer labels only through a match. A final
+     * comment is a rule finding when it sits where one did before critique (the critique may reword
+     * it) or still carries the engine's rule tag.
+     */
+    static void unattributeUnmatchedRuleFindings(
+            ReviewResult result,
+            List<ReviewerAttribution.Evidence> evidence,
+            List<RuleSite> ruleSites,
+            List<LocalReviewRules.Rule> rules) {
+        for (LineComment comment : result.getLineComments()) {
+            boolean ruleFinding =
+                    ruleSites.stream().anyMatch(site -> site.matches(comment))
+                            || hasRuleTag(comment, rules);
+            if (ruleFinding
+                    && evidence.stream().noneMatch(candidate -> candidate.matches(comment))) {
+                comment.setSources(List.of());
+            }
+        }
+    }
+
+    /** True when the rationale carries the engine's {@code (rule: name)} tag for a loaded rule. */
+    static boolean hasRuleTag(LineComment comment, List<LocalReviewRules.Rule> rules) {
+        String rationale = StringUtils.strip(comment.getRationale());
+        if (StringUtils.isEmpty(rationale)) return false;
+        for (LocalReviewRules.Rule rule : rules) {
+            if (rationale.endsWith(" (rule: " + rule.name() + ")")
+                    || rationale.equals(ReviewRulesPass.withRuleSuffix(null, rule.name()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Selects and applies the reviewer's local review rules. Like the hygiene pass, rule agents
+     * read the full diff; only a chunked review falls back to the condensed index.
+     */
+    private ReviewResult ruleFindings(
+            List<LocalReviewRules.Rule> rules,
+            PRReviewRequest request,
+            boolean chunked,
+            InspectionManifest manifest,
+            Consumer<String> onStatus)
+            throws IOException, InterruptedException {
+        if (rules.isEmpty()) return new ReviewResult("", "COMMENT", new ArrayList<>());
+        PRReviewRequest ruleRequest =
+                chunked ? chunkedReviewService.finalValidationRequest(request) : request;
+        return new ReviewRulesPass(provider, this::validateAuthority)
+                .run(rules, request, ruleRequest, manifest, onStatus);
     }
 
     /** The merged first-pass result, with the reviewer labels when both reviewers succeeded. */

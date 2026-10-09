@@ -264,8 +264,9 @@ public class PluginSettingsComponent {
                                         SettingsUi.hintLabel(
                                                 "<html><small>Optional absolute path to a local folder of"
                                                         + " review rules (.md, .yaml, .yml), such as a checkout of"
-                                                        + " your team's central review rules. Added to every"
-                                                        + " review's guidance.</small></html>")),
+                                                        + " your team's central review rules. Structured rules"
+                                                        + " run when their trigger matches; each rule is applied"
+                                                        + " by its own agent.</small></html>")),
                                 1,
                                 false)
                         .addSeparator(8)

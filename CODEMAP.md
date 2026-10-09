@@ -89,7 +89,7 @@ guidance.
 - `engine/ReviewEngineApi.java` - Complete review capability surface and JSON-RPC wire-name map.
 - `engine/ReviewSessionService.java` - Provider dispatch and operation-scoped cancellation.
 - `review/ClaudeService.java` - Claude CLI execution, tool-use status, and process lifecycle.
-- `review/ReviewPrompts.java` - Canonical review, chat, focused-chat, hygiene and critique prompts,
+- `review/ReviewPrompts.java` - Canonical review, chat, focused-chat, hygiene, rule-selection, rule and critique prompts,
   prompt version, and prompt-content helpers. Tests: `ReviewPromptsTest`.
 - `review/ReviewResultParser.java` - Review JSON parsing, comment repair, and category validation
   including compatibility findings. Tests: `ReviewResultParserTest`.
@@ -97,15 +97,20 @@ guidance.
 - `review/PromptCompleter.java` - One-shot provider-neutral prompt completion used by development tools such as the recall benchmark.
 - `review/ChunkedReviewService.java` - Shared diff batching, contract-index generation, and mandatory global reconciliation.
 - `review/ReviewPipelineService.java` - Shared primary/chunked orchestration, base-commit context
-  enrichment, optional parallel Copilot second reviewer, bounded supervision, the recall-mode
-  hygiene pass, recall-candidate critique, opt-in dropped-finding statuses, cancellation checkpoints, fallback behavior, final CI suppression, and the final comment cap.
+  enrichment, optional parallel Copilot second reviewer, bounded supervision, the review-rules pass,
+  the recall-mode hygiene pass, recall-candidate critique, opt-in dropped-finding statuses, cancellation checkpoints, fallback behavior, final CI suppression, and the final comment cap.
 - `review/BaseCommitContext.java` - Trusted guidance files (configured globs, then defaults), changed-file commit history and textual
   call sites read only from the PR base commit's git objects, time-bounded and fail-open. Tests:
   `BaseCommitContextTest`.
 - `review/LanguageChecklists.java` - Per-language Pass B checks (Java, Kotlin, JS/TS, Python, Go,
   Rust) added only for languages in the diff. Tests: `LanguageChecklistsTest`.
-- `review/LocalReviewRules.java` - Bounded reader for the reviewer's `reviewRulesDirectory`, appended
-  to repository guidance by `ReviewPipelineService.withLocalRules`. Tests: `LocalReviewRulesTest`.
+- `review/LocalReviewRules.java` - Bounded loader for the reviewer's `reviewRulesDirectory`: structured
+  YAML rules (name, description, trigger, prompt) and always-selected unstructured files. Tests:
+  `LocalReviewRulesTest`.
+- `review/ReviewRulesPass.java` - Trigger selection call plus one read-only agent per selected rule
+  (3 concurrent, 25 cap, 12-minute deadline); findings get a ` (rule: <name>)` rationale suffix.
+  Tests: `ReviewRulesPassTest`; pipeline wiring in `ReviewPipelineServiceTest` and
+  `ReviewPipelineRecallTest`.
 - `review/ChangedSymbols.java` - Extracts the existing declarations a diff changes (removed-line
   declarations, then hunk-header context) for the call-site search. Tests: `ChangedSymbolsTest`.
 - `review/ChangedLogStatements.java` - Mechanically extracts the production log statements a diff
@@ -409,6 +414,7 @@ VS Code host integration. All GitHub and review generation routes through the Ja
 `ReviewPane`/`App.tsx` -> host bridge -> `ReviewEngineApi` -> `ReviewSessionService` ->
 `ReviewPipelineService` -> base-commit guidance/history enrichment -> direct or chunked primary pass
 (plus optional parallel second reviewer, merged) -> optional bounded supervisor/follow-up ->
+optional `ReviewRulesPass` (trigger selection, one agent per rule) ->
 contract-index-backed final critique/CI suppression -> status/chunk notifications -> host bridge -> shared webview.
 
 ### GitHub operations

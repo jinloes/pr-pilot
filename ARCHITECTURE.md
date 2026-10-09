@@ -46,6 +46,7 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [Review guidance, file history and call sites come from the base commit](docs/architecture/review-pipeline.md#review-guidance-file-history-and-call-sites-come-from-the-base-commit)
 - [Recall: second reviewer and candidate validation](docs/architecture/review-pipeline.md#recall-second-reviewer-and-candidate-validation)
 - [Reviewer attribution and corroboration](docs/architecture/review-pipeline.md#reviewer-attribution-and-corroboration)
+- [Review rules are trigger-gated and applied one agent per rule](docs/architecture/review-pipeline.md#review-rules-are-trigger-gated-and-applied-one-agent-per-rule)
 - [Recall benchmark withholds the reference answers](docs/architecture/review-pipeline.md#recall-benchmark-withholds-the-reference-answers)
 - [ReviewBench runs never consult GitHub and delegate scoring](docs/architecture/review-pipeline.md#reviewbench-runs-never-consult-github-and-delegate-scoring)
 - [Comment anchoring snaps within a hunk, never across one](docs/architecture/review-pipeline.md#comment-anchoring-snaps-within-a-hunk-never-across-one)
@@ -154,9 +155,12 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - `reviewRulesDirectory` (default `""`; VS Code `pr-pilot.reviewRulesDirectory`; benchmark
   `--rules-dir`) — an absolute local folder of the reviewer's own rules. The engine
   (`LocalReviewRules`) reads `.md`/`.yaml`/`.yml` regular files up to four levels deep, skipping
-  symbolic links inside the folder, files over 16 KB, and non-UTF-8 files, keeps at most 50 files and
-  32 KB sorted by path, and appends them to the repository guidance as `## local-rules/<path>`
-  sections so the critique can cite them. Unreadable or relative paths add nothing. It is carried on
+  symbolic links inside the folder, files over 32 KB, and non-UTF-8 files, and keeps at most 50
+  files sorted by path. Structured YAML rules (`name`, `description`, `trigger`, `prompt`) are
+  selected by one trigger-matching call; every other file is always selected. `ReviewRulesPass`
+  applies each selected rule in its own read-only agent (3 at a time, at most 25 per review) and
+  merges the findings into the candidate; rules never enter the repository guidance. Unreadable or
+  relative paths add nothing. It is carried on
   `GenerateReviewParams.rulesDirectory` / `PRReviewRequest.rulesDirectory`.
 - `reviewSecondReviewerModel` (default `""`; VS Code `pr-pilot.reviewSecondReviewerModel`) — optional
   Copilot model run in parallel as a second reviewer whose findings are merged and cross-validated.

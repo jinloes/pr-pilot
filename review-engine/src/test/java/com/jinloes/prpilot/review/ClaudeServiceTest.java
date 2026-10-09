@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -111,6 +112,27 @@ class ClaudeServiceTest {
         }
     }
 
+    /** Hangs on the first chat (or every chat when {@code allHang}); later chats echo stdin. */
+    private static final class TrackedChatClaudeService extends ClaudeService {
+        final List<Process> processes = new CopyOnWriteArrayList<>();
+        final CountDownLatch hanging;
+        private final boolean allHang;
+
+        TrackedChatClaudeService(int hangingChats, boolean allHang) {
+            this.hanging = new CountDownLatch(hangingChats);
+            this.allHang = allHang;
+        }
+
+        @Override
+        Process buildProcess(String... extraArgs) throws IOException {
+            boolean hang = allHang || processes.isEmpty();
+            Process process = new ProcessBuilder("sh", "-c", hang ? "sleep 30" : "cat").start();
+            processes.add(process);
+            if (hang) hanging.countDown();
+            return process;
+        }
+    }
+
     @Nested
     class Cancellation {
 
@@ -122,6 +144,52 @@ class ClaudeServiceTest {
 
             assertThatThrownBy(() -> service.chatWithPrompt("question", ignored -> {}))
                     .isInstanceOf(InterruptedException.class);
+        }
+
+        @Test
+        void oneCancelStopsEveryConcurrentRun() throws Exception {
+            TrackedChatClaudeService service = new TrackedChatClaudeService(2, true);
+            ExecutorService callers = Executors.newFixedThreadPool(2);
+            try {
+                Future<String> first =
+                        callers.submit(() -> service.chatWithPrompt("first", ignored -> {}));
+                Future<String> second =
+                        callers.submit(() -> service.chatWithPrompt("second", ignored -> {}));
+                assertThat(service.hanging.await(5, TimeUnit.SECONDS)).isTrue();
+
+                service.cancelCurrentRequest();
+
+                assertThatThrownBy(() -> first.get(5, TimeUnit.SECONDS))
+                        .hasCauseInstanceOf(InterruptedException.class);
+                assertThatThrownBy(() -> second.get(5, TimeUnit.SECONDS))
+                        .hasCauseInstanceOf(InterruptedException.class);
+                assertThat(service.processes).hasSize(2);
+                for (Process process : service.processes) {
+                    assertThat(process.waitFor(5, TimeUnit.SECONDS)).isTrue();
+                }
+            } finally {
+                callers.shutdownNow();
+            }
+        }
+
+        @Test
+        void aFinishedRunDoesNotUntrackAnotherRun() throws Exception {
+            TrackedChatClaudeService service = new TrackedChatClaudeService(1, false);
+            ExecutorService callers = Executors.newSingleThreadExecutor();
+            try {
+                Future<String> slow =
+                        callers.submit(() -> service.chatWithPrompt("slow", ignored -> {}));
+                assertThat(service.hanging.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(service.chatWithPrompt("fast", ignored -> {})).isEqualTo("fast");
+
+                service.cancelCurrentRequest();
+
+                assertThatThrownBy(() -> slow.get(5, TimeUnit.SECONDS))
+                        .hasCauseInstanceOf(InterruptedException.class);
+                assertThat(service.processes.get(0).waitFor(5, TimeUnit.SECONDS)).isTrue();
+            } finally {
+                callers.shutdownNow();
+            }
         }
     }
 

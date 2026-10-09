@@ -89,9 +89,11 @@ reasoning-effort, and MCP options are advanced controls. PR Pilot checks the sel
 during onboarding and again before generating a review. Settings remain available from the setup
 screen so you can switch providers.
 
-To apply your own review rules everywhere, set **Rules folder** to an absolute local folder. PR
-Pilot adds its `.md`, `.yaml`, and `.yml` files (up to 50 files and 32 KB) to every review's
-repository guidance.
+To apply your own review rules everywhere, set **Rules folder** to an absolute local folder of
+`.md`, `.yaml`, and `.yml` files (up to 50). A YAML rule with `name`, `description`, `trigger`, and
+`prompt` runs only when one quick check finds its trigger matches the pull request; any other file
+always runs. Each selected rule is applied by its own read-only agent (at most 25 per review), and
+its findings are labeled `(rule: <name>)`.
 
 ## Complete your first review
 
@@ -277,7 +279,8 @@ more from each PR's base commit, for example a repository that keeps review rule
   --args="--prs prs.txt --repos-root ~/src --provider copilot --guidance-glob '.linkedin/ai-agent/*.md'"
 ```
 
-Pass `--rules-dir DIR` to add a local rules folder the same way the **Rules folder** setting does,
+Pass `--rules-dir DIR` to apply a local rules folder the same way the **Rules folder** setting does
+(rules selected by trigger, one agent per rule),
 and `--supervisor` to include coverage follow-ups.
 
 ### Score reviews on ReviewBench

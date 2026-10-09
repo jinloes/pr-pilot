@@ -24,7 +24,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -65,7 +67,10 @@ public class CopilotService {
     private final File workingDir;
     private final File projectDir;
     private RuntimeFactory runtimeFactory = new SdkRuntimeFactory();
-    private final AtomicReference<ActiveRun> activeRun = new AtomicReference<>();
+
+    /** Runs in flight; several run at once during the rules pass. */
+    private final Set<ActiveRun> activeRuns = ConcurrentHashMap.newKeySet();
+
     private final CancellationToken cancellationToken;
 
     public CopilotService() {
@@ -349,7 +354,7 @@ public class CopilotService {
             RuntimeClient client = runtimeFactory.createClient(buildClientRequest());
             currentRun = new ActiveRun(client);
             cancellationToken.throwIfCancelled();
-            this.activeRun.set(currentRun);
+            this.activeRuns.add(currentRun);
             if (cancellationToken.isCancelled()) {
                 cancelCurrentRequest();
                 cancellationToken.throwIfCancelled();
@@ -419,15 +424,16 @@ public class CopilotService {
             throw asIOException(e);
         } finally {
             for (Closeable c : subscriptions) closeQuietly(c);
-            this.activeRun.compareAndSet(currentRun, null);
+            if (currentRun != null) this.activeRuns.remove(currentRun);
             closeQuietly(currentRun);
         }
     }
 
     public void cancelCurrentRequest() {
         cancellationToken.cancel();
-        ActiveRun run = activeRun.getAndSet(null);
-        if (run != null) run.cancel();
+        for (ActiveRun run : activeRuns) {
+            if (activeRuns.remove(run)) run.cancel();
+        }
     }
 
     private ClientRequest buildClientRequest() {

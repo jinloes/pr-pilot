@@ -13,12 +13,15 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Shared fakes and fixtures for the review-pipeline test classes. */
 final class ReviewPipelineTestSupport {
@@ -31,6 +34,7 @@ final class ReviewPipelineTestSupport {
         final int invalidateAt;
         final boolean providerFailure;
         final List<String> calls = new ArrayList<>();
+        String ruleSelection = "{\"triggered\":[\"gated\"]}";
 
         DeepStages(
                 SemanticReviewServiceTest.Backend backend,
@@ -41,7 +45,7 @@ final class ReviewPipelineTestSupport {
             this.providerFailure = providerFailure;
         }
 
-        void observe(String stage, String prompt) throws IOException {
+        synchronized void observe(String stage, String prompt) throws IOException {
             assertThat(prompt)
                     .contains(
                             "<trusted_semantic_review_skills>",
@@ -70,6 +74,14 @@ final class ReviewPipelineTestSupport {
         }
 
         String complete(String prompt, boolean reads) throws IOException {
+            if (prompt.contains(RULE_SELECTION_MARKER)) {
+                observe("rule-selection", prompt);
+                return ruleSelection;
+            }
+            if (prompt.contains(RULE_AGENT_MARKER)) {
+                observe("rule", prompt);
+                return emptyReviewJson();
+            }
             boolean critique = prompt.contains("<draft_review>");
             boolean hygiene = prompt.contains("hygiene problems only");
             observe(
@@ -146,6 +158,22 @@ final class ReviewPipelineTestSupport {
     /** A scripted completion that makes that one {@code complete} call fail. */
     static final String FAIL = "<fail>";
 
+    static final String RULE_SELECTION_MARKER = "deciding which review rules apply";
+    static final String RULE_AGENT_MARKER = "applying exactly one review rule";
+    private static final Pattern RULE_NAME =
+            Pattern.compile("<review_rule>\\n[^\\n]*\\n\\nname: (\\S+)");
+
+    /** The rule name a rule-agent prompt applies. */
+    static String ruleName(String prompt) {
+        Matcher matcher = RULE_NAME.matcher(prompt);
+        return matcher.find() ? matcher.group(1) : "";
+    }
+
+    /** A rule agent's scripted behavior: return {@code json}, or block, or fail. */
+    interface RuleScript {
+        String run(String prompt) throws IOException, InterruptedException;
+    }
+
     static final class FakeProvider implements ReviewPipelineService.ProviderExecutor {
         ReviewPassResult primaryResult;
         final AtomicInteger primaryCalls = new AtomicInteger();
@@ -154,7 +182,17 @@ final class ReviewPipelineTestSupport {
         // Hygiene calls are tracked apart so stage-specific assertions stay readable.
         final List<String> hygieneCompletions = new ArrayList<>();
         final List<PromptCall> hygieneCalls = new ArrayList<>();
-        final List<String> callOrder = new ArrayList<>();
+        // Rule agents run on worker threads, so every list they touch is thread-safe.
+        final List<String> callOrder = new CopyOnWriteArrayList<>();
+        final List<String> ruleSelectionCompletions = new CopyOnWriteArrayList<>();
+        final List<PromptCall> ruleSelectionCalls = new CopyOnWriteArrayList<>();
+        volatile RuleScript ruleSelectionScript;
+        final Map<String, RuleScript> ruleScripts = new ConcurrentHashMap<>();
+        final List<PromptCall> ruleCalls = new CopyOnWriteArrayList<>();
+        final List<Consumer<String>> ruleStatusConsumers = new CopyOnWriteArrayList<>();
+        final AtomicInteger inFlightRules = new AtomicInteger();
+        final AtomicInteger peakInFlightRules = new AtomicInteger();
+        volatile boolean cancelled;
         IOException hygieneFailure;
         IOException completionFailure;
         boolean cancelAfterPrimary;
@@ -193,8 +231,29 @@ final class ReviewPipelineTestSupport {
                 boolean allowReadTools,
                 boolean allowMcp,
                 Consumer<String> onStatus)
-                throws IOException {
+                throws IOException, InterruptedException {
             PromptCall call = new PromptCall(prompt, timeoutMillis, allowReadTools, allowMcp);
+            if (prompt.contains(RULE_SELECTION_MARKER)) {
+                ruleSelectionCalls.add(call);
+                ruleStatusConsumers.add(onStatus);
+                callOrder.add("rule-selection");
+                if (ruleSelectionScript != null) return ruleSelectionScript.run(prompt);
+                String next = ruleSelectionCompletions.remove(0);
+                if (FAIL.equals(next)) throw new IOException("scripted selection failure");
+                return next;
+            }
+            if (prompt.contains(RULE_AGENT_MARKER)) {
+                ruleCalls.add(call);
+                ruleStatusConsumers.add(onStatus);
+                callOrder.add("rule");
+                peakInFlightRules.accumulateAndGet(inFlightRules.incrementAndGet(), Math::max);
+                try {
+                    RuleScript script = ruleScripts.get(ruleName(prompt));
+                    return script == null ? emptyReviewJson() : script.run(prompt);
+                } finally {
+                    inFlightRules.decrementAndGet();
+                }
+            }
             if (prompt.contains("hygiene problems only")) {
                 hygieneCalls.add(call);
                 callOrder.add("hygiene");
@@ -215,6 +274,7 @@ final class ReviewPipelineTestSupport {
 
         @Override
         public void checkCancelled() throws InterruptedException {
+            if (cancelled) throw new InterruptedException("cancelled");
             if (cancelAfterPrimary && primaryCalls.get() > 0) {
                 throw new InterruptedException("cancelled");
             }
@@ -294,7 +354,7 @@ final class ReviewPipelineTestSupport {
         return PRReviewRequest.builder(pr, diff).build();
     }
 
-    static String reviewJsonWithFinding(String file, int line) throws Exception {
+    static String reviewJsonWithFinding(String file, int line) throws IOException {
         return JSON.writeValueAsString(
                 Map.of(
                         "summary",

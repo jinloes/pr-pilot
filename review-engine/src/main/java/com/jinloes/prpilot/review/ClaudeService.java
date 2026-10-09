@@ -17,14 +17,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import org.apache.commons.io.IOUtils;
@@ -124,8 +125,8 @@ public class ClaudeService {
     private final CancellationToken cancellationToken;
     private final Executor ioExecutor;
 
-    /** The process currently executing a review or chat request; null when idle. */
-    private final AtomicReference<Process> activeProcess = new AtomicReference<>();
+    /** Processes executing review or chat requests; several run at once during the rules pass. */
+    private final Set<Process> activeProcesses = ConcurrentHashMap.newKeySet();
 
     public ClaudeService() {
         this(null, new CancellationToken(), IO_EXECUTOR);
@@ -290,7 +291,7 @@ public class ClaudeService {
                                     stdoutFile, REVIEW_MAX_TURNS, args.toArray(new String[0]))
                             : buildProcessWithoutTools(
                                     stdoutFile, REVIEW_MAX_TURNS, args.toArray(new String[0]));
-            activeProcess.set(process);
+            activeProcesses.add(process);
             if (cancellationToken.isCancelled()) {
                 cancelCurrentRequest();
                 cancellationToken.throwIfCancelled();
@@ -335,7 +336,7 @@ public class ClaudeService {
                     stdoutFile.length());
             return parseStdoutFileToRaw(stdoutFile, stderr, onStatus, onChunk);
         } finally {
-            activeProcess.compareAndSet(process, null);
+            if (process != null) activeProcesses.remove(process);
             if (process != null) {
                 process.destroy();
             }
@@ -366,7 +367,7 @@ public class ClaudeService {
                 args.add(model);
             }
             process = buildProcess(stdoutFile, RESUME_MAX_TURNS, args.toArray(new String[0]));
-            activeProcess.set(process);
+            activeProcesses.add(process);
             if (cancellationToken.isCancelled()) {
                 cancelCurrentRequest();
                 cancellationToken.throwIfCancelled();
@@ -402,7 +403,7 @@ public class ClaudeService {
 
             return parseStdoutFileToRaw(stdoutFile, stderr, onStatus, onChunk);
         } finally {
-            activeProcess.compareAndSet(process, null);
+            if (process != null) activeProcesses.remove(process);
             if (process != null) {
                 process.destroy();
             }
@@ -641,7 +642,7 @@ public class ClaudeService {
         Process process = null;
         try {
             process = buildProcess();
-            activeProcess.set(process);
+            activeProcesses.add(process);
             if (cancellationToken.isCancelled()) {
                 cancelCurrentRequest();
                 cancellationToken.throwIfCancelled();
@@ -672,7 +673,7 @@ public class ClaudeService {
             }
             return response;
         } finally {
-            activeProcess.compareAndSet(process, null);
+            if (process != null) activeProcesses.remove(process);
             if (process != null) {
                 process.destroy();
             }
@@ -680,14 +681,15 @@ public class ClaudeService {
     }
 
     /**
-     * Cancels the currently running review or chat request, if any. The blocked calling thread will
-     * receive an IOException.
+     * Cancels every running review or chat request, if any. The blocked calling thread will receive
+     * an IOException.
      */
     public void cancelCurrentRequest() {
         cancellationToken.cancel();
-        Process process = activeProcess.getAndSet(null);
-        if (process != null) {
-            process.destroyForcibly();
+        for (Process process : activeProcesses) {
+            if (activeProcesses.remove(process)) {
+                process.destroyForcibly();
+            }
         }
     }
 

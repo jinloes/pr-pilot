@@ -32,6 +32,112 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 class ReviewPipelineServiceTest {
+    @Nested
+    class UnattributeUnmatchedRuleFindings {
+        private final List<LocalReviewRules.Rule> rules =
+                List.of(new LocalReviewRules.Rule("perf", "perf.yaml", "d", "t", "p"));
+
+        private LineComment finding(int line, String rationale, List<String> sources) {
+            LineComment comment = new LineComment("src/A.java", line, "issue", "Body " + line);
+            comment.setCategory("performance");
+            comment.setRationale(rationale);
+            comment.setSources(sources);
+            return comment;
+        }
+
+        @Test
+        void clearsTheFallbackLabelOnAnUnmatchedRuleFinding() {
+            LineComment rule = finding(10, "Slow. (rule: perf)", List.of("claude-opus"));
+
+            ReviewPipelineService.unattributeUnmatchedRuleFindings(
+                    new ReviewResult("", "COMMENT", List.of(rule)), List.of(), List.of(), rules);
+
+            assertThat(rule.getSources()).isEmpty();
+        }
+
+        @Test
+        void clearsTheFallbackLabelWhenCritiqueRewordedTheRuleFindingWithoutItsTag() {
+            List<ReviewPipelineService.RuleSite> sites =
+                    ReviewPipelineService.RuleSite.of(
+                            List.of(finding(10, "Slow. (rule: perf)", List.of())));
+            LineComment reworded = finding(11, "Reworded by critique.", List.of("claude-opus"));
+
+            ReviewPipelineService.unattributeUnmatchedRuleFindings(
+                    new ReviewResult("", "COMMENT", List.of(reworded)), List.of(), sites, rules);
+
+            assertThat(reworded.getSources()).isEmpty();
+        }
+
+        @Test
+        void ruleSitesAreSnapshotsUnaffectedByLaterEditsToTheRuleComment() {
+            LineComment original = finding(10, "Slow. (rule: perf)", List.of());
+            List<ReviewPipelineService.RuleSite> sites =
+                    ReviewPipelineService.RuleSite.of(List.of(original));
+            original.setLine(40);
+            LineComment atOriginalSite = finding(10, "Reworded.", List.of("claude-opus"));
+            LineComment nearEditedLine = finding(40, "Other.", List.of("claude-opus"));
+
+            ReviewPipelineService.unattributeUnmatchedRuleFindings(
+                    new ReviewResult("", "COMMENT", List.of(atOriginalSite, nearEditedLine)),
+                    List.of(),
+                    sites,
+                    rules);
+
+            assertThat(atOriginalSite.getSources()).isEmpty();
+            assertThat(nearEditedLine.getSources()).containsExactly("claude-opus");
+        }
+
+        @Test
+        void aRuleSiteDoesNotClaimAFindingInAnotherCategoryOrBeyondTheLineWindow() {
+            List<ReviewPipelineService.RuleSite> sites =
+                    ReviewPipelineService.RuleSite.of(List.of(finding(10, "x", List.of())));
+            LineComment far = finding(13, "Far.", List.of("claude-opus"));
+            LineComment otherCategory = finding(10, "Other.", List.of("claude-opus"));
+            otherCategory.setCategory("security");
+
+            ReviewPipelineService.unattributeUnmatchedRuleFindings(
+                    new ReviewResult("", "COMMENT", List.of(far, otherCategory)),
+                    List.of(),
+                    sites,
+                    rules);
+
+            assertThat(List.of(far, otherCategory))
+                    .allSatisfy(c -> assertThat(c.getSources()).containsExactly("claude-opus"));
+        }
+
+        @Test
+        void keepsLabelsOnARuleFindingAReviewerCandidateMatches() {
+            LineComment rule = finding(10, "rule: perf", List.of("gpt-5.5"));
+            List<ReviewerAttribution.Evidence> evidence =
+                    ReviewerAttribution.Evidence.snapshot(
+                            List.of(finding(11, "Second.", List.of("gpt-5.5"))));
+
+            ReviewPipelineService.unattributeUnmatchedRuleFindings(
+                    new ReviewResult("", "COMMENT", List.of(rule)),
+                    evidence,
+                    ReviewPipelineService.RuleSite.of(List.of(finding(10, "x", List.of()))),
+                    rules);
+
+            assertThat(rule.getSources()).containsExactly("gpt-5.5");
+        }
+
+        @Test
+        void leavesNonRuleFindingsAndUnknownRuleTagsAlone() {
+            LineComment plain = finding(10, "Slow.", List.of("claude-opus"));
+            LineComment unknown = finding(20, "Slow. (rule: other)", List.of("claude-opus"));
+            LineComment blank = finding(30, null, List.of("claude-opus"));
+
+            ReviewPipelineService.unattributeUnmatchedRuleFindings(
+                    new ReviewResult("", "COMMENT", List.of(plain, unknown, blank)),
+                    List.of(),
+                    List.of(),
+                    rules);
+
+            assertThat(List.of(plain, unknown, blank))
+                    .allSatisfy(c -> assertThat(c.getSources()).containsExactly("claude-opus"));
+        }
+    }
+
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @org.junit.jupiter.api.io.TempDir java.nio.file.Path semanticRoot;
@@ -277,17 +383,125 @@ class ReviewPipelineServiceTest {
         }
     }
 
-    @Nested
-    class WithLocalRules {
-        @Test
-        void leavesTheRequestUnchangedWithoutARulesFolder() {
-            PRReviewRequest request = request(oneRiskyHunk());
+    @Test
+    void deepReviewKeepsAuthorityThroughTheRulePhase() throws Exception {
+        Path rules = Files.createTempDirectory("deep-rules");
+        try {
+            Files.writeString(
+                    rules.resolve("gated.yaml"),
+                    "name: gated\ndescription: d\ntrigger: t\nprompt: Check retries.\n");
+            for (boolean copilot : List.of(false, true)) {
+                for (boolean chunked : List.of(false, true)) {
+                    List<String> expected =
+                            chunked
+                                    ? List.of(
+                                            "primary",
+                                            "primary",
+                                            "primary",
+                                            "rule-selection",
+                                            "rule",
+                                            "hygiene",
+                                            "critique")
+                                    : List.of(
+                                            "primary",
+                                            "selection",
+                                            "follow-up",
+                                            "rule-selection",
+                                            "rule",
+                                            "hygiene",
+                                            "critique");
+                    int firstRuleStage = expected.indexOf("rule-selection");
+                    for (int invalidateAt = -1;
+                            invalidateAt <= firstRuleStage + 1;
+                            invalidateAt++) {
+                        if (invalidateAt >= 0 && invalidateAt < firstRuleStage) continue;
+                        for (boolean providerFailure : List.of(false, true)) {
+                            var backend =
+                                    new SemanticReviewServiceTest.Backend(
+                                            semanticRoot.toRealPath());
+                            backend.expectedRanges = chunked ? 7 : 1;
+                            backend.sourcePaths =
+                                    chunked
+                                            ? List.of(
+                                                    "F0.java", "F1.java", "F2.java", "F3.java",
+                                                    "F4.java", "F5.java", "F6.java")
+                                            : List.of("src/Api.java");
+                            String diff = chunked ? sevenFileDiff() : fourRiskyHunks();
+                            PRReviewRequest request =
+                                    request(diff).toBuilder()
+                                            .rulesDirectory(rules.toString())
+                                            .build();
+                            var stages = new DeepStages(backend, invalidateAt, providerFailure);
+                            try (var execution =
+                                    new SemanticReviewService.Execution(
+                                            backend.root, backend, () -> {}, diff)) {
+                                execution.collect();
+                                var pipeline = stages.pipeline(copilot);
+                                if (invalidateAt < 0) {
+                                    pipeline.review(
+                                            request,
+                                            chunked,
+                                            true,
+                                            !chunked,
+                                            ignored -> {},
+                                            null,
+                                            execution);
+                                    assertThat(stages.calls).containsExactlyElementsOf(expected);
+                                } else {
+                                    assertThatThrownBy(
+                                                    () ->
+                                                            pipeline.review(
+                                                                    request,
+                                                                    chunked,
+                                                                    true,
+                                                                    !chunked,
+                                                                    ignored -> {},
+                                                                    null,
+                                                                    execution))
+                                            .isInstanceOf(IOException.class);
+                                    assertThat(stages.calls)
+                                            .as("No later provider may consume stale authority")
+                                            .hasSize(invalidateAt + 1);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } finally {
+            Files.deleteIfExists(rules.resolve("gated.yaml"));
+            Files.deleteIfExists(rules);
+        }
+    }
 
-            assertThat(ReviewPipelineService.withLocalRules(request)).isSameAs(request);
+    @Nested
+    class ReviewRules {
+        @Test
+        void makesNoRuleCallsWithoutARulesFolder() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    ReviewPassResult.withoutLedger(
+                            new ReviewResult("baseline", "APPROVE", List.of()));
+            PRReviewRequest request =
+                    request(oneRiskyHunk()).toBuilder().repoGuidelines("repo rule").build();
+
+            ReviewResult result =
+                    new ReviewPipelineService(
+                                    provider,
+                                    new ChunkedReviewService(),
+                                    new ReviewCoverageAnalyzer())
+                            .review(request, false, false, false, ignored -> {}, null);
+
+            assertThat(result.getSummary()).isEqualTo("baseline");
+            assertThat(provider.callOrder).containsExactly("review");
+            assertThat(provider.primaryRequests)
+                    .singleElement()
+                    .extracting(PRReviewRequest::getRepoGuidelines)
+                    .isEqualTo("repo rule");
         }
 
         @Test
-        void appendsTheRulesToTheRepositoryGuidanceSeenByThePrimaryPass() throws Exception {
+        void runsRulesAsSeparateAgentsInsteadOfAddingThemToTheGuidance() throws Exception {
             Path rules = Files.createTempDirectory("pipeline-rules");
             try {
                 Files.writeString(rules.resolve("team.md"), "Prefer Optional over null.");
@@ -300,18 +514,67 @@ class ReviewPipelineServiceTest {
                 provider.primaryResult =
                         ReviewPassResult.withoutLedger(
                                 new ReviewResult("baseline", "APPROVE", List.of()));
-                ReviewPipelineService pipeline =
-                        new ReviewPipelineService(
-                                provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
+                provider.ruleScripts.put(
+                        "team.md", prompt -> reviewJsonWithFinding("src/Api.java", 1));
+                List<String> statuses = new ArrayList<>();
 
-                pipeline.review(request, false, false, false, ignored -> {}, null);
+                ReviewResult result =
+                        new ReviewPipelineService(
+                                        provider,
+                                        new ChunkedReviewService(),
+                                        new ReviewCoverageAnalyzer())
+                                .review(request, false, false, false, statuses::add, null);
 
                 assertThat(provider.primaryRequests)
                         .singleElement()
                         .extracting(PRReviewRequest::getRepoGuidelines)
+                        .isEqualTo("## AGENTS.md\nrepo rule");
+                assertThat(provider.callOrder).containsExactly("review", "rule");
+                assertThat(provider.ruleCalls.get(0).prompt())
+                        .contains("Prefer Optional over null.");
+                assertThat(statuses).contains("Rules: 1 loaded, 1 selected (team.md)");
+                assertThat(result.getLineComments())
+                        .singleElement()
+                        .extracting(LineComment::getRationale)
                         .isEqualTo(
-                                "## AGENTS.md\nrepo rule\n\n"
-                                        + "## local-rules/team.md\nPrefer Optional over null.");
+                                "The new signature no longer accepts the required value."
+                                        + " (rule: team.md)");
+            } finally {
+                Files.deleteIfExists(rules.resolve("team.md"));
+                Files.deleteIfExists(rules);
+            }
+        }
+
+        @Test
+        void chunkedRuleAgentsSeeTheCondensedIndex() throws Exception {
+            Path rules = Files.createTempDirectory("pipeline-rules");
+            try {
+                Files.writeString(rules.resolve("team.md"), "Prefer Optional over null.");
+                PRReviewRequest request =
+                        request(sevenFileDiff()).toBuilder()
+                                .rulesDirectory(rules.toString())
+                                .build();
+                FakeProvider provider = new FakeProvider();
+                provider.primaryResult =
+                        ReviewPassResult.withoutLedger(
+                                new ReviewResult("baseline", "APPROVE", List.of()));
+                ChunkedReviewService chunkedService = new ChunkedReviewService();
+
+                new ReviewPipelineService(provider, chunkedService, new ReviewCoverageAnalyzer())
+                        .review(request, true, false, false, ignored -> {}, null);
+
+                LocalReviewRules.Rule rule =
+                        new LocalReviewRules.Rule(
+                                "team.md", "team.md", null, null, "Prefer Optional over null.");
+                String condensed =
+                        ReviewPrompts.buildRuleReviewPrompt(
+                                chunkedService.finalValidationRequest(request), rule);
+                assertThat(condensed)
+                        .isNotEqualTo(ReviewPrompts.buildRuleReviewPrompt(request, rule));
+                assertThat(provider.ruleCalls)
+                        .singleElement()
+                        .extracting(PromptCall::prompt)
+                        .isEqualTo(condensed);
             } finally {
                 Files.deleteIfExists(rules.resolve("team.md"));
                 Files.deleteIfExists(rules);

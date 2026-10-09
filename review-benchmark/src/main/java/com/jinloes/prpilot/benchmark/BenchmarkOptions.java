@@ -72,7 +72,8 @@ record BenchmarkOptions(
               --chunked               Review large diffs in per-file chunks
               --no-call-sites         Omit base-commit call-site context
               --guidance-glob GLOB    Also read base-commit guidance matching GLOB (repeatable)
-              --rules-dir DIR         Also read review rules (.md/.yaml) from this local folder
+              --rules-dir DIR         Apply review rules (.md/.yaml) from this local folder,
+                                      selected by trigger, one agent per rule
               --judge llm|location    How matches are decided (default llm)
               --judge-model ID        Judge model (defaults to --model)
               --line-window N         Max line distance for a candidate match (default 10)
