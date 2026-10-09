@@ -48,6 +48,20 @@ A pure-deletion file has only `delete` changes, which carry no new-file line num
 ### Existing review comments carry thread state
 `PrSupplementalService.existingReviews` tags each inline comment in the `<existing_reviews>` summary `[resolved]`, `[outdated]`, or `[resolved, outdated]`; open comments stay untagged. Outdated state comes from REST alone: a comment with a null `line` and a positive `original_line` renders that original line with `[outdated]`, so the tag survives any GraphQL failure. Resolved state needs one GraphQL `reviewThreads` query (≤5 pages of 100) that returns only each thread's root comment `fullDatabaseId`. The 32-bit `databaseId` overflows on current comment IDs, so the BigInt string is compared to the REST `id` as a `long`, and replies inherit their root's state through REST `in_reply_to_id`. Each POST is a single attempt with a 3-second timeout, so a slow GraphQL endpoint cannot push `prs/getExistingReviews` past VS Code's 60-second request bound. The call is skipped when there are no inline comments. Any failure, including a sixth page, is all-or-nothing: pages already read are discarded, no `[resolved]` tag appears, and `(Thread resolution state was unavailable.)` is inserted at the top so context truncation never removes it. Handling is prompt-only: the review preface and the critique directive tell the model how to treat each tag, and nothing deterministically suppresses generated comments against existing threads.
 
+### Incremental review since the last submitted review
+"Review changes since last review" sends `generateReview` with `incremental: true`. The host asks the `prs/getIncrementalDiff` capability (`IncrementalDiffService`) for the diff of commits pushed since the viewer's latest submitted review. The baseline is the same commit the list's `UPDATED_SINCE_REVIEW` badge compares against (`PrReviewStatusService.reviewBaseline`), and it must appear in the PR's current commit history (up to 3 backward pages of 100). The engine then calls GitHub's `compare/{baseline}...{head}` and bounds the result with the same whole-file review budget as `prs/getDiff`.
+
+Anything that makes the incremental diff untrustworthy falls back to a full review with a `fallbackReason` instead of failing:
+- `no_prior_review` and `up_to_date`.
+- `baseline_not_in_history`: a force-push or rebase dropped the reviewed commit.
+- `baseline_unavailable`: compare returned 404 or 422.
+- `empty_incremental_diff`.
+- `incremental_diff_too_large`: compare returned 406.
+
+Real GitHub failures (auth, rate limit, network, other API errors) return a non-`ok` status with no scope. The host reports these as `reviewError`, just as it reports a failed PR diff fetch.
+
+The incremental diff feeds only the model. The host still loads the PR review diff and validation diff, and `activeDiff`, the published `reviewResult` `diff` and `validationDiff` are always PR diffs, so anchors validate against the whole PR and the diff view is unchanged. When the scope is incremental, `PRReviewRequest.incrementalBaselineSha` adds an engine-authored `<review_scope>` section to the prompt. It says earlier changes were already reviewed and findings must anchor to this diff. Chunked mode is ignored for an incremental review. Deep (IntelliJ-assisted) review never asks for the incremental diff. `reviewResult` carries `reviewScope` only when incremental was requested, and the webview shows it as a banner.
+
 ### Review JSON parsing is self-healing, not all-or-nothing
 `ReviewResultParser.parseReview` (in `review-engine`, shared by both the Claude CLI and Copilot SDK paths on both hosts — IntelliJ calls it in-process, VS Code via the sidecar's `reviews/generate`) tolerates and repairs common model schema deviations instead of rejecting the entire review, which previously surfaced as "The model returned an invalid review format" for otherwise-good output. Unknown top-level/comment fields are ignored; an over-long `summary` is truncated to 800 chars; a comment `body` with embedded newlines is collapsed to one line but otherwise preserved in full; a low-confidence `"issue"` is downgraded to `"suggestion"` rather than failing the review; the final `verdict` is derived from (and corrected to match) the surviving comments rather than trusting the model's stated verdict. Only individually-malformed line comments (missing/blank required field, invalid enum value) are dropped — one bad comment no longer discards the other 19. A hard parse failure remains only for genuinely non-JSON output or a missing `summary`/non-object root, since there is nothing to salvage in that case.
 
@@ -60,7 +74,7 @@ Three parts of the pipeline previously treated `"confidence": "low"` as a way to
 
 The self-critique directive is keyed on `confidence`, not on type, for a related reason: its input is `draftReviewJson` over an already-parsed draft, so by then no low-confidence `"issue"` exists and the old "drop a low-confidence issue" rule could never match anything. It now requires each surviving low-confidence comment to be confirmed and raised, or dropped.
 
-`PROMPT_VERSION` is `2026-10-thread-state`. Pass B appends `BUG_HUNT_CHECKLIST` (failure
+`PROMPT_VERSION` is `2026-10-thread-state-incremental-scope`. Pass B appends `BUG_HUNT_CHECKLIST` (failure
 disposition, swallowed failures, removed safeguards, unchecked absent (protobuf default) inputs, mixed versions, and the other defect classes a
 generic "look for bugs" instruction skips) plus `LanguageChecklists` entries for only the languages
 the diff changes. Two scope rules close gaps the evidence policy used to open: a finding caused by a

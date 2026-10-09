@@ -93,6 +93,28 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             if (!isCurrentGeneration()) return;
             state.activeDiff = diff;
         }
+        // The incremental diff only feeds the model: activeDiff and every diff published to the
+        // webview stay PR diffs so anchoring, validation and publishing are unchanged.
+        let modelDiff = diff;
+        let incrementalBaselineSha: string | undefined;
+        let reviewScope: { kind: 'incremental'; baselineSha: string } | { kind: 'full'; fallbackReason: string } | undefined;
+        if (msg.incremental === true && !deep) {
+            const incremental = await deps.client().getIncrementalDiff(base, owner, repo, number);
+            if (!incremental || incremental.status !== 'ok') {
+                throw new GitHubOperationError(
+                    incremental?.status ?? 'invalid_response',
+                    incremental?.message ?? 'Invalid sidecar incremental diff response.',
+                );
+            }
+            if (!isCurrentGeneration()) return;
+            if (incremental.scope === 'incremental') {
+                modelDiff = incremental.diff;
+                incrementalBaselineSha = incremental.baselineSha;
+                reviewScope = { kind: 'incremental', baselineSha: incremental.baselineSha };
+            } else {
+                reviewScope = { kind: 'full', fallbackReason: incremental.fallbackReason };
+            }
+        }
         let resolvedValidationDiff = state.activeValidationDiff;
         let reviewResultPublished = false;
         const validationDiffPromise = resolvedValidationDiff
@@ -182,7 +204,8 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 reviewSupervisorEnabled: settings.supervisorEnabled,
                 secondReviewerModel: settings.secondReviewerModel || undefined,
                 baseSha: revisions.baseSha || undefined,
-                chunkedReview: msg.chunkedReview === true,
+                incrementalBaselineSha,
+                chunkedReview: msg.chunkedReview === true && !incrementalBaselineSha,
                 pr: {
                     title,
                     // htmlUrl/author/createdAt/isDraft aren't used by ClaudeService/CopilotService's
@@ -198,7 +221,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                     createdAt: '',
                     isDraft: false,
                 },
-                diff,
+                diff: modelDiff,
                 priorReview,
                 existingReviews,
                 // Guidance in the PR worktree is authored by the change under review, so the host
@@ -255,6 +278,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             result,
             diff,
             validationDiff: resolvedValidationDiff ?? diff,
+            ...(reviewScope ? { reviewScope } : {}),
         });
         reviewResultPublished = true;
     } catch (err) {

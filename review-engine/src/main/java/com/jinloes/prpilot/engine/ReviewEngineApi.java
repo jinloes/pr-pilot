@@ -62,6 +62,10 @@ public interface ReviewEngineApi {
      * <p>{@code ciAnnotations} is the structured form of {@code ciStatus}: same data, but
      * machine-comparable, so duplicate findings can be dropped deterministically rather than by
      * asking the model nicely.
+     *
+     * <p>{@code incrementalBaselineSha} is set when {@code diff} holds only the commits pushed
+     * since the reviewer's last review at that SHA; the prompt then scopes the review to those
+     * changes.
      */
     record GenerateReviewParams(
             String operationId,
@@ -90,7 +94,67 @@ public interface ReviewEngineApi {
             String baseSha,
             String secondReviewerModel,
             List<String> guidanceGlobs,
-            String rulesDirectory) {
+            String rulesDirectory,
+            String incrementalBaselineSha) {
+        public GenerateReviewParams(
+                String operationId,
+                String provider,
+                String projectDir,
+                String model,
+                String effort,
+                boolean inheritMcp,
+                String configDir,
+                boolean selfCritique,
+                boolean reviewSupervisorEnabled,
+                PrParams pr,
+                String diff,
+                String priorReview,
+                String existingReviews,
+                String repoGuidelines,
+                String focusAreas,
+                String customInstructions,
+                String ciStatus,
+                String commits,
+                String linkedIssue,
+                String repoProfile,
+                List<CiAnnotationParam> ciAnnotations,
+                boolean chunkedReview,
+                DeepReviewParams deepReview,
+                String baseSha,
+                String secondReviewerModel,
+                List<String> guidanceGlobs,
+                String rulesDirectory) {
+            this(
+                    operationId,
+                    provider,
+                    projectDir,
+                    model,
+                    effort,
+                    inheritMcp,
+                    configDir,
+                    selfCritique,
+                    reviewSupervisorEnabled,
+                    pr,
+                    diff,
+                    priorReview,
+                    existingReviews,
+                    repoGuidelines,
+                    focusAreas,
+                    customInstructions,
+                    ciStatus,
+                    commits,
+                    linkedIssue,
+                    repoProfile,
+                    ciAnnotations,
+                    chunkedReview,
+                    deepReview,
+                    baseSha,
+                    secondReviewerModel,
+                    guidanceGlobs,
+                    rulesDirectory,
+                    null);
+        }
+
         public GenerateReviewParams(
                 String operationId,
                 String provider,
@@ -145,6 +209,7 @@ public interface ReviewEngineApi {
                     baseSha,
                     secondReviewerModel,
                     guidanceGlobs,
+                    null,
                     null);
         }
 
@@ -201,6 +266,7 @@ public interface ReviewEngineApi {
                     baseSha,
                     secondReviewerModel,
                     null,
+                    null,
                     null);
         }
 
@@ -255,6 +321,7 @@ public interface ReviewEngineApi {
                     null,
                     null,
                     null,
+                    null,
                     null);
         }
 
@@ -304,6 +371,7 @@ public interface ReviewEngineApi {
                     repoProfile,
                     ciAnnotations,
                     chunkedReview,
+                    null,
                     null,
                     null,
                     null,

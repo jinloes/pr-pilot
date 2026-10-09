@@ -9,6 +9,8 @@ import com.jinloes.prpilot.sidecar.pr.DraftReviewMutationService;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewResult;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewService;
 import com.jinloes.prpilot.sidecar.pr.ExistingReviewsResult;
+import com.jinloes.prpilot.sidecar.pr.IncrementalDiffResult;
+import com.jinloes.prpilot.sidecar.pr.IncrementalDiffService;
 import com.jinloes.prpilot.sidecar.pr.LinkedIssueResult;
 import com.jinloes.prpilot.sidecar.pr.LinkedIssueService;
 import com.jinloes.prpilot.sidecar.pr.PrCommitsResult;
@@ -41,6 +43,7 @@ public final class GitHubEngine implements GitHubEngineApi {
     private final PrListService listService;
     private final PrDetailService detailService;
     private final PrDiffService diffService;
+    private final IncrementalDiffService incrementalDiffService;
     private final PrSupplementalService supplementalService;
     private final DraftReviewService draftReviewService;
     private final DraftReviewMutationService mutationService;
@@ -57,6 +60,7 @@ public final class GitHubEngine implements GitHubEngineApi {
                 new PrListService(),
                 new PrDetailService(),
                 new PrDiffService(),
+                new IncrementalDiffService(),
                 new PrSupplementalService(),
                 new DraftReviewService(),
                 new DraftReviewMutationService(),
@@ -72,6 +76,7 @@ public final class GitHubEngine implements GitHubEngineApi {
             PrListService listService,
             PrDetailService detailService,
             PrDiffService diffService,
+            IncrementalDiffService incrementalDiffService,
             PrSupplementalService supplementalService,
             DraftReviewService draftReviewService,
             DraftReviewMutationService mutationService,
@@ -84,6 +89,7 @@ public final class GitHubEngine implements GitHubEngineApi {
         this.listService = Objects.requireNonNull(listService);
         this.detailService = Objects.requireNonNull(detailService);
         this.diffService = Objects.requireNonNull(diffService);
+        this.incrementalDiffService = Objects.requireNonNull(incrementalDiffService);
         this.supplementalService = Objects.requireNonNull(supplementalService);
         this.draftReviewService = Objects.requireNonNull(draftReviewService);
         this.mutationService = Objects.requireNonNull(mutationService);
@@ -126,6 +132,11 @@ public final class GitHubEngine implements GitHubEngineApi {
     @Override
     public PrDiffResult getPullRequestDiff(PrDiffService.Params params) {
         return diffService.get(params);
+    }
+
+    @Override
+    public IncrementalDiffResult getIncrementalDiff(IncrementalDiffService.Params params) {
+        return incrementalDiffService.get(params);
     }
 
     @Override

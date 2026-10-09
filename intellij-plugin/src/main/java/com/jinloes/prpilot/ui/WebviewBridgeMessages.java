@@ -77,7 +77,27 @@ final class WebviewBridgeMessages {
             @JsonProperty("prKey") String prKey,
             ReviewResultDto result,
             String diff,
-            @JsonProperty("validationDiff") String validationDiff) {}
+            @JsonProperty("validationDiff") String validationDiff,
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("reviewScope")
+                    ReviewScopeDto reviewScope) {}
+
+    /**
+     * Mirrors {@code ReviewScope} in {@code webview/src/bridge/types.ts}; present only when the
+     * user asked for an incremental review.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record ReviewScopeDto(
+            String kind,
+            @JsonProperty("baselineSha") String baselineSha,
+            @JsonProperty("fallbackReason") String fallbackReason) {
+        static ReviewScopeDto incremental(String baselineSha) {
+            return new ReviewScopeDto("incremental", baselineSha, null);
+        }
+
+        static ReviewScopeDto full(String fallbackReason) {
+            return new ReviewScopeDto("full", null, fallbackReason);
+        }
+    }
 
     record ErrorMsg(String type, @JsonProperty("prKey") String prKey, String message) {}
 

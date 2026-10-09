@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Adds authenticated-user review freshness to a bounded pull-request list. */
 final class PrReviewStatusService implements PrListService.ReviewStatusClient {
@@ -26,6 +27,15 @@ final class PrReviewStatusService implements PrListService.ReviewStatusClient {
             "headRefOid reviews(last: 1, author: $viewer, "
                     + "states: [APPROVED, CHANGES_REQUESTED, COMMENTED]) "
                     + "{ nodes { state submittedAt commit { oid } } }";
+    private static final int MAX_BASELINE_COMMIT_PAGES = 3;
+    private static final Pattern SHA = Pattern.compile("[0-9a-f]{40}");
+    private static final String BASELINE_QUERY =
+            "query ReviewBaseline($viewer: String!, $owner: String!, $repo: String!, $number:"
+                    + " Int!, $cursor: String) { repository(owner: $owner, name: $repo) {"
+                    + " pullRequest(number: $number) { "
+                    + REVIEW_FIELDS
+                    + " commits(last: 100, before: $cursor) { pageInfo { hasPreviousPage"
+                    + " startCursor } nodes { commit { oid } } } } } }";
 
     private final ApiClient client;
     private final ObjectMapper mapper;
@@ -87,11 +97,12 @@ final class PrReviewStatusService implements PrListService.ReviewStatusClient {
 
     private String viewerLogin(String apiBaseUrl, String token) {
         GitHubResponse response = client.get(apiBaseUrl + "/user", token);
-        if (!response.isSuccess()) {
-            return null;
-        }
+        return response.isSuccess() ? login(response.body()) : null;
+    }
+
+    private String login(String body) {
         try {
-            JsonNode login = mapper.readTree(response.body()).path("login");
+            JsonNode login = mapper.readTree(body).path("login");
             return login.isTextual() && !login.textValue().isBlank() ? login.textValue() : null;
         } catch (IOException exception) {
             return null;
@@ -140,14 +151,32 @@ final class PrReviewStatusService implements PrListService.ReviewStatusClient {
 
     static ReviewStatus reviewStatus(JsonNode pullRequest) {
         JsonNode headRefOid = pullRequest.path("headRefOid");
-        JsonNode reviews = pullRequest.path("reviews").path("nodes");
         if (!pullRequest.isObject()
                 || !headRefOid.isTextual()
-                || headRefOid.textValue().isBlank()
-                || !reviews.isArray()) {
+                || headRefOid.textValue().isBlank()) {
             return ReviewStatus.UNAVAILABLE;
         }
+        LatestReview latest = latestReview(pullRequest.path("reviews").path("nodes"));
+        if (!latest.available()) {
+            return ReviewStatus.UNAVAILABLE;
+        }
+        if (latest.commitOid() == null) {
+            return ReviewStatus.UNREVIEWED;
+        }
+        return headRefOid.textValue().equals(latest.commitOid())
+                ? ReviewStatus.REVIEWED
+                : ReviewStatus.UPDATED_SINCE_REVIEW;
+    }
 
+    /**
+     * Selects the commit of the viewer's latest submitted review, the single rule shared by the
+     * list badge and the incremental-review baseline. A null OID on an available result means no
+     * submitted review exists.
+     */
+    static LatestReview latestReview(JsonNode reviews) {
+        if (!reviews.isArray()) {
+            return LatestReview.UNAVAILABLE;
+        }
         JsonNode latest = null;
         Instant latestSubmittedAt = null;
         for (JsonNode review : reviews) {
@@ -159,7 +188,7 @@ final class PrReviewStatusService implements PrListService.ReviewStatusClient {
             try {
                 submitted = Instant.parse(submittedAt);
             } catch (DateTimeParseException exception) {
-                return ReviewStatus.UNAVAILABLE;
+                return LatestReview.UNAVAILABLE;
             }
             if (latestSubmittedAt == null || !submitted.isBefore(latestSubmittedAt)) {
                 latest = review;
@@ -167,15 +196,143 @@ final class PrReviewStatusService implements PrListService.ReviewStatusClient {
             }
         }
         if (latest == null) {
-            return ReviewStatus.UNREVIEWED;
+            return new LatestReview(true, null);
         }
         JsonNode reviewedOid = latest.path("commit").path("oid");
         if (!reviewedOid.isTextual() || reviewedOid.textValue().isBlank()) {
-            return ReviewStatus.UNAVAILABLE;
+            return LatestReview.UNAVAILABLE;
         }
-        return headRefOid.textValue().equals(reviewedOid.textValue())
-                ? ReviewStatus.REVIEWED
-                : ReviewStatus.UPDATED_SINCE_REVIEW;
+        return new LatestReview(true, reviewedOid.textValue());
+    }
+
+    /**
+     * Resolves the incremental-review baseline: the badge's latest-review commit, proved to be in
+     * the pull request's current history by paging its commit OIDs backwards from the head.
+     */
+    ReviewBaseline reviewBaseline(
+            GitHubApiBase baseUrls, String token, String owner, String repo, int number) {
+        GitHubResponse userResponse = client.get(baseUrls.apiBaseUrl() + "/user", token);
+        if (userResponse.statusCode() == 401) {
+            return ReviewBaseline.of(BaselineOutcome.NOT_AUTHENTICATED);
+        }
+        String viewer = userResponse.isSuccess() ? login(userResponse.body()) : null;
+        if (viewer == null) {
+            return ReviewBaseline.of(BaselineOutcome.FAILED);
+        }
+
+        String headSha = null;
+        String baselineSha = null;
+        String cursor = null;
+        for (int page = 1; page <= MAX_BASELINE_COMMIT_PAGES; page++) {
+            JsonNode pullRequest;
+            try {
+                GitHubResponse response =
+                        client.postJson(
+                                baseUrls.graphqlUrl(),
+                                token,
+                                baselineRequestBody(viewer, owner, repo, number, cursor));
+                if (response.statusCode() == 401) {
+                    return ReviewBaseline.of(BaselineOutcome.NOT_AUTHENTICATED);
+                }
+                if (!response.isSuccess()) {
+                    return ReviewBaseline.of(BaselineOutcome.FAILED);
+                }
+                JsonNode root = mapper.readTree(response.body());
+                JsonNode errors = root.path("errors");
+                if ((errors.isArray() && !errors.isEmpty()) || !root.path("data").isObject()) {
+                    return ReviewBaseline.of(BaselineOutcome.FAILED);
+                }
+                pullRequest = root.path("data").path("repository").path("pullRequest");
+            } catch (IOException exception) {
+                return ReviewBaseline.of(BaselineOutcome.FAILED);
+            }
+            if (!pullRequest.isObject()) {
+                return ReviewBaseline.of(BaselineOutcome.NOT_FOUND);
+            }
+            if (page == 1) {
+                JsonNode headRefOid = pullRequest.path("headRefOid");
+                if (!headRefOid.isTextual() || !isSha(headRefOid.textValue())) {
+                    return ReviewBaseline.of(BaselineOutcome.FAILED);
+                }
+                headSha = headRefOid.textValue();
+                LatestReview latest = latestReview(pullRequest.path("reviews").path("nodes"));
+                if (!latest.available()) {
+                    return ReviewBaseline.of(BaselineOutcome.FAILED);
+                }
+                if (latest.commitOid() == null) {
+                    return new ReviewBaseline(BaselineOutcome.NO_PRIOR_REVIEW, headSha, null);
+                }
+                if (!isSha(latest.commitOid())) {
+                    return ReviewBaseline.of(BaselineOutcome.FAILED);
+                }
+                baselineSha = latest.commitOid();
+                if (baselineSha.equals(headSha)) {
+                    return new ReviewBaseline(BaselineOutcome.UP_TO_DATE, headSha, baselineSha);
+                }
+            }
+            JsonNode commits = pullRequest.path("commits");
+            JsonNode nodes = commits.path("nodes");
+            if (!nodes.isArray()) {
+                return ReviewBaseline.of(BaselineOutcome.FAILED);
+            }
+            for (JsonNode node : nodes) {
+                if (baselineSha.equals(node.path("commit").path("oid").asText())) {
+                    return new ReviewBaseline(BaselineOutcome.FOUND, headSha, baselineSha);
+                }
+            }
+            JsonNode pageInfo = commits.path("pageInfo");
+            JsonNode startCursor = pageInfo.path("startCursor");
+            if (!pageInfo.path("hasPreviousPage").asBoolean(false)
+                    || !startCursor.isTextual()
+                    || startCursor.textValue().isBlank()) {
+                break;
+            }
+            cursor = startCursor.textValue();
+        }
+        return new ReviewBaseline(BaselineOutcome.NOT_IN_HISTORY, headSha, baselineSha);
+    }
+
+    private String baselineRequestBody(
+            String viewer, String owner, String repo, int number, String cursor)
+            throws IOException {
+        ObjectNode variables = mapper.createObjectNode();
+        variables.put("viewer", viewer);
+        variables.put("owner", owner);
+        variables.put("repo", repo);
+        variables.put("number", number);
+        if (cursor == null) {
+            variables.putNull("cursor");
+        } else {
+            variables.put("cursor", cursor);
+        }
+        ObjectNode body = mapper.createObjectNode();
+        body.put("query", BASELINE_QUERY);
+        body.set("variables", variables);
+        return mapper.writeValueAsString(body);
+    }
+
+    static boolean isSha(String value) {
+        return value != null && SHA.matcher(value).matches();
+    }
+
+    record LatestReview(boolean available, String commitOid) {
+        static final LatestReview UNAVAILABLE = new LatestReview(false, null);
+    }
+
+    enum BaselineOutcome {
+        NOT_AUTHENTICATED,
+        FAILED,
+        NOT_FOUND,
+        NO_PRIOR_REVIEW,
+        UP_TO_DATE,
+        NOT_IN_HISTORY,
+        FOUND
+    }
+
+    record ReviewBaseline(BaselineOutcome outcome, String headSha, String baselineSha) {
+        static ReviewBaseline of(BaselineOutcome outcome) {
+            return new ReviewBaseline(outcome, null, null);
+        }
     }
 
     private static PrListService.ReviewStatusResponse unavailable(
@@ -197,17 +354,26 @@ final class PrReviewStatusService implements PrListService.ReviewStatusClient {
         GitHubResponse postJson(String url, String token, String body);
     }
 
-    private static final class HttpApiClient implements ApiClient {
+    static final class HttpApiClient implements ApiClient {
         private final GitHubHttpClient httpClient = new GitHubHttpClient();
+        private final Duration timeout;
+
+        HttpApiClient() {
+            this(OPTIONAL_REQUEST_TIMEOUT);
+        }
+
+        HttpApiClient(Duration timeout) {
+            this.timeout = Objects.requireNonNull(timeout);
+        }
 
         @Override
         public GitHubResponse get(String url, String token) {
-            return httpClient.getOnce(url, token, OPTIONAL_REQUEST_TIMEOUT);
+            return httpClient.getOnce(url, token, timeout);
         }
 
         @Override
         public GitHubResponse postJson(String url, String token, String body) {
-            return httpClient.postJsonOnce(url, token, body, OPTIONAL_REQUEST_TIMEOUT);
+            return httpClient.postJsonOnce(url, token, body, timeout);
         }
     }
 }

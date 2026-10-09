@@ -8,6 +8,7 @@ import com.jinloes.prpilot.model.ReviewStatus;
 import com.jinloes.prpilot.sidecar.github.GitHubApiBase;
 import com.jinloes.prpilot.sidecar.github.GitHubResponse;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -309,6 +310,225 @@ class PrReviewStatusServiceTest {
         }
     }
 
+    @Nested
+    class ReviewBaselineResolution {
+        private static final String HEAD = "b".repeat(40);
+        private static final String BASELINE = "a".repeat(40);
+        private static final GitHubApiBase BASE =
+                GitHubApiBase.require("https://github.example.test");
+
+        @Test
+        void findsTheBadgeBaselineOnTheFirstCommitPage() throws Exception {
+            RecordingApiClient client =
+                    client(
+                            ok(
+                                    page(
+                                            HEAD,
+                                            List.of(
+                                                    review(
+                                                            "COMMENTED",
+                                                            "2026-08-01T00:00:00Z",
+                                                            "c".repeat(40)),
+                                                    review(
+                                                            "APPROVED",
+                                                            "2026-08-02T00:00:00Z",
+                                                            BASELINE)),
+                                            List.of(BASELINE, HEAD),
+                                            false,
+                                            null)));
+
+            PrReviewStatusService.ReviewBaseline result = resolve(client);
+
+            assertThat(result)
+                    .isEqualTo(
+                            new PrReviewStatusService.ReviewBaseline(
+                                    PrReviewStatusService.BaselineOutcome.FOUND, HEAD, BASELINE));
+            assertThat(client.getUrls).containsExactly("https://github.example.test/api/v3/user");
+            assertThat(client.postUrls).containsExactly("https://github.example.test/api/graphql");
+            JsonNode posted = MAPPER.readTree(client.postBodies.get(0));
+            assertThat(posted.path("query").asText())
+                    .contains(
+                            "reviews(last: 1, author: $viewer, states: [APPROVED, CHANGES_REQUESTED, COMMENTED])")
+                    .contains("commits(last: 100, before: $cursor)")
+                    .contains("pageInfo { hasPreviousPage startCursor }");
+            JsonNode variables = posted.path("variables");
+            assertThat(variables.path("viewer").asText()).isEqualTo("octocat");
+            assertThat(variables.path("owner").asText()).isEqualTo("acme");
+            assertThat(variables.path("repo").asText()).isEqualTo("widgets");
+            assertThat(variables.path("number").asInt()).isEqualTo(7);
+            assertThat(variables.path("cursor").isNull()).isTrue();
+        }
+
+        @Test
+        void pagesBackwardsWithTheCursorAndKeepsTheFirstHead() throws Exception {
+            RecordingApiClient client =
+                    client(
+                            ok(page(HEAD, reviewed(BASELINE), List.of(HEAD), true, "cursor-1")),
+                            ok(page("d".repeat(40), List.of(), List.of(BASELINE), true, "c2")));
+
+            PrReviewStatusService.ReviewBaseline result = resolve(client);
+
+            assertThat(result.outcome()).isEqualTo(PrReviewStatusService.BaselineOutcome.FOUND);
+            assertThat(result.headSha()).isEqualTo(HEAD);
+            assertThat(client.postBodies).hasSize(2);
+            assertThat(
+                            MAPPER.readTree(client.postBodies.get(1))
+                                    .path("variables")
+                                    .path("cursor")
+                                    .asText())
+                    .isEqualTo("cursor-1");
+        }
+
+        @Test
+        void stopsAfterThreeCommitPages() throws Exception {
+            RecordingApiClient client =
+                    client(ok(page(HEAD, reviewed(BASELINE), List.of(HEAD), true, "more")));
+
+            PrReviewStatusService.ReviewBaseline result = resolve(client);
+
+            assertThat(result)
+                    .isEqualTo(
+                            new PrReviewStatusService.ReviewBaseline(
+                                    PrReviewStatusService.BaselineOutcome.NOT_IN_HISTORY,
+                                    HEAD,
+                                    BASELINE));
+            assertThat(client.postBodies).hasSize(3);
+        }
+
+        @Test
+        void stopsWhenThereIsNoPreviousPage() throws Exception {
+            RecordingApiClient client =
+                    client(ok(page(HEAD, reviewed(BASELINE), List.of(HEAD), false, "more")));
+
+            assertThat(resolve(client).outcome())
+                    .isEqualTo(PrReviewStatusService.BaselineOutcome.NOT_IN_HISTORY);
+            assertThat(client.postBodies).hasSize(1);
+        }
+
+        @Test
+        void reportsNoPriorReviewAndUpToDate() throws Exception {
+            assertThat(resolve(client(ok(page(HEAD, List.of(), List.of(HEAD), false, null)))))
+                    .isEqualTo(
+                            new PrReviewStatusService.ReviewBaseline(
+                                    PrReviewStatusService.BaselineOutcome.NO_PRIOR_REVIEW,
+                                    HEAD,
+                                    null));
+            assertThat(
+                            resolve(
+                                            client(
+                                                    ok(
+                                                            page(
+                                                                    HEAD,
+                                                                    reviewed(HEAD),
+                                                                    List.of(HEAD),
+                                                                    false,
+                                                                    null))))
+                                    .outcome())
+                    .isEqualTo(PrReviewStatusService.BaselineOutcome.UP_TO_DATE);
+        }
+
+        @Test
+        void mapsUnauthorizedViewerOrGraphQlToNotAuthenticated() throws Exception {
+            assertThat(
+                            resolve(
+                                            new RecordingApiClient(
+                                                    new GitHubResponse(401, ""),
+                                                    new GitHubResponse(200, "{}")))
+                                    .outcome())
+                    .isEqualTo(PrReviewStatusService.BaselineOutcome.NOT_AUTHENTICATED);
+            assertThat(
+                            resolve(
+                                            new RecordingApiClient(
+                                                    new GitHubResponse(
+                                                            200, json(Map.of("login", "octocat"))),
+                                                    new GitHubResponse(401, "")))
+                                    .outcome())
+                    .isEqualTo(PrReviewStatusService.BaselineOutcome.NOT_AUTHENTICATED);
+        }
+
+        @Test
+        void mapsOtherFailuresToFailedOrNotFound() throws Exception {
+            assertThat(
+                            resolve(
+                                            new RecordingApiClient(
+                                                    new GitHubResponse(500, ""),
+                                                    new GitHubResponse(200, "{}")))
+                                    .outcome())
+                    .isEqualTo(PrReviewStatusService.BaselineOutcome.FAILED);
+            assertThat(resolve(client(new GitHubResponse(502, ""))).outcome())
+                    .isEqualTo(PrReviewStatusService.BaselineOutcome.FAILED);
+            assertThat(
+                            resolve(
+                                            client(
+                                                    ok(
+                                                            Map.of(
+                                                                    "errors",
+                                                                    List.of(Map.of("message", "x")),
+                                                                    "data",
+                                                                    Map.of()))))
+                                    .outcome())
+                    .isEqualTo(PrReviewStatusService.BaselineOutcome.FAILED);
+            assertThat(
+                            resolve(
+                                            client(
+                                                    ok(
+                                                            page(
+                                                                    "not-a-sha",
+                                                                    reviewed(BASELINE),
+                                                                    List.of(),
+                                                                    false,
+                                                                    null))))
+                                    .outcome())
+                    .isEqualTo(PrReviewStatusService.BaselineOutcome.FAILED);
+            Map<String, Object> missingPr = new LinkedHashMap<>();
+            missingPr.put("pullRequest", null);
+            assertThat(
+                            resolve(client(ok(Map.of("data", Map.of("repository", missingPr)))))
+                                    .outcome())
+                    .isEqualTo(PrReviewStatusService.BaselineOutcome.NOT_FOUND);
+        }
+
+        private PrReviewStatusService.ReviewBaseline resolve(RecordingApiClient client) {
+            return new PrReviewStatusService(client, MAPPER)
+                    .reviewBaseline(BASE, "secret-token", "acme", "widgets", 7);
+        }
+
+        private RecordingApiClient client(GitHubResponse... posts) throws Exception {
+            return new RecordingApiClient(
+                    new GitHubResponse(200, json(Map.of("login", "octocat"))), posts);
+        }
+
+        private GitHubResponse ok(Object body) throws Exception {
+            return new GitHubResponse(200, json(body));
+        }
+
+        private List<Map<String, Object>> reviewed(String oid) {
+            return List.of(review("COMMENTED", "2026-08-01T00:00:00Z", oid));
+        }
+
+        private Map<String, Object> page(
+                String head,
+                List<Map<String, Object>> reviews,
+                List<String> commitOids,
+                boolean hasPreviousPage,
+                String startCursor) {
+            Map<String, Object> pageInfo = new LinkedHashMap<>();
+            pageInfo.put("hasPreviousPage", hasPreviousPage);
+            pageInfo.put("startCursor", startCursor);
+            Map<String, Object> pullRequest = new LinkedHashMap<>(pullRequest(head, reviews));
+            pullRequest.put(
+                    "commits",
+                    Map.of(
+                            "pageInfo",
+                            pageInfo,
+                            "nodes",
+                            commitOids.stream()
+                                    .map(oid -> Map.of("commit", Map.of("oid", oid)))
+                                    .toList()));
+            return Map.of("data", Map.of("repository", Map.of("pullRequest", pullRequest)));
+        }
+    }
+
     private static PullRequestSummary pr(int number) {
         return new PullRequestSummary(
                 number,
@@ -343,7 +563,7 @@ class PrReviewStatusServiceTest {
 
     private static final class RecordingApiClient implements PrReviewStatusService.ApiClient {
         private final GitHubResponse getResponse;
-        private final GitHubResponse postResponse;
+        private final ArrayDeque<GitHubResponse> postResponses = new ArrayDeque<>();
         private final List<String> getUrls = new ArrayList<>();
         private final List<String> postUrls = new ArrayList<>();
         private final List<String> postBodies = new ArrayList<>();
@@ -353,9 +573,9 @@ class PrReviewStatusServiceTest {
             this(new GitHubResponse(200, getBody), new GitHubResponse(200, postBody));
         }
 
-        RecordingApiClient(GitHubResponse getResponse, GitHubResponse postResponse) {
+        RecordingApiClient(GitHubResponse getResponse, GitHubResponse... postResponses) {
             this.getResponse = getResponse;
-            this.postResponse = postResponse;
+            this.postResponses.addAll(List.of(postResponses));
         }
 
         @Override
@@ -370,7 +590,9 @@ class PrReviewStatusServiceTest {
             postUrls.add(url);
             postBodies.add(body);
             tokens.add(token);
-            return postResponse;
+            return postResponses.size() > 1
+                    ? postResponses.removeFirst()
+                    : postResponses.getFirst();
         }
     }
 }

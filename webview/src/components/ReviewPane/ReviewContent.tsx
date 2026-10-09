@@ -4,12 +4,13 @@ import {
   CheckCircle2,
   ExternalLink,
   GitMerge,
+  History,
   Loader2,
   RefreshCw,
   RotateCcw,
   Settings2,
 } from 'lucide-react'
-import type { LineComment, ReviewResult } from '../../bridge/types'
+import type { IncrementalFallbackReason, LineComment, ReviewResult, ReviewScope } from '../../bridge/types'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { formatBudget, splitDiffCoverage, unlistedCount, type DiffCoverage } from '@/lib/diffCoverage'
@@ -36,6 +37,8 @@ interface PaneContentProps {
   focusedCommentIdx: number
   commentFocusRequestId: number
   onGenerate: () => void
+  /** Present only when the user's last review is behind the PR head. */
+  onGenerateIncremental?: () => void
   onVerifyComment?: (comment: LineComment) => void
   onSuggestFixComment?: (comment: LineComment) => void
   onFocusComment: (index: number) => void
@@ -87,6 +90,40 @@ function coverageRemedy(gain: number, chunkedMode: boolean): string {
   return chunkedMode
     ? `Chunked review is on. The next review will include ${gain} more ${plural(gain, 'file', 'files')}.`
     : `Chunked review can include ${gain} of them.`
+}
+
+const FALLBACK_REASON_TEXT: Record<IncrementalFallbackReason, string> = {
+  no_prior_review: "you haven't submitted a review on this pull request",
+  up_to_date: 'no commits were pushed since your last review',
+  baseline_not_in_history: "the commit you last reviewed is no longer in this pull request's history",
+  baseline_unavailable: "GitHub couldn't compare against the commit you last reviewed",
+  empty_incremental_diff: 'the changes since your last review have no diff',
+  incremental_diff_too_large: 'the changes since your last review are too large to compare',
+}
+
+export function reviewScopeText(scope: ReviewScope): string {
+  return scope.kind === 'incremental'
+    ? `Reviewed only changes since your last review (${scope.baselineSha.slice(0, 7)}).`
+    : `Couldn't review only new changes (${FALLBACK_REASON_TEXT[scope.fallbackReason]}). Reviewed the full pull request instead.`
+}
+
+function ReviewScopeBanner({ scope }: { scope: ReviewScope }) {
+  return (
+    <div className="px-4 pt-3">
+      <Alert
+        data-testid="review-scope-banner"
+        className={cn(
+          'mt-0 mb-0',
+          scope.kind === 'full' && 'border-status-suggestion/40 bg-status-suggestion/5',
+        )}
+      >
+        <History className={cn('h-3.5 w-3.5', scope.kind === 'full' && 'text-status-suggestion')} />
+        <AlertDescription className={cn('text-xs', scope.kind === 'full' && 'text-status-suggestion')}>
+          {reviewScopeText(scope)}
+        </AlertDescription>
+      </Alert>
+    </div>
+  )
 }
 
 interface CoverageRemedyProps {
@@ -166,8 +203,10 @@ function ReviewAndDiff({
   chunkedMode,
   onChunkedModeChange,
   nextRegeneration,
+  reviewScope,
 }: CoverageRemedyProps & {
   result: ReviewResult | null
+  reviewScope?: ReviewScope
   diff?: string
   generationElapsedSec?: number
   focusedCommentIdx: number
@@ -232,6 +271,7 @@ function ReviewAndDiff({
           </Alert>
         </div>
       )}
+      {reviewScope && <ReviewScopeBanner scope={reviewScope} />}
       {coverage && (
         <DiffCoverageBanner
           coverage={coverage}
@@ -349,11 +389,13 @@ function ErrorWithReview({
 function GenerationCard({
   state,
   onGenerate,
+  onGenerateIncremental,
   onOpenSettings,
   generationOptions,
 }: {
   state: Extract<PaneState, { kind: 'noDraft' }>
   onGenerate: () => void
+  onGenerateIncremental?: () => void
   onOpenSettings: () => void
   generationOptions?: ReactNode
 }) {
@@ -371,6 +413,18 @@ function GenerationCard({
           >
             Generate Review
           </Button>
+          {onGenerateIncremental && (
+            <Button
+              data-testid="generate-incremental-review"
+              variant="outline"
+              onClick={onGenerateIncremental}
+              className="gap-2"
+              disabled={unavailable}
+            >
+              <History className="h-3.5 w-3.5" />
+              Review changes since last review
+            </Button>
+          )}
           <div className="min-w-0 flex-1 basis-[180px]">
             <p className="text-sm text-muted-foreground">No pending draft for this PR.</p>
             {readiness && (
@@ -403,6 +457,7 @@ export function PaneContent({
   focusedCommentIdx,
   commentFocusRequestId,
   onGenerate,
+  onGenerateIncremental,
   onVerifyComment,
   onSuggestFixComment,
   onFocusComment,
@@ -437,6 +492,7 @@ export function PaneContent({
           <GenerationCard
             state={state}
             onGenerate={onGenerate}
+            onGenerateIncremental={onGenerateIncremental}
             onOpenSettings={onOpenSettings}
             generationOptions={generationOptions}
           />
@@ -527,6 +583,7 @@ export function PaneContent({
           onSuggestFixComment={onSuggestFixComment}
           staleCommits={state.staleCommits}
           importedFromGitHub={state.importedFromGitHub}
+          reviewScope={state.reviewScope}
           onReanchor={onReanchor}
           inlineComments={inlineComments}
           orphanComments={orphanComments}
@@ -544,6 +601,7 @@ export function PaneContent({
         <ReviewAndDiff
           result={state.result}
           diff={state.diff}
+          reviewScope={state.reviewScope}
           generationElapsedSec={state.generationElapsedSec}
           focusedCommentIdx={focusedCommentIdx}
           commentFocusRequestId={commentFocusRequestId}

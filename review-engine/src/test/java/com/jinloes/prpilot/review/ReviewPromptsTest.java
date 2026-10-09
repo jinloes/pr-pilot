@@ -293,7 +293,8 @@ class ReviewPromptsTest {
 
         @Test
         void promptVersionSegmentsContextConformanceChanges() {
-            assertThat(ReviewPrompts.PROMPT_VERSION).isEqualTo("2026-10-thread-state");
+            assertThat(ReviewPrompts.PROMPT_VERSION)
+                    .isEqualTo("2026-10-thread-state-incremental-scope");
         }
 
         @Test
@@ -1167,6 +1168,42 @@ class ReviewPromptsTest {
         void directiveIsConsistentWithTheGrantedToolAllowlist() {
             assertThat(ClaudeService.READ_ONLY_TOOLS).contains("Grep");
             assertThat(ReviewPrompts.buildPrompt(fakeRequest())).contains("Grep/Read/Glob");
+        }
+    }
+
+    @Nested
+    class ReviewScope {
+        private static final String SHA = "0123456789abcdef0123456789abcdef01234567";
+
+        private PRReviewRequest request(String baselineSha) {
+            return PRReviewRequest.builder(fakePr(), "")
+                    .incrementalBaselineSha(baselineSha)
+                    .build();
+        }
+
+        @Test
+        void reviewAndCritiquePromptsStateTheIncrementalScope() {
+            String prompt = ReviewPrompts.buildPrompt(request(SHA));
+            String critique =
+                    ReviewPrompts.buildCritiquePrompt(
+                            request(SHA), new ReviewResult("s", "COMMENT", List.of()));
+
+            for (String text : List.of(prompt, critique)) {
+                assertThat(text)
+                        .contains("<review_scope>\n")
+                        .contains("<pr_diff> holds only the commits pushed")
+                        .contains("since the reviewer's last review at commit " + SHA + ".")
+                        .contains("were already reviewed")
+                        .contains("Anchor every finding to a line in this diff.");
+                assertThat(text.split("</review_scope>", -1)).hasSize(2);
+            }
+        }
+
+        @Test
+        void aFullReviewHasNoScopeSection() {
+            assertThat(ReviewPrompts.buildPrompt(request(null))).doesNotContain("<review_scope>");
+            assertThat(ReviewPrompts.buildPrompt(request("not-a-sha")))
+                    .doesNotContain("<review_scope>");
         }
     }
 

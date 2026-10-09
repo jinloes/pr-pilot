@@ -45,6 +45,9 @@ PR-scoped lifecycle messages (`draftLoaded`, review generation/chunks/results/er
 
 Draft mutations are serialized per host view and bind the pending review ID to its full `prKey`. Selection revisions prevent late loads/saves/generation results from installing state after a PR switch; submit/delete reject IDs not owned by the active PR. Regeneration preserves the existing GitHub draft until a replacement is explicitly saved.
 
+### Incremental review button and scope banner
+The no-draft generation card shows a secondary "Review changes since last review" button (`generate-incremental-review`) only when the selected PR's `reviewStatus` is `UPDATED_SINCE_REVIEW`. It is disabled when the provider is unavailable. It sends `generateReview` with `incremental: true` and no `diff`, `chunkedReview` or `intellijAssisted`, regardless of chunked mode. Bridge validation drops a malformed `reviewScope` but keeps the rest of the `reviewResult`. The scope is stored with the result, carried through a draft save, and cleared on a new generation or a PR change. `ReviewScopeBanner` states either that only changes since the given short SHA were reviewed, or why the review fell back to the full PR.
+
 ### VS Code webview surfaces
 The VS Code host exposes PR Pilot as an editor-tab `WebviewPanel` opened by `pr-pilot.open`. The Activity Bar view (`pr-pilot.main`) is an empty native tree view whose `viewsWelcome` content offers an Open PR Pilot command button and a Settings link; it hosts no webview. Opening or revealing the editor panel never changes the sidebar's visibility. The full PR loading, review generation, chat, and worktree lifecycle run only in the editor-tab panel.
 

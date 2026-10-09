@@ -111,6 +111,7 @@ export function isValidBridgeRequest(msg: AnyMessage | null | undefined): msg is
         && hasValidPrIdentity(msg)
         && (msg.diff === undefined || isBoundedString(msg.diff, MAX_REVIEW_DIFF))
         && (msg.chunkedReview === undefined || typeof msg.chunkedReview === 'boolean')
+        && (msg.incremental === undefined || typeof msg.incremental === 'boolean')
         && (msg.intellijAssisted === undefined || typeof msg.intellijAssisted === 'boolean')
         && (msg.focusAreas === undefined || isBoundedString(msg.focusAreas, 10_000))
         && (msg.customInstructions === undefined || isBoundedString(msg.customInstructions, 20_000));

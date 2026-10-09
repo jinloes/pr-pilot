@@ -231,6 +231,43 @@ class PRReviewRequestTest {
     }
 
     @Nested
+    class GetIncrementalBaselineSha {
+        @Test
+        void keepsAFullLowercaseSha() {
+            String sha = "0123456789abcdef0123456789abcdef01234567";
+
+            assertThat(
+                            PRReviewRequest.builder(pr(), "diff")
+                                    .incrementalBaselineSha(sha)
+                                    .build()
+                                    .getIncrementalBaselineSha())
+                    .isEqualTo(sha);
+        }
+
+        @Test
+        void dropsAnythingThatIsNotAFullLowercaseSha() {
+            for (String value :
+                    new String[] {
+                        null,
+                        "",
+                        "abc123",
+                        "A".repeat(40),
+                        "a".repeat(39),
+                        "a".repeat(41),
+                        "g".repeat(40)
+                    }) {
+                assertThat(
+                                PRReviewRequest.builder(pr(), "diff")
+                                        .incrementalBaselineSha(value)
+                                        .build()
+                                        .getIncrementalBaselineSha())
+                        .as(String.valueOf(value))
+                        .isNull();
+            }
+        }
+    }
+
+    @Nested
     class GetGuidanceGlobs {
         @Test
         void defaultsToEmptyWhenUnset() {
@@ -277,6 +314,7 @@ class PRReviewRequestTest {
                     .ciAnnotations(List.of(new CiAnnotation()))
                     .semanticContext(semantic)
                     .baseSha(SHA)
+                    .incrementalBaselineSha("b".repeat(40))
                     .guidanceGlobs(List.of("docs/rules/*.md"))
                     .rulesDirectory("/rules")
                     .fileHistory("history")
@@ -293,6 +331,7 @@ class PRReviewRequestTest {
 
             assertThat(copy).usingRecursiveComparison().isEqualTo(source);
             assertThat(copy.getBaseSha()).isEqualTo(SHA);
+            assertThat(copy.getIncrementalBaselineSha()).isEqualTo("b".repeat(40));
             assertThat(copy.getFileHistory()).isEqualTo("history");
             assertThat(copy.isCandidateRecall()).isTrue();
             assertThat(copy.getGuidanceGlobs()).containsExactly("docs/rules/*.md");

@@ -17,6 +17,8 @@ import com.jinloes.prpilot.sidecar.pr.DraftReviewMutationResult;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewMutationService;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewResult;
 import com.jinloes.prpilot.sidecar.pr.ExistingReviewsResult;
+import com.jinloes.prpilot.sidecar.pr.IncrementalDiffResult;
+import com.jinloes.prpilot.sidecar.pr.IncrementalDiffService;
 import com.jinloes.prpilot.sidecar.pr.LinkedIssueResult;
 import com.jinloes.prpilot.sidecar.pr.LinkedIssueService;
 import com.jinloes.prpilot.sidecar.pr.PrCommitsResult;
@@ -128,6 +130,19 @@ public final class IntellijGitHubService {
 
     public String getPRDiffFull(String owner, String repo, int prNumber) throws IOException {
         return getDiff(owner, repo, prNumber, "validation");
+    }
+
+    /**
+     * Diff of commits pushed since the viewer's latest submitted review, or a full-review fallback
+     * reason. A non-{@code ok} status throws, like {@link #getPRDiff}.
+     */
+    public IncrementalDiffResult getIncrementalDiff(String owner, String repo, int prNumber)
+            throws IOException {
+        IncrementalDiffResult result =
+                engine.getIncrementalDiff(
+                        new IncrementalDiffService.Params(baseUrl(), owner, repo, prNumber));
+        requireOk(result.status(), result.message());
+        return result;
     }
 
     public SaveDraftResult saveDraftReview(

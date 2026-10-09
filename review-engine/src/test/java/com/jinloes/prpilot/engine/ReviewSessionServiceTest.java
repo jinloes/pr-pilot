@@ -177,6 +177,27 @@ class ReviewSessionServiceTest {
         }
 
         @Test
+        void carriesAValidIncrementalBaselineAndDropsAnInvalidOne() {
+            Map<String, Object> valid = params();
+            valid.put("incrementalBaselineSha", "c".repeat(40));
+            Map<String, Object> invalid = params();
+            invalid.put("incrementalBaselineSha", "HEAD~1");
+
+            assertThat(
+                            ReviewSessionService.toReviewRequest(decode(valid))
+                                    .getIncrementalBaselineSha())
+                    .isEqualTo("c".repeat(40));
+            assertThat(
+                            ReviewSessionService.toReviewRequest(decode(invalid))
+                                    .getIncrementalBaselineSha())
+                    .isNull();
+            assertThat(
+                            ReviewSessionService.toReviewRequest(decode(params()))
+                                    .getIncrementalBaselineSha())
+                    .isNull();
+        }
+
+        @Test
         void carriesTheConfiguredRulesDirectory() {
             Map<String, Object> params = params();
             params.put("rulesDirectory", "/opt/review-rules");

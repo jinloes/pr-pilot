@@ -202,7 +202,14 @@ export function useReviewHostMessages({
           setReviewActivity((current) =>
             finishReviewActivity(current, 'completed', 'Review complete', nowMs),
           )
-          dispatch({ type: 'reviewResult', result, diff, validationDiff, generationElapsedSec })
+          dispatch({
+            type: 'reviewResult',
+            result,
+            diff,
+            validationDiff,
+            generationElapsedSec,
+            ...(message.reviewScope ? { reviewScope: message.reviewScope } : {}),
+          })
           break
         }
 

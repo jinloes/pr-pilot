@@ -98,6 +98,7 @@ export interface ReviewActions {
   saveRepositoryInstructions: () => void
   setChunkedMode: (value: boolean) => void
   generate: () => void
+  generateIncremental: () => void
   cancel: () => void
   save: () => void
   deleteDraft: () => void

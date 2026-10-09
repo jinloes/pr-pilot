@@ -308,4 +308,40 @@ class StdioJsonRpcServerGitHubParamsTest extends StdioJsonRpcServerTestBase {
 
         assertThat(missingReviewId.path("error").path("code").asInt()).isEqualTo(-32602);
     }
+
+    @Test
+    void returnsAStructuredResultForAnInvalidIncrementalDiffBaseUrl() {
+        JsonNode response =
+                server.handle(
+                        ("{\"jsonrpc\":\"2.0\",\"id\":\"inc-1\",\"method\":\"prs/getIncrementalDiff\","
+                                        + "\"params\":{\"githubBaseUrl\":\"http://github.com\",\"owner\":\"acme\","
+                                        + "\"repo\":\"widgets\",\"number\":7}}")
+                                .getBytes(StandardCharsets.UTF_8));
+
+        assertThat(response.path("id").asText()).isEqualTo("inc-1");
+        assertThat(response.path("result").path("status").asText()).isEqualTo("invalid_base_url");
+        assertThat(response.path("result").path("scope").isNull()).isTrue();
+        assertThat(response.path("result").path("diff").isNull()).isTrue();
+    }
+
+    @Test
+    void rejectsInvalidIncrementalDiffParams() {
+        String prefix =
+                "{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"prs/getIncrementalDiff\",\"params\":";
+        String[] invalid = {
+            prefix + "{}}",
+            prefix
+                    + "{\"githubBaseUrl\":\"https://github.com\",\"owner\":\"acme\","
+                    + "\"repo\":\"widgets\",\"number\":\"7\"}}",
+            prefix
+                    + "{\"githubBaseUrl\":\"https://github.com\",\"owner\":\"acme\","
+                    + "\"repo\":\"widgets\",\"number\":7,\"mode\":\"review\"}}",
+            prefix + "[]}"
+        };
+
+        for (String body : invalid) {
+            JsonNode response = server.handle(body.getBytes(StandardCharsets.UTF_8));
+            assertThat(response.path("error").path("code").asInt()).as(body).isEqualTo(-32602);
+        }
+    }
 }

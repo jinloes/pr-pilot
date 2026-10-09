@@ -54,6 +54,7 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [CI annotations are selected by whether they exist, not by whether the check failed](docs/architecture/review-pipeline.md#ci-annotations-are-selected-by-whether-they-exist-not-by-whether-the-check-failed)
 - [CI-duplicate suppression is conservative by design](docs/architecture/review-pipeline.md#ci-duplicate-suppression-is-conservative-by-design)
 - [Existing review comments carry thread state](docs/architecture/review-pipeline.md#existing-review-comments-carry-thread-state)
+- [Incremental review since the last submitted review](docs/architecture/review-pipeline.md#incremental-review-since-the-last-submitted-review)
 - [Review JSON parsing is self-healing, not all-or-nothing](docs/architecture/review-pipeline.md#review-json-parsing-is-self-healing-not-all-or-nothing)
 - [Low confidence is a gate, not a label](docs/architecture/review-pipeline.md#low-confidence-is-a-gate-not-a-label)
 - [Prompt-injection hardening](docs/architecture/review-pipeline.md#prompt-injection-hardening)
@@ -118,6 +119,7 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [PR chat scope](docs/architecture/webview.md#pr-chat-scope)
 - [DTO mapping in IntelliJ webview bridge](docs/architecture/webview.md#dto-mapping-in-intellij-webview-bridge)
 - [Webview bridge PR correlation](docs/architecture/webview.md#webview-bridge-pr-correlation)
+- [Incremental review button and scope banner](docs/architecture/webview.md#incremental-review-button-and-scope-banner)
 - [VS Code webview surfaces](docs/architecture/webview.md#vs-code-webview-surfaces)
 - [IntelliJ webview surfaces](docs/architecture/webview.md#intellij-webview-surfaces)
 

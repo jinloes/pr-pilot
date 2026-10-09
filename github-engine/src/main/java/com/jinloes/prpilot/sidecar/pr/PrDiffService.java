@@ -32,6 +32,7 @@ public final class PrDiffService {
     private static final Pattern SEGMENT = Pattern.compile("[A-Za-z0-9_.-]+");
     private final GitHubAuthService.TokenResolver tokenResolver;
     private final DiffClient diffClient;
+    private final CompareClient compareClient;
     private final Backoff backoff;
 
     public PrDiffService() {
@@ -47,9 +48,46 @@ public final class PrDiffService {
 
     PrDiffService(
             GitHubAuthService.TokenResolver tokenResolver, DiffClient diffClient, Backoff backoff) {
+        this(tokenResolver, diffClient, new HttpDiffClient(), backoff);
+    }
+
+    PrDiffService(
+            GitHubAuthService.TokenResolver tokenResolver,
+            DiffClient diffClient,
+            CompareClient compareClient,
+            Backoff backoff) {
         this.tokenResolver = Objects.requireNonNull(tokenResolver);
         this.diffClient = Objects.requireNonNull(diffClient);
+        this.compareClient = Objects.requireNonNull(compareClient);
         this.backoff = Objects.requireNonNull(backoff);
+    }
+
+    GitHubAuthService.TokenResolution resolveToken(String hostnameArgument) {
+        return tokenResolver.resolve(hostnameArgument);
+    }
+
+    /**
+     * Fetches {@code baseSha...headSha} as a review-bounded diff with the same retry policy as
+     * {@link #get}, keeping the HTTP code so callers can map compare-specific failures.
+     */
+    CompareResponse compare(
+            String apiBaseUrl,
+            String token,
+            String owner,
+            String repo,
+            String baseSha,
+            String headSha) {
+        CompareResponse response = new CompareResponse(Response.of(Status.NETWORK), 0);
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            response =
+                    compareClient.compare(
+                            apiBaseUrl, token, owner, repo, baseSha, headSha, REVIEW_LIMIT_BYTES);
+            if (!retryable(response.response().status())
+                    || attempt == MAX_ATTEMPTS
+                    || Thread.currentThread().isInterrupted()) break;
+            backoff.pause(attempt);
+        }
+        return response;
     }
 
     public PrDiffResult get(Params params) {
@@ -120,6 +158,20 @@ public final class PrDiffService {
                 String api, String token, String owner, String repo, int number, int limitBytes);
     }
 
+    interface CompareClient {
+        CompareResponse compare(
+                String api,
+                String token,
+                String owner,
+                String repo,
+                String baseSha,
+                String headSha,
+                int limitBytes);
+    }
+
+    /** A bounded compare diff plus the HTTP status code; {@code 0} means no HTTP response. */
+    record CompareResponse(Response response, int statusCode) {}
+
     interface Backoff {
         void pause(int attempt);
     }
@@ -145,8 +197,41 @@ public final class PrDiffService {
         API
     }
 
-    private static final class HttpDiffClient implements DiffClient {
+    static final class HttpDiffClient implements DiffClient, CompareClient {
         private final GitHubHttpClient httpClient = new GitHubHttpClient();
+
+        @Override
+        public CompareResponse compare(
+                String api,
+                String token,
+                String owner,
+                String repo,
+                String baseSha,
+                String headSha,
+                int limitBytes) {
+            String url =
+                    api + "/repos/" + owner + "/" + repo + "/compare/" + baseSha + "..." + headSha;
+            try {
+                return httpClient.stream(
+                        url,
+                        token,
+                        GitHubHttpClient.ACCEPT_DIFF,
+                        (statusCode, body) -> {
+                            if (statusCode < 200 || statusCode >= 300) {
+                                return new CompareResponse(
+                                        Response.of(classifyFailure(statusCode)), statusCode);
+                            }
+                            return new CompareResponse(
+                                    bound(body, limitBytes, PER_FILE_CAP_BYTES, SCAN_CEILING_BYTES),
+                                    statusCode);
+                        });
+            } catch (IOException e) {
+                return new CompareResponse(Response.of(Status.NETWORK), 0);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return new CompareResponse(Response.of(Status.NETWORK), 0);
+            }
+        }
 
         @Override
         public Response get(
@@ -429,7 +514,7 @@ public final class PrDiffService {
                 || status == Status.TRANSIENT_API;
     }
 
-    private static boolean valid(String value) {
+    static boolean valid(String value) {
         return value != null && SEGMENT.matcher(value).matches();
     }
 }

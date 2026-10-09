@@ -40,16 +40,17 @@ export function useReviewGeneration({
   setReviewActivity,
   dispatch,
 }: UseReviewGenerationOptions) {
-  return useCallback((ordinary = false) => {
+  return useCallback((ordinary = false, incremental = false) => {
     if (!pr) return
     setDeepSetup(null)
     beforeDeepPauseRef.current = state
-    const assisted = intellijAssisted && intellijAssistedEnabled && !ordinary
+    const assisted = intellijAssisted && intellijAssistedEnabled && !ordinary && !incremental
     setDeepBusy(assisted)
     const focusAreas = focusAreasOverride.trim()
     const customInstructions = customInstructionsOverride.trim()
 
-    if (chunkedMode) {
+    // The host fetches the incremental diff itself, so chunking and assisted mode never apply.
+    if (chunkedMode && !incremental) {
       const sourceDiff = validationDiffOf(state)
       if (!sourceDiff.trim()) {
         toast.error('Chunked mode needs a loaded diff. Reload the PR and try again.')
@@ -91,6 +92,7 @@ export function useReviewGeneration({
       owner: pr.owner,
       repo: pr.repo,
       ...(assisted ? { intellijAssisted: true } : {}),
+      ...(incremental ? { incremental: true } : {}),
       focusAreas: focusAreas || undefined,
       customInstructions: customInstructions || undefined,
     })

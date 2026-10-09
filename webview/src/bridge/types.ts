@@ -75,12 +75,27 @@ export interface ReviewChunkMessage {
   chunk: string
 }
 
+/** Why an incremental request reviewed the whole pull request instead. */
+export type IncrementalFallbackReason =
+  | 'no_prior_review'
+  | 'up_to_date'
+  | 'baseline_not_in_history'
+  | 'baseline_unavailable'
+  | 'empty_incremental_diff'
+  | 'incremental_diff_too_large'
+
+/** Present on a result only when the user asked to review changes since their last review. */
+export type ReviewScope =
+  | { kind: 'incremental'; baselineSha: string }
+  | { kind: 'full'; fallbackReason: IncrementalFallbackReason }
+
 export interface ReviewResultMessage {
   type: 'reviewResult'
   prKey?: string
   result: ReviewResult
   diff: string
   validationDiff?: string
+  reviewScope?: ReviewScope
 }
 
 export interface ValidationDiffUpdatedMessage {
@@ -300,6 +315,8 @@ export interface GenerateReviewRequest {
   /** Runs bounded batches plus a mandatory engine-owned global reconciliation pass. */
   chunkedReview?: boolean
   intellijAssisted?: boolean
+  /** Reviews only the commits pushed since the user's last submitted review; sent without a diff. */
+  incremental?: boolean
   /** Optional per-review override of the focus areas; falls back to the saved setting. */
   focusAreas?: string
   /** Optional per-review override of custom instructions; falls back to the saved setting. */

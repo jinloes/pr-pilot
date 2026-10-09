@@ -123,6 +123,42 @@ export interface SidecarPrDiffResult {
     limitBytes: number;
 }
 
+export type SidecarIncrementalFallbackReason =
+    | 'no_prior_review'
+    | 'up_to_date'
+    | 'baseline_not_in_history'
+    | 'baseline_unavailable'
+    | 'empty_incremental_diff'
+    | 'incremental_diff_too_large';
+
+/**
+ * `ok` carries either an incremental baseline..head diff or a full-review fallback reason; any
+ * other status carries no scope.
+ */
+export type SidecarIncrementalDiffResult =
+    | {
+        status: 'ok';
+        message: string;
+        scope: 'incremental';
+        baselineSha: string;
+        headSha: string;
+        diff: string;
+        truncated: boolean;
+        limitBytes: number;
+    }
+    | {
+        status: 'ok';
+        message: string;
+        scope: 'full';
+        fallbackReason: SidecarIncrementalFallbackReason;
+        limitBytes: number;
+    }
+    | {
+        status: Exclude<SidecarPrDiffResult['status'], 'ok' | 'diff_too_large'>;
+        message: string;
+        limitBytes: number;
+    };
+
 export interface SidecarPrDetailResult {
     status: 'ok' | 'not_installed' | 'not_authenticated' | 'invalid_base_url' | 'invalid_request' | 'rate_limited' | 'network_error' | 'api_failed';
     message: string;
@@ -212,6 +248,8 @@ export interface SidecarGenerateReviewParams {
     secondReviewerModel?: string;
     /** PR base commit; the engine reads trusted guidance and file history from it. */
     baseSha?: string;
+    /** Last-reviewed commit when `diff` holds only later changes; the engine adds a scope section. */
+    incrementalBaselineSha?: string;
     chunkedReview: boolean;
     pr: SidecarPrInput;
     diff: string;

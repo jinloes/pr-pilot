@@ -31,7 +31,7 @@ public final class ReviewPrompts {
      *
      * <p>Not a compatibility version: nothing parses it, and old log lines keep their old value.
      */
-    public static final String PROMPT_VERSION = "2026-10-thread-state";
+    public static final String PROMPT_VERSION = "2026-10-thread-state-incremental-scope";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -700,6 +700,24 @@ public final class ReviewPrompts {
                     .append("\n</pr_description>\n");
         }
         appendOmittedFiles(prompt, request.diffCoverage());
+        appendReviewScope(prompt, request.getIncrementalBaselineSha());
+    }
+
+    /**
+     * States that the diff is incremental. Engine-authored: the only interpolated value is a SHA
+     * that {@link PRReviewRequest} has already validated, so no PR text enters this section.
+     */
+    static void appendReviewScope(StringBuilder prompt, String baselineSha) {
+        if (baselineSha == null) return;
+        prompt.append("\n<review_scope>\n")
+                .append("This is an incremental review. <pr_diff> holds only the commits pushed")
+                .append(" since the reviewer's last review at commit ")
+                .append(baselineSha)
+                .append(". The changes before that commit were already reviewed; do not")
+                .append(" re-review them or repeat earlier findings about them. Anchor every")
+                .append(" finding to a line in this diff. Read other files from the working")
+                .append(" directory only to check a cross-file effect on these changes.")
+                .append("\n</review_scope>\n");
     }
 
     /**

@@ -26,6 +26,14 @@ test('rejects invalid or oversized batch diffs', () => {
   assert.equal(isValidBridgeRequest({ ...base, diff: 'x'.repeat(1_100_001) }), false);
 });
 
+test('accepts only a boolean incremental flag on generateReview', () => {
+  const base = { ...version, type: 'generateReview', operationId: 'review-1', number: 42, owner: 'acme', repo: 'platform' };
+  assert.equal(isValidBridgeRequest({ ...base, incremental: true }), true);
+  assert.equal(isValidBridgeRequest({ ...base, incremental: false }), true);
+  assert.equal(isValidBridgeRequest({ ...base, incremental: 'yes' }), false);
+  assert.equal(isValidBridgeRequest({ ...base, incremental: 1 }), false);
+});
+
 test('rejects unknown type', () => {
   assert.equal(isValidBridgeRequest({ ...version, type: 'surprise' }), false);
 });

@@ -14,6 +14,8 @@ import com.jinloes.prpilot.sidecar.pr.DraftReviewMutationResult;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewMutationService;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewResult;
 import com.jinloes.prpilot.sidecar.pr.ExistingReviewsResult;
+import com.jinloes.prpilot.sidecar.pr.IncrementalDiffResult;
+import com.jinloes.prpilot.sidecar.pr.IncrementalDiffService;
 import com.jinloes.prpilot.sidecar.pr.LinkedIssueResult;
 import com.jinloes.prpilot.sidecar.pr.LinkedIssueService;
 import com.jinloes.prpilot.sidecar.pr.PrCommitsResult;
@@ -83,6 +85,11 @@ class IntellijGitHubServiceTest {
 
         @Override
         public PrDiffResult getPullRequestDiff(PrDiffService.Params params) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public IncrementalDiffResult getIncrementalDiff(IncrementalDiffService.Params params) {
             throw new UnsupportedOperationException();
         }
 
@@ -486,6 +493,97 @@ class IntellijGitHubServiceTest {
                                 assertThat(error.status()).isEqualTo("rate_limited");
                                 assertThat(error).hasMessage("slow down");
                             });
+        }
+    }
+
+    @Nested
+    class GetIncrementalDiff {
+
+        private static final String BASELINE = "a".repeat(40);
+        private static final String HEAD = "b".repeat(40);
+
+        @Test
+        void delegatesWithTheConfiguredBaseUrlAndReturnsTheEngineResult() throws IOException {
+            IncrementalDiffService.Params[] seen = new IncrementalDiffService.Params[1];
+            IncrementalDiffResult engineResult =
+                    new IncrementalDiffResult(
+                            "ok",
+                            "loaded",
+                            IncrementalDiffResult.SCOPE_INCREMENTAL,
+                            null,
+                            BASELINE,
+                            HEAD,
+                            "@@ -1 +1 @@",
+                            false,
+                            0);
+            IntellijGitHubService service =
+                    serviceOver(
+                            new StubEngine() {
+                                @Override
+                                public IncrementalDiffResult getIncrementalDiff(
+                                        IncrementalDiffService.Params params) {
+                                    seen[0] = params;
+                                    return engineResult;
+                                }
+                            });
+
+            assertThat(service.getIncrementalDiff("acme", "widgets", 42)).isSameAs(engineResult);
+            assertThat(seen[0])
+                    .isEqualTo(new IncrementalDiffService.Params(BASE_URL, "acme", "widgets", 42));
+        }
+
+        @Test
+        void returnsAFullScopeFallbackWithoutThrowing() throws IOException {
+            IncrementalDiffResult fallback =
+                    new IncrementalDiffResult(
+                            "ok",
+                            "full",
+                            IncrementalDiffResult.SCOPE_FULL,
+                            IncrementalDiffResult.NO_PRIOR_REVIEW,
+                            null,
+                            null,
+                            null,
+                            false,
+                            0);
+            IntellijGitHubService service =
+                    serviceOver(
+                            new StubEngine() {
+                                @Override
+                                public IncrementalDiffResult getIncrementalDiff(
+                                        IncrementalDiffService.Params params) {
+                                    return fallback;
+                                }
+                            });
+
+            assertThat(service.getIncrementalDiff("acme", "widgets", 42).fallbackReason())
+                    .isEqualTo(IncrementalDiffResult.NO_PRIOR_REVIEW);
+        }
+
+        @Test
+        void surfacesANonOkStatusAsAnIoException() {
+            IntellijGitHubService service =
+                    serviceOver(
+                            new StubEngine() {
+                                @Override
+                                public IncrementalDiffResult getIncrementalDiff(
+                                        IncrementalDiffService.Params params) {
+                                    return new IncrementalDiffResult(
+                                            "not_authenticated",
+                                            "log in",
+                                            null,
+                                            null,
+                                            null,
+                                            null,
+                                            null,
+                                            false,
+                                            0);
+                                }
+                            });
+
+            assertThatThrownBy(() -> service.getIncrementalDiff("acme", "widgets", 42))
+                    .isInstanceOfSatisfying(
+                            IntellijGitHubService.GitHubOperationException.class,
+                            error -> assertThat(error.status()).isEqualTo("not_authenticated"));
         }
     }
 }

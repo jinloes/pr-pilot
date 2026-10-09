@@ -1,4 +1,4 @@
-import type { IncomingMessage, LineComment, PR, ReviewResult } from './types'
+import type { IncomingMessage, LineComment, PR, ReviewResult, ReviewScope } from './types'
 
 export const BRIDGE_PROTOCOL_VERSION = 1 as const
 
@@ -94,6 +94,26 @@ function isProviderReadiness(value: unknown): boolean {
     && (value.authCommand === undefined || isString(value.authCommand))
 }
 
+export const INCREMENTAL_FALLBACK_REASONS = [
+  'no_prior_review',
+  'up_to_date',
+  'baseline_not_in_history',
+  'baseline_unavailable',
+  'empty_incremental_diff',
+  'incremental_diff_too_large',
+] as const
+
+function isReviewScope(value: unknown): value is ReviewScope {
+  if (!isRecord(value)) return false
+  if (value.kind === 'incremental') {
+    return Object.keys(value).length === 2
+      && typeof value.baselineSha === 'string' && /^[0-9a-f]{40}$/.test(value.baselineSha)
+  }
+  return value.kind === 'full'
+    && Object.keys(value).length === 2
+    && (INCREMENTAL_FALLBACK_REASONS as readonly unknown[]).includes(value.fallbackReason)
+}
+
 function hasMessage(value: Record<string, unknown>): boolean {
   return isString(value.message)
 }
@@ -174,6 +194,11 @@ export function parseIncomingMessage(value: unknown): IncomingMessage | null {
       valid = isReviewResult(value.result)
         && isString(value.diff, MAX_DIFF)
         && isOptionalString(value.validationDiff, MAX_DIFF)
+      if (valid && value.reviewScope !== undefined && !isReviewScope(value.reviewScope)) {
+        // A malformed scope only loses its banner; the review itself is still usable.
+        const { reviewScope: _dropped, ...rest } = value
+        return rest as unknown as IncomingMessage
+      }
       break
     case 'validationDiffUpdated':
       valid = isString(value.validationDiff, MAX_DIFF)

@@ -18,6 +18,7 @@ import com.jinloes.prpilot.services.PendingReviewIndex;
 import com.jinloes.prpilot.services.UserFacingErrors;
 import com.jinloes.prpilot.settings.PluginSettings;
 import com.jinloes.prpilot.settings.RepositoryReviewInstructions;
+import com.jinloes.prpilot.sidecar.pr.IncrementalDiffResult;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftSaveErrorMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftSavedMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ErrorMsg;
@@ -27,6 +28,7 @@ import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewChunkMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewGeneratingMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewGenerationSettings;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewResultMsg;
+import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewScopeDto;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.SimpleMsg;
 import java.util.List;
 import org.apache.commons.lang3.StringUtils;
@@ -40,6 +42,32 @@ final class WebviewReviewController {
 
     WebviewReviewController(WebviewPanel panel) {
         this.panel = panel;
+    }
+
+    /** What the model reviews; the published diffs stay the PR diff regardless. */
+    record ReviewInput(
+            String modelDiff, String incrementalBaselineSha, ReviewScopeDto reviewScope) {}
+
+    interface IncrementalDiffFetcher {
+        IncrementalDiffResult fetch() throws Exception;
+    }
+
+    /**
+     * Picks the model diff for a generation. Only an incremental request asks for the incremental
+     * diff; an engine fallback reviews the full PR diff and records why. A failed fetch propagates
+     * so the caller reports it like a diff failure.
+     */
+    static ReviewInput resolveReviewInput(
+            boolean incremental, String prDiff, IncrementalDiffFetcher fetcher) throws Exception {
+        if (!incremental) return new ReviewInput(prDiff, null, null);
+        IncrementalDiffResult scoped = fetcher.fetch();
+        if (IncrementalDiffResult.SCOPE_INCREMENTAL.equals(scoped.scope())) {
+            return new ReviewInput(
+                    scoped.diff(),
+                    scoped.baselineSha(),
+                    ReviewScopeDto.incremental(scoped.baselineSha()));
+        }
+        return new ReviewInput(prDiff, null, ReviewScopeDto.full(scoped.fallbackReason()));
     }
 
     void handleGenerateReview(
@@ -65,6 +93,30 @@ final class WebviewReviewController {
             String overrideCustomInstructions,
             String operationId,
             DeepReviewController.DeepInvocation deep) {
+        handleGenerateReview(
+                number,
+                owner,
+                repo,
+                overrideDiff,
+                chunkedReview,
+                overrideFocusAreas,
+                overrideCustomInstructions,
+                operationId,
+                deep,
+                false);
+    }
+
+    void handleGenerateReview(
+            int number,
+            String owner,
+            String repo,
+            String overrideDiff,
+            boolean chunkedReview,
+            String overrideFocusAreas,
+            String overrideCustomInstructions,
+            String operationId,
+            DeepReviewController.DeepInvocation deep,
+            boolean incremental) {
         String key = bridgePrKey(number, owner, repo);
         final PullRequest pr;
         final long reviewRevision;
@@ -190,6 +242,32 @@ final class WebviewReviewController {
                                 }
                             }
 
+                            // The incremental diff only feeds the model: the published diff and
+                            // validationDiff stay PR diffs so anchors validate against the whole
+                            // PR.
+                            ReviewInput reviewInput;
+                            try {
+                                reviewInput =
+                                        resolveReviewInput(
+                                                incremental && deep == null,
+                                                diff,
+                                                () ->
+                                                        panel.ghSvc.getIncrementalDiff(
+                                                                owner, repo, number));
+                            } catch (Exception e) {
+                                panel.publishIfCurrentGeneration(
+                                        key,
+                                        reviewRevision,
+                                        generationId,
+                                        new ErrorMsg(
+                                                "reviewError",
+                                                key,
+                                                UserFacingErrors.forGitHub(
+                                                        e,
+                                                        "load the changes since your last review")));
+                                return;
+                            }
+
                             // Reuse prefetched existing reviews; fall back to live fetch only if
                             // stale.
                             String existingReviews;
@@ -288,6 +366,10 @@ final class WebviewReviewController {
 
                             // Kick off the review — callbacks fired on EDT
                             final String finalDiff = diff;
+                            final String finalModelDiff = reviewInput.modelDiff();
+                            final String finalIncrementalBaselineSha =
+                                    reviewInput.incrementalBaselineSha();
+                            final ReviewScopeDto finalReviewScope = reviewInput.reviewScope();
                             final String finalValidationDiff = validationDiff;
                             final String finalExisting = existingReviews;
                             java.io.File guidelinesDir;
@@ -348,7 +430,7 @@ final class WebviewReviewController {
                                             : panel.ghSvc.getRepoProfileSummary(
                                                     guidelinesDir.getAbsolutePath());
                             finalReviewService.reviewPR(
-                                    PRReviewRequest.builder(promptPr, finalDiff)
+                                    PRReviewRequest.builder(promptPr, finalModelDiff)
                                             .priorReview(finalPriorReview)
                                             .existingReviews(finalExisting)
                                             .repoGuidelines(finalGuidelines)
@@ -362,9 +444,10 @@ final class WebviewReviewController {
                                             .baseSha(finalBaseSha)
                                             .guidanceGlobs(generationSettings.guidanceGlobs())
                                             .rulesDirectory(generationSettings.rulesDirectory())
+                                            .incrementalBaselineSha(finalIncrementalBaselineSha)
                                             .build(),
                                     generationSettings.runtime(),
-                                    chunkedReview,
+                                    chunkedReview && finalIncrementalBaselineSha == null,
                                     statusMsg ->
                                             panel.publishIfCurrentGeneration(
                                                     key,
@@ -437,7 +520,8 @@ final class WebviewReviewController {
                                                         key,
                                                         ReviewMapper.INSTANCE.toDto(result),
                                                         finalDiff,
-                                                        finalValidationDiff));
+                                                        finalValidationDiff,
+                                                        finalReviewScope));
                                     },
                                     err -> {
                                         synchronized (panel) {

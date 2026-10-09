@@ -18,6 +18,9 @@ package com.jinloes.prpilot.model;
  */
 public final class PRReviewRequest {
 
+    private static final java.util.regex.Pattern SHA =
+            java.util.regex.Pattern.compile("[0-9a-f]{40}");
+
     private final PullRequest pr;
     private final String diff;
     private final DiffCoverage diffCoverage;
@@ -33,6 +36,7 @@ public final class PRReviewRequest {
     private final java.util.List<CiAnnotation> ciAnnotations;
     private final SemanticReviewContext semanticContext;
     private final String baseSha;
+    private final String incrementalBaselineSha;
     private final java.util.List<String> guidanceGlobs;
     private final String rulesDirectory;
     private final String fileHistory;
@@ -54,6 +58,7 @@ public final class PRReviewRequest {
         this.repoProfile = builder.repoProfile;
         this.semanticContext = copySemanticContext(builder.semanticContext);
         this.baseSha = builder.baseSha;
+        this.incrementalBaselineSha = builder.incrementalBaselineSha;
         this.guidanceGlobs =
                 builder.guidanceGlobs == null
                         ? java.util.List.of()
@@ -158,6 +163,15 @@ public final class PRReviewRequest {
     }
 
     /**
+     * The commit of the reviewer's last submitted review when the diff holds only the changes
+     * pushed since then; null for a full-PR review. Always a 40-character lowercase hex SHA when
+     * set.
+     */
+    public String getIncrementalBaselineSha() {
+        return incrementalBaselineSha;
+    }
+
+    /**
      * User-configured guidance globs, matched against the base commit before the built-in defaults.
      * Never null; empty when none are configured.
      */
@@ -245,6 +259,7 @@ public final class PRReviewRequest {
                 .ciAnnotations(ciAnnotations)
                 .semanticContext(semanticContext)
                 .baseSha(baseSha)
+                .incrementalBaselineSha(incrementalBaselineSha)
                 .guidanceGlobs(guidanceGlobs)
                 .rulesDirectory(rulesDirectory)
                 .fileHistory(fileHistory)
@@ -282,6 +297,7 @@ public final class PRReviewRequest {
         private java.util.List<CiAnnotation> ciAnnotations = java.util.List.of();
         private SemanticReviewContext semanticContext;
         private String baseSha;
+        private String incrementalBaselineSha;
         private java.util.List<String> guidanceGlobs;
         private String rulesDirectory;
         private String fileHistory;
@@ -372,6 +388,15 @@ public final class PRReviewRequest {
 
         public Builder baseSha(String value) {
             this.baseSha = value;
+            return this;
+        }
+
+        /**
+         * Sets the incremental baseline; any value that is not a full lowercase SHA becomes null.
+         */
+        public Builder incrementalBaselineSha(String value) {
+            this.incrementalBaselineSha =
+                    value != null && SHA.matcher(value).matches() ? value : null;
             return this;
         }
 

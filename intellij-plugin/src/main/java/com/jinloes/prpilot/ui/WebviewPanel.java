@@ -497,6 +497,30 @@ public class WebviewPanel implements Disposable {
             String overrideCustomInstructions,
             String operationId,
             DeepInvocation deep) {
+        handleGenerateReview(
+                number,
+                owner,
+                repo,
+                overrideDiff,
+                chunkedReview,
+                overrideFocusAreas,
+                overrideCustomInstructions,
+                operationId,
+                deep,
+                false);
+    }
+
+    void handleGenerateReview(
+            int number,
+            String owner,
+            String repo,
+            String overrideDiff,
+            boolean chunkedReview,
+            String overrideFocusAreas,
+            String overrideCustomInstructions,
+            String operationId,
+            DeepInvocation deep,
+            boolean incremental) {
         reviewController.handleGenerateReview(
                 number,
                 owner,
@@ -506,7 +530,8 @@ public class WebviewPanel implements Disposable {
                 overrideFocusAreas,
                 overrideCustomInstructions,
                 operationId,
-                deep);
+                deep,
+                incremental);
     }
 
     static boolean canPersistDraft(boolean activePr, boolean hasExplicitResult) {

@@ -5,6 +5,7 @@ import {
   initialPaneState,
   normalizeReviewResult,
   resultOf,
+  reviewScopeOf,
   reviewReducer,
   validationDiffOf,
   type DraftPresentState,
@@ -297,5 +298,38 @@ describe('review state selectors', () => {
     expect(resultOf(generating)).toEqual(result)
     expect(diffOf(generating)).toBe(diff)
     expect(validationDiffOf(generating)).toBe(diff)
+  })
+})
+
+describe('review scope', () => {
+  const scope = { kind: 'incremental', baselineSha: 'a'.repeat(40) } as const
+  const generating: PaneState = { kind: 'generating', result: null, diff, validationDiff: diff, replacingDraft: false }
+
+  it('stores the scope with an incremental result', () => {
+    const next = reviewReducer(generating, { type: 'reviewResult', result, diff, validationDiff: diff, reviewScope: scope })
+    expect(reviewScopeOf(next)).toEqual(scope)
+  })
+
+  it('leaves the scope unset for an ordinary result', () => {
+    const next = reviewReducer(generating, { type: 'reviewResult', result, diff, validationDiff: diff })
+    expect(next).not.toHaveProperty('reviewScope')
+  })
+
+  it('keeps the scope when the draft is saved', () => {
+    const unsaved = reviewReducer(generating, { type: 'reviewResult', result, diff, validationDiff: diff, reviewScope: scope })
+    expect(reviewScopeOf(reviewReducer(unsaved, { type: 'draftSaved', reviewId: 'draft-1' }))).toEqual(scope)
+  })
+
+  it('clears the scope when a new generation starts', () => {
+    const unsaved = reviewReducer(generating, { type: 'reviewResult', result, diff, validationDiff: diff, reviewScope: scope })
+    const next = reviewReducer(unsaved, { type: 'startGenerating' })
+    expect(reviewScopeOf(next)).toBeUndefined()
+    const done = reviewReducer(next, { type: 'reviewResult', result, diff, validationDiff: diff })
+    expect(reviewScopeOf(done)).toBeUndefined()
+  })
+
+  it('clears the scope when the PR changes', () => {
+    const unsaved = reviewReducer(generating, { type: 'reviewResult', result, diff, validationDiff: diff, reviewScope: scope })
+    expect(reviewScopeOf(reviewReducer(unsaved, { type: 'reset', hasPr: true }))).toBeUndefined()
   })
 })

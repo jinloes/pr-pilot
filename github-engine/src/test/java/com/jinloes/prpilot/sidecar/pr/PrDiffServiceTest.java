@@ -4,14 +4,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jinloes.prpilot.model.DiffCoverage;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
+import com.jinloes.prpilot.sidecar.github.GitHubHttpClient;
+import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -544,6 +550,162 @@ class PrDiffServiceTest {
     })
     void classifiesHttpFailures(int statusCode, PrDiffService.Status expected) {
         assertThat(PrDiffService.classifyFailure(statusCode)).isEqualTo(expected);
+    }
+
+    @Nested
+    class Compare {
+        private static final String BASE = "a".repeat(40);
+        private static final String HEAD = "b".repeat(40);
+
+        @Test
+        void fetchesTheThreeDotRangeAsABoundedDiff() throws IOException {
+            AtomicReference<String> path = new AtomicReference<>();
+            AtomicReference<String> accept = new AtomicReference<>();
+            HttpServer server = server(200, "diff --git a/x b/x\n+x\n", path, accept);
+            try {
+                PrDiffService.CompareResponse response =
+                        new PrDiffService.HttpDiffClient()
+                                .compare(
+                                        api(server),
+                                        "secret-token",
+                                        "acme",
+                                        "widgets",
+                                        BASE,
+                                        HEAD,
+                                        PrDiffService.REVIEW_LIMIT_BYTES);
+
+                assertThat(path.get())
+                        .isEqualTo("/repos/acme/widgets/compare/" + BASE + "..." + HEAD);
+                assertThat(accept.get()).isEqualTo(GitHubHttpClient.ACCEPT_DIFF);
+                assertThat(response.statusCode()).isEqualTo(200);
+                assertThat(response.response().status()).isEqualTo(PrDiffService.Status.OK);
+                assertThat(response.response().diff()).isEqualTo("diff --git a/x b/x\n+x\n");
+            } finally {
+                server.stop(0);
+            }
+        }
+
+        @Test
+        void keepsTheHttpStatusOfAFailedCompare() throws IOException {
+            HttpServer server = server(422, "{}", new AtomicReference<>(), new AtomicReference<>());
+            try {
+                PrDiffService.CompareResponse response =
+                        new PrDiffService.HttpDiffClient()
+                                .compare(
+                                        api(server),
+                                        "secret-token",
+                                        "acme",
+                                        "widgets",
+                                        BASE,
+                                        HEAD,
+                                        PrDiffService.REVIEW_LIMIT_BYTES);
+
+                assertThat(response.statusCode()).isEqualTo(422);
+                assertThat(response.response().status()).isEqualTo(PrDiffService.Status.API);
+                assertThat(response.response().diff()).isNull();
+            } finally {
+                server.stop(0);
+            }
+        }
+
+        @Test
+        void retriesTransientFailuresWithTheReviewLimit() {
+            ArrayDeque<PrDiffService.CompareResponse> responses =
+                    new ArrayDeque<>(
+                            List.of(
+                                    new PrDiffService.CompareResponse(
+                                            PrDiffService.Response.of(
+                                                    PrDiffService.Status.TRANSIENT_API),
+                                            502),
+                                    new PrDiffService.CompareResponse(
+                                            PrDiffService.Response.ok("diff", false), 200)));
+            AtomicInteger requestedLimit = new AtomicInteger();
+            List<Integer> backoffs = new ArrayList<>();
+            PrDiffService service =
+                    new PrDiffService(
+                            hostname -> GitHubAuthService.TokenResolution.resolved("t"),
+                            (api, token, owner, repo, number, limit) -> null,
+                            (api, token, owner, repo, base, head, limit) -> {
+                                requestedLimit.set(limit);
+                                return responses.removeFirst();
+                            },
+                            backoffs::add);
+
+            PrDiffService.CompareResponse response =
+                    service.compare("https://api", "t", "acme", "widgets", BASE, HEAD);
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(backoffs).containsExactly(1);
+            assertThat(requestedLimit).hasValue(PrDiffService.REVIEW_LIMIT_BYTES);
+        }
+
+        @Test
+        void stopsAfterThreeAttemptsAndDoesNotRetryClientErrors() {
+            AtomicInteger attempts = new AtomicInteger();
+            PrDiffService transientService =
+                    new PrDiffService(
+                            hostname -> GitHubAuthService.TokenResolution.resolved("t"),
+                            (api, token, owner, repo, number, limit) -> null,
+                            (api, token, owner, repo, base, head, limit) -> {
+                                attempts.incrementAndGet();
+                                return new PrDiffService.CompareResponse(
+                                        PrDiffService.Response.of(PrDiffService.Status.NETWORK), 0);
+                            },
+                            attempt -> {});
+            assertThat(
+                            transientService
+                                    .compare("https://api", "t", "o", "r", BASE, HEAD)
+                                    .statusCode())
+                    .isZero();
+            assertThat(attempts).hasValue(3);
+
+            AtomicInteger clientErrorAttempts = new AtomicInteger();
+            PrDiffService clientErrorService =
+                    new PrDiffService(
+                            hostname -> GitHubAuthService.TokenResolution.resolved("t"),
+                            (api, token, owner, repo, number, limit) -> null,
+                            (api, token, owner, repo, base, head, limit) -> {
+                                clientErrorAttempts.incrementAndGet();
+                                return new PrDiffService.CompareResponse(
+                                        PrDiffService.Response.of(PrDiffService.Status.NOT_FOUND),
+                                        404);
+                            },
+                            attempt -> {});
+            assertThat(
+                            clientErrorService
+                                    .compare("https://api", "t", "o", "r", BASE, HEAD)
+                                    .statusCode())
+                    .isEqualTo(404);
+            assertThat(clientErrorAttempts).hasValue(1);
+        }
+
+        private static HttpServer server(
+                int status,
+                String body,
+                AtomicReference<String> path,
+                AtomicReference<String> accept)
+                throws IOException {
+            HttpServer server =
+                    HttpServer.create(
+                            new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0);
+            server.createContext(
+                    "/",
+                    exchange -> {
+                        path.set(exchange.getRequestURI().getPath());
+                        accept.set(exchange.getRequestHeaders().getFirst("Accept"));
+                        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+                        exchange.sendResponseHeaders(status, bytes.length);
+                        try (OutputStream out = exchange.getResponseBody()) {
+                            out.write(bytes);
+                        }
+                    });
+            server.start();
+            return server;
+        }
+
+        private static String api(HttpServer server) {
+            return "http://127.0.0.1:" + server.getAddress().getPort();
+        }
     }
 
     private static PrDiffService service(AtomicInteger requestedLimit) {

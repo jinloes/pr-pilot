@@ -631,6 +631,7 @@ export function useReviewController({
       saveRepositoryInstructions: handleSaveRepositoryInstructions,
       setChunkedMode,
       generate: () => handleGenerate(),
+      generateIncremental: () => handleGenerate(true, true),
       cancel: handleCancel,
       save: handleSave,
       deleteDraft: handleDelete,

@@ -121,6 +121,7 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
       focusedCommentIdx={model.focusedCommentIdx}
       commentFocusRequestId={model.commentFocusRequestId}
       onGenerate={actions.generate}
+      onGenerateIncremental={model.pr?.reviewStatus === 'UPDATED_SINCE_REVIEW' ? actions.generateIncremental : undefined}
       onVerifyComment={model.hasReview ? actions.verifyComment : undefined}
       onSuggestFixComment={model.hasReview ? actions.suggestFixComment : undefined}
       onFocusComment={actions.focusComment}

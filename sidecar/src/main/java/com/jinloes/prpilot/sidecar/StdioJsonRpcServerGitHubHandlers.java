@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jinloes.prpilot.engine.GitHubEngineApi;
 import com.jinloes.prpilot.sidecar.pr.CheckRunService;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewMutationService;
+import com.jinloes.prpilot.sidecar.pr.IncrementalDiffService;
 import com.jinloes.prpilot.sidecar.pr.LinkedIssueService;
 import com.jinloes.prpilot.sidecar.pr.PrDetailService;
 import com.jinloes.prpilot.sidecar.pr.PrDiffService;
@@ -32,6 +33,7 @@ final class StdioJsonRpcServerGitHubHandlers {
         handlers.put("repos/listStarred", this::listStarredRepositories);
         handlers.put("prs/getDetail", this::getPullRequestDetail);
         handlers.put("prs/getDiff", this::getPullRequestDiff);
+        handlers.put("prs/getIncrementalDiff", this::getIncrementalDiff);
         handlers.put("prs/getExistingReviews", this::getExistingReviews);
         handlers.put("prs/getDraftReview", this::getDraftReview);
         handlers.put("prs/saveDraftReview", this::saveDraftReview);
@@ -132,6 +134,27 @@ final class StdioJsonRpcServerGitHubHandlers {
                                 params.path("repo").textValue(),
                                 params.path("number").intValue(),
                                 params.path("mode").textValue())));
+    }
+
+    private ObjectNode getIncrementalDiff(JsonNode request) {
+        JsonNode params = request.get("params");
+        if (params == null
+                || !params.isObject()
+                || !support.hasOnlyFields(
+                        params, Set.of("githubBaseUrl", "owner", "repo", "number"))
+                || !params.path("githubBaseUrl").isTextual()
+                || !params.path("owner").isTextual()
+                || !params.path("repo").isTextual()
+                || !params.path("number").isInt())
+            return support.error(support.requestId(request), -32602, "Invalid params");
+        return support.result(
+                support.requestId(request),
+                github.getIncrementalDiff(
+                        new IncrementalDiffService.Params(
+                                params.path("githubBaseUrl").textValue(),
+                                params.path("owner").textValue(),
+                                params.path("repo").textValue(),
+                                params.path("number").intValue())));
     }
 
     private ObjectNode searchPullRequests(JsonNode request) {

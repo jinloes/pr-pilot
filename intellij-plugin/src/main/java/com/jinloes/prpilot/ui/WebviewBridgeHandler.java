@@ -95,7 +95,8 @@ final class WebviewBridgeHandler {
                                 node.path("focusAreas").asText(""),
                                 node.path("customInstructions").asText(""),
                                 node.path("operationId").asText(),
-                                null);
+                                null,
+                                isIncrementalRequest(node));
                     }
                 }
                 case "continueDeepReview" -> panel.assistedReviews.continueReview(node.deepCopy());
@@ -190,5 +191,11 @@ final class WebviewBridgeHandler {
                                         finalOrphans);
                             }
                         });
+    }
+
+    /** Only a JSON {@code true} opts in; Jackson's lenient coercion would also accept "true". */
+    static boolean isIncrementalRequest(JsonNode node) {
+        JsonNode incremental = node.get("incremental");
+        return incremental != null && incremental.isBoolean() && incremental.booleanValue();
     }
 }

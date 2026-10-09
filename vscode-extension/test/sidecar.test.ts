@@ -18,6 +18,7 @@ import {
   parseGitHubAuthResult,
   parseInitializeResult,
   parsePrDetailResult,
+  parseIncrementalDiffResult,
   parsePrDiffResult,
   parsePrListResult,
   parsePrSearchResult,
@@ -955,4 +956,32 @@ test('worktree and guidance reads tolerate a malformed payload without throwing'
     status: 'failed', worktreeDir: '', message: '',
   });
   client.dispose();
+});
+
+test('parseIncrementalDiffResult accepts incremental, fallback and failure results', () => {
+  const baselineSha = 'a'.repeat(40);
+  const headSha = 'b'.repeat(40);
+  assert.deepEqual(parseIncrementalDiffResult({ status: 'ok', message: 'ok', scope: 'incremental', fallbackReason: null,
+    baselineSha, headSha, diff: 'diff', truncated: false, limitBytes: 250000 }),
+  { status: 'ok', message: 'ok', scope: 'incremental', baselineSha, headSha, diff: 'diff', truncated: false, limitBytes: 250000 });
+  assert.deepEqual(parseIncrementalDiffResult({ status: 'ok', message: 'Falling back.', scope: 'full',
+    fallbackReason: 'up_to_date', baselineSha, headSha, diff: null, truncated: false, limitBytes: 250000 }),
+  { status: 'ok', message: 'Falling back.', scope: 'full', fallbackReason: 'up_to_date', limitBytes: 250000 });
+  assert.deepEqual(parseIncrementalDiffResult({ status: 'not_authenticated', message: 'Log in.', scope: null,
+    fallbackReason: null, baselineSha: null, headSha: null, diff: null, truncated: false, limitBytes: 250000 }),
+  { status: 'not_authenticated', message: 'Log in.', limitBytes: 250000 });
+});
+
+test('parseIncrementalDiffResult rejects malformed results', () => {
+  const baselineSha = 'a'.repeat(40);
+  const ok = { status: 'ok', message: 'ok', scope: 'incremental', baselineSha, headSha: baselineSha,
+    diff: 'diff', truncated: false, limitBytes: 250000 };
+  assert.equal(parseIncrementalDiffResult({ ...ok, baselineSha: 'HEAD' }), null);
+  assert.equal(parseIncrementalDiffResult({ ...ok, diff: '  ' }), null);
+  assert.equal(parseIncrementalDiffResult({ ...ok, scope: 'partial' }), null);
+  assert.equal(parseIncrementalDiffResult({ ...ok, scope: 'full', fallbackReason: 'surprise' }), null);
+  assert.equal(parseIncrementalDiffResult({ status: 'api_failed', message: 'x', scope: 'full', limitBytes: 1 }), null);
+  assert.equal(parseIncrementalDiffResult({ status: 'diff_too_large', message: 'x', limitBytes: 1 }), null);
+  assert.equal(parseIncrementalDiffResult({ status: 'unknown', message: 'x', limitBytes: 1 }), null);
+  assert.equal(parseIncrementalDiffResult(null), null);
 });

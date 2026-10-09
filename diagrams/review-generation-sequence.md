@@ -44,6 +44,22 @@ sequenceDiagram
         Note over Host,ReviewEngine: Readiness failure preserves setup for explicit Retry.<br/>Request evidence alone never grants execution authority.
     end
 
+    opt Review changes since last review (incremental, non-deep)
+        Host->>GitHubEngine: getIncrementalDiff(prKey)
+        GitHubEngine->>GitHub: Viewer's latest review commit, PR history, compare baseline...head
+        GitHub-->>GitHubEngine: Baseline and compare diff
+        alt Baseline trusted and diff non-empty
+            GitHubEngine-->>Host: scope incremental (baselineSha, bounded diff)
+            Host->>Host: Use incremental diff as model diff and set incrementalBaselineSha (chunked mode off)
+        else Fallback reason
+            GitHubEngine-->>Host: scope full (fallbackReason)
+        else GitHub failure
+            GitHubEngine-->>Host: Non-ok status
+            Host-->>UI: reviewError
+        end
+        Note over Host,GitHubEngine: activeDiff, the published diff and validationDiff stay PR diffs.<br/>incrementalBaselineSha adds a review_scope prompt section.
+    end
+
     par Load additive review context
         Host->>GitHubEngine: Get checks and CI annotations
         GitHubEngine->>GitHub: Read check runs and annotations
@@ -142,7 +158,7 @@ sequenceDiagram
         Sidecar-->>Host: Parsed ReviewResult
     end
 
-    Host-->>UI: reviewResult(prKey, generation ID)
+    Host-->>UI: reviewResult(prKey, generation ID, reviewScope only when incremental was requested)
     UI-->>Reviewer: Editable review, findings, verdict, and activity history
 
     Note over Pipeline,UI: Lifecycle status is reduced to safe phase labels before display.<br/>Provider text and private thinking are never persisted or rendered.
@@ -156,6 +172,8 @@ sequenceDiagram
   `<omitted_files>` name them, and the webview banner states the review coverage.
 - GitHub HTTP 406 for a diff is attempted once and surfaces as `diff_too_large`, not a retryable
   API failure.
+- An incremental request whose diff cannot be trusted reviews the full PR and reports the fallback
+  reason. A GitHub failure while fetching the incremental diff becomes `reviewError`.
 - Primary provider failure is terminal.
 - Base-commit enrichment failures (unreachable commit, timeout, non-git directory) review without
   base guidance or history. Second-reviewer and hygiene-pass failures are ignored.

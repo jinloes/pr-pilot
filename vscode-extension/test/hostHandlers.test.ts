@@ -49,7 +49,7 @@ function host(settings: Record<string, unknown> = {}) {
             return require(name);
         };
         const expose = path.basename(file) === 'extension.js'
-            ? '\nexports.testHost = {refresh: handleRefreshPRs, cancelChat: handleCancelChat, '
+            ? '\nexports.testHost = {refresh: handleRefreshPRs, cancelChat: handleCancelChat, generate: handleGenerateReview, '
                 + 'saveRepositoryInstructions: handleSaveRepositoryInstructions, setClient: c => {sidecarClient=c}};'
             : '';
         runInNewContext(readFileSync(file, 'utf8') + expose, { module, exports: module.exports,
@@ -58,7 +58,7 @@ function host(settings: Record<string, unknown> = {}) {
         return module.exports;
     }
     const api = load(require.resolve('../src/extension')).testHost as {
-        refresh: Handler; cancelChat: Handler; setClient: (value: object) => void;
+        refresh: Handler; cancelChat: Handler; generate: Handler; setClient: (value: object) => void;
         saveRepositoryInstructions: (state: Record<string, unknown>, msg: Record<string, unknown>,
             push: (message: Record<string, unknown>) => void) => Promise<void>;
     };
@@ -154,4 +154,105 @@ test('saveRepositoryInstructions reports invalid names, oversize text, and setti
         instructions: 'Rule' }, (message) => failing.messages.push(message));
     assert.deepEqual(plain(failing.messages), [{ type: 'repositoryInstructionsSaveError', prKey: 'acme/widget#1',
         message: 'Could not save PR Pilot settings. Try again.' }]);
+});
+
+const BASELINE = 'b'.repeat(40);
+
+/** Runs one generateReview through the real host handler with a scripted sidecar. */
+async function generate(options: {
+    incremental?: boolean;
+    incrementalResult?: Record<string, unknown>;
+    validationFails?: boolean;
+}) {
+    const h = host();
+    const incrementalCalls: unknown[][] = [];
+    const generateCalls: Record<string, unknown>[] = [];
+    h.api.setClient({
+        cancelReview: async () => {},
+        getPullRequestDiff: async (_base: string, _owner: string, _repo: string, _number: number, mode: string) => {
+            if (mode === 'validation' && options.validationFails) throw new Error('network down');
+            return { status: 'ok', message: 'ok', diff: mode === 'validation' ? 'pr-validation-diff' : 'pr-diff',
+                truncated: false, limitBytes: 250000 };
+        },
+        getIncrementalDiff: async (...args: unknown[]) => {
+            incrementalCalls.push(args);
+            return options.incrementalResult;
+        },
+        getExistingReviews: async () => ({ status: 'ok', summary: '' }),
+        getPullRequestDetail: async () => ({ status: 'ok', detail: { head: { sha: 'c'.repeat(40) }, baseSha: 'd'.repeat(40) } }),
+        getCommits: async () => ({ summary: '', closingIssueNumbers: [] }),
+        getCheckStatus: async () => ({ summary: '', annotations: [] }),
+        getLinkedIssues: async () => '',
+        getRepoProfile: async () => '',
+        generateReview: async (params: Record<string, unknown>) => {
+            generateCalls.push(params);
+            return { summary: 'Done.', verdict: 'COMMENT', lineComments: [] };
+        },
+    });
+    Object.assign(h.state, {
+        activePR: { number: 42, owner: 'acme', repo: 'widget', title: 'Test', body: '' },
+        activeDiff: '', activeValidationDiff: '', activeReviewResult: null, generatedReviews: new Map(),
+        worktreeDir: '/fixture/wt', worktreeKey: 'acme/widget#42',
+    });
+    await h.api.generate(h.state, { type: 'generateReview', operationId: 'op-1', number: 42, owner: 'acme',
+        repo: 'widget', ...(options.incremental ? { incremental: true } : {}) });
+    const find = (type: string) => {
+        const message = h.messages.find((m) => m.type === type);
+        return message === undefined ? undefined : plain(message) as Record<string, unknown>;
+    };
+    const result = find('reviewResult');
+    const error = find('reviewError');
+    return { state: h.state, incrementalCalls, generateCalls, result, error };
+}
+
+test('incremental generation reviews only new changes but publishes PR diffs', async () => {
+    const run = await generate({ incremental: true, incrementalResult: { status: 'ok', message: 'ok',
+        scope: 'incremental', baselineSha: BASELINE, headSha: 'c'.repeat(40), diff: 'incremental-diff',
+        truncated: false, limitBytes: 250000 } });
+
+    assert.equal(run.incrementalCalls.length, 1);
+    assert.equal(run.generateCalls[0].diff, 'incremental-diff');
+    assert.equal(run.generateCalls[0].incrementalBaselineSha, BASELINE);
+    assert.equal(run.state.activeDiff, 'pr-diff');
+    assert.equal(run.result?.diff, 'pr-diff');
+    assert.equal(run.result?.validationDiff, 'pr-validation-diff');
+    assert.deepEqual(run.result?.reviewScope, { kind: 'incremental', baselineSha: BASELINE });
+});
+
+test('incremental generation falls back to the PR diff when the validation fetch fails', async () => {
+    const run = await generate({ incremental: true, validationFails: true, incrementalResult: { status: 'ok',
+        message: 'ok', scope: 'incremental', baselineSha: BASELINE, headSha: 'c'.repeat(40),
+        diff: 'incremental-diff', truncated: false, limitBytes: 250000 } });
+
+    assert.equal(run.generateCalls[0].diff, 'incremental-diff');
+    assert.equal(run.result?.diff, 'pr-diff');
+    assert.equal(run.result?.validationDiff, 'pr-diff');
+});
+
+test('incremental generation runs a full review when the engine falls back', async () => {
+    const run = await generate({ incremental: true, incrementalResult: { status: 'ok', message: 'Falling back.',
+        scope: 'full', fallbackReason: 'baseline_not_in_history', limitBytes: 250000 } });
+
+    assert.equal(run.generateCalls[0].diff, 'pr-diff');
+    assert.equal(run.generateCalls[0].incrementalBaselineSha, undefined);
+    assert.equal(run.result?.diff, 'pr-diff');
+    assert.deepEqual(run.result?.reviewScope, { kind: 'full', fallbackReason: 'baseline_not_in_history' });
+});
+
+test('incremental generation reports a non-ok status as a review error', async () => {
+    const run = await generate({ incremental: true, incrementalResult: { status: 'rate_limited',
+        message: 'GitHub rate limit exceeded. Try again shortly.', limitBytes: 250000 } });
+
+    assert.equal(run.generateCalls.length, 0);
+    assert.equal(run.result, undefined);
+    assert.ok(run.error, 'expected a reviewError');
+});
+
+test('ordinary generation never asks for the incremental diff or sends a scope', async () => {
+    const run = await generate({});
+
+    assert.equal(run.incrementalCalls.length, 0);
+    assert.equal(run.generateCalls[0].diff, 'pr-diff');
+    assert.equal(run.generateCalls[0].incrementalBaselineSha, undefined);
+    assert.equal(run.result !== undefined && 'reviewScope' in run.result, false);
 });

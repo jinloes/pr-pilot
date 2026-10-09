@@ -7,6 +7,8 @@ import com.jinloes.prpilot.sidecar.pr.DraftReviewMutationResult;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewMutationService;
 import com.jinloes.prpilot.sidecar.pr.DraftReviewResult;
 import com.jinloes.prpilot.sidecar.pr.ExistingReviewsResult;
+import com.jinloes.prpilot.sidecar.pr.IncrementalDiffResult;
+import com.jinloes.prpilot.sidecar.pr.IncrementalDiffService;
 import com.jinloes.prpilot.sidecar.pr.LinkedIssueResult;
 import com.jinloes.prpilot.sidecar.pr.LinkedIssueService;
 import com.jinloes.prpilot.sidecar.pr.PrCommitsResult;
@@ -55,6 +57,7 @@ public interface GitHubEngineApi {
                     Map.entry("listStarredRepositories", "repos/listStarred"),
                     Map.entry("getPullRequestDetail", "prs/getDetail"),
                     Map.entry("getPullRequestDiff", "prs/getDiff"),
+                    Map.entry("getIncrementalDiff", "prs/getIncrementalDiff"),
                     Map.entry("getExistingReviews", "prs/getExistingReviews"),
                     Map.entry("getDraftReview", "prs/getDraftReview"),
                     Map.entry("saveDraftReview", "prs/saveDraftReview"),
@@ -85,6 +88,12 @@ public interface GitHubEngineApi {
 
     /** Bounded unified diff in either {@code review} or {@code validation} mode. */
     PrDiffResult getPullRequestDiff(PrDiffService.Params params);
+
+    /**
+     * Review-bounded diff of commits pushed since the viewer's latest submitted review, or a full
+     * review fallback reason when that diff cannot be trusted.
+     */
+    IncrementalDiffResult getIncrementalDiff(IncrementalDiffService.Params params);
 
     /** Formatted summary of already-submitted reviews, used as prompt context. */
     ExistingReviewsResult getExistingReviews(PrSupplementalService.IdentityParams params);

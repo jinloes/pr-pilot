@@ -145,6 +145,7 @@ public class ReviewSessionService implements ReviewEngineApi {
                 .baseSha(params.baseSha())
                 .guidanceGlobs(params.guidanceGlobs())
                 .rulesDirectory(params.rulesDirectory())
+                .incrementalBaselineSha(params.incrementalBaselineSha())
                 .build();
     }
 

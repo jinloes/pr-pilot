@@ -32,6 +32,46 @@ void test('accepts complete rich review result messages', () => {
   assert.notEqual(parsed, null)
 })
 
+void test('keeps a well-formed review scope on a result', () => {
+  const sha = '0123456789abcdef0123456789abcdef01234567'
+  const incremental = parseIncomingMessage({
+    ...version,
+    type: 'reviewResult',
+    prKey: 'acme/platform#42',
+    result: review,
+    diff: 'diff',
+    reviewScope: { kind: 'incremental', baselineSha: sha },
+  })
+  const full = parseIncomingMessage({
+    ...version,
+    type: 'reviewResult',
+    prKey: 'acme/platform#42',
+    result: review,
+    diff: 'diff',
+    reviewScope: { kind: 'full', fallbackReason: 'baseline_not_in_history' },
+  })
+
+  assert.deepEqual(incremental?.type === 'reviewResult' && incremental.reviewScope, { kind: 'incremental', baselineSha: sha })
+  assert.deepEqual(full?.type === 'reviewResult' && full.reviewScope, { kind: 'full', fallbackReason: 'baseline_not_in_history' })
+})
+
+void test('drops a malformed review scope but keeps the result', () => {
+  for (const reviewScope of [
+    { kind: 'incremental', baselineSha: 'HEAD' },
+    { kind: 'incremental', baselineSha: 'A'.repeat(40) },
+    { kind: 'full', fallbackReason: 'surprise' },
+    { kind: 'full', fallbackReason: 'up_to_date', extra: true },
+    { kind: 'partial' },
+    'incremental',
+    null,
+  ]) {
+    const parsed = parseIncomingMessage({ ...version, type: 'reviewResult', prKey: 'acme/platform#42', result: review, diff: 'diff', reviewScope })
+
+    assert.equal(parsed?.type, 'reviewResult', JSON.stringify(reviewScope))
+    assert.equal(parsed !== null && 'reviewScope' in parsed, false, JSON.stringify(reviewScope))
+  }
+})
+
 void test('rejects unversioned and unknown messages', () => {
   assert.equal(parseIncomingMessage({ type: 'prLoading' }), null)
   assert.equal(parseIncomingMessage({ ...version, type: 'surprise' }), null)

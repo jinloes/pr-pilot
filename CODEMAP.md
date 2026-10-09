@@ -161,6 +161,9 @@ receive GitHub tokens.
 - `sidecar/pr/PrReviewStatusService.java` - Viewer lookup plus one GraphQL freshness query for at
   most 50 list results.
 - `sidecar/pr/PrDetailService.java` - PR metadata and worktree-head lookup.
+- `sidecar/pr/IncrementalDiffService.java` - Diff of commits since the viewer's last submitted
+  review (`prs/getIncrementalDiff`), using `PrReviewStatusService.reviewBaseline` and
+  `PrDiffService.compare`, with typed full-review fallback reasons.
 - `sidecar/pr/PrDiffService.java` - Whole-file, UTF-8-safe review/validation diff bounding
   (smallest-first, 250 KB per file, coverage trailer) and HTTP 406 as `diff_too_large`.
 - `sidecar/pr/DraftReviewService.java` - Pending-review lookup and decoding.

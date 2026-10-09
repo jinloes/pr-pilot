@@ -30,6 +30,7 @@ final class SidecarBootstrapService {
                     Map.entry("githubAuth", Set.of("github/checkAuth")),
                     Map.entry("prDetail", Set.of("prs/getDetail")),
                     Map.entry("prDiff", Set.of("prs/getDiff")),
+                    Map.entry("prIncrementalDiff", Set.of("prs/getIncrementalDiff")),
                     Map.entry("prList", Set.of("prs/list")),
                     Map.entry("repoDetect", Set.of("repo/detect")),
                     Map.entry("draftReview", Set.of("prs/getDraftReview")),

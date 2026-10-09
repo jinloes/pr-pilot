@@ -6,6 +6,8 @@ import type {
     SidecarGitHubAuthResult,
     SidecarInitializeResult,
     SidecarPrDetailResult,
+    SidecarIncrementalDiffResult,
+    SidecarIncrementalFallbackReason,
     SidecarPrDiffResult,
     SidecarPrListResult,
     SidecarPrSearchResult,
@@ -37,6 +39,7 @@ export const REQUIRED_CAPABILITIES = [
     'worktrees',
     'semanticReviews',
     'reviewGeneration',
+    'prIncrementalDiff',
 ] as const;
 
 export function parseReviewResult(value: unknown): ReviewResult | null {
@@ -373,6 +376,50 @@ export function parsePrDiffResult(value: unknown): SidecarPrDiffResult | null {
     if ((result.status === 'ok') !== (typeof result.diff === 'string')) return null;
     return { status: result.status as SidecarPrDiffResult['status'], message: result.message,
         diff: typeof result.diff === 'string' ? result.diff : null, truncated: result.truncated, limitBytes: result.limitBytes };
+}
+
+const INCREMENTAL_FALLBACK_REASONS = new Set<string>([
+    'no_prior_review',
+    'up_to_date',
+    'baseline_not_in_history',
+    'baseline_unavailable',
+    'empty_incremental_diff',
+    'incremental_diff_too_large',
+]);
+const SHA = /^[0-9a-f]{40}$/;
+
+/** Validates the token-free result shape returned by `prs/getIncrementalDiff`. */
+export function parseIncrementalDiffResult(value: unknown): SidecarIncrementalDiffResult | null {
+    if (!value || typeof value !== 'object') return null;
+    const result = value as Record<string, unknown>;
+    if (typeof result.status !== 'string' || typeof result.message !== 'string'
+        || typeof result.limitBytes !== 'number') return null;
+    const { message, limitBytes } = result;
+    if (result.status !== 'ok') {
+        if (!PR_DIFF_STATUSES.has(result.status as SidecarPrDiffResult['status'])
+            || result.status === 'diff_too_large' || result.scope != null) return null;
+        return {
+            status: result.status as Exclude<SidecarPrDiffResult['status'], 'ok' | 'diff_too_large'>,
+            message,
+            limitBytes,
+        };
+    }
+    if (result.scope === 'incremental') {
+        if (typeof result.baselineSha !== 'string' || !SHA.test(result.baselineSha)
+            || typeof result.headSha !== 'string' || !SHA.test(result.headSha)
+            || typeof result.diff !== 'string' || !result.diff.trim()
+            || typeof result.truncated !== 'boolean') return null;
+        return { status: 'ok', message, scope: 'incremental', baselineSha: result.baselineSha,
+            headSha: result.headSha, diff: result.diff, truncated: result.truncated, limitBytes };
+    }
+    if (result.scope === 'full') {
+        if (typeof result.fallbackReason !== 'string' || !INCREMENTAL_FALLBACK_REASONS.has(result.fallbackReason)) {
+            return null;
+        }
+        return { status: 'ok', message, scope: 'full',
+            fallbackReason: result.fallbackReason as SidecarIncrementalFallbackReason, limitBytes };
+    }
+    return null;
 }
 
 /** Validates the token-free result shape returned by `prs/getDraftReview`. */

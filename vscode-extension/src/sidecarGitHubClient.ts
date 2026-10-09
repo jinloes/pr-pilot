@@ -5,6 +5,7 @@ import {
     parseDraftReviewResult,
     parseExistingReviewsResult,
     parseGitHubAuthResult,
+    parseIncrementalDiffResult,
     parsePrDetailResult,
     parsePrDiffResult,
     parsePrListResult,
@@ -19,6 +20,7 @@ import type {
     SidecarDraftReviewResult,
     SidecarExistingReviewsResult,
     SidecarGitHubAuthResult,
+    SidecarIncrementalDiffResult,
     SidecarPrDetailResult,
     SidecarPrDiffResult,
     SidecarPrListResult,
@@ -97,6 +99,17 @@ export class SidecarGitHubClient extends SidecarTransport {
     ): Promise<SidecarPrDiffResult> {
         return this.parseResult('PR diff', parsePrDiffResult,
             await this.request('prs/getDiff', { githubBaseUrl, owner, repo, number, mode }));
+    }
+
+    /** Changes since the caller's last submitted review, or the reason to review the full PR. */
+    async getIncrementalDiff(
+        githubBaseUrl: string,
+        owner: string,
+        repo: string,
+        number: number,
+    ): Promise<SidecarIncrementalDiffResult> {
+        return this.parseResult('incremental diff', parseIncrementalDiffResult,
+            await this.request('prs/getIncrementalDiff', { githubBaseUrl, owner, repo, number }));
     }
 
     async getExistingReviews(

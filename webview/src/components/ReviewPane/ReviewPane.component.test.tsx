@@ -266,6 +266,111 @@ describe('no-draft workspace', () => {
   })
 })
 
+describe('incremental review', () => {
+  const updatedPr = { ...pr, reviewStatus: 'UPDATED_SINCE_REVIEW' as const }
+
+  function generatingResult(reviewScope?: unknown) {
+    act(() => hostMessage({
+      type: 'reviewResult',
+      prKey: 'acme/widget#42',
+      result: { summary: 'Done.', verdict: 'COMMENT', lineComments: [] },
+      diff: diffWithFiles(1),
+      validationDiff: diffWithFiles(1),
+      ...(reviewScope ? { reviewScope } : {}),
+    }))
+  }
+
+  it('offers the incremental button only when the PR changed since the last review', () => {
+    installHost()
+    const view = render(<ReviewPane pr={pr} />)
+    loadNoDraft(diffWithFiles(1))
+    expect(screen.queryByTestId('generate-incremental-review')).not.toBeInTheDocument()
+
+    view.rerender(<ReviewPane pr={{ ...pr, reviewStatus: 'REVIEWED' }} />)
+    loadNoDraft(diffWithFiles(1))
+    expect(screen.queryByTestId('generate-incremental-review')).not.toBeInTheDocument()
+  })
+
+  it('sends an incremental request without diff, chunking, or assisted mode', async () => {
+    const user = userEvent.setup()
+    const cefQuery = installHost()
+    render(<ReviewPane pr={updatedPr} intellijAssistedEnabled />)
+    loadNoDraft(`${diffWithFiles(1)}\n${coverageTrailer(1, ['src/file-1.ts'])}`, diffWithFiles(2))
+    await user.click(screen.getByRole('button', { name: 'Include them with chunked review' }))
+
+    const button = screen.getByTestId('generate-incremental-review')
+    expect(button).toHaveTextContent('Review changes since last review')
+    await user.click(button)
+
+    const sent = outgoingOf(cefQuery, 'generateReview')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ incremental: true, number: 42, owner: 'acme', repo: 'widget' })
+    expect(sent[0]).not.toHaveProperty('diff')
+    expect(sent[0]).not.toHaveProperty('chunkedReview')
+    expect(sent[0]).not.toHaveProperty('intellijAssisted')
+  })
+
+  it('omits the incremental flag from an ordinary generation', async () => {
+    const user = userEvent.setup()
+    const cefQuery = installHost()
+    render(<ReviewPane pr={updatedPr} />)
+    loadNoDraft(diffWithFiles(1))
+    await user.click(screen.getByRole('button', { name: 'Generate Review' }))
+    expect(outgoingOf(cefQuery, 'generateReview')[0]).not.toHaveProperty('incremental')
+  })
+
+  it('disables the incremental button when the provider is unavailable', () => {
+    installHost()
+    render(<ReviewPane pr={updatedPr} />)
+    loadNoDraft(diffWithFiles(1), diffWithFiles(1), false)
+    expect(screen.getByTestId('generate-incremental-review')).toBeDisabled()
+  })
+
+  it('shows the incremental scope banner with the short baseline SHA', async () => {
+    const user = userEvent.setup()
+    installHost()
+    render(<ReviewPane pr={updatedPr} />)
+    loadNoDraft(diffWithFiles(1))
+    await user.click(screen.getByTestId('generate-incremental-review'))
+    generatingResult({ kind: 'incremental', baselineSha: 'abcdef1'.padEnd(40, '0') })
+
+    expect(screen.getByTestId('review-scope-banner'))
+      .toHaveTextContent('Reviewed only changes since your last review (abcdef1).')
+  })
+
+  const reasons: [string, string][] = [
+    ['no_prior_review', "you haven't submitted a review on this pull request"],
+    ['up_to_date', 'no commits were pushed since your last review'],
+    ['baseline_not_in_history', "the commit you last reviewed is no longer in this pull request's history"],
+    ['baseline_unavailable', "GitHub couldn't compare against the commit you last reviewed"],
+    ['empty_incremental_diff', 'the changes since your last review have no diff'],
+    ['incremental_diff_too_large', 'the changes since your last review are too large to compare'],
+  ]
+  for (const [reason, text] of reasons) {
+    it(`explains the full-review fallback for ${reason}`, async () => {
+      const user = userEvent.setup()
+      installHost()
+      render(<ReviewPane pr={updatedPr} />)
+      loadNoDraft(diffWithFiles(1))
+      await user.click(screen.getByTestId('generate-incremental-review'))
+      generatingResult({ kind: 'full', fallbackReason: reason })
+
+      expect(screen.getByTestId('review-scope-banner')).toHaveTextContent(
+        `Couldn't review only new changes (${text}). Reviewed the full pull request instead.`)
+    })
+  }
+
+  it('shows no scope banner for an ordinary result', async () => {
+    const user = userEvent.setup()
+    installHost()
+    render(<ReviewPane pr={updatedPr} />)
+    loadNoDraft(diffWithFiles(1))
+    await user.click(screen.getByRole('button', { name: 'Generate Review' }))
+    generatingResult()
+    expect(screen.queryByTestId('review-scope-banner')).not.toBeInTheDocument()
+  })
+})
+
 describe('coverage banner remedy', () => {
   it('turns on chunked mode from the no-draft banner without starting a review', async () => {
     const user = userEvent.setup()
