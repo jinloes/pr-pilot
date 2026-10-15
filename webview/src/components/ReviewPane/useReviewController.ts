@@ -437,6 +437,8 @@ export function useReviewController({
       setFocusedCommentIdx((focusedIndex) =>
         focusedIndexAfterCommentDeletion(focusedIndex, index, partition.adjusted.length),
       )
+      // The focused index often stays the same after a delete; force a re-scroll.
+      setCommentFocusRequestId((requestId) => requestId + 1)
       updateAtOriginal(inlineToOriginal(index), () => null)
     },
     onRemoveSuggestion: (index: number) => {

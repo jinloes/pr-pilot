@@ -374,6 +374,25 @@ describe('useReviewController', () => {
     expect(result.current.model.commentFocusRequestId).toBe(2)
   })
 
+  it('requests focus again after deleting a comment', () => {
+    const { result } = renderHook(() => useReviewController({ pr }))
+    act(() => {
+      hostMessage({
+        type: 'draftLoaded',
+        prKey: 'acme/widget#42',
+        prState: 'DRAFT_PRESENT',
+        reviewId: 'draft-1',
+        result: review,
+        diff,
+        validationDiff: diff,
+      })
+    })
+
+    const before = result.current.model.commentFocusRequestId
+    act(() => result.current.actions.editCommentHandlers.onDeleteComment(0))
+    expect(result.current.model.commentFocusRequestId).toBe(before + 1)
+  })
+
   it('marks review activity failed when generation errors', () => {
     ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
     const { result } = renderHook(() => useReviewController({ pr }))
