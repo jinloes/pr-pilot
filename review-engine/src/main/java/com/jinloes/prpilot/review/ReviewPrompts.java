@@ -32,7 +32,8 @@ public final class ReviewPrompts {
      * <p>Not a compatibility version: nothing parses it, and old log lines keep their old value.
      */
     public static final String PROMPT_VERSION =
-            "2026-10-thread-state-incremental-scope-corroboration-rule-gating-suggested-changes";
+            "2026-10-thread-state-incremental-scope-corroboration-rule-gating-suggested-changes"
+                    + "-stable-pagination-discarded-records";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -301,6 +302,12 @@ public final class ReviewPrompts {
                     + "- Swallowed failures: a catch that only logs or ignores the error, or an"
                     + " error path that returns a success-like value (empty list, null, default,"
                     + " true, OK status), so the caller cannot tell the operation failed.\n"
+                    + "- Silently discarded records: a filter, skip, or continue that drops"
+                    + " malformed or incomplete input rows (missing required fields, failed"
+                    + " parse) while still returning success, with no count, metric, or log of"
+                    + " what was dropped. Callers see fewer results with no signal. Tell the"
+                    + " author to count the dropped rows and emit one aggregated WARN (or"
+                    + " metric) with the count, not a log line per row.\n"
                     + "- Removed safeguards: a deleted or weakened guard, null check, validation,"
                     + " authorization check, lock, cleanup, or required call. Read the '-' lines,"
                     + " not only the '+' lines.\n"
@@ -321,6 +328,11 @@ public final class ReviewPrompts {
                     + " timeout, or with retries that are unbounded or not idempotent-safe.\n"
                     + "- Data changes: a schema migration without the backfill or default existing"
                     + " rows need, or a new query filtering or joining on a column with no index.\n"
+                    + "- Unstable pagination: offset/limit paging whose sort key is not unique"
+                    + " across the filtered rows — including ordering only by columns the filter"
+                    + " pins to a single value. Tied rows can reorder between page requests, so"
+                    + " pages skip or duplicate rows. Tell the author to add a unique tie-breaker"
+                    + " (such as the primary key) or switch to cursor-based paging.\n"
                     + "- State and ordering: a new state transition the existing state machine"
                     + " forbids, a related field left stale by a partial update, a cache not"
                     + " invalidated, or a cancellation, retry, or await path that leaves work"

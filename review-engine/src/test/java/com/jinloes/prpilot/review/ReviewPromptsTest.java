@@ -403,7 +403,7 @@ class ReviewPromptsTest {
             assertThat(ReviewPrompts.PROMPT_VERSION)
                     .isEqualTo(
                             "2026-10-thread-state-incremental-scope-corroboration-rule-gating"
-                                    + "-suggested-changes");
+                                    + "-suggested-changes-stable-pagination-discarded-records");
         }
 
         @Test
@@ -414,7 +414,11 @@ class ReviewPromptsTest {
             assertThat(prompt).contains(ReviewPrompts.BUG_HUNT_CHECKLIST);
             assertThat(ReviewPrompts.BUG_HUNT_CHECKLIST)
                     .contains("Unchecked absent inputs")
-                    .contains("reached by");
+                    .contains("reached by")
+                    .contains("Unstable pagination")
+                    .contains("unique tie-breaker")
+                    .contains("Silently discarded records")
+                    .contains("one aggregated WARN");
             assertThat(prompt)
                     .contains("A deleted ('-') line is in scope when removing it creates the")
                     .contains("the removed code in \"rationale\"");
