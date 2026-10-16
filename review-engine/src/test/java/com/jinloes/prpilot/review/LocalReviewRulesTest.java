@@ -220,13 +220,15 @@ class LocalReviewRulesTest {
 
             assertThat(builtIn)
                     .extracting(Rule::name)
-                    .containsExactly("helper-reuse", "telemetry-default-semantics");
+                    .containsExactly(
+                            "helper-reuse", "telemetry-default-semantics", "ambiguous-delimiter");
             assertThat(builtIn).allSatisfy(rule -> assertThat(rule.structured()).isTrue());
             assertThat(builtIn)
                     .extracting(Rule::source)
                     .containsExactly(
                             "built-in/helper-reuse.yaml",
-                            "built-in/telemetry-default-semantics.yaml");
+                            "built-in/telemetry-default-semantics.yaml",
+                            "built-in/ambiguous-delimiter.yaml");
         }
 
         @Test
@@ -247,14 +249,19 @@ class LocalReviewRulesTest {
 
             assertThat(LocalReviewRules.load(rules.toString(), true))
                     .extracting(Rule::name)
-                    .containsExactly("helper-reuse", "telemetry-default-semantics", "team");
+                    .containsExactly(
+                            "helper-reuse",
+                            "telemetry-default-semantics",
+                            "ambiguous-delimiter",
+                            "team");
         }
 
         @Test
         void returnsBuiltInsWithoutAUserFolder() {
             assertThat(LocalReviewRules.load(null, true))
                     .extracting(Rule::name)
-                    .containsExactly("helper-reuse", "telemetry-default-semantics");
+                    .containsExactly(
+                            "helper-reuse", "telemetry-default-semantics", "ambiguous-delimiter");
         }
 
         @Test
@@ -275,9 +282,10 @@ class LocalReviewRulesTest {
 
             assertThat(loaded)
                     .extracting(Rule::name)
-                    .containsExactly("telemetry-default-semantics", "helper-reuse");
-            assertThat(loaded.get(1).source()).isEqualTo("mine.yaml");
-            assertThat(loaded.get(1).trigger()).isEqualTo("my trigger");
+                    .containsExactly(
+                            "telemetry-default-semantics", "ambiguous-delimiter", "helper-reuse");
+            assertThat(loaded.get(2).source()).isEqualTo("mine.yaml");
+            assertThat(loaded.get(2).trigger()).isEqualTo("my trigger");
         }
 
         @Test
@@ -286,7 +294,7 @@ class LocalReviewRulesTest {
 
             assertThat(LocalReviewRules.load(rules.toString(), true))
                     .extracting(Rule::name)
-                    .containsExactly("helper-reuse");
+                    .containsExactly("helper-reuse", "ambiguous-delimiter");
         }
 
         @Test
@@ -296,7 +304,10 @@ class LocalReviewRulesTest {
             assertThat(LocalReviewRules.load(rules.toString(), true))
                     .extracting(Rule::name)
                     .containsExactly(
-                            "helper-reuse", "telemetry-default-semantics", "helper-reuse.md");
+                            "helper-reuse",
+                            "telemetry-default-semantics",
+                            "ambiguous-delimiter",
+                            "helper-reuse.md");
         }
     }
 }
