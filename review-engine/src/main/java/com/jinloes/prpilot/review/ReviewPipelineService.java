@@ -1,6 +1,5 @@
 package com.jinloes.prpilot.review;
 
-import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewResult;
 import java.io.File;
@@ -8,7 +7,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -37,39 +35,36 @@ public final class ReviewPipelineService {
     static final int MAX_FILE_FOLLOW_UPS = 5;
     private static final long CRITIQUE_TIMEOUT_MS = 30L * 60L * 1000L;
     private static final long HYGIENE_TIMEOUT_MS = 15L * 60L * 1000L;
-    private static final int DROPPED_BODY_MAX_CHARS = 120;
     static final String REPORT_DROPPED_PROPERTY = "prpilot.review.reportDropped";
     static final String STATUS_HYGIENE_FAILED = "Hygiene pass failed; continuing without it";
     private static final long SECONDARY_POLL_MS = 250;
-    private static final int MERGED_CANDIDATE_CAP = 40;
-    // A validated finding this close to a hygiene finding, in the same category, already covers it.
-    static final int HYGIENE_COVER_LINES = 2;
+    static final int MERGED_CANDIDATE_CAP = 40;
     static final String STATUS_COVERAGE_COMPLETE =
             "Coverage check: every changed file was reviewed; no follow-up findings needed";
     static final String STATUS_BASE_CONTEXT = "Reading base-commit guidance…";
 
-    private final ProviderExecutor provider;
+    private final ReviewProviderExecutor provider;
     private final ChunkedReviewService chunkedReviewService;
     private final ReviewCoverageAnalyzer coverageAnalyzer;
     private final SemanticReviewService.Execution execution;
     private final BaseContextResolver baseContextResolver;
-    private final ProviderExecutor secondary;
+    private final ReviewProviderExecutor secondary;
     private final Runnable cancelSecondary;
     private final String secondaryModel;
 
-    private ReviewPipelineService(ProviderExecutor provider) {
+    private ReviewPipelineService(ReviewProviderExecutor provider) {
         this(provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
     }
 
     ReviewPipelineService(
-            ProviderExecutor provider,
+            ReviewProviderExecutor provider,
             ChunkedReviewService chunkedReviewService,
             ReviewCoverageAnalyzer coverageAnalyzer) {
         this(provider, chunkedReviewService, coverageAnalyzer, defaultResolver());
     }
 
     ReviewPipelineService(
-            ProviderExecutor provider,
+            ReviewProviderExecutor provider,
             ChunkedReviewService chunkedReviewService,
             ReviewCoverageAnalyzer coverageAnalyzer,
             BaseContextResolver baseContextResolver) {
@@ -85,12 +80,12 @@ public final class ReviewPipelineService {
     }
 
     private ReviewPipelineService(
-            ProviderExecutor provider,
+            ReviewProviderExecutor provider,
             ChunkedReviewService chunkedReviewService,
             ReviewCoverageAnalyzer coverageAnalyzer,
             SemanticReviewService.Execution execution,
             BaseContextResolver baseContextResolver,
-            ProviderExecutor secondary,
+            ReviewProviderExecutor secondary,
             Runnable cancelSecondary,
             String secondaryModel) {
         this.provider = provider;
@@ -122,13 +117,14 @@ public final class ReviewPipelineService {
         }
         CopilotService service = new CopilotService(projectDir.getPath());
         return withSecondReviewer(
-                new CopilotExecutor(service, model.trim(), effort, false, configDir),
+                new ReviewProviderExecutor.CopilotExecutor(
+                        service, model.trim(), effort, false, configDir),
                 service::cancelCurrentRequest,
                 model.trim());
     }
 
     ReviewPipelineService withSecondReviewer(
-            ProviderExecutor reviewer, Runnable cancel, String model) {
+            ReviewProviderExecutor reviewer, Runnable cancel, String model) {
         return new ReviewPipelineService(
                 provider,
                 chunkedReviewService,
@@ -141,7 +137,7 @@ public final class ReviewPipelineService {
     }
 
     public static ReviewPipelineService forClaude(ClaudeService service, String model) {
-        return new ReviewPipelineService(new ClaudeExecutor(service, model));
+        return new ReviewPipelineService(new ReviewProviderExecutor.ClaudeExecutor(service, model));
     }
 
     public static ReviewPipelineService forCopilot(
@@ -151,7 +147,8 @@ public final class ReviewPipelineService {
             boolean inheritMcp,
             String configDir) {
         return new ReviewPipelineService(
-                new CopilotExecutor(service, model, effort, inheritMcp, configDir));
+                new ReviewProviderExecutor.CopilotExecutor(
+                        service, model, effort, inheritMcp, configDir));
     }
 
     public ReviewResult review(
@@ -165,10 +162,10 @@ public final class ReviewPipelineService {
             throws IOException, InterruptedException {
         if (execution == null)
             return review(request, chunked, selfCritique, supervisorEnabled, onStatus, onChunk);
-        ProviderExecutor selected = provider;
-        if (provider instanceof CopilotExecutor copilot) {
+        ReviewProviderExecutor selected = provider;
+        if (provider instanceof ReviewProviderExecutor.CopilotExecutor copilot) {
             selected =
-                    new CopilotExecutor(
+                    new ReviewProviderExecutor.CopilotExecutor(
                             copilot.service(),
                             copilot.model(),
                             copilot.effort(),
@@ -240,7 +237,8 @@ public final class ReviewPipelineService {
         List<ReviewerAttribution.Evidence> attributed =
                 ReviewerAttribution.Evidence.snapshot(candidate.getLineComments());
         ReviewResult ruleFindings = ruleFindings(rules, request, chunked, manifest, onStatus);
-        List<RuleSite> ruleSites = RuleSite.of(ruleFindings.getLineComments());
+        List<ReviewPipelineFindings.RuleSite> ruleSites =
+                ReviewPipelineFindings.RuleSite.of(ruleFindings.getLineComments());
         if (!ruleFindings.getLineComments().isEmpty()) {
             candidate = ReviewResultMerger.merge(candidate, ruleFindings, MERGED_CANDIDATE_CAP);
         }
@@ -260,7 +258,8 @@ public final class ReviewPipelineService {
                         chunkedReviewService.finalValidationRequest(request);
                 String raw =
                         provider.complete(
-                                ReviewPrompts.buildCritiquePrompt(critiqueRequest, candidate),
+                                ReviewCritiquePrompts.buildCritiquePrompt(
+                                        critiqueRequest, candidate),
                                 CRITIQUE_TIMEOUT_MS,
                                 true,
                                 true,
@@ -276,26 +275,29 @@ public final class ReviewPipelineService {
             // Unconfirmed recall candidates never reach the user, even if validation failed.
             candidate = ReviewResultMerger.withoutLowConfidence(candidate);
             int validatedCount = candidate.getLineComments().size();
-            candidate = restoreHygieneFindings(candidate, hygiene, manifest);
+            candidate = ReviewPipelineFindings.restoreHygieneFindings(candidate, hygiene, manifest);
             int restored = candidate.getLineComments().size() - validatedCount;
             if (restored > 0) {
                 onStatus.accept("Kept " + findings(restored) + " from the hygiene pass");
             }
             int beforeRules = candidate.getLineComments().size();
-            candidate = restoreHygieneFindings(candidate, ruleFindings, manifest);
+            candidate =
+                    ReviewPipelineFindings.restoreHygieneFindings(
+                            candidate, ruleFindings, manifest);
             int restoredRules = candidate.getLineComments().size() - beforeRules;
             if (restoredRules > 0) {
                 onStatus.accept("Kept " + findings(restoredRules) + " from review rules");
             }
             if (Boolean.getBoolean(REPORT_DROPPED_PROPERTY)) {
-                droppedStatuses(draft, candidate).forEach(onStatus);
+                ReviewPipelineFindings.droppedStatuses(draft, candidate).forEach(onStatus);
             }
             onStatus.accept(validatedStatus(candidate.getLineComments().size(), draftCount));
         }
         if (passes.labels() != null) {
             candidate =
                     ReviewerAttribution.reattach(candidate, attributed, passes.labels().primary());
-            unattributeUnmatchedRuleFindings(candidate, attributed, ruleSites, rules);
+            ReviewPipelineFindings.unattributeUnmatchedRuleFindings(
+                    candidate, attributed, ruleSites, rules);
         }
         provider.checkCancelled();
         if (supervisorEnabled) {
@@ -326,7 +328,7 @@ public final class ReviewPipelineService {
         try {
             String raw =
                     provider.complete(
-                            ReviewPrompts.buildHygienePrompt(
+                            ReviewHygienePrompts.buildHygienePrompt(
                                     chunked
                                             ? chunkedReviewService.finalValidationRequest(request)
                                             : request,
@@ -351,67 +353,6 @@ public final class ReviewPipelineService {
         }
     }
 
-    /**
-     * Re-adds confirmed hygiene findings that validation dropped; review-rule findings are restored
-     * the same way. The hygiene rules are mechanical (log level, attached exception, comment
-     * wording), and the validator reliably discards them as low-value even when told to keep them,
-     * which loses exactly the findings production reviewers such as Mae report. A hygiene finding
-     * is kept unless it is low confidence, does not anchor to a changed line, or a validated
-     * finding of the same category already sits within {@link #HYGIENE_COVER_LINES} lines of it in
-     * the same file (the validator reworded or merged it).
-     */
-    static ReviewResult restoreHygieneFindings(
-            ReviewResult validated, ReviewResult hygiene, InspectionManifest manifest) {
-        List<LineComment> kept = new ArrayList<>(validated.getLineComments());
-        List<LineComment> restored = new ArrayList<>();
-        for (LineComment comment : hygiene.getLineComments()) {
-            if ("low".equals(comment.getConfidence())
-                    || manifest.hunkFor(comment.getFile(), comment.getLine()).isEmpty()
-                    || kept.stream().anyMatch(other -> covers(other, comment))) {
-                continue;
-            }
-            kept.add(comment);
-            restored.add(comment);
-        }
-        if (restored.isEmpty()) {
-            return validated;
-        }
-        return ReviewResultMerger.merge(
-                validated, new ReviewResult("", "COMMENT", restored), MERGED_CANDIDATE_CAP);
-    }
-
-    private static boolean covers(LineComment kept, LineComment hygiene) {
-        return Objects.equals(kept.getFile(), hygiene.getFile())
-                && Math.abs(kept.getLine() - hygiene.getLine()) <= HYGIENE_COVER_LINES
-                && Objects.equals(kept.getCategory(), hygiene.getCategory());
-    }
-
-    /**
-     * One diagnostic status per draft finding whose file and line no longer appear after
-     * validation. Opt-in via {@link #REPORT_DROPPED_PROPERTY} so recall benchmarks can tell a
-     * finding that was never produced from one validation discarded.
-     */
-    static List<String> droppedStatuses(ReviewResult draft, ReviewResult validated) {
-        Set<String> kept = new HashSet<>();
-        for (LineComment comment : validated.getLineComments()) {
-            kept.add(comment.getFile() + ":" + comment.getLine());
-        }
-        List<String> statuses = new ArrayList<>();
-        Set<String> reported = new HashSet<>();
-        for (LineComment comment : draft.getLineComments()) {
-            String location = comment.getFile() + ":" + comment.getLine();
-            if (kept.contains(location) || !reported.add(location)) continue;
-            statuses.add(
-                    "Validation dropped finding at "
-                            + location
-                            + " — "
-                            + StringUtils.abbreviate(
-                                    StringUtils.normalizeSpace(comment.getBody()),
-                                    DROPPED_BODY_MAX_CHARS));
-        }
-        return statuses;
-    }
-
     private PRReviewRequest withBaseCommitContext(
             PRReviewRequest request, InspectionManifest manifest, Consumer<String> onStatus)
             throws InterruptedException {
@@ -434,65 +375,6 @@ public final class ReviewPipelineService {
                         : resolved.guidelines();
         return request.withBaseCommitContext(
                 guidelines, resolved.fileHistory(), resolved.callSites());
-    }
-
-    /**
-     * Where a rule finding sat before critique. Captured as values so later edits to the comment
-     * objects cannot change which final comments count as rule findings.
-     */
-    record RuleSite(String file, String category, int line) {
-        static List<RuleSite> of(List<LineComment> ruleFindings) {
-            return ruleFindings.stream()
-                    .filter(comment -> StringUtils.isNotBlank(comment.getCategory()))
-                    .map(
-                            comment ->
-                                    new RuleSite(
-                                            comment.getFile(),
-                                            comment.getCategory(),
-                                            comment.getLine()))
-                    .toList();
-        }
-
-        boolean matches(LineComment comment) {
-            return Objects.equals(file, comment.getFile())
-                    && Objects.equals(category, comment.getCategory())
-                    && Math.abs(line - comment.getLine()) <= HYGIENE_COVER_LINES;
-        }
-    }
-
-    /**
-     * Clears the primary-label fallback {@code reattach} gives a rule finding that no reviewer
-     * candidate matched, so a rule finding carries reviewer labels only through a match. A final
-     * comment is a rule finding when it sits where one did before critique (the critique may reword
-     * it) or still carries the engine's rule tag.
-     */
-    static void unattributeUnmatchedRuleFindings(
-            ReviewResult result,
-            List<ReviewerAttribution.Evidence> evidence,
-            List<RuleSite> ruleSites,
-            List<LocalReviewRules.Rule> rules) {
-        for (LineComment comment : result.getLineComments()) {
-            boolean ruleFinding =
-                    ruleSites.stream().anyMatch(site -> site.matches(comment))
-                            || hasRuleTag(comment, rules);
-            if (ruleFinding
-                    && evidence.stream().noneMatch(candidate -> candidate.matches(comment))) {
-                comment.setSources(List.of());
-            }
-        }
-    }
-
-    /** True when the rationale carries the engine's {@code (rule: name)} tag for a loaded rule. */
-    static boolean hasRuleTag(LineComment comment, List<LocalReviewRules.Rule> rules) {
-        String rationale = StringUtils.strip(comment.getRationale());
-        if (StringUtils.isEmpty(rationale)) return false;
-        for (LocalReviewRules.Rule rule : rules) {
-            if (rationale.endsWith(" (rule: " + rule.name() + ")")
-                    || rationale.equals(ReviewRulesPass.withRuleSuffix(null, rule.name()))) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -817,34 +699,6 @@ public final class ReviewPipelineService {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
     }
 
-    interface ProviderExecutor {
-        ReviewPassResult primary(
-                PRReviewRequest request,
-                Consumer<String> onStatus,
-                BiConsumer<String, String> onChunk)
-                throws IOException, InterruptedException;
-
-        String complete(
-                String prompt,
-                long timeoutMillis,
-                boolean allowReadTools,
-                boolean allowMcp,
-                Consumer<String> onStatus)
-                throws IOException, InterruptedException;
-
-        void checkCancelled() throws InterruptedException;
-
-        /** The working directory the provider reviews in, or null when it has none. */
-        default File projectDir() {
-            return null;
-        }
-
-        /** The model name shown in review progress, or blank when unknown. */
-        default String displayModel() {
-            return "";
-        }
-    }
-
     /** Resolves base-commit guidance and file history; injectable for tests. */
     @FunctionalInterface
     interface BaseContextResolver {
@@ -855,95 +709,5 @@ public final class ReviewPipelineService {
                 List<String> guidanceGlobs,
                 BaseCommitContext.CancellationCheck cancellation)
                 throws InterruptedException;
-    }
-
-    private record ClaudeExecutor(ClaudeService service, String model) implements ProviderExecutor {
-        @Override
-        public ReviewPassResult primary(
-                PRReviewRequest request,
-                Consumer<String> onStatus,
-                BiConsumer<String, String> onChunk)
-                throws IOException, InterruptedException {
-            return service.reviewPass(request, model, onStatus, onChunk);
-        }
-
-        @Override
-        public String complete(
-                String prompt,
-                long timeoutMillis,
-                boolean allowReadTools,
-                boolean allowMcp,
-                Consumer<String> onStatus)
-                throws IOException, InterruptedException {
-            return service.completeReviewPrompt(
-                    prompt, model, onStatus, timeoutMillis, allowReadTools);
-        }
-
-        @Override
-        public void checkCancelled() throws InterruptedException {
-            service.throwIfCancelled();
-        }
-
-        @Override
-        public File projectDir() {
-            return service.projectDir();
-        }
-
-        @Override
-        public String displayModel() {
-            return StringUtils.defaultIfBlank(model, "Claude default");
-        }
-    }
-
-    private record CopilotExecutor(
-            CopilotService service,
-            String model,
-            String effort,
-            boolean inheritMcp,
-            String configDir)
-            implements ProviderExecutor {
-        @Override
-        public ReviewPassResult primary(
-                PRReviewRequest request,
-                Consumer<String> onStatus,
-                BiConsumer<String, String> onChunk)
-                throws IOException, InterruptedException {
-            return service.reviewPass(
-                    request, model, effort, onStatus, onChunk, inheritMcp, configDir);
-        }
-
-        @Override
-        public String complete(
-                String prompt,
-                long timeoutMillis,
-                boolean allowReadTools,
-                boolean allowMcp,
-                Consumer<String> onStatus)
-                throws IOException, InterruptedException {
-            return service.completeReviewPrompt(
-                    prompt,
-                    model,
-                    effort,
-                    allowMcp && inheritMcp,
-                    configDir,
-                    allowReadTools,
-                    timeoutMillis,
-                    onStatus);
-        }
-
-        @Override
-        public void checkCancelled() throws InterruptedException {
-            service.throwIfCancelled();
-        }
-
-        @Override
-        public File projectDir() {
-            return service.projectDir();
-        }
-
-        @Override
-        public String displayModel() {
-            return StringUtils.defaultIfBlank(model, "Copilot default");
-        }
     }
 }

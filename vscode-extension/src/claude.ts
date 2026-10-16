@@ -10,8 +10,8 @@ export interface ChatMessage {
 // ── Constants ─────────────────────────────────────────────────────────────────
 //
 // Only the focused-chat persona lives here. Review and regular-chat prompts are built by
-// review-engine's ReviewPrompts and reached over the sidecar, so this file must not grow a second
-// copy of them (AGENTS.md modularity guardrail #5).
+// review-engine's ReviewPrompts and ReviewChatPrompts and reached over the sidecar, so this file
+// must not grow a second copy of them (AGENTS.md modularity guardrail #5).
 
 const CHAT_PERSONA =
     'You are a senior engineer familiar with the codebase under review. ' +

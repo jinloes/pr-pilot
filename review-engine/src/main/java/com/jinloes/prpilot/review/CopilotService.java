@@ -1,21 +1,14 @@
 package com.jinloes.prpilot.review;
 
-import com.github.copilot.CopilotClient;
-import com.github.copilot.CopilotSession;
-import com.github.copilot.generated.AssistantMessageDeltaEvent;
-import com.github.copilot.generated.AssistantMessageEvent;
-import com.github.copilot.generated.SessionErrorEvent;
-import com.github.copilot.generated.ToolExecutionStartEvent;
-import com.github.copilot.rpc.CopilotClientMode;
-import com.github.copilot.rpc.CopilotClientOptions;
-import com.github.copilot.rpc.McpServerConfig;
-import com.github.copilot.rpc.MessageOptions;
-import com.github.copilot.rpc.PermissionHandler;
-import com.github.copilot.rpc.PermissionRequestResult;
-import com.github.copilot.rpc.SessionConfig;
 import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewResult;
+import com.jinloes.prpilot.review.CopilotSdkRuntime.ClientRequest;
+import com.jinloes.prpilot.review.CopilotSdkRuntime.RuntimeClient;
+import com.jinloes.prpilot.review.CopilotSdkRuntime.RuntimeFactory;
+import com.jinloes.prpilot.review.CopilotSdkRuntime.RuntimeSession;
+import com.jinloes.prpilot.review.CopilotSdkRuntime.SdkRuntimeFactory;
+import com.jinloes.prpilot.review.CopilotSdkRuntime.SessionRequest;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -25,12 +18,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -46,7 +35,8 @@ import org.slf4j.LoggerFactory;
  * <p>The SDK still requires the local {@code copilot} CLI/runtime, but it gives us typed session
  * events instead of a hand-rolled JSONL parser. We keep the same outward behavior: stream text
  * deltas to the UI, surface tool names as status updates, and parse the final assistant message as
- * review JSON.
+ * review JSON. The SDK adapter, and the runtime seam that tests fake, live in {@link
+ * CopilotSdkRuntime}.
  */
 public class CopilotService {
 
@@ -55,7 +45,6 @@ public class CopilotService {
     private static final String STATUS_GENERATING = "Generating review…";
     private static final String STATUS_PARSING = "Parsing review…";
     private static final long REQUEST_TIMEOUT_MS = 30L * 60L * 1000L;
-    private static final long SDK_BOOT_TIMEOUT_MS = 60L * 1000L;
 
     /**
      * Default for PR review work: {@code high} trades some latency for materially deeper reasoning,
@@ -128,7 +117,7 @@ public class CopilotService {
         try {
             return CiFindingSuppressor.suppress(
                     runReview(
-                            ReviewPrompts.buildCritiquePrompt(request, draft),
+                            ReviewCritiquePrompts.buildCritiquePrompt(request, draft),
                             model,
                             effort,
                             inheritMcp,
@@ -277,7 +266,7 @@ public class CopilotService {
             boolean inheritMcp,
             String configDir)
             throws IOException, InterruptedException {
-        String prompt = ReviewPrompts.buildChatPrompt(prContext, history, userMessage);
+        String prompt = ReviewChatPrompts.buildChatPrompt(prContext, history, userMessage);
         return runSession(
                 prompt,
                 "",
@@ -302,8 +291,8 @@ public class CopilotService {
 
     /**
      * Sends a pre-built prompt directly to Copilot without wrapping it in {@link
-     * ReviewPrompts#buildChatPrompt}. Use this when the caller has already assembled the full
-     * prompt (e.g. via {@link ReviewPrompts#buildFocusedChatPrompt}) and does not want any
+     * ReviewChatPrompts#buildChatPrompt}. Use this when the caller has already assembled the full
+     * prompt (e.g. via {@link ReviewChatPrompts#buildFocusedChatPrompt}) and does not want any
      * additional wrapping.
      */
     public String chatWithPrompt(
@@ -485,192 +474,6 @@ public class CopilotService {
         }
     }
 
-    record ClientRequest(String cliPath, File workingDir, Map<String, String> environment) {}
-
-    record SessionRequest(
-            String model,
-            String effort,
-            File workingDir,
-            boolean inheritMcp,
-            String configDir,
-            boolean allowReadTools) {}
-
-    interface RuntimeFactory {
-        RuntimeClient createClient(ClientRequest request);
-    }
-
-    interface RuntimeClient extends AutoCloseable {
-        void start() throws Exception;
-
-        RuntimeSession createSession(SessionRequest request) throws Exception;
-
-        void forceStop();
-
-        @Override
-        void close();
-    }
-
-    interface RuntimeSession extends AutoCloseable {
-        Closeable onAssistantMessageDelta(Consumer<String> listener);
-
-        Closeable onAssistantMessage(Consumer<String> listener);
-
-        Closeable onToolExecutionStart(Consumer<String> listener);
-
-        Closeable onSessionError(Consumer<String> listener);
-
-        String sendAndWait(String prompt, long timeoutMs) throws Exception;
-
-        void abort();
-
-        @Override
-        void close();
-    }
-
-    static final class SdkRuntimeFactory implements RuntimeFactory {
-        @Override
-        public RuntimeClient createClient(ClientRequest request) {
-            return new SdkRuntimeClient(request);
-        }
-    }
-
-    static final class SdkRuntimeClient implements RuntimeClient {
-        private final ClientRequest request;
-        private final CopilotClient client;
-
-        SdkRuntimeClient(ClientRequest request) {
-            this.request = request;
-            this.client =
-                    new CopilotClient(
-                            new CopilotClientOptions()
-                                    .setCliPath(request.cliPath())
-                                    .setCwd(request.workingDir().getAbsolutePath())
-                                    .setEnvironment(request.environment())
-                                    .setMode(CopilotClientMode.COPILOT_CLI)
-                                    .setAutoStart(false));
-        }
-
-        @Override
-        public void start() throws Exception {
-            awaitWithTimeout(client.start(), "runtime startup");
-        }
-
-        @Override
-        public RuntimeSession createSession(SessionRequest sessionRequest) throws Exception {
-            PermissionHandler permissionHandler =
-                    (permissionRequest, ctx) ->
-                            CompletableFuture.completedFuture(
-                                    permissionDecision(
-                                            permissionRequest.getKind(),
-                                            sessionRequest.inheritMcp(),
-                                            sessionRequest.allowReadTools()));
-            SessionConfig config =
-                    new SessionConfig()
-                            .setOnPermissionRequest(permissionHandler)
-                            .setStreaming(true)
-                            .setWorkingDirectory(sessionRequest.workingDir().getAbsolutePath())
-                            .setReasoningEffort(sessionRequest.effort())
-                            // Never enable on-disk config discovery: for a review the working
-                            // directory is the untrusted PR-branch worktree, so discovery would
-                            // load an attacker-controlled repo-local .mcp.json (which can launch
-                            // an arbitrary process). Trusted MCP servers are injected explicitly
-                            // below from the user's own config dir instead.
-                            .setEnableConfigDiscovery(false);
-            if (!sessionRequest.allowReadTools()) {
-                config.setAvailableTools(List.of());
-            }
-            if (sessionRequest.inheritMcp()) {
-                Map<String, McpServerConfig> trusted =
-                        CopilotMcpConfig.loadTrustedServers(sessionRequest.configDir());
-                if (!trusted.isEmpty()) {
-                    config.setMcpServers(trusted);
-                }
-            }
-            if (StringUtils.isNotBlank(sessionRequest.model())) {
-                config.setModel(sessionRequest.model());
-            }
-            if (StringUtils.isNotBlank(sessionRequest.configDir())) {
-                config.setConfigDirectory(sessionRequest.configDir());
-            }
-            return new SdkRuntimeSession(
-                    awaitWithTimeout(client.createSession(config), "session creation"));
-        }
-
-        @Override
-        public void forceStop() {
-            client.forceStop();
-        }
-
-        @Override
-        public void close() {
-            client.close();
-        }
-    }
-
-    static final class SdkRuntimeSession implements RuntimeSession {
-        private final CopilotSession session;
-
-        SdkRuntimeSession(CopilotSession session) {
-            this.session = session;
-        }
-
-        @Override
-        public Closeable onAssistantMessageDelta(Consumer<String> listener) {
-            return session.on(
-                    AssistantMessageDeltaEvent.class,
-                    event ->
-                            listener.accept(
-                                    event.getData() != null
-                                            ? event.getData().deltaContent()
-                                            : null));
-        }
-
-        @Override
-        public Closeable onAssistantMessage(Consumer<String> listener) {
-            return session.on(
-                    AssistantMessageEvent.class,
-                    event ->
-                            listener.accept(
-                                    event.getData() != null ? event.getData().content() : null));
-        }
-
-        @Override
-        public Closeable onToolExecutionStart(Consumer<String> listener) {
-            return session.on(
-                    ToolExecutionStartEvent.class,
-                    event ->
-                            listener.accept(
-                                    event.getData() != null ? event.getData().toolName() : null));
-        }
-
-        @Override
-        public Closeable onSessionError(Consumer<String> listener) {
-            return session.on(
-                    SessionErrorEvent.class,
-                    event ->
-                            listener.accept(
-                                    event.getData() != null ? event.getData().message() : null));
-        }
-
-        @Override
-        public String sendAndWait(String prompt, long timeoutMs) throws Exception {
-            return session.sendAndWait(new MessageOptions().setPrompt(prompt), timeoutMs)
-                    .get()
-                    .getData()
-                    .content();
-        }
-
-        @Override
-        public void abort() {
-            session.abort();
-        }
-
-        @Override
-        public void close() {
-            session.close();
-        }
-    }
-
     private static final class ActiveRun implements AutoCloseable {
         private final RuntimeClient client;
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
@@ -717,23 +520,6 @@ public class CopilotService {
         }
     }
 
-    static PermissionRequestResult permissionDecision(String kind, boolean allowMcp) {
-        return permissionDecision(kind, allowMcp, true);
-    }
-
-    static PermissionRequestResult permissionDecision(
-            String kind, boolean allowMcp, boolean allowReadTools) {
-        if (allowReadTools && "read".equals(kind)) {
-            return PermissionRequestResult.approveOnce();
-        }
-        if (allowMcp && "mcp".equals(kind)) {
-            return PermissionRequestResult.approveOnce();
-        }
-        return PermissionRequestResult.reject(
-                "PR Pilot reviews allow read-only file access only; write, shell, and network tools"
-                        + " are disabled.");
-    }
-
     static String normalizeReasoningEffort(String effort) {
         String normalized =
                 effort != null ? effort.trim().toLowerCase(java.util.Locale.ROOT) : null;
@@ -744,25 +530,6 @@ public class CopilotService {
             case "max" -> "xhigh";
             default -> DEFAULT_REASONING_EFFORT;
         };
-    }
-
-    static <T> T awaitWithTimeout(Future<T> future, String operation) throws IOException {
-        try {
-            return future.get(SDK_BOOT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException timeout) {
-            throw new IOException(
-                    "copilot "
-                            + operation
-                            + " timed out after "
-                            + (SDK_BOOT_TIMEOUT_MS / 1000)
-                            + "s",
-                    timeout);
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            throw new IOException("copilot " + operation + " failed", interrupted);
-        } catch (ExecutionException execution) {
-            throw new IOException("copilot " + operation + " failed", execution);
-        }
     }
 
     public static String findCopilotBinary() {

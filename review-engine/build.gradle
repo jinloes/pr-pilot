@@ -1,5 +1,6 @@
 plugins {
     id 'java-library'
+    id 'info.solidsoft.pitest'
 }
 
 group = 'com.jinloes.prpilot'
@@ -41,6 +42,29 @@ tasks.named('test') {
     systemProperty 'semantic.engineJar', tasks.named('jar').get().archiveFile.get().asFile.absolutePath
     // SemanticRuntimeTest fixture root: owner-only, never under a world-writable /tmp.
     systemProperty 'semantic.testRoot', layout.buildDirectory.dir('semantic-runtime-test').get().asFile.absolutePath
+}
+
+// These tests launch real processes or read jar paths that only the `test` task supplies, so they
+// cannot run in PIT's minions; mutating the classes they cover would report only false survivors.
+pitest {
+    excludedTestClasses = [
+        'com.jinloes.prpilot.review.BaseCommitContextTest*',
+        'com.jinloes.prpilot.review.BoundedProcessRunnerTest*',
+        'com.jinloes.prpilot.review.ClaudeServiceTest*',
+        'com.jinloes.prpilot.review.GitWorktreeServiceTest*',
+        'com.jinloes.prpilot.review.SemanticRuntimeTest*',
+        'com.jinloes.prpilot.review.SemanticWorktreeStoreTest*',
+        'com.jinloes.prpilot.review.SourceInventoryClientTest*',
+    ]
+    excludedClasses = [
+        'com.jinloes.prpilot.review.BaseCommitContext*',
+        'com.jinloes.prpilot.review.BoundedProcessRunner*',
+        'com.jinloes.prpilot.review.ClaudeService*',
+        'com.jinloes.prpilot.review.GitWorktreeService*',
+        'com.jinloes.prpilot.review.SemanticRuntime*',
+        'com.jinloes.prpilot.review.SemanticWorktreeStore*',
+        'com.jinloes.prpilot.review.SourceInventoryClient*',
+    ]
 }
 
 tasks.register('sourceInventoryWorkerJar', Jar) {

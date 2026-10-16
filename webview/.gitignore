@@ -1,5 +1,9 @@
 node_modules/
 dist/
 .vite/
+coverage/
+.stryker-tmp/
+reports/
+stryker-output-*.json
 playwright-report/
 test-results/

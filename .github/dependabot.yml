@@ -1,0 +1,54 @@
+version: 2
+
+# Weekly, grouped, with a 7-day cooldown so a freshly published (possibly compromised) release is not
+# proposed the day it ships. Constraints on the excluded/ignored packages: docs/architecture/ci.md.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      gradle:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /webview
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      webview:
+        patterns: ["*"]
+        # A Playwright bump also needs the CI container image bumped; keep it in its own PR.
+        exclude-patterns: ["@playwright/test"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /vscode-extension
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      vscode-extension:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # vsce rejects a declared @types/vscode newer than engines.vscode.
+      - dependency-name: "@types/vscode"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

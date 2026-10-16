@@ -5,44 +5,97 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write
+permissions: {}
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Release jobs restore no caches, so nothing written by a pull-request run can reach a published
+# artifact (docs/architecture/ci.md).
 jobs:
-  release:
-    name: Build And Release
-    runs-on: ubuntu-latest
-
+  visual:
+    name: Webview visual regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48
+      options: --user 1001 --ipc=host
+    defaults:
+      run:
+        working-directory: webview
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Visual regression tests
+        run: npm run test:visual -- --reporter=line
+
+      - name: Upload visual diffs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: webview-visual-diffs
+          path: |
+            webview/test-results/
+            webview/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  build:
+    name: Build and verify
+    needs: visual
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: "17"
-          cache: gradle
+          java-version: |
+            21
+            17
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "20.20.2"
-          cache: npm
-          cache-dependency-path: |
-            webview/package-lock.json
-            vscode-extension/package-lock.json
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-disabled: true
+
+      - name: Trust JDKs for SemanticRuntime
+        run: bash .github/scripts/trusted-jdks.sh "$JAVA_HOME_17_X64" "$JAVA_HOME_21_X64"
 
       - name: Derive installable versions from tag
         id: version
         run: node scripts/release-version.mjs "$GITHUB_REF_NAME" vscode-extension/package.json "$GITHUB_OUTPUT" "$GITHUB_ENV"
 
-      - name: Verify Gradle formatting and tests
-        run: ./gradlew spotlessCheck check :core:test :intellij-plugin:unitTest
-
       - name: Install webview dependencies
         working-directory: webview
         run: npm ci
+
+      - name: Verify Gradle formatting and tests
+        run: |
+          umask 022
+          ./gradlew spotlessCheck check
 
       - name: Verify webview
         working-directory: webview
@@ -56,10 +109,6 @@ jobs:
         working-directory: webview
         run: npm run test:a11y
 
-      - name: Verify webview visual regressions
-        working-directory: webview
-        run: npm run test:visual
-
       - name: Build webview
         working-directory: webview
         run: npm run build
@@ -72,11 +121,22 @@ jobs:
         working-directory: vscode-extension
         run: npm run lint && npx tsc --noEmit && npm run test:unit
 
-      - name: Build IntelliJ plugin
-        run: ./gradlew :intellij-plugin:buildPlugin
+      # Verifying against every recommended IDE downloads several full IDE distributions.
+      - name: Free disk space for plugin verification
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
+
+      - name: Build and verify IntelliJ plugin against recommended IDEs
+        run: |
+          umask 022
+          ./gradlew :intellij-plugin:buildPlugin :intellij-plugin:verifyPlugin -PverifyRecommendedIdes
 
       - name: Build sidecar jar
-        run: ./gradlew :sidecar:bootJar
+        run: |
+          umask 022
+          ./gradlew :sidecar:bootJar
 
       - name: Smoke test Java sidecar protocol
         working-directory: vscode-extension
@@ -92,36 +152,75 @@ jobs:
 
       - name: Package VS Code extension
         working-directory: vscode-extension
-        run: npm run stage:webview && npm run stage:sidecar && npx --yes @vscode/vsce package --out pr-pilot-${{ github.ref_name }}.vsix
+        run: npm run stage:webview && npm run stage:sidecar && npm run vsce -- package --out "pr-pilot-${GITHUB_REF_NAME}.vsix"
 
       - name: Verify packaged artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
+          vsix="vscode-extension/pr-pilot-${GITHUB_REF_NAME}.vsix"
+          plugin_check="$RUNNER_TEMP/pr-pilot-plugin-check"
           test -n "$(find intellij-plugin/build/distributions -maxdepth 1 -type f -name '*.zip' -print -quit)"
-          unzip -l "vscode-extension/pr-pilot-${GITHUB_REF_NAME}.vsix" | grep -q 'extension/sidecar/pr-pilot-sidecar.jar'
-          unzip -l "vscode-extension/pr-pilot-${GITHUB_REF_NAME}.vsix" | grep -q 'extension/webview-dist/index.html'
-          unzip -p "vscode-extension/pr-pilot-${GITHUB_REF_NAME}.vsix" extension/package.json | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>{if(JSON.parse(s).version!==process.argv[1])process.exit(1)})" "${{ steps.version.outputs.version }}"
-          rm -rf /tmp/pr-pilot-plugin-check
-          mkdir -p /tmp/pr-pilot-plugin-check
-          unzip -q "intellij-plugin/build/distributions/intellij-plugin-${{ steps.version.outputs.version }}.zip" -d /tmp/pr-pilot-plugin-check
-          unzip -p "/tmp/pr-pilot-plugin-check/intellij-plugin/lib/intellij-plugin-${{ steps.version.outputs.version }}.jar" META-INF/plugin.xml | grep -q "<version>${{ steps.version.outputs.version }}</version>"
+          # `unzip -l archive a b` exits 0 when any one name matches, so test each entry separately.
+          vsix_entries="$(unzip -Z1 "$vsix")"
+          for entry in extension/sidecar/pr-pilot-sidecar.jar extension/webview-dist/index.html; do
+            if ! grep -qxF "$entry" <<< "$vsix_entries"; then
+              echo "::error::$entry is missing from $vsix"
+              exit 1
+            fi
+          done
+          unzip -p "$vsix" extension/package.json | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>{if(JSON.parse(s).version!==process.argv[1])process.exit(1)})" "$VERSION"
+          rm -rf "$plugin_check"
+          mkdir -p "$plugin_check"
+          unzip -q "intellij-plugin/build/distributions/intellij-plugin-${VERSION}.zip" -d "$plugin_check"
+          unzip -p "$plugin_check/intellij-plugin/lib/intellij-plugin-${VERSION}.jar" META-INF/plugin.xml | grep -q "<version>${VERSION}</version>"
 
-      - name: Mark release channel from tag
-        id: channel
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF_NAME}" == *-rc.* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create GitHub release and upload artifacts
-        uses: softprops/action-gh-release@v2
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          prerelease: ${{ steps.channel.outputs.prerelease }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
+          name: release-artifacts
+          path: |
             intellij-plugin/build/distributions/*
             vscode-extension/*.vsix
+          if-no-files-found: error
+          retention-days: 7
 
+  # Only this job holds a write token, and it runs no project code.
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the release and upload its assets
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-artifacts
+          path: release-artifacts
+
+      # gh ships on the runner, so the write token never reaches a third-party action. A re-run after
+      # a partial publish uploads to the existing release instead of failing on create.
+      - name: Create GitHub release and upload artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          plugin=(release-artifacts/intellij-plugin/build/distributions/*)
+          vsix=(release-artifacts/vscode-extension/*.vsix)
+          if (( ${#plugin[@]} == 0 || ${#vsix[@]} == 0 )); then
+            echo "::error::Missing release artifacts: ${#plugin[@]} plugin, ${#vsix[@]} VSIX"
+            exit 1
+          fi
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --clobber "${plugin[@]}" "${vsix[@]}"
+            exit 0
+          fi
+          flags=(--verify-tag --generate-notes --title "$GITHUB_REF_NAME")
+          if [[ "$GITHUB_REF_NAME" == *-rc.* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" "${plugin[@]}" "${vsix[@]}"

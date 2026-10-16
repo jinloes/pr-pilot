@@ -17,7 +17,7 @@ import org.apache.commons.lang3.StringUtils;
  */
 final class ReviewerAttribution {
     /** Two findings this close in the same file and category describe the same defect. */
-    static final int SAME_FINDING_LINES = ReviewPipelineService.HYGIENE_COVER_LINES;
+    static final int SAME_FINDING_LINES = ReviewPipelineFindings.HYGIENE_COVER_LINES;
 
     private ReviewerAttribution() {}
 

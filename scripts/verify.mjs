@@ -9,6 +9,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { checkAgentDocs, isAgentDoc } from './agent-docs.mjs'
+import { mirrorNotes } from './host-mirrors.mjs'
+import { checkPlaywrightImages, IMAGE_SOURCES, LOCKFILE } from './playwright-image.mjs'
 import { gradleWrapperInvocation } from './portable-process.mjs'
 
 const JVM_DOWNSTREAM = {
@@ -42,6 +45,24 @@ const ROOT_BUILD_FILES = new Set([
 
 const DOC_ONLY = /\.(md|mmd)$/i
 
+// Checks that run inside this process rather than as a child command.
+const IN_PROCESS = {
+  docs: {
+    describe: 'agent-doc links, decision index, and sizes (scripts/agent-docs.mjs)',
+    run: (repoRoot) => checkAgentDocs(repoRoot),
+  },
+  playwrightImage: {
+    describe: `Playwright image tags and digests match ${LOCKFILE} (scripts/playwright-image.mjs)`,
+    run: (repoRoot) => ({ errors: checkPlaywrightImages(repoRoot), warnings: [] }),
+  },
+}
+
+const PLAYWRIGHT_IMAGE_INPUTS = [...IMAGE_SOURCES, LOCKFILE, 'webview/package.json']
+
+function isPlaywrightImageInput(file) {
+  return PLAYWRIGHT_IMAGE_INPUTS.includes(file) || file.startsWith('scripts/playwright-image')
+}
+
 function webviewChecks() {
   return [
     { name: 'webview lint', cwd: 'webview', npm: ['run', 'lint'] },
@@ -69,7 +90,9 @@ function normalize(file) {
 
 /**
  * Maps changed repository-relative paths to the smallest set of checks that covers them.
- * Returns `{ checks, notes }`; checks are ordered JVM first, then webview, then extension.
+ * Returns `{ checks, notes }`; checks are ordered in-process consistency checks first, then JVM,
+ * then webview, then extension. Notes include reminders for hand-mirrored logic that no test keeps
+ * in sync and for CI files that only CI can run.
  */
 export function planChecks(changedPaths, options = {}) {
   const files = changedPaths.map(normalize).filter(Boolean)
@@ -108,12 +131,22 @@ export function planChecks(changedPaths, options = {}) {
   }
 
   const checks = []
+  if (everything || files.some(isAgentDoc)) checks.push({ name: 'agent docs', inProcess: 'docs' })
+  if (everything || files.some(isPlaywrightImageInput)) {
+    checks.push({ name: 'playwright image pins', inProcess: 'playwrightImage' })
+  }
   if (jvmModules.size > 0) {
     const tasks = JVM_ORDER.filter((module) => jvmModules.has(module)).map((m) => `:${m}:check`)
     checks.push({ name: `gradle ${tasks.join(' ')}`, gradle: ['--console=plain', '--continue', ...tasks] })
   }
   if (webview) checks.push(...webviewChecks())
   if (extension) checks.push(...extensionChecks())
+  notes.push(...mirrorNotes(files))
+  if (files.some((file) => file.startsWith('.github/'))) {
+    notes.push(
+      'CI config changed: lint with actionlint, shellcheck, and zizmor (see "Workflow lint" in docs/architecture/ci.md); CI runs all three.',
+    )
+  }
   if (visual) {
     notes.push(
       'Webview UI changed: run the Docker visual check in webview/AGENTS.md.',
@@ -155,7 +188,29 @@ function invocationFor(check, repoRoot) {
 }
 
 function describe(check) {
+  if (check.inProcess) return IN_PROCESS[check.inProcess].describe
   return check.gradle ? `./gradlew ${check.gradle.join(' ')}` : `(cd ${check.cwd} && npm ${check.npm.join(' ')})`
+}
+
+function runCheck(check, repoRoot) {
+  if (check.inProcess) {
+    try {
+      const { errors, warnings } = IN_PROCESS[check.inProcess].run(repoRoot)
+      return { ok: errors.length === 0, output: errors.join('\n'), warnings }
+    } catch (error) {
+      return { ok: false, output: String(error?.stack ?? error), warnings: [] }
+    }
+  }
+  const inv = invocationFor(check, repoRoot)
+  const result = spawnSync(inv.command, inv.args, {
+    cwd: inv.cwd,
+    shell: inv.shell,
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+    env: { ...process.env, CI: process.env.CI ?? '1', FORCE_COLOR: '0' },
+  })
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}${result.error?.message ?? ''}`
+  return { ok: result.status === 0, output, warnings: [] }
 }
 
 export const MIN_NODE = [20, 19]
@@ -179,7 +234,7 @@ function main(argv) {
   const { checks, notes } = planChecks(files, { all: flags.has('--all') })
 
   if (checks.length === 0) {
-    console.log(files.length === 0 ? 'No changes detected.' : 'No checks needed (docs only).')
+    console.log(files.length === 0 ? 'No changes detected.' : 'No local checks cover these changes.')
     notes.forEach((note) => console.log(`note: ${note}`))
     return 0
   }
@@ -193,17 +248,10 @@ function main(argv) {
   let failed = 0
   for (const [index, check] of checks.entries()) {
     const started = Date.now()
-    const inv = invocationFor(check, repoRoot)
-    const result = spawnSync(inv.command, inv.args, {
-      cwd: inv.cwd,
-      shell: inv.shell,
-      encoding: 'utf8',
-      maxBuffer: 256 * 1024 * 1024,
-      env: { ...process.env, CI: process.env.CI ?? '1', FORCE_COLOR: '0' },
-    })
+    const { ok, output, warnings } = runCheck(check, repoRoot)
+    notes.push(...warnings)
     const seconds = ((Date.now() - started) / 1000).toFixed(0)
-    const output = `${result.stdout ?? ''}${result.stderr ?? ''}${result.error?.message ?? ''}`
-    if (result.status === 0) {
+    if (ok) {
       console.log(`ok   ${check.name} (${seconds}s)`)
       continue
     }

@@ -3,6 +3,7 @@ package com.jinloes.prpilot.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
@@ -119,6 +120,29 @@ class SourceInventoryTest {
                     .extracting(Enum::name)
                     .contains("VFS_VERIFIED")
                     .doesNotContain("COVERED", "READY");
+        }
+    }
+
+    @Nested
+    class DeclaredWireFields {
+        class OuterBound {
+            private String name;
+
+            // Using the enclosing instance makes javac keep its synthetic outer-instance field.
+            Object owner() {
+                return DeclaredWireFields.this;
+            }
+        }
+
+        @Test
+        void excludesSyntheticFieldsLikeInjectedCoverageProbes() {
+            assertThat(OuterBound.class.getDeclaredFields())
+                    .as("fixture precondition: javac emitted a synthetic field")
+                    .anyMatch(Field::isSynthetic);
+
+            assertThat(SourceInventory.declaredWireFields(OuterBound.class))
+                    .extracting(Field::getName)
+                    .containsExactly("name");
         }
     }
 

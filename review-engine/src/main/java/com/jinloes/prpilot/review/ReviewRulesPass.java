@@ -46,17 +46,17 @@ final class ReviewRulesPass {
         void check() throws IOException, InterruptedException;
     }
 
-    private final ReviewPipelineService.ProviderExecutor provider;
+    private final ReviewProviderExecutor provider;
     private final AuthorityCheck authority;
     private final long deadlineMillis;
     private final long pollMillis;
 
-    ReviewRulesPass(ReviewPipelineService.ProviderExecutor provider, AuthorityCheck authority) {
+    ReviewRulesPass(ReviewProviderExecutor provider, AuthorityCheck authority) {
         this(provider, authority, RULE_PHASE_DEADLINE_MS, POLL_MS);
     }
 
     ReviewRulesPass(
-            ReviewPipelineService.ProviderExecutor provider,
+            ReviewProviderExecutor provider,
             AuthorityCheck authority,
             long deadlineMillis,
             long pollMillis) {
@@ -141,7 +141,7 @@ final class ReviewRulesPass {
         Set<String> all = new LinkedHashSet<>();
         structured.forEach(rule -> all.add(rule.name()));
         authority.check();
-        String prompt = ReviewPrompts.buildRuleSelectionPrompt(request, manifest, structured);
+        String prompt = ReviewRulePrompts.buildRuleSelectionPrompt(request, manifest, structured);
         Future<String> future =
                 executor.submit(
                         () ->
@@ -262,7 +262,7 @@ final class ReviewRulesPass {
             throws IOException, InterruptedException {
         String raw =
                 provider.complete(
-                        ReviewPrompts.buildRuleReviewPrompt(ruleRequest, rule),
+                        ReviewRulePrompts.buildRuleReviewPrompt(ruleRequest, rule),
                         RULE_TIMEOUT_MS,
                         true,
                         false,

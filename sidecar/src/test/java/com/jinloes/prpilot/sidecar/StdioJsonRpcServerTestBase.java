@@ -11,7 +11,9 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -93,6 +95,17 @@ abstract class StdioJsonRpcServerTestBase {
         }
         assertThat(responses.keySet()).containsAll(requiredIds);
         return responses;
+    }
+
+    /** Every frame written so far, in order, including notifications (which carry no id). */
+    List<JsonNode> readFrames(ByteArrayOutputStream output) throws IOException {
+        ByteArrayInputStream frames = new ByteArrayInputStream(output.toByteArray());
+        List<JsonNode> nodes = new ArrayList<>();
+        byte[] frame;
+        while ((frame = frameCodec.readFrame(frames)) != null) {
+            nodes.add(objectMapper.readTree(frame));
+        }
+        return nodes;
     }
 
     ObjectNode rpcRequest(int id, String method) {

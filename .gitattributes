@@ -1,0 +1,10 @@
+# Byte-exact fixtures read by both the Java and TypeScript tests. Pin LF so a Windows checkout with
+# core.autocrlf=true does not rewrite them to CRLF and break the shared golden comparison.
+core/src/test/resources/diff-coverage/** text eol=lf
+
+# Shell scripts run under bash in CI and WSL, where a CRLF checkout breaks them.
+*.sh text eol=lf
+
+# SemanticSkillBundle verifies these resources by SHA-256, so Git must never convert their line
+# endings. A CRLF checkout makes the bundle fail closed. -text keeps diffs readable, unlike binary.
+review-engine/src/main/resources/semantic-skills/** -text

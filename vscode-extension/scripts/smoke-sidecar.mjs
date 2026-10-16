@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
 
 const jarPath = path.resolve(process.argv[2] ?? 'sidecar/pr-pilot-sidecar.jar');
 await access(jarPath);
 
-const child = spawn(process.env.JAVA_BINARY ?? 'java', ['-jar', jarPath], {
+const child = spawn(resolveJavaBinary(), ['-jar', jarPath], {
   stdio: ['pipe', 'pipe', 'pipe'],
 });
 const requiredCapabilities = [
@@ -75,4 +76,11 @@ function fail(message) {
   process.exitCode = 1;
 }
 
-
+function resolveJavaBinary() {
+  if (process.env.JAVA_BINARY) return process.env.JAVA_BINARY;
+  if (process.env.JAVA_HOME) {
+    const candidate = path.join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return 'java';
+}

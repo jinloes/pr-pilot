@@ -1,11 +1,8 @@
 package com.jinloes.prpilot.review;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewResult;
-import com.jinloes.prpilot.review.stream.ContentBlock;
-import com.jinloes.prpilot.review.stream.StreamEvent;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -13,9 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -29,9 +24,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import org.apache.commons.io.IOUtils;
-import org.apache.commons.io.LineIterator;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.Strings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +40,6 @@ import org.slf4j.LoggerFactory;
 public class ClaudeService {
 
     private static final Logger log = LoggerFactory.getLogger(ClaudeService.class);
-    private static final ObjectMapper JSON = new ObjectMapper();
     private static final AtomicLong IO_THREAD_SEQUENCE = new AtomicLong();
     private static final Executor IO_EXECUTOR =
             Executors.newCachedThreadPool(
@@ -61,8 +53,6 @@ public class ClaudeService {
                         return thread;
                     });
 
-    private static final String STATUS_GENERATING = "Generating review…";
-    private static final String STATUS_PARSING = "Parsing review…";
     static final String STATUS_REFINING = "Refining review…";
 
     static final int DEFAULT_MAX_TURNS = 15;
@@ -117,9 +107,6 @@ public class ClaudeService {
             "You have gathered sufficient context. Output the review JSON now following the"
                     + " schema exactly — no more tool calls.";
 
-    private static final String CLAUDE_DIR_UNIX = "/.claude/";
-    private static final String CLAUDE_DIR_WIN = "\\.claude\\";
-
     private final File workingDir;
     private final File projectDir;
     private final CancellationToken cancellationToken;
@@ -149,9 +136,6 @@ public class ClaudeService {
         this.cancellationToken = Objects.requireNonNull(cancellationToken);
         this.ioExecutor = Objects.requireNonNull(ioExecutor);
     }
-
-    /** Holds the subtype and session ID from an error result event in the stream output. */
-    record ErrorInfo(String subtype, String sessionId) {}
 
     public ReviewResult reviewPR(PRReviewRequest request, String model, Consumer<String> onStatus)
             throws IOException, InterruptedException {
@@ -193,7 +177,7 @@ public class ClaudeService {
         try {
             return CiFindingSuppressor.suppress(
                     runReview(
-                            ReviewPrompts.buildCritiquePrompt(request, draft),
+                            ReviewCritiquePrompts.buildCritiquePrompt(request, draft),
                             model,
                             onStatus,
                             onChunk),
@@ -314,7 +298,8 @@ public class ClaudeService {
             int exitCode = process.exitValue();
             String stderr = awaitIo(stderrFuture, "read review stderr");
             if (exitCode != 0) {
-                ErrorInfo errorInfo = findErrorInfo(stdoutFile);
+                ClaudeStreamParser.ErrorInfo errorInfo =
+                        ClaudeStreamParser.findErrorInfo(stdoutFile);
                 if (allowResume
                         && "error_max_turns".equals(errorInfo.subtype())
                         && errorInfo.sessionId() != null) {
@@ -334,7 +319,7 @@ public class ClaudeService {
                     "claude stdout file: {} ({} bytes)",
                     stdoutFile.getAbsolutePath(),
                     stdoutFile.length());
-            return parseStdoutFileToRaw(stdoutFile, stderr, onStatus, onChunk);
+            return ClaudeStreamParser.parseStdoutFileToRaw(stdoutFile, stderr, onStatus, onChunk);
         } finally {
             if (process != null) activeProcesses.remove(process);
             if (process != null) {
@@ -390,7 +375,8 @@ public class ClaudeService {
             int exitCode = process.exitValue();
             String stderr = awaitIo(stderrFuture, "read resume stderr");
             if (exitCode != 0) {
-                ErrorInfo errorInfo = findErrorInfo(stdoutFile);
+                ClaudeStreamParser.ErrorInfo errorInfo =
+                        ClaudeStreamParser.findErrorInfo(stdoutFile);
                 String msg =
                         "error_max_turns".equals(errorInfo.subtype())
                                 ? "Review hit the turn limit even after resume — the PR may be too large."
@@ -401,7 +387,7 @@ public class ClaudeService {
                 throw new IOException(msg);
             }
 
-            return parseStdoutFileToRaw(stdoutFile, stderr, onStatus, onChunk);
+            return ClaudeStreamParser.parseStdoutFileToRaw(stdoutFile, stderr, onStatus, onChunk);
         } finally {
             if (process != null) activeProcesses.remove(process);
             if (process != null) {
@@ -433,180 +419,6 @@ public class ClaudeService {
     }
 
     /**
-     * Reads the ndjson stdout file produced by a claude process and parses it into a {@link
-     * ReviewResult}. Package-private for unit testing without spawning a real process.
-     */
-    ReviewResult parseStdoutFileToResult(
-            File stdoutFile,
-            String stderr,
-            Consumer<String> onStatus,
-            BiConsumer<String, String> onChunk)
-            throws IOException {
-        String raw = parseStdoutFileToRaw(stdoutFile, stderr, onStatus, onChunk);
-        try {
-            return ReviewResultParser.parseReview(raw);
-        } catch (Exception parseEx) {
-            log.warn("Failed to parse Claude review JSON (output chars: {})", raw.length());
-            throw new IOException("Failed to parse review JSON from Claude output.", parseEx);
-        }
-    }
-
-    private String parseStdoutFileToRaw(
-            File stdoutFile,
-            String stderr,
-            Consumer<String> onStatus,
-            BiConsumer<String, String> onChunk)
-            throws IOException {
-        long stdoutBytes = stdoutFile.length();
-        StringBuilder resultBuffer = new StringBuilder();
-        StringBuilder textBuffer = new StringBuilder();
-        Map<String, Integer> eventTypeSeen = new LinkedHashMap<>();
-        try (LineIterator it =
-                IOUtils.lineIterator(
-                        Files.newInputStream(stdoutFile.toPath()), StandardCharsets.UTF_8)) {
-            while (it.hasNext()) {
-                String line = it.next();
-                if (StringUtils.isBlank(line)) continue;
-                try {
-                    StreamEvent event = JSON.readValue(line, StreamEvent.class);
-                    String eventType = StringUtils.defaultString(event.getType(), "unknown");
-                    eventTypeSeen.merge(eventType, 1, Integer::sum);
-                    handleStreamEvent(event, onStatus, onChunk, resultBuffer, textBuffer);
-                } catch (Exception e) {
-                    log.warn(
-                            "Claude stream event could not be parsed: {}",
-                            e.getClass().getSimpleName());
-                }
-            }
-        }
-
-        String raw = !resultBuffer.isEmpty() ? resultBuffer.toString() : textBuffer.toString();
-        if (StringUtils.isBlank(raw)) {
-            String eventSummary =
-                    eventTypeSeen.isEmpty()
-                            ? "none"
-                            : eventTypeSeen.entrySet().stream()
-                                    .map(e -> e.getKey() + "×" + e.getValue())
-                                    .reduce((a, b) -> a + ", " + b)
-                                    .orElse("none");
-            log.warn(
-                    "Claude produced no review output. events: [{}], stdoutBytes: {}, stderrPresent: {}",
-                    eventSummary,
-                    stdoutBytes,
-                    StringUtils.isNotBlank(stderr));
-            throw new IOException(
-                    "claude produced no output (events: "
-                            + eventSummary
-                            + ", stdout: "
-                            + stdoutBytes
-                            + "B)");
-        }
-        return raw;
-    }
-
-    /**
-     * Scans {@code stdoutFile} for a result event with {@code isError == true} and returns its
-     * subtype and session_id. Returns an {@link ErrorInfo} with null fields if no such event is
-     * found or the file does not exist. Package-private for unit testing.
-     */
-    ErrorInfo findErrorInfo(File stdoutFile) {
-        if (!stdoutFile.exists()) return new ErrorInfo(null, null);
-        try (LineIterator it =
-                IOUtils.lineIterator(
-                        Files.newInputStream(stdoutFile.toPath()), StandardCharsets.UTF_8)) {
-            while (it.hasNext()) {
-                String line = it.next();
-                if (StringUtils.isBlank(line)) continue;
-                try {
-                    StreamEvent event = JSON.readValue(line, StreamEvent.class);
-                    if (event.isError()) {
-                        return new ErrorInfo(event.getSubtype(), event.getSessionId());
-                    }
-                } catch (Exception e) {
-                    // Skip corrupt lines.
-                }
-            }
-        } catch (Exception e) {
-            // Non-fatal: file unreadable.
-        }
-        return new ErrorInfo(null, null);
-    }
-
-    private void handleStreamEvent(
-            StreamEvent event,
-            Consumer<String> onStatus,
-            BiConsumer<String, String> onChunk,
-            StringBuilder resultBuffer,
-            StringBuilder textBuffer) {
-        switch (StringUtils.defaultString(event.getType())) {
-            case "assistant" -> {
-                if (event.getMessage() != null && event.getMessage().getContent() != null) {
-                    for (ContentBlock block : event.getMessage().getContent()) {
-                        handleContentBlock(block, onStatus, onChunk, textBuffer);
-                    }
-                }
-            }
-            case "result" -> {
-                if (!event.isError()
-                        && (event.getSubtype() == null || "success".equals(event.getSubtype()))) {
-                    String result = event.getResult();
-                    if (result != null) {
-                        if (StringUtils.isNotBlank(result)) {
-                            resultBuffer.append(result);
-                        }
-                        onStatus.accept(STATUS_PARSING);
-                    }
-                }
-            }
-            default -> {
-                // Ignore other event types.
-            }
-        }
-    }
-
-    public void handleContentBlock(
-            ContentBlock block, Consumer<String> onStatus, BiConsumer<String, String> onChunk) {
-        handleContentBlock(block, onStatus, onChunk, null);
-    }
-
-    void handleContentBlock(
-            ContentBlock block,
-            Consumer<String> onStatus,
-            BiConsumer<String, String> onChunk,
-            StringBuilder textBuffer) {
-        log.debug("stream content block: type={}", block.getType());
-        switch (StringUtils.defaultString(block.getType())) {
-            case "tool_use" -> {
-                String status =
-                        toolUseStatus(
-                                StringUtils.defaultString(block.getName()),
-                                block.getInput() != null ? block.getInput() : Map.of());
-                if (status != null) onStatus.accept(status);
-            }
-            case "text" -> {
-                String text = StringUtils.defaultString(block.getText());
-                if (StringUtils.isNotBlank(text) && textBuffer != null) {
-                    textBuffer.append(text);
-                }
-                if (onChunk != null && StringUtils.isNotBlank(text)) {
-                    onChunk.accept("text", text);
-                } else {
-                    onStatus.accept(STATUS_GENERATING);
-                }
-            }
-            case "thinking" -> {
-                String thinking = StringUtils.defaultString(block.getThinking());
-                if (onChunk != null && StringUtils.isNotBlank(thinking)) {
-                    onChunk.accept("thinking", thinking);
-                }
-            }
-            default -> {
-                // Ignore other block types.
-            }
-        }
-    }
-
-    /**
      * Sends a chat message to Claude. Runs synchronously on the calling thread.
      *
      * @param prContext formatted PR + review background (may be empty)
@@ -621,14 +433,14 @@ public class ClaudeService {
             String userMessage,
             Consumer<String> onChunk)
             throws IOException, InterruptedException {
-        String prompt = ReviewPrompts.buildChatPrompt(prContext, history, userMessage);
+        String prompt = ReviewChatPrompts.buildChatPrompt(prContext, history, userMessage);
         return runChat(prompt, onChunk);
     }
 
     /**
      * Sends a pre-built prompt directly to Claude without wrapping it in {@link
-     * ReviewPrompts#buildChatPrompt}. Use this when the caller has already assembled the full
-     * prompt (e.g. via {@link ReviewPrompts#buildFocusedChatPrompt}) and does not want any
+     * ReviewChatPrompts#buildChatPrompt}. Use this when the caller has already assembled the full
+     * prompt (e.g. via {@link ReviewChatPrompts#buildFocusedChatPrompt}) and does not want any
      * additional wrapping.
      */
     public String chatWithPrompt(String rawPrompt, Consumer<String> onChunk)
@@ -738,32 +550,6 @@ public class ClaudeService {
         return TimeUnit.MINUTES.toMillis(10);
     }
 
-    /**
-     * Formats a tool-use event as a compact CLI-style label, e.g. {@code
-     * github/get_file_contents(owner=foo, repo=bar, path=CLAUDE.md)}.
-     *
-     * <p>Returns null for Claude Code's internal tool-result temp files, which are an
-     * implementation detail and not meaningful to show.
-     */
-    public static String toolUseStatus(String toolName, Map<String, Object> input) {
-        for (String key : List.of("path", "file_path", "filename")) {
-            Object value = input.get(key);
-            if (value instanceof String stringValue) {
-                if (stringValue.contains(CLAUDE_DIR_UNIX) || stringValue.contains(CLAUDE_DIR_WIN)) {
-                    return null;
-                }
-            }
-        }
-        String display = Strings.CS.removeStart(toolName, "mcp__").replace("__", "/");
-        String args =
-                input.entrySet().stream()
-                        .filter(e -> isScalar(e.getValue()))
-                        .map(e -> e.getKey() + "=" + e.getValue())
-                        .reduce((a, b) -> a + ", " + b)
-                        .orElse("");
-        return display + "(" + args + ")";
-    }
-
     private CompletableFuture<String> drainStderr(Process process) {
         return CompletableFuture.supplyAsync(
                 () -> {
@@ -825,10 +611,6 @@ public class ClaudeService {
         } catch (IOException e) {
             throw new java.io.UncheckedIOException(e);
         }
-    }
-
-    private static boolean isScalar(Object value) {
-        return value instanceof String || value instanceof Number || value instanceof Boolean;
     }
 
     public static String findClaudeBinary() {

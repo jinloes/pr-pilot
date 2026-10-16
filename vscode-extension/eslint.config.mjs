@@ -7,7 +7,7 @@ if (typeof globalThis.structuredClone !== 'function') {
 }
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules', 'eslint.config.mjs'] },
+  { ignores: ['dist', 'dist-test', 'coverage', '.vscode-test', 'integration-test', 'webview-dist', 'sidecar', 'node_modules', 'eslint.config.mjs'] },
   {
     files: ['src/**/*.ts'],
     extends: [

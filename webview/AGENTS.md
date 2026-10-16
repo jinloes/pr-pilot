@@ -15,9 +15,12 @@ Rules for work under `webview/`. The root `AGENTS.md` still applies.
 ## Checks
 
 `node scripts/verify.mjs` (from the repo root) runs lint, typecheck, unit, and a11y tests for webview
-changes. Visual snapshots are canonical Ubuntu/Chromium artifacts and must not be verified natively
-on other operating systems. Run them with the Playwright version pinned by `package-lock.json`; for
-the current lockfile, from the repo root:
+changes. `npm run test:coverage` writes LCOV under `coverage/` (CI feeds it to diff-cover) and
+`npm run test:mutation` runs Stryker over `src/lib/` (nightly in CI, report-only).
+
+Visual snapshots are canonical Ubuntu/Chromium artifacts and must not be verified natively on other
+operating systems. CI's `Webview visual regression` job runs them in the pinned Playwright
+container; run the same image locally, from the repo root:
 
 ```bash
 mkdir -p /tmp/pr-pilot-playwright-node-modules /tmp/pr-pilot-playwright-npm-cache
@@ -28,9 +31,13 @@ docker run --rm --ipc=host \
   -v /tmp/pr-pilot-playwright-node-modules:/work/webview/node_modules \
   -v /tmp/pr-pilot-playwright-npm-cache:/tmp/npm-cache \
   -w /work/webview \
-  mcr.microsoft.com/playwright:v1.61.1-noble \
+  mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48 \
   bash -lc "npm ci && npm run test:visual -- --reporter=line"
 ```
+
+The image tag must match the `@playwright/test` version in `package-lock.json`, and this command,
+`ci.yml`, and `release.yml` must share one tag and digest; `scripts/playwright-image.mjs` fails when
+they drift. To bump Playwright, follow "Playwright container image" in `docs/architecture/ci.md`.
 
 For an intentional baseline regeneration, use the same command and image but change the final
 command to `npm ci && npm run test:visual -- --update-snapshots --reporter=line`. Review every image

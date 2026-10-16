@@ -178,7 +178,8 @@ code, or sensitive pull-request content.
 - `vscode-extension/` - VS Code host integration
 - `webview/` - Shared React webview UI
 - `diagrams/` - Mermaid architecture and PR review-generation diagrams
-- `.github/workflows/release.yml` - Tag-driven release workflow for both plugin artifacts
+- `.github/workflows/` - CI, release, CodeQL, dependency review, workflow lint, and nightly mutation
+  workflows (constraints in `docs/architecture/ci.md`)
 - `AGENTS.md` - Agent workflow, test requirements, and parity rules
 - `ARCHITECTURE.md` - Architecture details and design constraints
 - `CODEMAP.md` - Task-oriented implementation and test-file map
@@ -343,6 +344,11 @@ npm run build
 npm run test:unit
 ```
 
+`npm run test:integration` activates the extension inside a downloaded VS Code 1.90 (the minimum
+supported version) and checks its commands and sidecar handshake. It stages the webview and sidecar
+first, so build them before running it (`npm run build` in `webview/`,
+`./gradlew :sidecar:bootJar`); on Linux without a display, run it under `xvfb-run -a`.
+
 ### Package VS Code extension (`.vsix`)
 
 This builds and stages the Java sidecar and shared webview assets before packaging.
@@ -361,44 +367,65 @@ npm run package:vsix
 
 ## Verification commands
 
-These are the repository's required checks from `AGENTS.md`:
+`scripts/verify.mjs` runs the checks affected by your changes (see `AGENTS.md`). Use Node from
+`.nvmrc`:
 
 ```bash
-./gradlew spotlessApply
-./gradlew spotlessCheck
-./gradlew check
-./gradlew :core:test :intellij-plugin:unitTest
+./gradlew spotlessApply          # after Java edits
+node scripts/verify.mjs          # checks affected by changes vs origin/main, incl. uncommitted
+node scripts/verify.mjs --all    # everything; run before opening a PR
 ```
 
+Coverage and mutation reports are opt-in locally:
+
 ```bash
-(cd webview && npm run lint)
-(cd webview && npx tsc --noEmit)
-(cd vscode-extension && npm run lint)
-(cd vscode-extension && npx tsc --noEmit)
-(cd vscode-extension && npm run test:unit)
+./gradlew check jacocoAggregateReport -Pcoverage  # build/reports/jacoco/aggregate/
+(cd webview && npm run test:coverage)              # webview/coverage/{logic,component}/
+(cd vscode-extension && npm run test:coverage)     # vscode-extension/coverage/
+./gradlew :core:pitest :review-engine:pitest       # <module>/build/reports/pitest/
+(cd webview && npm run test:mutation)              # webview/reports/mutation/
 ```
 
 ## CI and release workflow
 
-Continuous integration runs via `.github/workflows/ci.yml` on pushes to `main`, pull requests, and manual dispatch.
+Continuous integration runs via `.github/workflows/ci.yml` on pushes to `main`, pull requests, and
+manual dispatch. Its job names are the checks a pull request must pass:
 
-CI checks:
+- **Gradle check** - Spotless and every module's `check`, with JaCoCo coverage
+- **IntelliJ plugin** - Plugin build and IntelliJ Plugin Verifier against the pinned platform
+- **Webview** - Lint, typecheck, unit and component tests with coverage, accessibility tests, and
+  build
+- **Webview visual regression** - Playwright screenshot tests inside the pinned Playwright container
+  image, which the committed baselines are rendered in
+- **VS Code extension** - Lint, typecheck, unit tests with coverage, the Java 17 sidecar protocol
+  smoke test, and packaged `.vsix` content checks
+- **VS Code extension host smoke** - Activates the extension in VS Code 1.90 and checks its commands
+  and sidecar capabilities
+- **Host checks** (Windows and macOS) - Provider-binary, worktree-path, extension test, and
+  packaging checks
+- **Lint workflows** and **zizmor** (`workflow-lint.yml`) - actionlint, shellcheck, the Playwright
+  image pin check, and a workflow security audit
+- **Dependency review** (`dependency-review.yml`) - Fails when a pull request's npm lockfile changes
+  add a dependency with a known vulnerability of moderate severity or higher
 
-- Gradle Spotless + JVM checks (`spotlessCheck`, `check`, `:core:test`, `:intellij-plugin:unitTest`)
-- Webview lint/typecheck/build
-- VS Code extension lint/typecheck/unit tests/build
-- Java 17 sidecar protocol smoke test and packaged `.vsix` JAR assertion
+Report-only signals: changed-line coverage on pull requests (job summary and annotations), a
+non-blocking full Windows test run, CodeQL code scanning (`codeql.yml`), and nightly PIT and Stryker
+mutation testing (`mutation.yml`). `docs/architecture/ci.md` records the design constraints behind
+these jobs.
 
 Releases are tag-driven via `.github/workflows/release.yml`.
 
 What the workflow does:
 
-1. Sets up Java 17 and Node 20.17+ for the exact tagged commit
-2. Runs Gradle formatting/checks and JVM tests
-3. Runs webview lint, typecheck, unit tests, accessibility tests, and build
-4. Runs VS Code extension lint, typecheck, unit tests, build, and the sidecar protocol smoke test
-5. Builds both installable artifacts and verifies their packaged contents
-6. Creates a GitHub Release and uploads both artifacts only after every verification step passes
+1. Runs the visual regression tests in the same Playwright container as CI
+2. Sets up Java 17 and 21 and Node from `.nvmrc` for the exact tagged commit, restoring no caches
+3. Runs Gradle formatting/checks and JVM tests
+4. Runs webview lint, typecheck, unit tests, accessibility tests, and build
+5. Runs VS Code extension lint, typecheck, and unit tests, verifies the IntelliJ plugin against
+   every recommended IDE, and runs the sidecar protocol smoke test
+6. Builds both installable artifacts and verifies their packaged contents
+7. Creates a GitHub Release and uploads both artifacts from a separate job, only after every
+   verification step passes
 
 If verification fails, the workflow stops before the GitHub Release upload. Fix the failure on a new
 commit and create a new tag; do not move or reuse a published tag.

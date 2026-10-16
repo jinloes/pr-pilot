@@ -9,12 +9,17 @@ if (status === 0) {
   const testFiles = fs.readdirSync('dist-test/test')
     .filter((name) => name.endsWith('.test.js'))
     .map((name) => `dist-test/test/${name}`)
+  const scriptTests = fs.readdirSync('../scripts')
+    .filter((name) => name.endsWith('.test.mjs'))
+    .map((name) => `../scripts/${name}`)
   const tests = spawnSync(
     process.execPath,
-    ['--test', ...testFiles, '../scripts/portable-process.test.mjs', '../scripts/verify.test.mjs', '../scripts/reviewbench.test.mjs', '../scripts/reviewbench-report.test.mjs'],
+    ['--test', ...testFiles, ...scriptTests],
     { stdio: 'inherit', shell: false },
   )
   status = tests.status ?? 1
 }
-fs.rmSync('dist-test', { recursive: true, force: true })
+if (process.env.PR_PILOT_KEEP_DIST_TEST !== '1') {
+  fs.rmSync('dist-test', { recursive: true, force: true })
+}
 process.exit(status)

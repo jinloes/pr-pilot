@@ -20,15 +20,4 @@ run(gradleWrapperInvocation([':sidecar:bootJar'], { repoRoot }), repoRoot)
 run(npmCliInvocation(['run', 'build']), extensionDir)
 run(npmCliInvocation(['run', 'stage:webview']), extensionDir)
 run(npmCliInvocation(['run', 'stage:sidecar']), extensionDir)
-run(
-  npmCliInvocation([
-    'exec',
-    '--yes',
-    '--package=@vscode/vsce',
-    '--',
-    'vsce',
-    'package',
-    ...process.argv.slice(2),
-  ]),
-  extensionDir,
-)
+run(npmCliInvocation(['run', 'vsce', '--', 'package', ...process.argv.slice(2)]), extensionDir)

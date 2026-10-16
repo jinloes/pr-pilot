@@ -2,8 +2,17 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist-test",
-    "rootDir": "."
+    "rootDir": ".",
+    "sourceMap": true,
+    "inlineSources": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
-  "exclude": ["node_modules", "dist", "dist-test"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-test"
+  ]
 }

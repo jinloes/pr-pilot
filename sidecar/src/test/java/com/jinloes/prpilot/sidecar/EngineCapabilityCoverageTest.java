@@ -53,10 +53,19 @@ class EngineCapabilityCoverageTest {
         reviewExecutor.shutdownNow();
     }
 
+    /** Ignores synthetic members, such as the {@code $jacocoInit} method coverage runs add. */
     private static Set<String> declaredMethodNames(Class<?> api) {
         return Arrays.stream(api.getDeclaredMethods())
+                .filter(method -> !method.isSynthetic())
                 .map(Method::getName)
                 .collect(Collectors.toSet());
+    }
+
+    /** javac compiles the lambda into a private static synthetic method on this interface. */
+    private interface WithSyntheticMember {
+        Runnable NO_OP = () -> {};
+
+        void capability();
     }
 
     /** Every wire name declared by either engine. */
@@ -64,6 +73,19 @@ class EngineCapabilityCoverageTest {
         Set<String> names = new HashSet<>(GitHubEngineApi.RPC_METHODS.values());
         names.addAll(ReviewEngineApi.RPC_METHODS.values());
         return names;
+    }
+
+    @Nested
+    class DeclaredMethodNames {
+
+        @Test
+        void ignoresSyntheticMethods() {
+            assertThat(WithSyntheticMember.class.getDeclaredMethods())
+                    .as("fixture must declare a synthetic method for this test to mean anything")
+                    .anyMatch(Method::isSynthetic);
+            assertThat(declaredMethodNames(WithSyntheticMember.class))
+                    .containsExactly("capability");
+        }
     }
 
     @Nested

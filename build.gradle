@@ -3,6 +3,7 @@ plugins {
     id 'com.diffplug.spotless' version '8.8.0' apply false
     id 'org.springframework.boot' version '3.5.16' apply false
     id 'io.spring.dependency-management' version '1.1.7' apply false
+    id 'info.solidsoft.pitest' version '1.19.0' apply false
 }
 
 idea {
@@ -30,8 +31,47 @@ def secureTraversalJdk = providers.provider {
     probe.exitValue() == 0
 }
 
+// JaCoCo is opt-in (-Pcoverage) so ordinary local runs stay fast. CI enables it and feeds
+// jacocoAggregateReport's XML to diff-cover. Code exercised only inside child JVMs (the
+// review-engine source-inventory and semantic workers) is not measured.
+def coverageEnabled = providers.gradleProperty('coverage').isPresent()
+def jacocoVersion = '0.8.15'
+
 subprojects {
+    // Mutation testing runs nightly (.github/workflows/mutation.yml) and is report-only.
+    plugins.withId('info.solidsoft.pitest') {
+        pitest {
+            pitestVersion = '1.30.1'
+            junit5PluginVersion = '1.2.3'
+            targetClasses = ['com.jinloes.prpilot.*']
+            threads = 4
+            outputFormats = ['XML', 'HTML']
+            timestampedReports = false
+        }
+    }
+
     plugins.withId('java') {
+        // targetCompatibility alone only sets the bytecode version: on the JDK 21 build, a call to
+        // a newer API (List.getFirst() for a Java 17 target) compiles, then fails at runtime.
+        def declaredRelease = providers.provider {
+            java.targetCompatibility.majorVersion.toInteger()
+        }
+        tasks.withType(JavaCompile).configureEach {
+            options.release.set(declaredRelease)
+        }
+
+        if (coverageEnabled) {
+            apply plugin: 'jacoco'
+            jacoco {
+                toolVersion = jacocoVersion
+            }
+            tasks.withType(Test).configureEach {
+                jacoco {
+                    includes = ['com.jinloes.prpilot.*']
+                }
+            }
+        }
+
         if (secureTraversalJdk.get()) {
             tasks.withType(Test).configureEach {
                 javaLauncher = javaToolchains.launcherFor {
@@ -61,6 +101,46 @@ subprojects {
                 googleJavaFormat('1.22.0').aosp()
                 trimTrailingWhitespace()
                 endWithNewline()
+            }
+        }
+    }
+}
+
+if (coverageEnabled) {
+    repositories {
+        mavenCentral()
+    }
+    apply plugin: 'jacoco'
+    jacoco {
+        toolVersion = jacocoVersion
+    }
+
+    def aggregateReport = tasks.register('jacocoAggregateReport', JacocoReport) {
+        group = 'verification'
+        description = 'Merges every Java module test run into one JaCoCo report.'
+        reports {
+            xml.required = true
+            html.required = true
+            csv.required = false
+            xml.outputLocation = layout.buildDirectory.file('reports/jacoco/aggregate/jacoco.xml')
+            html.outputLocation = layout.buildDirectory.dir('reports/jacoco/aggregate/html')
+        }
+    }
+
+    // Subprojects apply their plugins after this script runs; wire them in once all are evaluated.
+    gradle.projectsEvaluated {
+        def javaProjects = subprojects.findAll { it.plugins.hasPlugin('java') }
+        aggregateReport.configure { report ->
+            javaProjects.each { p ->
+                p.tasks.withType(Test).each { testTask ->
+                    report.mustRunAfter(testTask)
+                    // Disabled or skipped test tasks leave no .exec file behind.
+                    def execFile = testTask.extensions.getByType(JacocoTaskExtension)
+                            .destinationFile
+                    report.executionData.from(files(execFile).filter { it.exists() })
+                }
+                report.sourceDirectories.from(p.sourceSets.main.allJava.srcDirs)
+                report.classDirectories.from(p.sourceSets.main.output.classesDirs)
             }
         }
     }

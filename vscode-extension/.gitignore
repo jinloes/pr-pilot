@@ -1,0 +1,5 @@
+coverage/
+.vscode-test/
+*.vsix
+sidecar/
+webview-dist/

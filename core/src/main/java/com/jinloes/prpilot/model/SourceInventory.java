@@ -783,8 +783,18 @@ public final class SourceInventory {
         if (type.getSuperclass() != Object.class) {
             result.addAll(fields(type.getSuperclass()));
         }
-        result.addAll(Arrays.asList(type.getDeclaredFields()));
+        result.addAll(declaredWireFields(type));
         return result;
+    }
+
+    /**
+     * Coverage and mutation agents inject synthetic fields (PIT's {@code $$pitCoverageProbes},
+     * JaCoCo's non-condy {@code $jacocoData}); they are not wire properties.
+     */
+    static List<Field> declaredWireFields(Class<?> type) {
+        return Arrays.stream(type.getDeclaredFields())
+                .filter(field -> !field.isSynthetic())
+                .toList();
     }
 
     /** Schema generation shares the exact required/nullable field definitions with validation. */

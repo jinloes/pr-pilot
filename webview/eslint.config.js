@@ -10,6 +10,9 @@ export default tseslint.config(
     ignores: [
       'dist',
       'node_modules',
+      'coverage',
+      '.stryker-tmp',
+      'reports',
       'src/components/ui/**',
       // Root config files — Node land, not part of the src TS project.
       'vite.config.ts',

@@ -6,3 +6,12 @@ scripts/**
 *.tsbuildinfo
 
 AGENTS.md
+
+integration-test/**
+.vscode-test*/**
+.vscode-test.mjs
+coverage/**
+*.vsix
+
+*.log
+.gitignore

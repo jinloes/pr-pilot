@@ -322,6 +322,95 @@ class StdioJsonRpcServerReviewsTest extends StdioJsonRpcServerTestBase {
     }
 
     @Test
+    void reviewsGenerateStreamsStatusAndChunkNotificationsBeforeItsResult() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ReviewSessionService fakeReview =
+                new ReviewSessionService() {
+                    @Override
+                    public ReviewResult generate(
+                            ReviewEngineApi.GenerateReviewParams params,
+                            Consumer<String> onStatus,
+                            BiConsumer<String, String> onChunk) {
+                        onStatus.accept("Reviewing");
+                        onChunk.accept("text", "partial");
+                        return new ReviewResult("summary", "APPROVE", List.of());
+                    }
+                };
+        server =
+                new StdioJsonRpcServer(
+                        objectMapper,
+                        frameCodec,
+                        new SidecarBootstrapService(),
+                        new GitHubEngine(),
+                        fakeReview,
+                        reviewExecutor);
+        server.run(new ByteArrayInputStream(new byte[0]), output);
+
+        assertThat(server.handle(generateRequest(43, "streamed"))).isNull();
+        reviewExecutor.submit(() -> {}).get(1, TimeUnit.SECONDS);
+
+        List<JsonNode> frames = readFrames(output);
+        assertThat(frames).hasSize(3);
+        assertThat(frames.get(0).path("method").asText()).isEqualTo("reviews/status");
+        assertThat(frames.get(0).path("params"))
+                .isEqualTo(
+                        objectMapper
+                                .createObjectNode()
+                                .put("requestId", 43)
+                                .put("message", "Reviewing"));
+        assertThat(frames.get(1).path("method").asText()).isEqualTo("reviews/chunk");
+        assertThat(frames.get(1).path("params"))
+                .isEqualTo(
+                        objectMapper
+                                .createObjectNode()
+                                .put("requestId", 43)
+                                .put("kind", "text")
+                                .put("text", "partial"));
+        assertThat(frames.get(2).path("id").asInt()).isEqualTo(43);
+        assertThat(frames.get(2).has("result")).isTrue();
+    }
+
+    @Test
+    void reviewsChatStreamsChatChunkNotificationsBeforeItsResult() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ReviewSessionService fakeReview =
+                new ReviewSessionService() {
+                    @Override
+                    public ReviewEngineApi.ChatResult chat(
+                            ReviewEngineApi.ChatParams params, Consumer<String> onChunk) {
+                        onChunk.accept("Hel");
+                        return new ReviewEngineApi.ChatResult("Hello");
+                    }
+                };
+        server =
+                new StdioJsonRpcServer(
+                        objectMapper,
+                        frameCodec,
+                        new SidecarBootstrapService(),
+                        new GitHubEngine(),
+                        fakeReview,
+                        reviewExecutor);
+        server.run(new ByteArrayInputStream(new byte[0]), output);
+        ObjectNode request = rpcRequest(44, "reviews/chat");
+        request.putObject("params")
+                .put("operationId", "chat-1")
+                .put("provider", "claude")
+                .put("userMessage", "question");
+
+        assertThat(server.handle(objectMapper.writeValueAsBytes(request))).isNull();
+        reviewExecutor.submit(() -> {}).get(1, TimeUnit.SECONDS);
+
+        List<JsonNode> frames = readFrames(output);
+        assertThat(frames).hasSize(2);
+        assertThat(frames.get(0).path("method").asText()).isEqualTo("reviews/chatChunk");
+        assertThat(frames.get(0).has("id")).isFalse();
+        assertThat(frames.get(0).path("params"))
+                .isEqualTo(objectMapper.createObjectNode().put("requestId", 44).put("text", "Hel"));
+        assertThat(frames.get(1).path("id").asInt()).isEqualTo(44);
+        assertThat(frames.get(1).path("result").path("content").asText()).isEqualTo("Hello");
+    }
+
+    @Test
     void reviewsGenerateReturnsNullSynchronouslyWithoutBlockingTheReadLoop() {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         server = serverWithOutput(output);

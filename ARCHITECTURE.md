@@ -1,20 +1,22 @@
 # PR Pilot Architecture
 
-IntelliJ and VS Code extension that lists GitHub Pull Requests and generates AI-powered code reviews using a local AI CLI/runtime (Claude Code or GitHub Copilot, selected per-host in settings).
+IntelliJ and VS Code extension that lists GitHub Pull Requests and generates AI-powered code reviews
+using a local AI CLI/runtime (Claude Code or GitHub Copilot, selected per-host in settings).
 
 ## Scope
 
 - Keep this file focused on stable architecture and design constraints.
 - See `CODEMAP.md` for implementation locations, task entry points, and related tests.
 - Put workflow/checklist instructions in `AGENTS.md`.
-- Put volatile version inventory in build manifests unless a version is itself an architecture constraint.
+- Put volatile version inventory in build manifests unless a version is itself an architecture
+  constraint.
 
 ## System shape
 
 PR Pilot is a multi-module Java 17 project with two IDE hosts sharing one React webview. `core`,
-`github-engine`, and `review-engine` own host-neutral behavior. IntelliJ calls the engines in-process;
-VS Code reaches the same capabilities through the stdio JSON-RPC `sidecar`. Host modules own only
-IDE lifecycle, settings integration, and bridge wiring.
+`github-engine`, and `review-engine` own host-neutral behavior. IntelliJ calls the engines
+in-process; VS Code reaches the same capabilities through the stdio JSON-RPC `sidecar`. Host modules
+own only IDE lifecycle, settings integration, and bridge wiring.
 
 The shared webview owns the user workflow from PR discovery through review editing and submission.
 GitHub credentials remain inside `github-engine`, while provider processes and review semantics
@@ -29,15 +31,18 @@ Visual references:
 
 ## Key design decisions
 
-Only decisions that encode active constraints future code must respect and are not obvious from source.
+Only decisions that encode active constraints future code must respect and are not obvious from
+source.
 
-Add a new decision as a `###` section in the matching `docs/architecture/*.md` file and an index line here.
+Add a new decision as a `###` section in the matching `docs/architecture/*.md` file and an index
+line here.
 
 **Semantic review** ([semantic-review.md](docs/architecture/semantic-review.md))
 
 - [Source inventory is evidence, not semantic readiness](docs/architecture/semantic-review.md#source-inventory-is-evidence-not-semantic-readiness)
 - [Successful import authority is memory-only and pre-armed](docs/architecture/semantic-review.md#successful-import-authority-is-memory-only-and-pre-armed)
 - [Opt-in semantic-review lifecycle](docs/architecture/semantic-review.md#opt-in-semantic-review-lifecycle)
+- [Bundled skill bytes are pinned](docs/architecture/semantic-review.md#bundled-skill-bytes-are-pinned)
 
 **Review pipeline** ([review-pipeline.md](docs/architecture/review-pipeline.md))
 
@@ -48,26 +53,37 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [Reviewer attribution and corroboration](docs/architecture/review-pipeline.md#reviewer-attribution-and-corroboration)
 - [Review rules are trigger-gated and applied one agent per rule](docs/architecture/review-pipeline.md#review-rules-are-trigger-gated-and-applied-one-agent-per-rule)
 - [Suggested changes are literal, one-line, high-confidence replacements](docs/architecture/review-pipeline.md#suggested-changes-are-literal-one-line-high-confidence-replacements)
-- [Recall benchmark withholds the reference answers](docs/architecture/review-pipeline.md#recall-benchmark-withholds-the-reference-answers)
-- [ReviewBench runs never consult GitHub and delegate scoring](docs/architecture/review-pipeline.md#reviewbench-runs-never-consult-github-and-delegate-scoring)
-- [Comment anchoring snaps within a hunk, never across one](docs/architecture/review-pipeline.md#comment-anchoring-snaps-within-a-hunk-never-across-one)
-- [Three comment keys exist on purpose](docs/architecture/review-pipeline.md#three-comment-keys-exist-on-purpose)
-- [Missing rationale drops a comment, never fabricates one](docs/architecture/review-pipeline.md#missing-rationale-drops-a-comment-never-fabricates-one)
-- [Comments on deleted files orphan by design](docs/architecture/review-pipeline.md#comments-on-deleted-files-orphan-by-design)
-- [CI annotations are selected by whether they exist, not by whether the check failed](docs/architecture/review-pipeline.md#ci-annotations-are-selected-by-whether-they-exist-not-by-whether-the-check-failed)
-- [CI-duplicate suppression is conservative by design](docs/architecture/review-pipeline.md#ci-duplicate-suppression-is-conservative-by-design)
-- [Existing review comments carry thread state](docs/architecture/review-pipeline.md#existing-review-comments-carry-thread-state)
-- [Incremental review since the last submitted review](docs/architecture/review-pipeline.md#incremental-review-since-the-last-submitted-review)
 - [Review JSON parsing is self-healing, not all-or-nothing](docs/architecture/review-pipeline.md#review-json-parsing-is-self-healing-not-all-or-nothing)
 - [Low confidence is a gate, not a label](docs/architecture/review-pipeline.md#low-confidence-is-a-gate-not-a-label)
 - [Prompt-injection hardening](docs/architecture/review-pipeline.md#prompt-injection-hardening)
-- [Diff acquisition model](docs/architecture/review-pipeline.md#diff-acquisition-model)
-- [Complete review diff coverage](docs/architecture/review-pipeline.md#complete-review-diff-coverage)
-- [Large diff visibility](docs/architecture/review-pipeline.md#large-diff-visibility)
-- [Review quality gate and chunked review mode](docs/architecture/review-pipeline.md#review-quality-gate-and-chunked-review-mode)
-- [Bounded review supervision](docs/architecture/review-pipeline.md#bounded-review-supervision)
-- [Comment anchoring policy](docs/architecture/review-pipeline.md#comment-anchoring-policy)
-- [Hygiene pass gets a mechanical log inventory](docs/architecture/review-pipeline.md#hygiene-pass-gets-a-mechanical-log-inventory)
+
+**Review benchmarks** ([review-benchmarks.md](docs/architecture/review-benchmarks.md))
+
+- [Recall benchmark withholds the reference answers](docs/architecture/review-benchmarks.md#recall-benchmark-withholds-the-reference-answers)
+- [ReviewBench runs never consult GitHub and delegate scoring](docs/architecture/review-benchmarks.md#reviewbench-runs-never-consult-github-and-delegate-scoring)
+
+**Review comments and context**
+([review-comments-context.md](docs/architecture/review-comments-context.md))
+
+- [Comment anchoring snaps within a hunk, never across one](docs/architecture/review-comments-context.md#comment-anchoring-snaps-within-a-hunk-never-across-one)
+- [Three comment keys exist on purpose](docs/architecture/review-comments-context.md#three-comment-keys-exist-on-purpose)
+- [Missing rationale drops a comment, never fabricates one](docs/architecture/review-comments-context.md#missing-rationale-drops-a-comment-never-fabricates-one)
+- [Comments on deleted files orphan by design](docs/architecture/review-comments-context.md#comments-on-deleted-files-orphan-by-design)
+- [CI annotations are selected by whether they exist, not by whether the check failed](docs/architecture/review-comments-context.md#ci-annotations-are-selected-by-whether-they-exist-not-by-whether-the-check-failed)
+- [CI-duplicate suppression is conservative by design](docs/architecture/review-comments-context.md#ci-duplicate-suppression-is-conservative-by-design)
+- [Existing review comments carry thread state](docs/architecture/review-comments-context.md#existing-review-comments-carry-thread-state)
+- [Incremental review since the last submitted review](docs/architecture/review-comments-context.md#incremental-review-since-the-last-submitted-review)
+- [Comment anchoring policy](docs/architecture/review-comments-context.md#comment-anchoring-policy)
+
+**Review diff coverage and quality**
+([review-diff-coverage.md](docs/architecture/review-diff-coverage.md))
+
+- [Diff acquisition model](docs/architecture/review-diff-coverage.md#diff-acquisition-model)
+- [Complete review diff coverage](docs/architecture/review-diff-coverage.md#complete-review-diff-coverage)
+- [Large diff visibility](docs/architecture/review-diff-coverage.md#large-diff-visibility)
+- [Review quality gate and chunked review mode](docs/architecture/review-diff-coverage.md#review-quality-gate-and-chunked-review-mode)
+- [Bounded review supervision](docs/architecture/review-diff-coverage.md#bounded-review-supervision)
+- [Hygiene pass gets a mechanical log inventory](docs/architecture/review-diff-coverage.md#hygiene-pass-gets-a-mechanical-log-inventory)
 
 **Providers** ([providers.md](docs/architecture/providers.md))
 
@@ -83,12 +99,6 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 **Hosts and sidecar** ([hosts-and-sidecar.md](docs/architecture/hosts-and-sidecar.md))
 
 - [Host operation correlation and acknowledged state](docs/architecture/hosts-and-sidecar.md#host-operation-correlation-and-acknowledged-state)
-- [Module boundaries](docs/architecture/hosts-and-sidecar.md#module-boundaries)
-- [Engine capability boundary (test-enforced host parity)](docs/architecture/hosts-and-sidecar.md#engine-capability-boundary-test-enforced-host-parity)
-- [Sidecar streaming: async requests plus server-push notifications](docs/architecture/hosts-and-sidecar.md#sidecar-streaming-async-requests-plus-server-push-notifications)
-- [GitHub engine host wiring](docs/architecture/hosts-and-sidecar.md#github-engine-host-wiring)
-- [core: plain Java module](docs/architecture/hosts-and-sidecar.md#core-plain-java-module)
-- [Threading model](docs/architecture/hosts-and-sidecar.md#threading-model)
 - [Cross-host parity](docs/architecture/hosts-and-sidecar.md#cross-host-parity)
 - [First-run onboarding path](docs/architecture/hosts-and-sidecar.md#first-run-onboarding-path)
 - [Notification parity](docs/architecture/hosts-and-sidecar.md#notification-parity)
@@ -97,7 +107,22 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [Pinned IntelliJ SDK versus local sandbox](docs/architecture/hosts-and-sidecar.md#pinned-intellij-sdk-versus-local-sandbox)
 - [VS Code extension development target repo](docs/architecture/hosts-and-sidecar.md#vs-code-extension-development-target-repo)
 
-**GitHub, drafts and worktrees** ([github-drafts-worktrees.md](docs/architecture/github-drafts-worktrees.md))
+**Sidecar capabilities** ([sidecar-capabilities.md](docs/architecture/sidecar-capabilities.md))
+
+- [Engine capability boundary (test-enforced host parity)](docs/architecture/sidecar-capabilities.md#engine-capability-boundary-test-enforced-host-parity)
+- [Sidecar streaming: async requests plus server-push notifications](docs/architecture/sidecar-capabilities.md#sidecar-streaming-async-requests-plus-server-push-notifications)
+- [GitHub engine host wiring](docs/architecture/sidecar-capabilities.md#github-engine-host-wiring)
+
+**Module and runtime boundaries**
+([module-runtime-boundaries.md](docs/architecture/module-runtime-boundaries.md))
+
+- [Module boundaries](docs/architecture/module-runtime-boundaries.md#module-boundaries)
+- [core: plain Java module](docs/architecture/module-runtime-boundaries.md#core-plain-java-module)
+- [Modules compile with --release](docs/architecture/module-runtime-boundaries.md#modules-compile-with---release)
+- [Threading model](docs/architecture/module-runtime-boundaries.md#threading-model)
+
+**GitHub, drafts and worktrees**
+([github-drafts-worktrees.md](docs/architecture/github-drafts-worktrees.md))
 
 - [Pending review index coordination](docs/architecture/github-drafts-worktrees.md#pending-review-index-coordination)
 - [Authenticated-user review freshness](docs/architecture/github-drafts-worktrees.md#authenticated-user-review-freshness)
@@ -108,6 +133,7 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [Worktree-based PR context](docs/architecture/github-drafts-worktrees.md#worktree-based-pr-context)
 - [GitHub API resilience policy](docs/architecture/github-drafts-worktrees.md#github-api-resilience-policy)
 - [Draft review storage semantics](docs/architecture/github-drafts-worktrees.md#draft-review-storage-semantics)
+- [Suggested changes are posted as GitHub suggestion blocks](docs/architecture/github-drafts-worktrees.md#suggested-changes-are-posted-as-github-suggestion-blocks)
 - [Draft autosave](docs/architecture/github-drafts-worktrees.md#draft-autosave)
 
 **Webview** ([webview.md](docs/architecture/webview.md))
@@ -124,67 +150,62 @@ Add a new decision as a `###` section in the matching `docs/architecture/*.md` f
 - [Webview bridge PR correlation](docs/architecture/webview.md#webview-bridge-pr-correlation)
 - [Incremental review button and scope banner](docs/architecture/webview.md#incremental-review-button-and-scope-banner)
 - [Reviewer sources chip](docs/architecture/webview.md#reviewer-sources-chip)
+- [Suggested change preview and removal](docs/architecture/webview.md#suggested-change-preview-and-removal)
 - [VS Code webview surfaces](docs/architecture/webview.md#vs-code-webview-surfaces)
 - [IntelliJ webview surfaces](docs/architecture/webview.md#intellij-webview-surfaces)
 
+**Local data** ([local-data.md](docs/architecture/local-data.md))
+
+- [Outcome logging is stateless because IntelliJ does not use ReviewSessionService](docs/architecture/local-data.md#outcome-logging-is-stateless-because-intellij-does-not-use-reviewsessionservice)
+- [The outcome log stores hashes, never comment text or file paths](docs/architecture/local-data.md#the-outcome-log-stores-hashes-never-comment-text-or-file-paths)
+
+**CI and releases** ([ci.md](docs/architecture/ci.md))
+
+- [Required checks are matched by job name](docs/architecture/ci.md#required-checks-are-matched-by-job-name)
+- [Gradle jobs run on owner-only JDK copies](docs/architecture/ci.md#gradle-jobs-run-on-owner-only-jdk-copies)
+- [Changed-line coverage is report-only](docs/architecture/ci.md#changed-line-coverage-is-report-only)
+- [Mutation testing is nightly and report-only](docs/architecture/ci.md#mutation-testing-is-nightly-and-report-only)
+- [Playwright container image](docs/architecture/ci.md#playwright-container-image)
+- [Windows parity is measured, not gated](docs/architecture/ci.md#windows-parity-is-measured-not-gated)
+- [Actions are pinned by commit SHA](docs/architecture/ci.md#actions-are-pinned-by-commit-sha)
+- [Dependency updates wait a week and arrive grouped](docs/architecture/ci.md#dependency-updates-wait-a-week-and-arrive-grouped)
+- [Dependency review covers npm; Gradle comes from submission](docs/architecture/ci.md#dependency-review-covers-npm-gradle-comes-from-submission)
+- [CodeQL runs as advanced setup](docs/architecture/ci.md#codeql-runs-as-advanced-setup)
+- [Workflow lint](docs/architecture/ci.md#workflow-lint)
+- [Release builds restore no caches and publish separately](docs/architecture/ci.md#release-builds-restore-no-caches-and-publish-separately)
+
 ## Settings persistence
 
-`PluginSettings` (`claudeReviews.xml`) stores:
+IntelliJ stores these in `PluginSettings` (`claudeReviews.xml`); VS Code contributes the same names
+as `pr-pilot.<name>` in `vscode-extension/package.json`. Field semantics, guidance profiles, and
+the VS Code default-mirroring rule are in [settings.md](docs/architecture/settings.md). No API keys
+or tokens are written to disk.
 
-- `githubBaseUrl` (default `https://github.com`)
-- `notificationsEnabled` (default `false`)
-- `notifyReviewRequested` (default `true`)
-- `notifyStarredRepos` (default `false`)
-- `notificationPollMinutes` (default `5`)
-- `reviewModel` (default `""`)
-- `reviewModelCopilot` (default `"claude-sonnet-4.6"`)
-- `reviewProvider` (default `"claude"`; values `claude|copilot`)
-- `reviewEffort` (default `"high"`; values `none|low|medium|high|xhigh|max`)
-- `copilotInheritMcp` (default `false`) — explicit capability elevation that injects MCP servers read from the user's trusted Copilot config (`<configDir>/mcp-config.json`) via `setMcpServers`, while retaining the read/MCP-only permission allowlist. On-disk config discovery stays disabled, so the untrusted PR-branch worktree's repo-local `.mcp.json` is never loaded. Copilot-only.
-- `copilotAutoEnableMcpOnReview` (default `false`) — review-only opt-in that forces MCP enablement for Copilot review generation even when `copilotInheritMcp` is off; chat still follows `copilotInheritMcp`. Copilot-only.
-- `copilotConfigDir` (default `""`) — optional override of the Copilot config directory used to read trusted MCP servers; empty uses the CLI default (`~/.copilot`). Copilot-only.
-- `reviewFocusAreas` (default `""`) — default reviewer focus areas; a non-empty per-review override takes precedence.
-- `reviewCustomInstructions` (default `""`) — default extra review instructions; a non-empty per-review override takes precedence.
-- `reviewGuidanceProfiles` (default `[]`) — named reusable bundles of focus areas and custom instructions. Profiles use stable IDs so renames preserve selection. Invalid, duplicate, or missing IDs fall back to the built-in legacy defaults rather than partially applying a profile. The `guidanceGlobs` profile field remains readable, is preserved on edits, and is sent to the engine, but is not exposed in settings UI.
-- `repositoryReviewInstructions` (default `{}`; VS Code `pr-pilot.repositoryReviewInstructions`) — review instructions remembered per repository, keyed by lowercase `owner/repo` (at most 200 repositories and 10,000 characters each; `RepositoryReviewInstructions` in IntelliJ, `repositoryInstructions.ts` in VS Code). At generation each host prepends the entry for the PR's repository to the engine's existing `customInstructions` input under an `Instructions remembered for owner/repo:` heading, ahead of the per-review override or the resolved profile/default, so no engine or wire field exists for it. Hosts send the entry on every `draftLoaded` as `repositoryInstructions`; the review pane's "Remember for this repository" posts `saveRepositoryInstructions` and receives `repositoryInstructionsSaved` (normalized text, empty when forgotten) or `repositoryInstructionsSaveError`. Both settings UIs list remembered repositories for editing and Forget. Keys ignore the GitHub host, so same-named repositories on github.com and an enterprise host share an entry.
-- `activeReviewGuidanceProfileId` (default `""`) — selected profile ID; blank selects the built-in defaults stored in `reviewFocusAreas`, `reviewCustomInstructions`, and `reviewGuidanceGlobs`. Keeping those fields as the built-in profile makes upgrades migration-free.
-- `reviewSelfCritique` (default `true`) — runs a second validation pass (`ClaudeService.buildCritiquePrompt`) that re-checks every finding against a contract index derived from the changed files and the same context sections the first pass saw, dropping misattributed, unsupported, and CI-duplicated comments. On by default because a misattributed comment costs the reviewer more than the extra pass does; disabling it roughly halves review latency. Shared by both providers.
-- `reviewSupervisorEnabled` (default `true`; labeled "Re-inspect coverage gaps") — checks the primary
-  inspection ledger for unreviewed high-risk hunks and uninspected files, then runs bounded
-  read-only follow-ups: one for selected hunks and up to five whole-file re-reviews. Shared by both
-  providers.
-- `reviewRulesDirectory` (default `""`; VS Code `pr-pilot.reviewRulesDirectory`; benchmark
-  `--rules-dir`) — an absolute local folder of the reviewer's own rules. The engine
-  (`LocalReviewRules`) reads `.md`/`.yaml`/`.yml` regular files up to four levels deep, skipping
-  symbolic links inside the folder, files over 32 KB, and non-UTF-8 files, and keeps at most 50
-  files sorted by path. Structured YAML rules (`name`, `description`, `trigger`, `prompt`) are
-  selected by one trigger-matching call; every other file is always selected. `ReviewRulesPass`
-  applies each selected rule in its own read-only agent (3 at a time, at most 25 per review) and
-  merges the findings into the candidate; rules never enter the repository guidance. Unreadable or
-  relative paths add nothing. It is carried on
-  `GenerateReviewParams.rulesDirectory` / `PRReviewRequest.rulesDirectory`.
-- `reviewSecondReviewerModel` (default `""`; VS Code `pr-pilot.reviewSecondReviewerModel`) — optional
-  Copilot model run in parallel as a second reviewer whose findings are merged and cross-validated.
-  Blank disables it. Uses the primary's effort when the primary is Copilot, otherwise Copilot's
-  default effort. Sent to the engine as `secondReviewerModel`; ignored for IntelliJ-assisted deep
-  review. Shared by both hosts.
-- `experimentalIntellijAssistedReview` (default `false`; VS Code `pr-pilot.experimentalIntellijAssistedReview`) —
-  experimental opt-in for IntelliJ-assisted review. Each host sends it to the webview as
-  `intellijAssistedEnabled` on every `draftLoaded` and `prListLoaded` message. Anything other than
-  `true` hides the IntelliJ-assisted checkbox and the Advanced-options retained-worktree button and
-  resets a checked box; the `prListLoaded` value also hides the no-selection "Review maintenance"
-  disclosure and the review-pane "Retained IntelliJ review worktrees" context-menu item unless an
-  assisted setup is active. Retained worktrees are therefore removable again only after the setting
-  is turned back on, which both hosts' setting hints state. While off, a `generateReview` request with
-  `intellijAssisted: true` is rejected with a `reviewError` and never downgraded to an ordinary
-  review. Shared by both hosts.
-- `reviewGuidanceGlobs` (hidden) — retained in host settings and profiles. It is not contributed as a public VS Code setting or rendered in either settings UI, but the resolved value is sent to the engine as `guidanceGlobs`, which reads matching files from the PR's base commit only (never the PR worktree).
-
-Profiles are host-owned settings/UI state, not an engine capability. Each host resolves the active profile into the existing engine inputs; focus areas, custom instructions and guidance globs are all sent; the engine reads glob matches from the base commit in addition to the guidance it discovers itself. Per-review non-empty focus/custom-instruction overrides still take precedence over the resolved active profile.
-
-The VS Code equivalents live in `vscode-extension/package.json` under `contributes.configuration`. Each is declared twice — once as the contribution default, once as the fallback in `extension.ts`'s reader — and VS Code only honors the former, so a mismatch is silent. `vscode-extension/test/settingDefaults.test.ts` asserts the two agree for every boolean setting.
-
-No API keys or tokens are written to disk.
+| Setting | Default | Purpose |
+|---|---|---|
+| `githubBaseUrl` | `https://github.com` | GitHub.com or Enterprise Server origin for API calls |
+| `notificationsEnabled` | `false` | Background PR notifications |
+| `notifyReviewRequested` | `true` | Notify when the user's review is requested |
+| `notifyStarredRepos` | `false` | Notify about new PRs in starred repositories |
+| `notificationPollMinutes` | `5` | Notification poll interval in minutes |
+| `reviewModel` | `""` | Claude model; blank uses the CLI default |
+| `reviewModelCopilot` | `"claude-sonnet-4.6"` | Copilot model |
+| `reviewProvider` | `"claude"` | `claude` or `copilot` |
+| `reviewEffort` | `"high"` | Reasoning effort, `none` through `max` |
+| `copilotInheritMcp` | `false` | Inject MCP servers from the trusted Copilot config (Copilot only) |
+| `copilotAutoEnableMcpOnReview` | `false` | Force MCP for Copilot review generation only |
+| `copilotConfigDir` | `""` | Copilot config directory override; blank uses `~/.copilot` |
+| `reviewFocusAreas` | `""` | Default focus areas; a per-review override wins |
+| `reviewCustomInstructions` | `""` | Default extra instructions; a per-review override wins |
+| `reviewGuidanceProfiles` | `[]` | Named focus/instruction bundles with stable IDs |
+| `activeReviewGuidanceProfileId` | `""` | Selected profile; blank uses the built-in defaults |
+| `repositoryReviewInstructions` | `{}` | Instructions remembered per `owner/repo` |
+| `reviewSelfCritique` | `true` | Validation pass that drops unsupported findings |
+| `reviewSupervisorEnabled` | `true` | Bounded "Re-inspect coverage gaps" follow-ups |
+| `reviewRulesDirectory` | `""` | Local folder of the reviewer's own rules |
+| `reviewSecondReviewerModel` | `""` | Parallel Copilot second reviewer; blank disables it |
+| `experimentalIntellijAssistedReview` | `false` | IntelliJ-assisted review opt-in |
+| `reviewGuidanceGlobs` | `""` (hidden) | Base-commit guidance globs; in neither settings UI |
 
 ## Local data files
 
@@ -198,7 +219,9 @@ Cancellation or restart releases process locks, not retention. Only explicit pro
 lease-free, identity-checked, clean non-force cleanup removes a retained worktree. The preparation
 binding itself is memory-only: restarting preserves maintenance access, not authority to Continue.
 
-IntelliJ-only (`intellij-plugin`'s `PendingReviewIndex`/`SeenPRSet`); VS Code persists the equivalent state via extension `globalState` instead (see Notification parity above).
+IntelliJ-only (`intellij-plugin`'s `PendingReviewIndex`/`SeenPRSet`); VS Code persists the
+equivalent state via extension `globalState` instead (see
+[Notification parity](docs/architecture/hosts-and-sidecar.md#notification-parity)).
 
 | Path | Purpose |
 |------|---------|
@@ -206,9 +229,3 @@ IntelliJ-only (`intellij-plugin`'s `PendingReviewIndex`/`SeenPRSet`); VS Code pe
 | `~/.pr-pilot/pending-prs.json.corrupt-<timestamp>` | User-triggered quarantine copy of an unreadable draft index; GitHub drafts are unchanged |
 | `~/.pr-pilot/seen-prs.json` | Set of `owner/repo#number` strings already notified about |
 | `~/.pr-pilot/review-outcomes.jsonl` | Append-only outcome log: one JSON object per generated/submitted comment (`ReviewOutcomeLog`, engine-owned), including category but never prose or paths, written by both hosts on submit |
-
-### Outcome logging is stateless because IntelliJ does not use `ReviewSessionService`
-`reviews/recordOutcome` takes **both** the generated and the submitted comment sets from its caller rather than the engine remembering the generated review between calls. The obvious design — snapshot it in `ReviewSessionService.generate` — silently fails on IntelliJ, which calls `ClaudeService`/`CopilotService` in-process through `IntellijClaudeService` and never touches `ReviewSessionService` at all (that type is sidecar-only). Each host therefore retains the half it was previously discarding: IntelliJ keeps `generatedResult` because `handleSaveDraft` overwrites `lastResult` with the edits, and VS Code keeps `editedReviewResult` because it only ever sees the edits in the `saveDraft` message. Classification, fingerprinting, and the base `promptVersion` stay engine-owned, so the hosts hold UI state and implement no logic. The host supplies only the snapshotted supervisor boolean; the engine uses it to suffix its own version and keep the two pipeline modes separable. A draft **loaded from GitHub** is never logged: it was not generated in this session, so diffing against it would record every comment as `kept`.
-
-### The outcome log stores hashes, never comment text or file paths
-`ReviewOutcomeLog` writes only `(recordedAt, promptVersion, provider, model, commentFingerprint, outcome, type, severity, category, confidence)`. The fingerprint is a SHA-256 prefix over `file + line + whitespace-normalized body`, which is enough to correlate the same finding across prompt versions — the log's entire purpose — without persisting review prose or repository structure to disk. It is the only append-mode file under `~/.pr-pilot`: the whole-file JSON stores use tmp+`ATOMIC_MOVE`, but rewriting a growing log on every submit does not scale, so this one uses `O_APPEND` with a `MAX_LOG_BYTES` cap because nothing prunes it. Every failure is logged and swallowed — instrumentation must never break a review submission.

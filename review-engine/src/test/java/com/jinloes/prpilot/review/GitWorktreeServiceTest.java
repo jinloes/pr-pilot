@@ -7,6 +7,8 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -59,6 +61,22 @@ class GitWorktreeServiceTest {
             throw new IllegalStateException("git worktree list failed in " + dir + ": " + output);
         }
         return output;
+    }
+
+    /**
+     * Returns the canonical paths of the worktrees registered in {@code dir}'s repository. git
+     * prints forward-slash paths on Windows and resolved symlinks on macOS, so both sides of a
+     * comparison must go through {@link File#getCanonicalFile()}.
+     */
+    private static List<File> registeredWorktrees(File dir)
+            throws IOException, InterruptedException {
+        List<File> worktrees = new ArrayList<>();
+        for (String line : worktreeList(dir).split("\\R")) {
+            if (line.startsWith("worktree ")) {
+                worktrees.add(new File(line.substring("worktree ".length())).getCanonicalFile());
+            }
+        }
+        return worktrees;
     }
 
     private static String headShaUnchecked(File dir) {
@@ -340,12 +358,13 @@ class GitWorktreeServiceTest {
         @Test
         void removesRegistrationWhenTheWorktreeDirectoryWasDeleted() throws Exception {
             service.createWorktree(repoDir, "main", headSha(repoDir), worktreeDir);
-            assertThat(worktreeList(repoDir)).contains(worktreeDir.getCanonicalPath());
+            File registration = worktreeDir.getCanonicalFile();
+            assertThat(registeredWorktrees(repoDir)).contains(registration);
             FileUtils.deleteDirectory(worktreeDir);
 
             assertThat(service.removeWorktree(repoDir, worktreeDir)).isTrue();
 
-            assertThat(worktreeList(repoDir)).doesNotContain(worktreeDir.getCanonicalPath());
+            assertThat(registeredWorktrees(repoDir)).doesNotContain(registration);
         }
 
         @Test
@@ -396,7 +415,14 @@ class GitWorktreeServiceTest {
             ExecutorService executor = Executors.newSingleThreadExecutor();
             Process spawnedProcess;
             try {
-                spawnedProcess = new ProcessBuilder("sh", "-c", "sleep 30").start();
+                spawnedProcess =
+                        new ProcessBuilder(
+                                        Path.of(System.getProperty("java.home"), "bin", "java")
+                                                .toString(),
+                                        "-cp",
+                                        System.getProperty("java.class.path"),
+                                        SleepFixture.class.getName())
+                                .start();
             } catch (IOException exception) {
                 throw new AssertionError(exception);
             }
@@ -417,6 +443,13 @@ class GitWorktreeServiceTest {
                     spawnedProcess.destroyForcibly();
                 }
             }
+        }
+    }
+
+    /** Child process that keeps its output open until killed, without needing a POSIX shell. */
+    public static class SleepFixture {
+        public static void main(String[] args) throws InterruptedException {
+            Thread.sleep(30_000);
         }
     }
 }

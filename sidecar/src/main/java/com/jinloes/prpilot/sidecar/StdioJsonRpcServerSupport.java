@@ -42,6 +42,15 @@ final class StdioJsonRpcServerSupport {
         return response;
     }
 
+    /** A fire-and-forget JSON-RPC notification (no {@code id} field). */
+    ObjectNode notification(String method, ObjectNode params) {
+        ObjectNode notification = objectMapper.createObjectNode();
+        notification.put("jsonrpc", JSON_RPC_VERSION);
+        notification.put("method", method);
+        notification.set("params", params);
+        return notification;
+    }
+
     private ObjectNode baseResponse(JsonNode id) {
         ObjectNode response = objectMapper.createObjectNode();
         response.put("jsonrpc", JSON_RPC_VERSION);

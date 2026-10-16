@@ -4,13 +4,13 @@ import * as copilot from './copilot';
 import type { SidecarClient } from './sidecar';
 import {
     buildModelsMessage,
-    buildSettingsHtml,
     GITHUB_BASE_URL_ERROR,
     mergeCopilotModelOptions,
     normalizeGithubBaseUrl,
     normalizeProvider,
     type SettingsState,
 } from './settingsView';
+import { buildSettingsHtml } from './settingsViewHtml';
 import {
     normalizeReviewGuidanceGlobs,
     normalizeReviewGuidanceProfiles,

@@ -3,6 +3,7 @@ package com.jinloes.prpilot.review;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewResult;
@@ -174,7 +175,7 @@ final class ReviewPipelineTestSupport {
         String run(String prompt) throws IOException, InterruptedException;
     }
 
-    static final class FakeProvider implements ReviewPipelineService.ProviderExecutor {
+    static final class FakeProvider implements ReviewProviderExecutor {
         ReviewPassResult primaryResult;
         final AtomicInteger primaryCalls = new AtomicInteger();
         final List<String> completions = new ArrayList<>();
@@ -287,7 +288,7 @@ final class ReviewPipelineTestSupport {
     }
 
     /** A second reviewer that can succeed, fail, or block until it is interrupted. */
-    static final class FakeSecondary implements ReviewPipelineService.ProviderExecutor {
+    static final class FakeSecondary implements ReviewProviderExecutor {
         ReviewPassResult result;
         IOException failure;
         boolean blockUntilInterrupted;
@@ -435,5 +436,74 @@ final class ReviewPipelineTestSupport {
                     .append("@@ -1 +1 @@\n-old\n+new\n");
         }
         return diff.toString();
+    }
+
+    static ReviewPipelineService pipeline(FakeProvider provider) {
+        return new ReviewPipelineService(
+                provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
+    }
+
+    static ReviewPipelineService pipeline(
+            FakeProvider provider, ReviewPipelineService.BaseContextResolver resolver) {
+        return new ReviewPipelineService(
+                provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer(), resolver);
+    }
+
+    static ReviewPipelineService withSecondary(FakeProvider provider, FakeSecondary secondary) {
+        return pipeline(provider).withSecondReviewer(secondary, secondary::cancel, "gpt-5.5");
+    }
+
+    static ReviewPassResult pass(ReviewResult review) {
+        return ReviewPassResult.withoutLedger(review);
+    }
+
+    static ReviewResult result(LineComment... comments) {
+        return new ReviewResult("reviewed", "COMMENT", new ArrayList<>(List.of(comments)));
+    }
+
+    static ReviewResult numberedComments(String label, String file, int count) {
+        List<LineComment> comments = new ArrayList<>();
+        for (int index = 0; index < count; index++) {
+            comments.add(comment(file, index + 1, "medium", label + " finding #" + index + ";"));
+        }
+        return new ReviewResult("reviewed", "COMMENT", comments);
+    }
+
+    static LineComment comment(String file, int line, String confidence, String body) {
+        LineComment comment = new LineComment(file, line, "issue", body);
+        comment.setSeverity("minor");
+        comment.setCategory("correctness");
+        comment.setConfidence(confidence);
+        comment.setRationale("Rationale for " + body);
+        return comment;
+    }
+
+    static LineComment severity(LineComment comment, String severity) {
+        comment.setSeverity(severity);
+        return comment;
+    }
+
+    static LineComment hygiene(String file, int line, String confidence, String body) {
+        LineComment comment = comment(file, line, confidence, body);
+        comment.setType("suggestion");
+        comment.setCategory("performance");
+        return comment;
+    }
+
+    /** The critique echoes a rule finding's rationale, including the engine's rule tag. */
+    static LineComment ruleTagged(LineComment comment) {
+        comment.setRationale(ReviewRulesPass.withRuleSuffix(comment.getRationale(), "team.md"));
+        return comment;
+    }
+
+    static String reviewJson(LineComment... comments) throws IOException {
+        return JSON.writeValueAsString(
+                Map.of(
+                        "summary",
+                        "validated",
+                        "verdict",
+                        "COMMENT",
+                        "lineComments",
+                        List.of(comments)));
     }
 }

@@ -7,159 +7,468 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Conventions are documented in docs/architecture/ci.md: actions are pinned by commit SHA, Linux
+# jobs pin the runner image, and Gradle steps that run tests use `umask 022` after
+# .github/scripts/trusted-jdks.sh so SemanticRuntime trusts the JDK and build directories.
 jobs:
-  gradle-checks:
-    name: Gradle Checks
-    runs-on: ubuntu-latest
-
+  gradle:
+    name: Gradle check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: "17"
-          cache: gradle
+          # The last entry becomes JAVA_HOME and runs Gradle; intellij-plugin uses the 21 toolchain.
+          java-version: |
+            21
+            17
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "20.20.2"
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: |
-            webview/package-lock.json
-            vscode-extension/package-lock.json
+          cache-dependency-path: webview/package-lock.json
+
+      # intellij-plugin processResources builds the webview bundle.
+      - name: Install webview dependencies
+        run: npm ci --prefix webview
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+
+      - name: Trust JDKs for SemanticRuntime
+        run: bash .github/scripts/trusted-jdks.sh "$JAVA_HOME_17_X64" "$JAVA_HOME_21_X64"
 
       - name: Spotless check
-        run: ./gradlew spotlessCheck
+        run: |
+          umask 022
+          ./gradlew spotlessCheck
 
-      - name: Gradle check
-        run: ./gradlew check
+      - name: Gradle check with coverage
+        run: |
+          umask 022
+          ./gradlew check jacocoAggregateReport -Pcoverage --continue
 
-      - name: Explicit JVM test suites
-        run: ./gradlew :core:test :intellij-plugin:unitTest
+      - name: Show JDK and build directory permissions
+        if: failure()
+        run: namei -l "$JAVA_HOME/bin/java" "$GITHUB_WORKSPACE/review-engine/build" || true
 
-  web-and-extension-checks:
-    name: Web And Extension Checks
-    runs-on: ubuntu-latest
+      - name: Upload JVM coverage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-jvm
+          path: build/reports/jacoco/aggregate/jacoco.xml
+          if-no-files-found: error
+          retention-days: 7
 
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gradle-test-reports
+          path: |
+            */build/reports/tests/
+            */build/test-results/
+            build/reports/problems/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  intellij-plugin:
+    name: IntelliJ plugin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            17
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: webview/package-lock.json
+
+      - name: Install webview dependencies
+        run: npm ci --prefix webview
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+
+      # Pull requests verify against the pinned platform; release.yml verifies every recommended IDE.
+      - name: Build and verify plugin
+        run: ./gradlew :intellij-plugin:buildPlugin :intellij-plugin:verifyPlugin -Porg.gradle.java.installations.fromEnv=JAVA_HOME_17_X64,JAVA_HOME_21_X64
+
+      - name: Upload verifier report
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: plugin-verifier-report
+          path: intellij-plugin/build/reports/pluginVerifier/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  webview:
+    name: Webview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: webview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: webview/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests with coverage
+        run: npm run test:coverage
+
+      - name: Upload webview coverage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-webview
+          path: |
+            webview/coverage/logic/lcov.info
+            webview/coverage/component/lcov.info
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Accessibility tests
+        run: npm run test:a11y
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: webview-playwright-results
+          path: |
+            webview/test-results/
+            webview/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  webview-visual:
+    name: Webview visual regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    # Baselines are rendered in this exact image; scripts/playwright-image.mjs keeps its tag in step
+    # with the locked @playwright/test version and with webview/AGENTS.md.
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48
+      options: --user 1001 --ipc=host
+    defaults:
+      run:
+        working-directory: webview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Visual regression tests
+        run: npm run test:visual -- --reporter=line
+
+      - name: Upload visual diffs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: webview-visual-diffs
+          path: |
+            webview/test-results/
+            webview/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  vscode-extension:
+    name: VS Code extension
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "20.20.2"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: |
             webview/package-lock.json
             vscode-extension/package-lock.json
 
-      - name: Install webview dependencies
-        working-directory: webview
-        run: npm ci
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
 
-      - name: Lint webview
-        working-directory: webview
-        run: npm run lint
+      - name: Install dependencies
+        run: |
+          npm ci --prefix webview
+          npm ci --prefix vscode-extension
 
-      - name: Typecheck webview
-        working-directory: webview
-        run: npx tsc --noEmit
-
-      - name: Run webview unit tests
-        working-directory: webview
-        run: npm run test:unit
-
-      - name: Install Playwright Chromium
-        working-directory: webview
-        run: npx playwright install --with-deps chromium
-
-      - name: Run webview accessibility tests
-        working-directory: webview
-        run: npm run test:a11y
-
-      - name: Run webview visual regression tests
-        working-directory: webview
-        run: npm run test:visual
-
-      - name: Build webview
-        working-directory: webview
-        run: npm run build
-
-      - name: Install VS Code extension dependencies
-        working-directory: vscode-extension
-        run: npm ci
-
-      - name: Lint VS Code extension
+      - name: Lint
         working-directory: vscode-extension
         run: npm run lint
 
-      - name: Typecheck VS Code extension
+      - name: Typecheck
         working-directory: vscode-extension
         run: npx tsc --noEmit
 
-      - name: Run VS Code extension unit tests
+      # Also runs the scripts/*.test.mjs repository consistency tests.
+      - name: Unit tests with coverage
         working-directory: vscode-extension
-        run: npm run test:unit
+        run: npm run test:coverage
 
-      - name: Build VS Code extension
-        working-directory: vscode-extension
-        run: npm run build
+      - name: Upload extension coverage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-vscode-extension
+          path: vscode-extension/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Build and stage Java sidecar
+      - name: Build sidecar jar
         run: ./gradlew :sidecar:bootJar
 
       - name: Smoke test Java sidecar protocol
         working-directory: vscode-extension
         run: npm run stage:sidecar && npm run test:sidecar
 
-      - name: Package VS Code extension
+      - name: Package VSIX
         working-directory: vscode-extension
-        run: npm run stage:webview && npx --yes @vscode/vsce package --out pr-pilot-ci.vsix
+        run: npm run package:vsix -- --out pr-pilot-ci.vsix
 
-      - name: Verify packaged sidecar
+      # `unzip -l archive a b` exits 0 when any one name matches, so test each entry separately.
+      - name: Verify VSIX contents
         working-directory: vscode-extension
-        run: unzip -l pr-pilot-ci.vsix | grep -q 'extension/sidecar/pr-pilot-sidecar.jar'
+        run: |
+          entries="$(unzip -Z1 pr-pilot-ci.vsix)"
+          for entry in extension/sidecar/pr-pilot-sidecar.jar extension/webview-dist/index.html; do
+            if ! grep -qxF "$entry" <<< "$entries"; then
+              echo "::error::$entry is missing from pr-pilot-ci.vsix"
+              exit 1
+            fi
+          done
 
-  targeted-host-checks:
-    name: Targeted Host Checks (${{ matrix.os }})
+  extension-host:
+    name: VS Code extension host smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            webview/package-lock.json
+            vscode-extension/package-lock.json
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefix webview
+          npm ci --prefix vscode-extension
+
+      - name: Build webview and sidecar
+        run: |
+          npm run build --prefix webview
+          ./gradlew :sidecar:bootJar
+
+      - name: Cache VS Code test build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vscode-extension/.vscode-test/vscode-*
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('vscode-extension/.vscode-test.mjs') }}
+
+      - name: Ensure Xvfb
+        run: command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
+
+      - name: Extension host smoke test
+        working-directory: vscode-extension
+        run: xvfb-run -a npm run test:integration
+
+      - name: Upload VS Code logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: extension-host-logs
+          path: vscode-extension/.vscode-test/user-data/logs/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  coverage:
+    name: Changed-line coverage (report only)
+    if: github.event_name == 'pull_request'
+    needs: [gradle, webview, vscode-extension]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download coverage reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: coverage-*
+          path: coverage-artifacts
+
+      # diff-cover cannot mix JaCoCo XML and LCOV in one run, so JVM and TypeScript report separately.
+      - name: Report coverage of changed lines
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          DIFF_COVER: diff-cover==10.6.0
+        run: |
+          reports=coverage-artifacts
+          pipx run --spec "$DIFF_COVER" diff-cover "$reports/coverage-jvm/jacoco.xml" \
+            --compare-branch="origin/$BASE_REF" \
+            --src-roots core/src/main/java github-engine/src/main/java review-engine/src/main/java \
+              sidecar/src/main/java intellij-plugin/src/main/java review-benchmark/src/main/java \
+            --format markdown:diff-cover-jvm.md,github-annotations:notice
+          pipx run --spec "$DIFF_COVER" diff-cover \
+            "$reports/coverage-webview/logic/lcov.info" \
+            "$reports/coverage-webview/component/lcov.info" \
+            "$reports/coverage-vscode-extension/lcov.info" \
+            --compare-branch="origin/$BASE_REF" \
+            --format markdown:diff-cover-typescript.md,github-annotations:notice
+          {
+            echo "## Changed-line coverage (report only)"
+            echo
+            echo "### JVM"
+            cat diff-cover-jvm.md
+            echo
+            echo "### TypeScript"
+            cat diff-cover-typescript.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  host-checks:
+    name: Host checks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "20.20.2"
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: vscode-extension/package-lock.json
+          cache-dependency-path: |
+            webview/package-lock.json
+            vscode-extension/package-lock.json
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
 
       - name: Verify provider binary and worktree path handling
         run: node scripts/run-gradle.mjs :review-engine:test --tests '*BinaryLocatorTest' --tests '*GitWorktreeServiceTest'
@@ -182,3 +491,60 @@ jobs:
       - name: Smoke check packaged extension
         working-directory: vscode-extension
         run: node -e "if (!require('fs').existsSync('pr-pilot-host-check.vsix')) process.exit(1)"
+
+  windows-parity:
+    name: Windows parity (non-blocking)
+    runs-on: windows-latest
+    timeout-minutes: 75
+    # Known Windows-only failures remain (docs/architecture/ci.md); this job measures them without
+    # blocking merges, and should become blocking once they are fixed.
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            17
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: webview/package-lock.json
+
+      - name: Install webview dependencies
+        run: npm ci --prefix webview
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+
+      - name: Gradle check
+        run: node scripts/run-gradle.mjs check --continue "-Porg.gradle.java.installations.fromEnv=JAVA_HOME_17_X64,JAVA_HOME_21_X64"
+
+      - name: Webview unit tests
+        if: success() || failure()
+        working-directory: webview
+        run: npm run test:unit
+
+      - name: Upload test reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-parity-test-reports
+          path: |
+            */build/reports/tests/
+            */build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

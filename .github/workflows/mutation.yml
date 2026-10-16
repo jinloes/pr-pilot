@@ -1,0 +1,103 @@
+name: Mutation testing
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+# Report-only: no mutation score is enforced. Stryker runs incrementally from the previous run's
+# report in the Actions cache; PIT runs a full analysis each night (docs/architecture/ci.md).
+jobs:
+  pitest:
+    name: PIT (core, review-engine)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+
+      - name: Trust JDKs for SemanticRuntime
+        run: bash .github/scripts/trusted-jdks.sh "$JAVA_HOME_17_X64" "$JAVA_HOME_21_X64"
+
+      - name: Run PIT
+        run: |
+          umask 022
+          ./gradlew :core:pitest :review-engine:pitest --continue
+
+      - name: Upload PIT reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pitest-reports
+          path: |
+            core/build/reports/pitest/
+            review-engine/build/reports/pitest/
+          if-no-files-found: warn
+          retention-days: 30
+
+  stryker:
+    name: Stryker (webview)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: webview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: webview/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore Stryker incremental report
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: webview/reports/stryker-incremental.json
+          key: stryker-incremental-${{ github.run_id }}
+          restore-keys: stryker-incremental-
+
+      - name: Run Stryker
+        run: npm run test:mutation
+
+      - name: Upload Stryker report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stryker-report
+          path: webview/reports/mutation/
+          if-no-files-found: warn
+          retention-days: 30

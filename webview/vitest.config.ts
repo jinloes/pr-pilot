@@ -13,7 +13,8 @@ export default defineConfig({
     include: ['src/**/*.component.test.{ts,tsx}', 'src/i18n/**/*.test.ts'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'html'],
+      reporter: ['text', 'html', 'lcov'],
+      reportsDirectory: './coverage/component',
     },
   },
 })

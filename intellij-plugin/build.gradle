@@ -48,11 +48,23 @@ dependencies {
         intellijIdeaUltimate('2026.1.4')
         bundledPlugin('com.intellij.modules.jcef')
         bundledPlugin('com.intellij.mcpServer')
+        pluginVerifier()
     }
 }
 
 intellijPlatform {
     instrumentCode = false
+    pluginVerification {
+        ides {
+            // PR checks verify against the compile platform, which is already downloaded; releases
+            // pass -PverifyRecommendedIdes to cover every IDE in the plugin's build range.
+            if (providers.gradleProperty('verifyRecommendedIdes').isPresent()) {
+                recommended()
+            } else {
+                current()
+            }
+        }
+    }
 }
 
 tasks.register('unitTest', Test) {
