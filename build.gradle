@@ -58,6 +58,8 @@ subprojects {
         }
         tasks.withType(JavaCompile).configureEach {
             options.release.set(declaredRelease)
+            // Test sources too: JDK 17 on Windows reads unspecified sources in the code page.
+            options.encoding = 'UTF-8'
         }
 
         if (coverageEnabled) {

@@ -15,10 +15,6 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
-compileJava {
-    options.encoding = 'UTF-8'
-}
-
 dependencies {
     // core: shared review request/result/PR models (plain Java 17 module, no Kotlin).
     api project(':core')

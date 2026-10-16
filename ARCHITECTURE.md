@@ -119,6 +119,7 @@ line here.
 - [Module boundaries](docs/architecture/module-runtime-boundaries.md#module-boundaries)
 - [core: plain Java module](docs/architecture/module-runtime-boundaries.md#core-plain-java-module)
 - [Modules compile with --release](docs/architecture/module-runtime-boundaries.md#modules-compile-with---release)
+- [Java sources compile as UTF-8](docs/architecture/module-runtime-boundaries.md#java-sources-compile-as-utf-8)
 - [Threading model](docs/architecture/module-runtime-boundaries.md#threading-model)
 
 **GitHub, drafts and worktrees**

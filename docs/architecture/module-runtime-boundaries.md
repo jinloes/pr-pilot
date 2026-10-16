@@ -48,6 +48,12 @@ task's `options.release` from the module's declared `targetCompatibility`, so ja
 newer than each module's target on every build, including the required `Gradle check`. Raise a
 module's floor by changing its `targetCompatibility`; do not set `options.release` separately.
 
+### Java sources compile as UTF-8
+The root `build.gradle` sets `options.encoding = 'UTF-8'` on every `JavaCompile` task, test sources
+included. Without it javac reads sources in the platform charset, which JDK 17 on Windows takes
+from the code page: a test literal such as `…` then decodes differently from the main code it
+checks, and the test fails only there. Do not set the encoding per module or only on `compileJava`.
+
 ### Threading model
 `ClaudeService`/`CopilotService` (in `review-engine`) are synchronous services. IntelliJ's
 `IntellijClaudeService` adapter owns threading (pooled thread for I/O, EDT for UI callbacks); the

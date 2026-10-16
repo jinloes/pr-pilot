@@ -96,9 +96,13 @@ permissions, command lines over the Windows length limit (`CreateProcess error=2
 in test git repositories that inherit the system `core.autocrlf=true`, undeletable read-only git
 object files, path canonicalization, URL-to-path conversion, symlink privileges, and tests that need
 `sh`. Fix those failures rather than skipping tests on Windows, then make the job required and drop
-`continue-on-error`. `.gitattributes` pins LF for the diff-coverage golden, which both toolchains
-compare byte for byte, and for shell scripts. It also disables line-ending conversion for the
-digest-pinned `semantic-skills` bundle; see
+`continue-on-error`. The plugin's webview build starts `npm.cmd` on Windows: Java cannot launch
+npm's `.cmd` shim by its bare name, and runners have no `npm.exe`, so without it `intellij-plugin`
+does not build there. Non-ASCII test literals rely on
+[Java sources compile as UTF-8](module-runtime-boundaries.md#java-sources-compile-as-utf-8).
+`.gitattributes` pins LF for the diff-coverage golden, which both toolchains compare byte for
+byte, and for shell scripts. It also disables line-ending conversion for the digest-pinned
+`semantic-skills` bundle; see
 [Bundled skill bytes are pinned](semantic-review.md#bundled-skill-bytes-are-pinned).
 
 ### Actions are pinned by commit SHA

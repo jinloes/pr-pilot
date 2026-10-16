@@ -21,10 +21,6 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
-compileJava {
-    options.encoding = 'UTF-8'
-}
-
 dependencies {
     implementation project(':core')
     implementation project(':github-engine')
@@ -114,7 +110,8 @@ def resolvedNpm = {
     for (def c : candidates) {
         if (new File(c).exists()) return c
     }
-    return 'npm'
+    // Java cannot start npm's Windows .cmd shim by its bare name.
+    return System.getProperty('os.name').startsWith('Windows') ? 'npm.cmd' : 'npm'
 }()
 
 tasks.register('installWebviewDeps', Exec) {

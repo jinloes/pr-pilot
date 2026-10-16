@@ -14,10 +14,6 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
-compileJava {
-    options.encoding = 'UTF-8'
-}
-
 dependencies {
     implementation project(':github-engine')
     implementation project(':review-engine')
