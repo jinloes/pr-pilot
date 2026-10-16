@@ -17,6 +17,13 @@ alerts; gate on alerts with a code-scanning rule, not by requiring those jobs. J
 upload their reports and screenshots when they fail, so a red check can be diagnosed without a
 re-run; new test jobs should do the same.
 
+The gate is the `main merge gate` repository ruleset on the default branch; list it with `gh api
+repos/jinloes/pr-pilot/rulesets`. Each entry is bound to the GitHub Actions app, so a check of the
+same name posted by another integration does not satisfy it. It does not require a branch to be up
+to date, so open pull requests are not forced to rebase each time `main` moves. The repository
+admin role may always bypass it, so an admin push straight to `main` skips the gate and the
+push-triggered CI run is its only signal.
+
 ### Gradle jobs run on owner-only JDK copies
 
 `SemanticRuntime` refuses to launch an executable that sits under a group- or other-writable
