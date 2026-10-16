@@ -149,6 +149,26 @@ it. Submission resolves every configuration, so it excludes the `*_runIdeLocal` 
 at a local IntelliJ installation and fail without `ideaLocalPath` by design (see "Pinned IntelliJ
 SDK versus local sandbox" in `hosts-and-sidecar.md`).
 
+### Transitive security fixes are temporary floors
+
+Dependency submission reports each project's build classpath as well as its own configurations, so
+a library that a Gradle plugin brings in raises alerts like a declared one. `classpath` constraints
+in the `buildscript` blocks of the root and `intellij-plugin` build files floor those libraries:
+the Spring Boot plugin pulls httpclient5, httpcore5, Commons Lang and Jackson for `bootBuildImage`,
+and the IntelliJ Platform plugin's structure and Marketplace client libraries pull jsoup and
+Jackson. A constraint only raises a version that a plugin already requests; it adds no library. A
+subproject's build classloader delegates to the root's first, so both blocks and every module
+declaration keep one Jackson version. In `sidecar`, Spring Boot's BOM overrides Gradle's
+highest-version-wins resolution: a patched Jackson, Log4j or Commons Lang declared by an engine
+module is downgraded unless `sidecar/build.gradle` raises the matching `ext[...]` BOM property.
+npm has two floors of its own. `webview` overrides `qs`, because Stryker requires
+`typed-rest-client` 2.3.x, which pins `qs` 6.15.1 exactly. `vscode-extension` overrides
+`serialize-javascript`, because `@vscode/test-cli` requires mocha 11, and every mocha 11 release
+depends on 6.x. Each floor is temporary: remove it once the plugin, BOM or parent package that
+pinned the old version moves past it, after checking what resolves without it
+(`buildEnvironment`, `dependencyInsight` or `npm ls`). Refresh lockfiles by hand with
+`npm update --before=<date a week ago>` so they keep Dependabot's 7-day cooldown.
+
 ### CodeQL runs as advanced setup
 
 `codeql.yml` analyzes Actions, Java/Kotlin, and JavaScript/TypeScript on pushes to `main`, pull

@@ -1,3 +1,15 @@
+// The IntelliJ Platform plugin's structure and Marketplace client libraries pull vulnerable jsoup
+// and Jackson releases onto this build classpath, which dependency submission reports. Jackson
+// matches the root build classpath, whose classloader is this one's parent: one Jackson version.
+buildscript {
+    dependencies {
+        constraints {
+            classpath 'com.fasterxml.jackson.core:jackson-databind:2.22.3'
+            classpath 'org.jsoup:jsoup:1.23.2'
+        }
+    }
+}
+
 plugins {
     id 'java'
     id 'org.jetbrains.intellij.platform' version '2.18.1'
@@ -26,7 +38,7 @@ dependencies {
     implementation project(':github-engine')
     implementation project(':review-engine')
 
-    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.1'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.22.3'
     implementation 'commons-io:commons-io:2.16.1'
     implementation 'org.apache.commons:commons-lang3:3.18.0'
     implementation 'org.apache.commons:commons-text:1.12.0'

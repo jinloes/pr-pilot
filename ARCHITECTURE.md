@@ -171,6 +171,7 @@ line here.
 - [Actions are pinned by commit SHA](docs/architecture/ci.md#actions-are-pinned-by-commit-sha)
 - [Dependency updates wait a week and arrive grouped](docs/architecture/ci.md#dependency-updates-wait-a-week-and-arrive-grouped)
 - [Dependency review covers npm; Gradle comes from submission](docs/architecture/ci.md#dependency-review-covers-npm-gradle-comes-from-submission)
+- [Transitive security fixes are temporary floors](docs/architecture/ci.md#transitive-security-fixes-are-temporary-floors)
 - [CodeQL runs as advanced setup](docs/architecture/ci.md#codeql-runs-as-advanced-setup)
 - [Workflow lint](docs/architecture/ci.md#workflow-lint)
 - [Release builds restore no caches and publish separately](docs/architecture/ci.md#release-builds-restore-no-caches-and-publish-separately)

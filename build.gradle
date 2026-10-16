@@ -1,3 +1,18 @@
+// Dependency submission reports build classpaths too. Spring Boot's Gradle plugin pulls vulnerable
+// httpclient5, httpcore5, Commons Lang and Jackson releases (for bootBuildImage), so floor them at
+// patched versions. A constraint only raises a library a plugin already uses; it adds none.
+buildscript {
+    dependencies {
+        constraints {
+            classpath 'com.fasterxml.jackson.core:jackson-databind:2.22.3'
+            classpath 'org.apache.commons:commons-lang3:3.18.0'
+            classpath 'org.apache.httpcomponents.client5:httpclient5:5.6.3'
+            classpath 'org.apache.httpcomponents.core5:httpcore5:5.4.3'
+            classpath 'org.apache.httpcomponents.core5:httpcore5-h2:5.4.3'
+        }
+    }
+}
+
 plugins {
     id 'idea'
     id 'com.diffplug.spotless' version '8.8.0' apply false
