@@ -1,0 +1,41 @@
+name: ambiguous-delimiter
+description: >-
+  Flags code that joins several values into one string with a delimiter that can also appear
+  inside the values, such as comma-joined URNs whose tuple keys contain commas, so the result
+  cannot be split back reliably.
+trigger: >-
+  The PR adds or changes code that joins a collection of values into a single string, for example
+  String.join, Collectors.joining, StringJoiner, Joiner.on, mkString, or join(), or builds a
+  delimited key, log field, header, query parameter, or stored value by concatenating values with
+  a separator.
+prompt: |
+  Find joined strings whose delimiter can occur inside the values being joined.
+
+  1. In <pr_diff>, list every added or changed place that joins several values into one string:
+     `String.join`, `Collectors.joining`, `StringJoiner`, Guava `Joiner.on`, Kotlin
+     `joinToString`, Scala `mkString`, Python/JS `join`, or manual concatenation with a separator
+     inside a loop. Note the delimiter and where the joined string goes (log or audit field,
+     metric tag, cache or map key, header, query parameter, persisted column, message).
+  2. Work out what the joined values look like. Read their types and where they come from, using
+     Grep on the callers and on any URN, ID, or key builders. Watch especially for:
+     - LinkedIn URNs and other URNs with tuple keys, such as
+       `urn:li:enterpriseProfile:(urn:li:enterpriseAccount:7,1)`. Any URN type with a
+       parenthesized key contains commas, and URNs always contain colons.
+     - Free text: names, titles, descriptions, error messages, file paths, and user input.
+     - Values that are themselves already joined or encoded strings.
+  3. Report a finding when the delimiter can appear inside a value and the joined string is meant
+     to be split, parsed, searched per element, or compared. A comma-joined list of tuple URNs in
+     an audit or log field is a typical case: a reader cannot tell where one URN ends. Report both
+     branches when the same join appears more than once, such as a truncated path and a full
+     path. Do not report when the values provably cannot contain the delimiter (numeric IDs, enum
+     names, simple URNs with a single numeric key), when the string is display-only text never
+     parsed again, or when the values are escaped or quoted before joining.
+
+  Anchor each finding on the line that performs the join. Use type "issue", category
+  "correctness", severity "minor" (raise it to "major" when the string is persisted, used as a
+  key, or is part of an audit or compliance record). In the body, name the delimiter, show a
+  concrete value that contains it, say what breaks for the consumer, and suggest a fix: a
+  delimiter that cannot occur in the values (for example a space for URNs), a structured field
+  such as a list or repeated attribute, or escaping. In "rationale", cite the paths you read to
+  establish the value format. Do not report speculative cases where your reading did not
+  establish that a value can contain the delimiter.

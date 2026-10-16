@@ -95,8 +95,9 @@ To apply your own review rules everywhere, set **Rules folder** to an absolute l
 always runs. Each selected rule is applied by its own read-only agent (at most 25 per review), and
 its findings are labeled `(rule: <name>)`.
 
-PR Pilot also ships built-in rules, such as reusing an existing helper instead of duplicating it and
-not hiding a missing telemetry value behind a default. They run the same way. Turn them off with
+PR Pilot also ships built-in rules, such as reusing an existing helper instead of duplicating it,
+not hiding a missing telemetry value behind a default, and not joining values with a delimiter
+that can appear inside them. They run the same way. Turn them off with
 **Use PR Pilot's built-in review rules**, or put a rule with the same `name` in your folder to
 replace one (or turn it off with `enabled: false`).
 

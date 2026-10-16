@@ -55,7 +55,10 @@ final class LocalReviewRules {
 
     /** File names of the bundled rules under {@link #BUILT_IN_RESOURCE_DIRECTORY}, in run order. */
     static final List<String> BUILT_IN_RULE_FILES =
-            List.of("helper-reuse.yaml", "telemetry-default-semantics.yaml");
+            List.of(
+                    "helper-reuse.yaml",
+                    "telemetry-default-semantics.yaml",
+                    "ambiguous-delimiter.yaml");
 
     static final String BUILT_IN_SOURCE_PREFIX = "built-in/";
 
