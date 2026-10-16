@@ -91,14 +91,15 @@ that pull request fails until the image moves with it. To bump Playwright:
 extension unit tests, and VSIX packaging) and is required. `Windows parity (non-blocking)` runs the
 whole Gradle `check` and the webview unit tests on Windows with `continue-on-error`, because
 Windows-only failures remain in `core`, `review-engine`, `review-benchmark` and `intellij-plugin`;
-its test reports are uploaded for triage. In a local Windows run the causes were POSIX file
+its test reports are uploaded for triage. The causes seen locally and in CI are POSIX file
 permissions, command lines over the Windows length limit (`CreateProcess error=206`), CRLF checkouts
 in test git repositories that inherit the system `core.autocrlf=true`, undeletable read-only git
-object files, path canonicalization, URL-to-path conversion, symlink privileges, and tests that need
-`sh`. Fix those failures rather than skipping tests on Windows, then make the job required and drop
-`continue-on-error`. The plugin's webview build starts `npm.cmd` on Windows: Java cannot launch
-npm's `.cmd` shim by its bare name, and runners have no `npm.exe`, so without it `intellij-plugin`
-does not build there. Non-ASCII test literals rely on
+object files, path canonicalization (including fixtures that use `/fixture` as an absolute path),
+URL-to-path conversion, symlink privileges, and tests that need `sh`. Fix those failures rather
+than skipping tests on Windows, then make the job required and drop `continue-on-error`. The
+plugin's webview build starts `npm.cmd` on Windows: Java cannot launch npm's `.cmd` shim by its
+bare name, and runners have no `npm.exe`, so without it `intellij-plugin` does not build there.
+Non-ASCII test literals rely on
 [Java sources compile as UTF-8](module-runtime-boundaries.md#java-sources-compile-as-utf-8).
 `.gitattributes` pins LF for the diff-coverage golden, which both toolchains compare byte for
 byte, and for shell scripts. It also disables line-ending conversion for the digest-pinned
@@ -136,9 +137,10 @@ dependency graph of the base and head commits. npm lockfiles are read statically
 cannot read Gradle dependencies from `build.gradle`; `dependency-submission.yml` submits `main`'s
 resolved graph on every push. A pull request's own Gradle changes are therefore not reviewed
 before merge; Dependabot alerts cover them once they land. The repository's dependency graph must
-stay enabled, or the review job fails. Submission resolves every configuration, so it excludes the
-`*_runIdeLocal` ones: they point at a local IntelliJ installation and fail without `ideaLocalPath`
-by design (see "Pinned IntelliJ SDK versus local sandbox" in `hosts-and-sidecar.md`).
+stay enabled, or both the review and the submission jobs fail; enabling Dependabot alerts enables
+it. Submission resolves every configuration, so it excludes the `*_runIdeLocal` ones: they point
+at a local IntelliJ installation and fail without `ideaLocalPath` by design (see "Pinned IntelliJ
+SDK versus local sandbox" in `hosts-and-sidecar.md`).
 
 ### CodeQL runs as advanced setup
 
