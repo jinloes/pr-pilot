@@ -40,3 +40,6 @@ jobs:
         with:
           cache-provider: basic
           dependency-graph: generate-and-submit
+          # runIdeLocal's configurations point at a local IntelliJ install and, by design, fail to
+          # resolve without -PideaLocalPath. They are not published dependencies.
+          dependency-graph-exclude-configurations: '.*_runIdeLocal'

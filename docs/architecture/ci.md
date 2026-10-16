@@ -132,7 +132,9 @@ dependency graph of the base and head commits. npm lockfiles are read statically
 cannot read Gradle dependencies from `build.gradle`; `dependency-submission.yml` submits `main`'s
 resolved graph on every push. A pull request's own Gradle changes are therefore not reviewed
 before merge; Dependabot alerts cover them once they land. The repository's dependency graph must
-stay enabled, or the review job fails.
+stay enabled, or the review job fails. Submission resolves every configuration, so it excludes the
+`*_runIdeLocal` ones: they point at a local IntelliJ installation and fail without `ideaLocalPath`
+by design (see "Pinned IntelliJ SDK versus local sandbox" in `hosts-and-sidecar.md`).
 
 ### CodeQL runs as advanced setup
 
