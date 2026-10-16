@@ -169,6 +169,8 @@ test('buildSettingsHtml renders reusable review-guidance profile controls', () =
     assert.match(html, /id="reviewSupervisorEnabled"/);
     assert.match(html, /<label for="reviewRulesDirectory">Rules folder<\/label>/);
     assert.match(html, /save\('reviewRulesDirectory'/);
+    assert.match(html, /id="reviewBuiltInRules"/);
+    assert.match(html, /save\('reviewBuiltInRules'/);
     assert.match(html, /Re-inspect coverage gaps/);
     assert.match(html, /<label for="reviewSecondReviewerModel">Second reviewer<\/label>/);
     assert.match(html, /<select id="reviewSecondReviewerModel" aria-describedby="reviewSecondReviewerModelHint"><\/select>/);

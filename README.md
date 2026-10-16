@@ -95,6 +95,11 @@ To apply your own review rules everywhere, set **Rules folder** to an absolute l
 always runs. Each selected rule is applied by its own read-only agent (at most 25 per review), and
 its findings are labeled `(rule: <name>)`.
 
+PR Pilot also ships built-in rules, such as reusing an existing helper instead of duplicating it and
+not hiding a missing telemetry value behind a default. They run the same way. Turn them off with
+**Use PR Pilot's built-in review rules**, or put a rule with the same `name` in your folder to
+replace one (or turn it off with `enabled: false`).
+
 ## Complete your first review
 
 1. Open the local GitHub repository that contains the pull request.
@@ -281,7 +286,7 @@ more from each PR's base commit, for example a repository that keeps review rule
 ```
 
 Pass `--rules-dir DIR` to apply a local rules folder the same way the **Rules folder** setting does
-(rules selected by trigger, one agent per rule),
+(rules selected by trigger, one agent per rule), `--no-builtin-rules` to skip the built-in rules,
 and `--supervisor` to include coverage follow-ups.
 
 ### Score reviews on ReviewBench

@@ -173,6 +173,11 @@ ${SETTINGS_VIEW_STYLES}
       <input type="text" id="reviewRulesDirectory" aria-describedby="reviewRulesDirectoryHint" placeholder="/absolute/path/to/review-rules">
       <div class="hint" id="reviewRulesDirectoryHint">Optional local folder of review rules (.md, .yaml, .yml), such as a checkout of your team's central review rules. Structured rules run when their trigger matches; each rule is applied by its own agent.</div>
     </div>
+
+    <div class="field">
+      <label><input type="checkbox" id="reviewBuiltInRules" style="width:auto;margin-right:6px;">Use PR Pilot's built-in review rules</label>
+      <div class="hint">Runs the rules bundled with PR Pilot, such as helper reuse and telemetry defaults, when their trigger matches. A rules-folder rule with the same name replaces or, with enabled: false, turns off a built-in one.</div>
+    </div>
   </div>
 
   <div class="section">

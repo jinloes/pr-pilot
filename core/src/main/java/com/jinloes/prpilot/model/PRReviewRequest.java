@@ -39,6 +39,7 @@ public final class PRReviewRequest {
     private final String incrementalBaselineSha;
     private final java.util.List<String> guidanceGlobs;
     private final String rulesDirectory;
+    private final boolean builtInRules;
     private final String fileHistory;
     private final String callSites;
     private final boolean candidateRecall;
@@ -66,6 +67,7 @@ public final class PRReviewRequest {
                                 .filter(java.util.Objects::nonNull)
                                 .toList();
         this.rulesDirectory = builder.rulesDirectory;
+        this.builtInRules = builder.builtInRules;
         this.fileHistory = builder.fileHistory;
         this.callSites = builder.callSites;
         this.candidateRecall = builder.candidateRecall;
@@ -188,6 +190,14 @@ public final class PRReviewRequest {
         return rulesDirectory;
     }
 
+    /**
+     * Whether the review rules bundled with the engine run alongside the user's {@link
+     * #getRulesDirectory() rules folder}. Defaults to {@code true}.
+     */
+    public boolean isBuiltInRules() {
+        return builtInRules;
+    }
+
     /** Rendered recent commit history of the changed files, reachable from the base commit. */
     public String getFileHistory() {
         return fileHistory;
@@ -262,6 +272,7 @@ public final class PRReviewRequest {
                 .incrementalBaselineSha(incrementalBaselineSha)
                 .guidanceGlobs(guidanceGlobs)
                 .rulesDirectory(rulesDirectory)
+                .builtInRules(builtInRules)
                 .fileHistory(fileHistory)
                 .callSites(callSites)
                 .candidateRecall(candidateRecall);
@@ -300,6 +311,7 @@ public final class PRReviewRequest {
         private String incrementalBaselineSha;
         private java.util.List<String> guidanceGlobs;
         private String rulesDirectory;
+        private boolean builtInRules = true;
         private String fileHistory;
         private String callSites;
         private boolean candidateRecall;
@@ -402,6 +414,11 @@ public final class PRReviewRequest {
 
         public Builder rulesDirectory(String value) {
             this.rulesDirectory = value == null || value.isBlank() ? null : value.strip();
+            return this;
+        }
+
+        public Builder builtInRules(boolean value) {
+            this.builtInRules = value;
             return this;
         }
 

@@ -54,6 +54,7 @@ export interface SettingsState {
     reviewSelfCritique: boolean;
     reviewSupervisorEnabled: boolean;
     reviewRulesDirectory: string;
+    reviewBuiltInRules: boolean;
     reviewSecondReviewerModel: string;
     experimentalIntellijAssistedReview: boolean;
     notificationsEnabled: boolean;

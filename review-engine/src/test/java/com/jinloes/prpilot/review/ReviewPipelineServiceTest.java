@@ -57,6 +57,24 @@ class ReviewPipelineServiceTest {
         }
 
         @Test
+        void loadsTheBuiltInRulesWhenEnabled() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    ReviewPassResult.withoutLedger(
+                            new ReviewResult("baseline", "APPROVE", List.of()));
+            PRReviewRequest request =
+                    request(oneRiskyHunk()).toBuilder().builtInRules(true).build();
+            List<String> status = new ArrayList<>();
+
+            new ReviewPipelineService(
+                            provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer())
+                    .review(request, false, false, false, status::add, null);
+
+            assertThat(status).anySatisfy(line -> assertThat(line).startsWith("Rules: 2 loaded"));
+            assertThat(provider.callOrder).startsWith("review", "rule-selection");
+        }
+
+        @Test
         void runsRulesAsSeparateAgentsInsteadOfAddingThemToTheGuidance() throws Exception {
             Path rules = Files.createTempDirectory("pipeline-rules");
             try {

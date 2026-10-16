@@ -30,6 +30,7 @@ class BenchmarkOptionsTest {
             assertThat(options.callSites()).isTrue();
             assertThat(options.guidanceGlobs()).isEmpty();
             assertThat(options.rulesDirectory()).isEmpty();
+            assertThat(options.builtInRules()).isTrue();
             assertThat(options.judge()).isEqualTo(BenchmarkOptions.JUDGE_LLM);
             assertThat(options.lineWindow()).isEqualTo(10);
             assertThat(options.repeat()).isEqualTo(1);
@@ -48,6 +49,11 @@ class BenchmarkOptionsTest {
 
             assertThat(options.guidanceGlobs())
                     .containsExactly(".linkedin/ai-agent/*.md", "docs/x.md");
+        }
+
+        @Test
+        void noBuiltinRulesDisablesTheBundledRules() {
+            assertThat(parse("--no-builtin-rules").builtInRules()).isFalse();
         }
 
         @Test

@@ -71,6 +71,8 @@ public class PluginSettingsComponent {
             new RepositoryInstructionsEditor();
     private final JCheckBox reviewSelfCritiqueBox =
             new JCheckBox("Validate findings with a second pass");
+    private final JCheckBox reviewBuiltInRulesBox =
+            new JCheckBox("Use PR Pilot's built-in review rules", true);
     private final JCheckBox reviewSupervisorBox = new JCheckBox("Re-inspect coverage gaps");
     private final JCheckBox experimentalIntellijAssistedBox =
             new JCheckBox("Enable IntelliJ-assisted review (experimental)");
@@ -269,6 +271,16 @@ public class PluginSettingsComponent {
                                                         + " by its own agent.</small></html>")),
                                 1,
                                 false)
+                        .addComponentToRightColumn(
+                                SettingsUi.fieldWithHint(
+                                        reviewBuiltInRulesBox,
+                                        SettingsUi.hintLabel(
+                                                "<html><small>Runs the rules bundled with PR Pilot, such as"
+                                                        + " helper reuse and telemetry defaults, when their"
+                                                        + " trigger matches. A rules-folder rule with the same"
+                                                        + " name replaces or, with enabled: false, turns off a"
+                                                        + " built-in one.</small></html>")),
+                                1)
                         .addSeparator(8)
                         .addComponent(sectionTitle("Review validation"), 1)
                         .addComponentToRightColumn(
@@ -517,6 +529,14 @@ public class PluginSettingsComponent {
 
     public void setReviewSecondReviewerModel(String value) {
         copilot.setReviewSecondReviewerModel(value);
+    }
+
+    public boolean isReviewBuiltInRules() {
+        return reviewBuiltInRulesBox.isSelected();
+    }
+
+    public void setReviewBuiltInRules(boolean value) {
+        reviewBuiltInRulesBox.setSelected(value);
     }
 
     public boolean isReviewSupervisorEnabled() {

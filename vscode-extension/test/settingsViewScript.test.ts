@@ -158,6 +158,7 @@ function initState(repositoryReviewInstructions: Record<string, string>): Record
         copilotConfigDir: '', reviewFocusAreas: '', reviewCustomInstructions: '', reviewGuidanceGlobs: [],
         reviewGuidanceProfiles: [], activeReviewGuidanceProfileId: '', repositoryReviewInstructions,
         reviewSelfCritique: true, reviewSupervisorEnabled: true, reviewSecondReviewerModel: '', reviewRulesDirectory: '',
+        reviewBuiltInRules: true,
         experimentalIntellijAssistedReview: false,
         notificationsEnabled: false, notifyReviewRequested: true, notifyStarredRepos: false,
         notificationPollMinutes: 5, notificationHealth: EMPTY_NOTIFICATION_HEALTH,

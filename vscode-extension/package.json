@@ -251,6 +251,11 @@
           "default": "",
           "description": "Optional absolute path to a local folder of extra review rules (`.md`, `.yaml`, `.yml`), such as a checkout of your team's central review rules. Structured YAML rules are selected by their trigger, and each selected rule is applied by its own agent. Leave blank to disable."
         },
+        "pr-pilot.reviewBuiltInRules": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the review rules bundled with PR Pilot (such as helper reuse and telemetry defaults) when their trigger matches. A rules-folder rule with the same name replaces the built-in one, or turns it off with `enabled: false`."
+        },
         "pr-pilot.reviewSecondReviewerModel": {
           "type": "string",
           "default": "",

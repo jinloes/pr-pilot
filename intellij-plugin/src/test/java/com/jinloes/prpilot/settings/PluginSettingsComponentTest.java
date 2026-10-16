@@ -791,6 +791,13 @@ class PluginSettingsComponentTest {
         assertThat(settings.isExperimentalIntellijAssistedReview()).isFalse();
         assertThat(configurable.isModified()).isFalse();
 
+        assertThat(component.isReviewBuiltInRules()).isTrue();
+        component.setReviewBuiltInRules(false);
+        assertThat(configurable.isModified()).isTrue();
+        configurable.apply();
+        assertThat(settings.isReviewBuiltInRules()).isFalse();
+        assertThat(configurable.isModified()).isFalse();
+
         assertThat(component.isReviewSupervisorEnabled()).isTrue();
         component.setReviewSecondReviewerModel("gpt-5.4");
         assertThat(configurable.isModified()).isTrue();

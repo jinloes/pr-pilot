@@ -1,0 +1,36 @@
+name: telemetry-default-semantics
+description: >-
+  Flags audit events, metrics, and logs that record a fallback value (0, false, empty string,
+  "none") for an absent input, when absence actually means "use the default" or "unknown"
+  rather than that value.
+trigger: >-
+  The PR adds or changes code that writes audit events, metrics, counters, gauges, structured
+  log attributes, or tracing attributes, and derives any recorded value from an Optional,
+  nullable field, or default-on-absent expression.
+prompt: |
+  Find telemetry that misreports an absent input as a concrete value.
+
+  1. In <pr_diff>, list every added or changed place that records a value into an audit event,
+     metric, counter, gauge, log attribute, or span attribute. For each, note values derived
+     with a fallback: `Optional.orElse(...)`, `orElseGet`, `map(...).orElse(...)`,
+     `Objects.requireNonNullElse`, `getOrDefault`, `x != null ? x : ...`, `?:`, `??`, proto
+     `hasX() ? getX() : ...`, or a proto getter on an unset field (which returns 0/""/false).
+  2. For each fallback, find out what absence means at runtime. Read the method parameters,
+     then use Grep to find the callers that build the value and the code that consumes the same
+     value (for example the request field it populates). Read the Javadoc, comments, and proto
+     field docs for that field. Absence usually means something specific: "omit the override so
+     the server applies its default set", "not yet known", "not applicable", or "all".
+  3. Report a finding when the recorded fallback states something different from what absence
+     means. Typical case: an empty Optional means "no override, server default applies", but
+     the audit records `count=0`, claiming nothing happens. Also report when the fallback makes
+     the absent case indistinguishable from a legitimate explicit value, such as an explicit
+     empty list versus no list at all. Do not report when absence really does mean the fallback
+     value, or when the field is purely informational and the PR documents the convention.
+
+  Anchor each finding on the line that computes or records the fallback value. Use type
+  "issue", category "correctness", severity "minor" (raise it to "major" for audit or compliance
+  records). In the body, say what the absent case actually means, cite the caller or consumer
+  that shows it, describe the misleading record a reader would see, and suggest a fix such as
+  omitting the field, recording a distinct marker like "default", or adding a separate flag.
+  In "rationale", cite the paths you read to establish the meaning of absence. Do not report
+  speculative cases where your reading did not establish what absence means.

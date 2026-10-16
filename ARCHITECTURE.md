@@ -205,6 +205,7 @@ or tokens are written to disk.
 | `reviewSelfCritique` | `true` | Validation pass that drops unsupported findings |
 | `reviewSupervisorEnabled` | `true` | Bounded "Re-inspect coverage gaps" follow-ups |
 | `reviewRulesDirectory` | `""` | Local folder of the reviewer's own rules |
+| `reviewBuiltInRules` | `true` | Runs the review rules bundled with PR Pilot |
 | `reviewSecondReviewerModel` | `""` | Parallel Copilot second reviewer; blank disables it |
 | `experimentalIntellijAssistedReview` | `false` | IntelliJ-assisted review opt-in |
 | `reviewGuidanceGlobs` | `""` (hidden) | Base-commit guidance globs; in neither settings UI |

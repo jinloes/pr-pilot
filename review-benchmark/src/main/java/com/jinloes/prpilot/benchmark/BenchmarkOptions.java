@@ -22,6 +22,7 @@ record BenchmarkOptions(
         boolean callSites,
         List<String> guidanceGlobs,
         String rulesDirectory,
+        boolean builtInRules,
         String judge,
         String judgeModel,
         int lineWindow,
@@ -74,6 +75,7 @@ record BenchmarkOptions(
               --guidance-glob GLOB    Also read base-commit guidance matching GLOB (repeatable)
               --rules-dir DIR         Apply review rules (.md/.yaml) from this local folder,
                                       selected by trigger, one agent per rule
+              --no-builtin-rules      Skip the review rules bundled with PR Pilot
               --judge llm|location    How matches are decided (default llm)
               --judge-model ID        Judge model (defaults to --model)
               --line-window N         Max line distance for a candidate match (default 10)
@@ -98,6 +100,7 @@ record BenchmarkOptions(
         boolean callSites = true;
         List<String> guidanceGlobs = new ArrayList<>();
         String rulesDir = "";
+        boolean builtInRules = true;
         String judge = JUDGE_LLM;
         String judgeModel = "";
         int window = DEFAULT_LINE_WINDOW;
@@ -123,6 +126,7 @@ record BenchmarkOptions(
                             true,
                             List.of(),
                             "",
+                            true,
                             JUDGE_LLM,
                             "",
                             DEFAULT_LINE_WINDOW,
@@ -136,6 +140,7 @@ record BenchmarkOptions(
                 case "--supervisor" -> supervisor = true;
                 case "--chunked" -> chunked = true;
                 case "--no-call-sites" -> callSites = false;
+                case "--no-builtin-rules" -> builtInRules = false;
                 case "--verbose" -> verbose = true;
                 default -> {
                     String value = value(args, ++i, arg);
@@ -182,6 +187,7 @@ record BenchmarkOptions(
                 callSites,
                 List.copyOf(guidanceGlobs),
                 rulesDir,
+                builtInRules,
                 judge,
                 StringUtils.defaultIfBlank(judgeModel, model),
                 window,

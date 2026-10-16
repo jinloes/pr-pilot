@@ -231,6 +231,24 @@ class PRReviewRequestTest {
     }
 
     @Nested
+    class IsBuiltInRules {
+        @Test
+        void defaultsToEnabled() {
+            assertThat(PRReviewRequest.builder(pr(), "diff").build().isBuiltInRules()).isTrue();
+        }
+
+        @Test
+        void canBeDisabled() {
+            assertThat(
+                            PRReviewRequest.builder(pr(), "diff")
+                                    .builtInRules(false)
+                                    .build()
+                                    .isBuiltInRules())
+                    .isFalse();
+        }
+    }
+
+    @Nested
     class GetIncrementalBaselineSha {
         @Test
         void keepsAFullLowercaseSha() {
@@ -317,6 +335,7 @@ class PRReviewRequestTest {
                     .incrementalBaselineSha("b".repeat(40))
                     .guidanceGlobs(List.of("docs/rules/*.md"))
                     .rulesDirectory("/rules")
+                    .builtInRules(false)
                     .fileHistory("history")
                     .callSites("sites")
                     .candidateRecall(true)
@@ -336,6 +355,7 @@ class PRReviewRequestTest {
             assertThat(copy.isCandidateRecall()).isTrue();
             assertThat(copy.getGuidanceGlobs()).containsExactly("docs/rules/*.md");
             assertThat(copy.getRulesDirectory()).isEqualTo("/rules");
+            assertThat(copy.isBuiltInRules()).isFalse();
         }
 
         @Test

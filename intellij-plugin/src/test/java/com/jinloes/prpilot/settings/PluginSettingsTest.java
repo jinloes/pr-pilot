@@ -207,6 +207,16 @@ class PluginSettingsTest {
     }
 
     @Test
+    void reviewBuiltInRulesDefaultsToTrueAndRoundTrips() {
+        PluginSettings s = new PluginSettings();
+        assertThat(s.isReviewBuiltInRules()).isTrue();
+        s.setReviewBuiltInRules(false);
+        assertThat(s.isReviewBuiltInRules()).isFalse();
+        s.setReviewBuiltInRules(true);
+        assertThat(s.isReviewBuiltInRules()).isTrue();
+    }
+
+    @Test
     void reviewRulesDirectoryDefaultsToEmptyAndTrims() {
         PluginSettings s = new PluginSettings();
         assertThat(s.getReviewRulesDirectory()).isEmpty();

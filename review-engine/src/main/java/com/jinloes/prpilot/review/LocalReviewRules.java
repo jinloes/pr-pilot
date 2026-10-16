@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -23,8 +24,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Loads a user-configured local folder of review rules, such as a team's copy of central review
- * rules that the reviewer cannot reach over the network.
+ * Loads the review rules bundled with the engine and a user-configured local folder of review
+ * rules, such as a team's copy of central review rules that the reviewer cannot reach over the
+ * network.
  *
  * <p>The folder is chosen by the reviewer in their own settings, not by the pull request author, so
  * it is trusted like the other preference data. Reads are still bounded: only regular {@code .md},
@@ -34,6 +36,10 @@ import org.slf4j.LoggerFactory;
  * <p>A YAML mapping with a valid {@code name} and non-blank {@code description}, {@code trigger}
  * and {@code prompt} is a structured rule, applied only when its trigger matches the pull request.
  * Any other readable file is an unstructured rule named by its path, applied to every review.
+ *
+ * <p>The built-in rules are structured rules under {@code /review-rules/} on the classpath. A user
+ * rule with the same name replaces a built-in one, and a disabled user rule with that name turns it
+ * off.
  */
 final class LocalReviewRules {
     private static final Logger log = LoggerFactory.getLogger(LocalReviewRules.class);
@@ -45,6 +51,14 @@ final class LocalReviewRules {
     private static final Pattern NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,63}");
     private static final ObjectMapper YAML = new ObjectMapper(new YAMLFactory());
 
+    static final String BUILT_IN_RESOURCE_DIRECTORY = "/review-rules/";
+
+    /** File names of the bundled rules under {@link #BUILT_IN_RESOURCE_DIRECTORY}, in run order. */
+    static final List<String> BUILT_IN_RULE_FILES =
+            List.of("helper-reuse.yaml", "telemetry-default-semantics.yaml");
+
+    static final String BUILT_IN_SOURCE_PREFIX = "built-in/";
+
     /**
      * One review rule. {@code trigger} is null for an unstructured rule, which is always applied.
      * {@code source} is the file's path relative to the rules folder.
@@ -55,50 +69,99 @@ final class LocalReviewRules {
         }
     }
 
+    /** The rules read from one source, plus the names of structured rules marked disabled. */
+    private record Loaded(List<Rule> rules, Set<String> disabled) {
+        static final Loaded EMPTY = new Loaded(List.of(), Set.of());
+    }
+
     private LocalReviewRules() {}
+
+    /**
+     * The built-in rules, when {@code builtIns} is set, followed by the rules under {@code
+     * directory} in path order. A user rule named like a built-in one replaces it, and a disabled
+     * user rule with that name removes it.
+     */
+    static List<Rule> load(String directory, boolean builtIns) {
+        Loaded user = loadUser(directory);
+        if (!builtIns) return user.rules();
+        Set<String> overridden = new HashSet<>(user.disabled());
+        user.rules().stream().filter(Rule::structured).map(Rule::name).forEach(overridden::add);
+        List<Rule> rules = new ArrayList<>();
+        for (Rule rule : builtIn()) {
+            if (overridden.contains(rule.name())) {
+                log.info("Built-in review rule {} is overridden by a local rule", rule.name());
+            } else {
+                rules.add(rule);
+            }
+        }
+        rules.addAll(user.rules());
+        return List.copyOf(rules);
+    }
 
     /**
      * The rules under {@code directory} in path order, or an empty list when the directory is
      * unset, missing, or holds no readable rule file.
      */
     static List<Rule> load(String directory) {
+        return loadUser(directory).rules();
+    }
+
+    /** The bundled rules in {@link #BUILT_IN_RULE_FILES} order; an unreadable one is skipped. */
+    static List<Rule> builtIn() {
+        List<Rule> rules = new ArrayList<>();
+        for (String file : BUILT_IN_RULE_FILES) {
+            String source = BUILT_IN_SOURCE_PREFIX + file;
+            String content = readResource(BUILT_IN_RESOURCE_DIRECTORY + file);
+            JsonNode yaml = content == null ? null : parseYaml(source, content);
+            Rule rule = yaml == null ? null : structured(source, yaml);
+            if (rule == null) {
+                log.warn("Skipping built-in review rule {}: not a structured rule", source);
+            } else {
+                rules.add(rule);
+            }
+        }
+        return List.copyOf(rules);
+    }
+
+    private static Loaded loadUser(String directory) {
         try {
             return loadRules(directory);
         } catch (RuntimeException failure) {
             log.warn("Could not load review rules from {}", directory, failure);
-            return List.of();
+            return Loaded.EMPTY;
         }
     }
 
-    private static List<Rule> loadRules(String directory) {
-        if (directory == null || directory.isBlank()) return List.of();
+    private static Loaded loadRules(String directory) {
+        if (directory == null || directory.isBlank()) return Loaded.EMPTY;
         Path root;
         try {
             root = Path.of(directory.strip());
         } catch (RuntimeException invalid) {
             log.warn("Review rules directory {} is not a valid path", directory);
-            return List.of();
+            return Loaded.EMPTY;
         }
         if (!root.isAbsolute() || !Files.isDirectory(root)) {
             log.warn("Review rules directory {} is not an absolute directory; skipping", root);
-            return List.of();
+            return Loaded.EMPTY;
         }
         try {
             // The configured folder itself may be a link; nothing inside it may be.
             root = root.toRealPath();
         } catch (IOException unresolved) {
             log.warn("Could not resolve review rules directory {}", root, unresolved);
-            return List.of();
+            return Loaded.EMPTY;
         }
         List<Path> files;
         try (Stream<Path> walk = Files.walk(root, MAX_DEPTH)) {
             files = walk.filter(LocalReviewRules::isRuleFile).sorted().limit(MAX_FILES).toList();
         } catch (IOException | RuntimeException failure) {
             log.warn("Could not list review rules directory {}", root, failure);
-            return List.of();
+            return Loaded.EMPTY;
         }
         List<Rule> rules = new ArrayList<>();
         Set<String> names = new HashSet<>();
+        Set<String> disabled = new HashSet<>();
         for (Path file : files) {
             String content = readUtf8(file);
             if (content == null || content.isBlank()) continue;
@@ -106,6 +169,8 @@ final class LocalReviewRules {
             JsonNode yaml = isYaml(file) ? parseYaml(source, content) : null;
             if (yaml != null && isDisabled(yaml)) {
                 log.info("Skipping disabled review rule {}", source);
+                String name = text(yaml, "name");
+                if (name != null && NAME.matcher(name).matches()) disabled.add(name);
                 continue;
             }
             Rule rule = yaml == null ? null : structured(source, yaml);
@@ -117,7 +182,20 @@ final class LocalReviewRules {
                 rules.add(rule);
             }
         }
-        return List.copyOf(rules);
+        return new Loaded(List.copyOf(rules), Set.copyOf(disabled));
+    }
+
+    private static String readResource(String path) {
+        try (InputStream in = LocalReviewRules.class.getResourceAsStream(path)) {
+            if (in == null) {
+                log.warn("Built-in review rule resource {} is missing", path);
+                return null;
+            }
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException failure) {
+            log.warn("Could not read built-in review rule resource {}", path, failure);
+            return null;
+        }
     }
 
     private static JsonNode parseYaml(String source, String content) {

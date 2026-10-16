@@ -345,7 +345,9 @@ public final class ReviewBenchmark {
                 StringUtils.defaultString(detail.baseSha()),
                 options.secondReviewerModel(),
                 options.guidanceGlobs(),
-                options.rulesDirectory());
+                options.rulesDirectory(),
+                null,
+                options.builtInRules());
     }
 
     private FindingMatcher.Judge judge(String worktree) {

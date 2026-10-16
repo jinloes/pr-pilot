@@ -211,4 +211,92 @@ class LocalReviewRulesTest {
             assertThat(load()).extracting(Rule::name).containsExactly("a/b/c/shallow.md");
         }
     }
+
+    @Nested
+    class BuiltIn {
+        @Test
+        void loadsEveryBundledRuleAsAStructuredRule() {
+            List<Rule> builtIn = LocalReviewRules.builtIn();
+
+            assertThat(builtIn)
+                    .extracting(Rule::name)
+                    .containsExactly("helper-reuse", "telemetry-default-semantics");
+            assertThat(builtIn).allSatisfy(rule -> assertThat(rule.structured()).isTrue());
+            assertThat(builtIn)
+                    .extracting(Rule::source)
+                    .containsExactly(
+                            "built-in/helper-reuse.yaml",
+                            "built-in/telemetry-default-semantics.yaml");
+        }
+
+        @Test
+        void listsEveryBundledResourceFile() throws IOException {
+            Path directory = Path.of("src/main/resources/review-rules");
+            try (Stream<Path> files = Files.list(directory)) {
+                assertThat(files.map(file -> file.getFileName().toString()))
+                        .containsExactlyInAnyOrderElementsOf(LocalReviewRules.BUILT_IN_RULE_FILES);
+            }
+        }
+    }
+
+    @Nested
+    class LoadWithBuiltIns {
+        @Test
+        void putsBuiltInsBeforeUserRules() throws IOException {
+            write("team.yaml", yamlRule("team", "always"));
+
+            assertThat(LocalReviewRules.load(rules.toString(), true))
+                    .extracting(Rule::name)
+                    .containsExactly("helper-reuse", "telemetry-default-semantics", "team");
+        }
+
+        @Test
+        void returnsBuiltInsWithoutAUserFolder() {
+            assertThat(LocalReviewRules.load(null, true))
+                    .extracting(Rule::name)
+                    .containsExactly("helper-reuse", "telemetry-default-semantics");
+        }
+
+        @Test
+        void omitsBuiltInsWhenDisabled() throws IOException {
+            write("team.yaml", yamlRule("team", "always"));
+
+            assertThat(LocalReviewRules.load(rules.toString(), false))
+                    .extracting(Rule::name)
+                    .containsExactly("team");
+            assertThat(LocalReviewRules.load(null, false)).isEmpty();
+        }
+
+        @Test
+        void aUserRuleWithTheSameNameReplacesTheBuiltIn() throws IOException {
+            write("mine.yaml", yamlRule("helper-reuse", "my trigger"));
+
+            List<Rule> loaded = LocalReviewRules.load(rules.toString(), true);
+
+            assertThat(loaded)
+                    .extracting(Rule::name)
+                    .containsExactly("telemetry-default-semantics", "helper-reuse");
+            assertThat(loaded.get(1).source()).isEqualTo("mine.yaml");
+            assertThat(loaded.get(1).trigger()).isEqualTo("my trigger");
+        }
+
+        @Test
+        void aDisabledUserRuleWithTheSameNameTurnsTheBuiltInOff() throws IOException {
+            write("off.yaml", "name: telemetry-default-semantics\nenabled: false\n");
+
+            assertThat(LocalReviewRules.load(rules.toString(), true))
+                    .extracting(Rule::name)
+                    .containsExactly("helper-reuse");
+        }
+
+        @Test
+        void anUnstructuredUserRuleDoesNotOverrideByPath() throws IOException {
+            write("helper-reuse.md", "Prefer shared helpers.");
+
+            assertThat(LocalReviewRules.load(rules.toString(), true))
+                    .extracting(Rule::name)
+                    .containsExactly(
+                            "helper-reuse", "telemetry-default-semantics", "helper-reuse.md");
+        }
+    }
 }

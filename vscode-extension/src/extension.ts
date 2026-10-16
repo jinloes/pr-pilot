@@ -416,6 +416,7 @@ function snapshotReviewGenerationSettings(): ReviewGenerationSettings {
         supervisorEnabled: c.get<boolean>('reviewSupervisorEnabled', true),
         secondReviewerModel: c.get<string>('reviewSecondReviewerModel', '').trim(),
         rulesDirectory: c.get<string>('reviewRulesDirectory', '').trim(),
+        builtInRules: c.get<boolean>('reviewBuiltInRules', true),
         githubBaseUrl: c.get<string>('githubBaseUrl', 'https://github.com'),
         guidance,
     };
