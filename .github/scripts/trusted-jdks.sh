@@ -53,6 +53,8 @@ harden_ancestors() {
 dest="$HOME/.trusted-jdks"
 rm -rf "$dest"
 mkdir -p "$dest"
+# Canonical, like the java.home the JVM reports and SemanticRuntime checks.
+dest="$(realpath -e "$dest")"
 
 homes=()
 index=0
@@ -61,13 +63,33 @@ for source in "$@"; do
     echo "::error::$source is not a JDK home (no bin/java)" >&2
     exit 1
   fi
+  # setup-java can link a preinstalled JDK into the tool cache (x64 -> /usr/lib/jvm/...), and
+  # cp -a copies such a link as a link, so copy the directory it resolves to.
+  real="$(realpath -e "$source")"
   target="$dest/jdk$index"
-  cp -a "$source" "$target"
+  mkdir "$target"
+  cp -a "$real/." "$target/"
   homes+=("$target")
   index=$((index + 1))
 done
 chmod -R go-w "$dest"
 harden_ancestors "$dest"
+
+# A JVM reports its canonical location as java.home, which is the path SemanticRuntime checks, so
+# each copy must resolve to itself rather than to a world-writable original.
+for home in "${homes[@]}"; do
+  if ! settings="$("$home/bin/java" -XshowSettings:properties -version 2>&1)"; then
+    echo "::error::$home/bin/java does not start" >&2
+    printf '%s\n' "$settings" >&2
+    exit 1
+  fi
+  reported="$(printf '%s\n' "$settings" | sed -n 's/^ *java\.home = //p')"
+  if [ "$reported" != "$home" ]; then
+    echo "::error::$home/bin/java reports java.home=$reported, outside the trusted copy" >&2
+    namei -l "$home/bin/java" >&2
+    exit 1
+  fi
+done
 
 # The engine jar and test fixtures live in the checkout, so it must be trusted as well.
 if [ -n "${GITHUB_WORKSPACE:-}" ]; then

@@ -23,13 +23,16 @@ re-run; new test jobs should do the same.
 directory. The JDKs `setup-java` installs on GitHub's Ubuntu runners fail that check, so the
 review-engine tests that launch `java.home` fail there. `.github/scripts/trusted-jdks.sh` copies the
 JDKs it is given to `~/.trusted-jdks` and removes group and other write from the copies, the
-checkout, and their ancestors that the runner user owns, failing on any ancestor it cannot fix. It
-exports the first copy as `JAVA_HOME` and limits Gradle toolchain discovery to the copies. Any Linux
-job that runs Gradle tests must call it after `setup-java` and `setup-gradle` (`setup-java` exports
-its own `JAVA_HOME`), pass the JDK Gradle runs on first, and run Gradle under `umask 022` so
-directories created later are not group-writable either. The script refuses to run outside GitHub
-Actions because it appends to the Gradle user home's `gradle.properties`. Do not relax the runtime
-check to make CI pass.
+checkout, and their ancestors that the runner user owns, failing on any ancestor it cannot fix. A
+tool-cache JDK home can be a symlink to a preinstalled `/usr/lib/jvm` JDK, and a JVM reports its
+resolved location as `java.home`, so the script copies the directory each home resolves to and
+fails unless each copy's `java` reports that copy as `java.home`. It exports the first copy as
+`JAVA_HOME` and limits Gradle toolchain discovery to the copies. Any Linux job that runs Gradle
+tests must call it after `setup-java` and `setup-gradle` (`setup-java` exports its own
+`JAVA_HOME`), pass the JDK Gradle runs on first, and run Gradle under `umask 022` so directories
+created later are not group-writable either. The script refuses to run outside GitHub Actions
+because it appends to the Gradle user home's `gradle.properties`. Do not relax the runtime check to
+make CI pass.
 
 ### Changed-line coverage is report-only
 
