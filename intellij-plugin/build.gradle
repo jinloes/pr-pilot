@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    id 'org.jetbrains.intellij.platform' version '2.18.1'
+    id 'org.jetbrains.intellij.platform' version '2.19.0'
 }
 
 group = 'com.jinloes.prpilot'
@@ -26,11 +26,11 @@ dependencies {
     implementation project(':github-engine')
     implementation project(':review-engine')
 
-    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.1'
-    implementation 'commons-io:commons-io:2.16.1'
-    implementation 'org.apache.commons:commons-lang3:3.18.0'
-    implementation 'org.apache.commons:commons-text:1.12.0'
-    implementation 'org.apache.commons:commons-collections4:4.4'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.22.3'
+    implementation 'commons-io:commons-io:2.22.0'
+    implementation 'org.apache.commons:commons-lang3:3.21.0'
+    implementation 'org.apache.commons:commons-text:1.15.0'
+    implementation 'org.apache.commons:commons-collections4:4.6.0'
 
     implementation 'org.mapstruct:mapstruct:1.6.3'
     annotationProcessor 'org.mapstruct:mapstruct-processor:1.6.3'
