@@ -174,6 +174,21 @@ class ReviewSessionServiceTest {
             assertThat(ReviewSessionService.toReviewRequest(decoded).getGuidanceGlobs()).isEmpty();
             assertThat(decoded.rulesDirectory()).isNull();
             assertThat(ReviewSessionService.toReviewRequest(decoded).getRulesDirectory()).isNull();
+            assertThat(decoded.builtInRules()).isNull();
+            assertThat(ReviewSessionService.toReviewRequest(decoded).isBuiltInRules()).isTrue();
+        }
+
+        @Test
+        void carriesTheBuiltInRulesToggle() {
+            Map<String, Object> disabled = params();
+            disabled.put("builtInRules", false);
+            Map<String, Object> enabled = params();
+            enabled.put("builtInRules", true);
+
+            assertThat(ReviewSessionService.toReviewRequest(decode(disabled)).isBuiltInRules())
+                    .isFalse();
+            assertThat(ReviewSessionService.toReviewRequest(decode(enabled)).isBuiltInRules())
+                    .isTrue();
         }
 
         @Test

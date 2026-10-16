@@ -40,6 +40,7 @@ public class PluginSettingsConfigurable implements Configurable {
                 || component.isCopilotAutoEnableMcpOnReview() != s.isCopilotAutoEnableMcpOnReview()
                 || !component.getCopilotConfigDir().equals(s.getCopilotConfigDir())
                 || !component.getReviewRulesDirectory().equals(s.getReviewRulesDirectory())
+                || component.isReviewBuiltInRules() != s.isReviewBuiltInRules()
                 || !component.getReviewFocusAreas().equals(s.getReviewFocusAreas())
                 || !component.getReviewCustomInstructions().equals(s.getReviewCustomInstructions())
                 || !component.getReviewGuidanceGlobs().equals(s.getReviewGuidanceGlobsRaw())
@@ -96,6 +97,7 @@ public class PluginSettingsConfigurable implements Configurable {
         s.setCopilotAutoEnableMcpOnReview(component.isCopilotAutoEnableMcpOnReview());
         s.setCopilotConfigDir(component.getCopilotConfigDir());
         s.setReviewRulesDirectory(component.getReviewRulesDirectory());
+        s.setReviewBuiltInRules(component.isReviewBuiltInRules());
         s.setReviewFocusAreas(component.getReviewFocusAreas());
         s.setReviewCustomInstructions(component.getReviewCustomInstructions());
         s.setReviewGuidanceGlobs(component.getReviewGuidanceGlobs());
@@ -132,6 +134,7 @@ public class PluginSettingsConfigurable implements Configurable {
         component.setCopilotAutoEnableMcpOnReview(s.isCopilotAutoEnableMcpOnReview());
         component.setCopilotConfigDir(s.getCopilotConfigDir());
         component.setReviewRulesDirectory(s.getReviewRulesDirectory());
+        component.setReviewBuiltInRules(s.isReviewBuiltInRules());
         component.setReviewFocusAreas(s.getReviewFocusAreas());
         component.setReviewCustomInstructions(s.getReviewCustomInstructions());
         component.setReviewGuidanceGlobs(s.getReviewGuidanceGlobsRaw());

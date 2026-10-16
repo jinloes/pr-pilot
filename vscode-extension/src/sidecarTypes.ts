@@ -265,6 +265,8 @@ export interface SidecarGenerateReviewParams {
     guidanceGlobs?: string[];
     /** Reviewer-configured local folder of extra review rules, read by the engine. */
     rulesDirectory?: string;
+    /** Whether the engine also runs its bundled review rules; omitted means on. */
+    builtInRules?: boolean;
     focusAreas?: string;
     customInstructions?: string;
     /** Pre-rendered CI state from `prs/getCheckStatus`. */

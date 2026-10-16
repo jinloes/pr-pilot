@@ -352,7 +352,8 @@ final class ReviewPipelineTestSupport {
                         "author",
                         "",
                         false);
-        return PRReviewRequest.builder(pr, diff).build();
+        // Built-in rules add model calls; tests that exercise them opt back in.
+        return PRReviewRequest.builder(pr, diff).builtInRules(false).build();
     }
 
     static String reviewJsonWithFinding(String file, int line) throws IOException {

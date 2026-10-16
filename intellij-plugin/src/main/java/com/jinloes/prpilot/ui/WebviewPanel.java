@@ -459,7 +459,8 @@ public class WebviewPanel implements Disposable {
                 settings.getResolvedReviewFocusAreas(),
                 settings.getResolvedReviewCustomInstructions(),
                 List.copyOf(settings.getResolvedReviewGuidanceGlobs()),
-                settings.getReviewRulesDirectory());
+                settings.getReviewRulesDirectory(),
+                settings.isReviewBuiltInRules());
     }
 
     private FreshDeepPr freshDeepPr(int number, String owner, String repo) throws Exception {

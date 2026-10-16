@@ -62,8 +62,9 @@ guidance.
 - `review/LanguageChecklists.java` - Per-language Pass B checks (Java, Kotlin, JS/TS, Python, Go,
   Rust) added only for languages in the diff. Tests: `LanguageChecklistsTest`.
 - `review/LocalReviewRules.java` - Bounded loader for the reviewer's `reviewRulesDirectory`:
-  structured YAML rules (name, description, trigger, prompt) and always-selected unstructured files.
-  Tests: `LocalReviewRulesTest`.
+  structured YAML rules (name, description, trigger, prompt) and always-selected unstructured files,
+  merged with the built-in rules in `src/main/resources/review-rules/` (a folder rule with the same
+  name overrides a built-in one). Tests: `LocalReviewRulesTest`.
 - `review/ReviewRulesPass.java` - Trigger selection call plus one read-only agent per selected rule
   (3 concurrent, 25 cap, 12-minute deadline); findings get a ` (rule: <name>)` rationale suffix.
   Tests: `ReviewRulesPassTest`; pipeline wiring in `ReviewPipelineServiceTest` and

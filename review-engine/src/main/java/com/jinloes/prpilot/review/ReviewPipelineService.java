@@ -216,7 +216,8 @@ public final class ReviewPipelineService {
         provider.checkCancelled();
         InspectionManifest manifest = InspectionManifest.fromDiff(request.getDiff());
         request = withBaseCommitContext(request, manifest, onStatus);
-        List<LocalReviewRules.Rule> rules = LocalReviewRules.load(request.getRulesDirectory());
+        List<LocalReviewRules.Rule> rules =
+                LocalReviewRules.load(request.getRulesDirectory(), request.isBuiltInRules());
         boolean recall = selfCritique || secondary != null;
         PRReviewRequest reviewRequest = request.withCandidateRecall(recall);
         Passes passes = reviewPasses(reviewRequest, chunked, onStatus, onChunk);

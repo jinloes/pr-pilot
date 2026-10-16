@@ -70,6 +70,12 @@ are written to disk.
   merges the findings into the candidate; rules never enter the repository guidance. Unreadable or
   relative paths add nothing. It is carried on
   `GenerateReviewParams.rulesDirectory` / `PRReviewRequest.rulesDirectory`.
+- `reviewBuiltInRules` (default `true`; VS Code `pr-pilot.reviewBuiltInRules`; benchmark
+  `--no-builtin-rules` turns it off) — also runs the structured rules bundled in review-engine's
+  `review-rules/` resources. A rules-folder rule with the same name replaces a built-in, and a
+  disabled one (`enabled: false`) turns it off. It is carried on the nullable
+  `GenerateReviewParams.builtInRules` (omitted means on, so older hosts keep the built-ins) /
+  `PRReviewRequest.builtInRules`.
 - `reviewSecondReviewerModel` (default `""`; VS Code `pr-pilot.reviewSecondReviewerModel`) —
   optional Copilot model run in parallel as a second reviewer whose findings are merged and
   cross-validated. Blank disables it. Uses the primary's effort when the primary is Copilot,

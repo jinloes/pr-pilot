@@ -94,6 +94,7 @@ export function buildSettingsScriptEvents(): string {
   });
   $('reviewSelfCritique').addEventListener('change', () => save('reviewSelfCritique', $('reviewSelfCritique').checked));
   $('reviewSupervisorEnabled').addEventListener('change', () => save('reviewSupervisorEnabled', $('reviewSupervisorEnabled').checked));
+  $('reviewBuiltInRules').addEventListener('change', () => save('reviewBuiltInRules', $('reviewBuiltInRules').checked));
   $('reviewSecondReviewerModel').addEventListener('change', () => save('reviewSecondReviewerModel', secondReviewerValue()));
   $('experimentalIntellijAssistedReview').addEventListener('change', () => save('experimentalIntellijAssistedReview', $('experimentalIntellijAssistedReview').checked));
   $('notificationsEnabled').addEventListener('change', () => {
@@ -159,6 +160,7 @@ export function buildSettingsScriptEvents(): string {
       renderRepositoryInstructions();
       $('reviewSelfCritique').checked = state.reviewSelfCritique !== false;
       $('reviewSupervisorEnabled').checked = state.reviewSupervisorEnabled === true;
+      $('reviewBuiltInRules').checked = state.reviewBuiltInRules !== false;
       $('experimentalIntellijAssistedReview').checked = state.experimentalIntellijAssistedReview === true;
       $('notificationsEnabled').checked = state.notificationsEnabled === true;
       $('notifyReviewRequested').checked = state.notifyReviewRequested === true;

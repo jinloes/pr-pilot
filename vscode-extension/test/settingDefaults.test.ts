@@ -80,6 +80,16 @@ test('reviewRulesDirectory defaults to blank in the contribution and both reader
     }
 });
 
+test('reviewBuiltInRules defaults to on in the contribution and both readers', () => {
+    const property = packageJsonDefaults()['pr-pilot.reviewBuiltInRules'] as { type: string; default: boolean };
+    assert.equal(property.type, 'boolean');
+    assert.equal(property.default, true);
+    for (const file of ['extension.ts', 'settings.ts']) {
+        const source = fs.readFileSync(path.join(extensionRoot, 'src', file), 'utf8');
+        assert.match(source, /c\.get<boolean>\('reviewBuiltInRules', true\)/, file);
+    }
+});
+
 test('reviewSupervisorEnabled settings reader fallback matches the contribution default', () => {
     const source = fs.readFileSync(path.join(extensionRoot, 'src', 'settings.ts'), 'utf8');
     assert.match(source, /c\.get<boolean>\('reviewSupervisorEnabled', true\)/);

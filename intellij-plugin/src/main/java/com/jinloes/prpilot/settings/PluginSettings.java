@@ -146,6 +146,12 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
         public String reviewRulesDirectory = "";
 
         /**
+         * Runs the review rules bundled with PR Pilot alongside the rules folder. A rules-folder
+         * rule with the same name replaces the bundled one.
+         */
+        public boolean reviewBuiltInRules = true;
+
+        /**
          * Saved named review-guidance configurations. The legacy fields form the built-in default.
          */
         public List<ReviewGuidanceProfile> reviewGuidanceProfiles = new ArrayList<>();
@@ -335,6 +341,14 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
     public void setReviewRulesDirectory(String value) {
         myState.reviewRulesDirectory = value != null ? value.trim() : "";
+    }
+
+    public boolean isReviewBuiltInRules() {
+        return myState.reviewBuiltInRules;
+    }
+
+    public void setReviewBuiltInRules(boolean value) {
+        myState.reviewBuiltInRules = value;
     }
 
     /** Raw newline-separated guidance-globs text, as edited in settings (may be blank). */

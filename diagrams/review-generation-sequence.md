@@ -88,8 +88,8 @@ sequenceDiagram
         Pipeline->>Pipeline: BaseCommitContext reads guidance (configured guidance globs first, then built-in defaults), changed-file history and call sites of changed symbols from base-commit git objects only (fetch by SHA if missing; fail-open)
     end
 
-    opt reviewRulesDirectory configured
-        Pipeline->>Pipeline: LocalReviewRules loads bounded local rule files (fail-open)
+    opt builtInRules on or reviewRulesDirectory configured
+        Pipeline->>Pipeline: LocalReviewRules loads built-in rules, then bounded local rule files that override them by name (fail-open)
     end
 
     alt Direct review

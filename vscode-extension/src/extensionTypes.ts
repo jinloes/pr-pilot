@@ -36,6 +36,7 @@ export interface ReviewGenerationSettings {
     supervisorEnabled: boolean;
     secondReviewerModel: string;
     rulesDirectory: string;
+    builtInRules: boolean;
     githubBaseUrl: string;
     guidance: ResolvedReviewGuidance;
 }

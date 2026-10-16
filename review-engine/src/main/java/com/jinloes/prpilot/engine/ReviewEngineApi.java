@@ -95,7 +95,74 @@ public interface ReviewEngineApi {
             String secondReviewerModel,
             List<String> guidanceGlobs,
             String rulesDirectory,
-            String incrementalBaselineSha) {
+            String incrementalBaselineSha,
+            Boolean builtInRules) {
+        /** Whether the bundled review rules run; an omitted value means they do. */
+        public boolean builtInRulesEnabled() {
+            return builtInRules == null || builtInRules;
+        }
+
+        public GenerateReviewParams(
+                String operationId,
+                String provider,
+                String projectDir,
+                String model,
+                String effort,
+                boolean inheritMcp,
+                String configDir,
+                boolean selfCritique,
+                boolean reviewSupervisorEnabled,
+                PrParams pr,
+                String diff,
+                String priorReview,
+                String existingReviews,
+                String repoGuidelines,
+                String focusAreas,
+                String customInstructions,
+                String ciStatus,
+                String commits,
+                String linkedIssue,
+                String repoProfile,
+                List<CiAnnotationParam> ciAnnotations,
+                boolean chunkedReview,
+                DeepReviewParams deepReview,
+                String baseSha,
+                String secondReviewerModel,
+                List<String> guidanceGlobs,
+                String rulesDirectory,
+                String incrementalBaselineSha) {
+            this(
+                    operationId,
+                    provider,
+                    projectDir,
+                    model,
+                    effort,
+                    inheritMcp,
+                    configDir,
+                    selfCritique,
+                    reviewSupervisorEnabled,
+                    pr,
+                    diff,
+                    priorReview,
+                    existingReviews,
+                    repoGuidelines,
+                    focusAreas,
+                    customInstructions,
+                    ciStatus,
+                    commits,
+                    linkedIssue,
+                    repoProfile,
+                    ciAnnotations,
+                    chunkedReview,
+                    deepReview,
+                    baseSha,
+                    secondReviewerModel,
+                    guidanceGlobs,
+                    rulesDirectory,
+                    incrementalBaselineSha,
+                    null);
+        }
+
         public GenerateReviewParams(
                 String operationId,
                 String provider,

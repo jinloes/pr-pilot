@@ -137,6 +137,7 @@ final class WebviewReviewController {
                         settings.getResolvedReviewCustomInstructions(),
                         List.copyOf(settings.getResolvedReviewGuidanceGlobs()),
                         settings.getReviewRulesDirectory(),
+                        settings.isReviewBuiltInRules(),
                         settings.getRepositoryReviewInstructions(owner, repo));
         long generationId;
         IntellijClaudeService previousReviewService;
@@ -444,6 +445,7 @@ final class WebviewReviewController {
                                             .baseSha(finalBaseSha)
                                             .guidanceGlobs(generationSettings.guidanceGlobs())
                                             .rulesDirectory(generationSettings.rulesDirectory())
+                                            .builtInRules(generationSettings.builtInRules())
                                             .incrementalBaselineSha(finalIncrementalBaselineSha)
                                             .build(),
                                     generationSettings.runtime(),

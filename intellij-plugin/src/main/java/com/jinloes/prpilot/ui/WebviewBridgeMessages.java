@@ -156,6 +156,7 @@ final class WebviewBridgeMessages {
             String customInstructions,
             List<String> guidanceGlobs,
             String rulesDirectory,
+            boolean builtInRules,
             String repositoryInstructions) {}
 
     record GeneratedReview(

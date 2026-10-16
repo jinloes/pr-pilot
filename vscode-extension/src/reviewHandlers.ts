@@ -229,6 +229,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 repoGuidelines: '',
                 guidanceGlobs: guidance.guidanceGlobs,
                 rulesDirectory: settings.rulesDirectory || undefined,
+                builtInRules: settings.builtInRules,
                 focusAreas,
                 customInstructions,
                 ciStatus: checkStatus.summary,

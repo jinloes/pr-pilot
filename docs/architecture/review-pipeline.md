@@ -85,6 +85,15 @@ is a structured rule (`enabled: false` skips it; `severity`, `owner` and `model`
 duplicate name is skipped). Every other readable file is an unstructured rule named by its path
 whose prompt is its content.
 
+Built-in rules are structured YAML files in review-engine's `review-rules/` resources, listed in
+`LocalReviewRules.BUILT_IN_RULE_FILES` (a test fails when the list and the folder disagree, since a
+jar cannot be listed reliably). With `builtInRules` on (the default; a null wire value means on),
+`load(dir, true)` puts them first and the folder's rules after. A built-in is dropped when a folder
+rule declares the same name, either as a valid structured rule (which replaces it) or with
+`enabled: false` (which turns it off). Unstructured `.md` rules are named by path, so they never
+override one. Built-ins do not count toward the 50-file folder cap, but they do count toward the
+25-rule agent cap. Their sources start with `built-in/`.
+
 `ReviewRulesPass` runs after the candidate is built and after the attribution snapshot, and before
 the hygiene pass. When structured rules exist, one tool-free selection call (90 s) sees the PR
 metadata, description, changed paths with added/removed counts, and each rule's name, description

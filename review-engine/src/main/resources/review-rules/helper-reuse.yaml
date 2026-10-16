@@ -1,0 +1,51 @@
+name: helper-reuse
+description: >-
+  Flags new helper methods whose logic already exists, in whole or in part, in a shared
+  utility or helper class elsewhere in the repository.
+trigger: >-
+  The PR adds or changes source code that defines a new method doing a self-contained
+  transformation, such as converting errors or exceptions to statuses or codes, mapping
+  between types, building or parsing tokens, pagination, timestamps, validation, or formatting.
+prompt: |
+  Find newly added methods that re-implement logic a shared helper already provides.
+
+  1. In <pr_diff>, list every added or substantially changed method, private or static ones
+     included, that does a self-contained transformation instead of orchestration. Typical
+     examples: exception or error to status/code conversion, enum or code mapping, proto/DTO
+     conversion, page token or page size handling, time conversion, input validation, string
+     formatting. Skip trivial getters and one-line delegations. Exception-to-status methods
+     (returning a gRPC `Status`, `StatusException`, `StatusRuntimeException`, or an HTTP status)
+     are the most often duplicated: always grep the repository for other methods that return
+     the same type, even when the new method's mapping looks service-specific.
+  2. Evaluate every method on that list on its own. Finding a duplicate for one method does not
+     finish the task; keep going until each method has its own verdict. For each one, search the
+     working directory for an existing equivalent. Do all of these before concluding that none
+     exists:
+     a. Read the whole public API of every utility class the new method calls, and of every
+        utility class the changed file imports, including static and wildcard imports such as
+        `import static ...ServiceUtils.*`. A class the method already calls for one step, such
+        as `UniversalClientErrorUtils.fromThrowable`, often has a sibling method for the next
+        step. Compare each public static method with the new method.
+     b. Grep for methods with the same input or output types. For example, a new method taking
+        `GraphClientException` or `UniversalClientError` and returning a gRPC `Status` or
+        `StatusRuntimeException` means grep for methods that take those types or return those
+        types.
+     c. Glob for `*Utils`, `*Util`, `*Helper(s)`, `*Converter(s)` and `*Mapper(s)` classes in
+        the changed file's module, read their method signatures, and look for overlap.
+     d. Grep other classes in the same package and parent package for private methods with a
+        similar name or body, such as another `toStatusException` or a `switch` over the same
+        codes. Repeated copies mean the logic belongs in a shared helper.
+  3. Report a finding when an existing method covers the new logic in whole or in part, even
+     if reusing it needs a small refactor, such as extending the helper or adding a code
+     mapping parameter. Partial coverage counts: a helper that builds the same output type from
+     the same inputs (for example a `StatusRuntimeException` from a code, description and
+     cause, or a `Status` from a `UniversalClientError`) covers part of a method that maps
+     codes and then builds that output. A deliberately different code mapping is not a reason
+     to skip; suggest reusing the helper for the shared parts and keeping only the mapping.
+     Also report when two or more classes, the new one included, carry near-identical private copies that should move into a shared helper.
+
+  Anchor each finding on the new method's declaration line. Use type "suggestion", category
+  "maintainability", severity "minor". In the body, name the existing class and method, say
+  which parts of the new logic it replaces, and describe any refactor needed. In "rationale",
+  cite the path of the existing helper (and of any duplicate copies) you actually read. Do not
+  report a method when your searches found no real overlap, and do not report style issues.
