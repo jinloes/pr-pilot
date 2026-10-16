@@ -19,12 +19,12 @@ dependencies {
     // core: shared review request/result/PR models (plain Java 17 module, no Kotlin).
     api project(':core')
 
-    implementation 'com.github:copilot-sdk-java:1.0.6'
+    implementation 'com.github:copilot-sdk-java:1.0.18'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.22.3'
     implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.22.3'
-    implementation 'org.apache.commons:commons-lang3:3.18.0'
-    implementation 'commons-io:commons-io:2.16.1'
-    implementation 'org.slf4j:slf4j-api:2.0.13'
+    implementation 'org.apache.commons:commons-lang3:3.21.0'
+    implementation 'commons-io:commons-io:2.22.0'
+    implementation 'org.slf4j:slf4j-api:2.0.20'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testImplementation 'org.assertj:assertj-core:3.27.7'

@@ -18,12 +18,12 @@ dependencies {
     implementation project(':github-engine')
     implementation project(':review-engine')
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.22.3'
-    implementation 'org.apache.commons:commons-lang3:3.18.0'
-    runtimeOnly 'org.slf4j:slf4j-simple:2.0.13'
+    implementation 'org.apache.commons:commons-lang3:3.21.0'
+    runtimeOnly 'org.slf4j:slf4j-simple:2.0.20'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testImplementation 'org.assertj:assertj-core:3.27.7'
-    testImplementation 'commons-io:commons-io:2.16.1'
+    testImplementation 'commons-io:commons-io:2.22.0'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
