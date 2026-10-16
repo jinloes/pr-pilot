@@ -285,21 +285,21 @@
     "test:coverage": "node ./scripts/run-coverage.mjs"
   },
   "dependencies": {
-    "@github/copilot-sdk": "^1.0.6",
-    "yaml": "^2.8.3"
+    "@github/copilot-sdk": "^1.0.19",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.6.5",
     "@types/vscode": "^1.85.0",
-    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^2.5.2",
     "c8": "^12.0.0",
-    "eslint": "^10.4.0",
-    "globals": "^17.6.0",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
     "typescript": "^5.3.0",
-    "typescript-eslint": "^8.59.4"
+    "typescript-eslint": "^8.71.1"
   },
   "overrides": {
     "serialize-javascript": "^7.0.5"
