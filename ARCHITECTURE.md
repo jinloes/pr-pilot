@@ -57,6 +57,11 @@ line here.
 - [Low confidence is a gate, not a label](docs/architecture/review-pipeline.md#low-confidence-is-a-gate-not-a-label)
 - [Prompt-injection hardening](docs/architecture/review-pipeline.md#prompt-injection-hardening)
 
+**Review checklists** ([review-checklists.md](docs/architecture/review-checklists.md))
+
+- [Security findings name their evidence](docs/architecture/review-checklists.md#security-findings-name-their-evidence)
+- [Change-triggered checklists are deterministic and path-free](docs/architecture/review-checklists.md#change-triggered-checklists-are-deterministic-and-path-free)
+
 **Review benchmarks** ([review-benchmarks.md](docs/architecture/review-benchmarks.md))
 
 - [Recall benchmark withholds the reference answers](docs/architecture/review-benchmarks.md#recall-benchmark-withholds-the-reference-answers)

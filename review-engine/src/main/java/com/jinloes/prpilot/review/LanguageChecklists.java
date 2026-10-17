@@ -30,7 +30,19 @@ final class LanguageChecklists {
                     Map.entry("cts", "JavaScript/TypeScript"),
                     Map.entry("py", "Python"),
                     Map.entry("go", "Go"),
-                    Map.entry("rs", "Rust"));
+                    Map.entry("rs", "Rust"),
+                    Map.entry("cs", "C#"),
+                    Map.entry("c", "C/C++"),
+                    Map.entry("h", "C/C++"),
+                    Map.entry("cc", "C/C++"),
+                    Map.entry("cpp", "C/C++"),
+                    Map.entry("cxx", "C/C++"),
+                    Map.entry("hh", "C/C++"),
+                    Map.entry("hpp", "C/C++"),
+                    Map.entry("hxx", "C/C++"),
+                    Map.entry("sh", "Shell"),
+                    Map.entry("bash", "Shell"),
+                    Map.entry("zsh", "Shell"));
 
     private static final Map<String, String> CHECKLISTS = new LinkedHashMap<>();
 
@@ -124,6 +136,72 @@ final class LanguageChecklists {
                         + "- Integer arithmetic that can overflow or a lossy `as` cast.\n"
                         + "- A Result discarded with `let _ =` or `.ok()` that hides a failure.\n"
                         + "- A task spawned and never joined or cancelled.\n");
+        CHECKLISTS.put(
+                "C#",
+                "- `async void` outside an event handler, or a Task neither awaited nor"
+                        + " observed, so its exception is lost.\n"
+                        + "- .Result, .Wait(), or GetAwaiter().GetResult() on a Task, which can"
+                        + " deadlock under a synchronization context or starve the thread"
+                        + " pool.\n"
+                        + "- An IDisposable (stream, connection, DbContext,"
+                        + " CancellationTokenSource) not disposed on every path (use `using`),"
+                        + " or a new HttpClient created per call instead of a shared or"
+                        + " factory-managed one.\n"
+                        + "- A CancellationToken accepted but not passed to the calls that take"
+                        + " one, or OperationCanceledException caught and treated as a"
+                        + " failure.\n"
+                        + "- lock on this, a Type, or a string; a Dictionary or List shared"
+                        + " across threads without a lock or a concurrent collection.\n"
+                        + "- The null-forgiving `!` operator, or a suppressed nullable warning,"
+                        + " on a value that can be null.\n"
+                        + "- SQL built by interpolation or concatenation, including FromSqlRaw,"
+                        + " ExecuteSqlRaw, or SqlCommand text (FromSql and FromSqlInterpolated"
+                        + " parameterize).\n"
+                        + "- An IEnumerable enumerated more than once (re-running its query), or"
+                        + " an unbounded query materialized with ToList().\n"
+                        + "- Unity: `?.`, `??`, or `is null` on a UnityEngine.Object, which"
+                        + " skips Unity's destroyed-object check; GetComponent, Find, or an"
+                        + " allocation inside Update; a coroutine or event subscription not"
+                        + " stopped or removed in OnDisable or OnDestroy.\n");
+        CHECKLISTS.put(
+                "C/C++",
+                "- A buffer read or write not checked against the buffer's size (memcpy,"
+                        + " strcpy, sprintf, indexing, or a length taken from input).\n"
+                        + "- Use after free, double free, a dangling pointer or reference (to a"
+                        + " local, a temporary, or a container element), or an iterator used"
+                        + " after its container changes.\n"
+                        + "- Memory, a file, or a lock leaked on an error path, or a raw new or"
+                        + " malloc where RAII (a smart pointer or scoped guard) belongs.\n"
+                        + "- A variable or field read before it is initialized.\n"
+                        + "- Integer overflow, signed and unsigned mixing, or truncation in a"
+                        + " size or index calculation.\n"
+                        + "- A format string taken from input, or a specifier that does not"
+                        + " match its argument.\n"
+                        + "- Data shared across threads without a lock or an atomic.\n"
+                        + "- A polymorphic base class without a virtual destructor, or a class"
+                        + " owning a resource without matching copy and move operations (rule"
+                        + " of three/five).\n"
+                        + "- Undefined behavior the optimizer can exploit: a null dereference,"
+                        + " signed overflow, a strict-aliasing violation, or a shift by the"
+                        + " type's width or more.\n");
+        CHECKLISTS.put(
+                "Shell",
+                "- An unquoted variable or command substitution that splits on spaces or"
+                        + " expands globs (rm $file, for f in $(ls)).\n"
+                        + "- A script that continues after a failed command (no set -euo"
+                        + " pipefail or equivalent checks), or cd without || exit.\n"
+                        + "- rm -rf, chmod, or mv on a path built from a variable that can be"
+                        + " empty or unset (rm -rf \"$DIR/\"*).\n"
+                        + "- eval, or a variable interpolated into a command run through ssh,"
+                        + " sh -c, sed, or awk, when the value can come from input.\n"
+                        + "- A script downloaded and piped to a shell, or a download used"
+                        + " without checksum verification.\n"
+                        + "- A temporary file at a fixed, predictable path instead of mktemp,"
+                        + " or no trap to clean it up.\n"
+                        + "- A secret passed on a command line (visible in the process list) or"
+                        + " printed by set -x.\n"
+                        + "- $? read after another command replaced it, or a pipeline that"
+                        + " masks an earlier command's failure.\n");
     }
 
     private LanguageChecklists() {}

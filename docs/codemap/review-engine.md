@@ -20,8 +20,8 @@ guidance.
   `ReviewPromptsSecurityTest`, `ReviewPromptsScopeTest`, and `ReviewPromptsRecallAndHistoryTest`,
   sharing `ReviewPromptsTestSupport`.
 - `review/ReviewInstructions.java` and `ReviewOutputContract.java` - First-pass instruction text
-  (preamble, bug-hunt checklist, Pass A/B, recall variant) and the JSON response contract appended
-  by every finding-emitting stage.
+  (preamble with claim checks, bug-hunt and security checklists, Pass A/B, recall variant) and the
+  JSON response contract appended by every finding-emitting stage.
 - `review/ReviewHygienePrompts.java`, `ReviewRulePrompts.java`, and `ReviewCritiquePrompts.java` -
   Recall-mode hygiene pass, review-rule selection and per-rule review, and self-critique (with
   reviewer corroboration) prompts. Tests: `ReviewRulePromptsTest`, `ReviewCritiquePromptsTest`;
@@ -60,7 +60,11 @@ guidance.
   changed-file commit history and textual call sites read only from the PR base commit's git
   objects, time-bounded and fail-open. Tests: `BaseCommitContextTest`.
 - `review/LanguageChecklists.java` - Per-language Pass B checks (Java, Kotlin, JS/TS, Python, Go,
-  Rust) added only for languages in the diff. Tests: `LanguageChecklistsTest`.
+  Rust, C#, C/C++, Shell) added only for languages in the diff. Tests: `LanguageChecklistsTest`.
+- `review/TriggeredChecklists.java` - Change-specific Pass B checks (CI workflows, dependency
+  manifests, container images, schema migrations, LLM integrations, test
+  changes) added only when a changed path or added line matches.
+  Tests: `TriggeredChecklistsTest`.
 - `review/LocalReviewRules.java` - Bounded loader for the reviewer's `reviewRulesDirectory`:
   structured YAML rules (name, description, trigger, prompt) and always-selected unstructured files,
   merged with the built-in rules in `src/main/resources/review-rules/` (a folder rule with the same

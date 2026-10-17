@@ -189,16 +189,20 @@ the old "drop a low-confidence issue" rule could never match anything. It now re
 surviving low-confidence comment to be confirmed and raised, or dropped.
 
 `PROMPT_VERSION` is
-`2026-10-thread-state-incremental-scope-corroboration-rule-gating-suggested-changes`. Pass B appends
-`BUG_HUNT_CHECKLIST` (failure disposition, swallowed failures, removed safeguards, unchecked absent
-(protobuf default) inputs, mixed versions, and the other defect classes a generic "look for bugs"
-instruction skips) plus `LanguageChecklists` entries for only the languages the diff changes. Two
-scope rules close gaps the evidence policy used to open: a finding caused by a deleted line anchors
-on the nearest added line in the same hunk or file and quotes the removed code (omitted when the
-file has no added line), and a compatibility finding about a persisted, cached, queued, or
-cross-process shape needs named storage or transport evidence instead of a located caller, because
-its consumer is the previous deploy or already-written data. The critique has matching keep rules so
-it does not drop either kind as misplaced or unsupported.
+`2026-10-thread-state-incremental-scope-corroboration-rule-gating-suggested-changes-stable-pagination-discarded-records-security-reliability-test-integrity-claims-gated-checklists`.
+Pass B appends `BUG_HUNT_CHECKLIST` (failure disposition, swallowed failures, fail-open checks,
+partial failure, removed safeguards, unchecked absent (protobuf default) inputs, unchecked internal
+input limits, mixed versions, check-then-act races, unguarded rollouts, library contract misuse,
+placeholder logic, evidence-gated security classes, and the other defect classes a generic "look for
+bugs" instruction skips), `LanguageChecklists` entries for only the languages the diff changes, and
+`TriggeredChecklists` entries for only the kinds of file it changes (see
+[review-checklists.md](review-checklists.md)). Two scope rules close gaps the evidence policy used to
+open: a finding caused by a deleted line anchors on the nearest added line in the same hunk or file
+and quotes the removed code (omitted when the file has no added line, unless it is a deleted test or
+assertion), and a compatibility finding about a persisted, cached, queued, or cross-process shape
+needs named storage or transport evidence instead of a located caller, because its consumer is the
+previous deploy or already-written data. The critique has matching keep rules so it does not drop
+either kind as misplaced or unsupported.
 
 The non-recall review prompt has a third pass of built-in hygiene rules (sensitive or per-request
 logging, failure logs that omit the failing identifier or drop the exception, history-narrating or

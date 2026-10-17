@@ -46,6 +46,18 @@ class ReviewCritiquePromptsTest {
         }
 
         @Test
+        void critiqueKeepsEvidenceBackedSecurityAndIntegrityFindings() {
+            String prompt = ReviewCritiquePrompts.buildCritiquePrompt(req(), draft());
+
+            assertThat(prompt)
+                    .contains("anywhere in the diff for a deleted test or")
+                    .contains("Keep a security finding when the caller-controlled source")
+                    .contains("drop generic security hardening advice")
+                    .contains("weakened-test, or contradicted-claim finding is not a style finding")
+                    .contains("<pr_description> and <commits> indeed omit it");
+        }
+
+        @Test
         void draftReviewJsonSerializesSchemaFields() {
             String json = ReviewCritiquePrompts.draftReviewJson(draft());
             assertThat(json)

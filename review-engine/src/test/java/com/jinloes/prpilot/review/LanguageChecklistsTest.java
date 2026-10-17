@@ -22,6 +22,18 @@ class LanguageChecklistsTest {
         }
 
         @Test
+        void mapsCSharpCAndCppAndShellExtensions() {
+            assertThat(LanguageChecklists.languageFor("Assets/Scripts/Player.cs")).isEqualTo("C#");
+            assertThat(LanguageChecklists.languageFor("src/buffer.c")).isEqualTo("C/C++");
+            assertThat(LanguageChecklists.languageFor("include/buffer.h")).isEqualTo("C/C++");
+            assertThat(LanguageChecklists.languageFor("src/Engine.CPP")).isEqualTo("C/C++");
+            assertThat(LanguageChecklists.languageFor("include/engine.hpp")).isEqualTo("C/C++");
+            assertThat(LanguageChecklists.languageFor("scripts/deploy.sh")).isEqualTo("Shell");
+            assertThat(LanguageChecklists.languageFor("scripts/setup.bash")).isEqualTo("Shell");
+            assertThat(LanguageChecklists.languageFor("scripts/env.zsh")).isEqualTo("Shell");
+        }
+
+        @Test
         void returnsNullForUncoveredOrMissingExtensions() {
             assertThat(LanguageChecklists.languageFor("README.md")).isNull();
             assertThat(LanguageChecklists.languageFor("Makefile")).isNull();
@@ -56,6 +68,29 @@ class LanguageChecklistsTest {
         void usesAFixedOrderRegardlessOfInputOrder() {
             assertThat(LanguageChecklists.sectionFor(List.of("x.py", "A.java")))
                     .isEqualTo(LanguageChecklists.sectionFor(List.of("A.java", "x.py")));
+        }
+
+        @Test
+        void includesTheCSharpChecklistWithItsUnityChecks() {
+            String section = LanguageChecklists.sectionFor(List.of("Assets/Player.cs"));
+
+            assertThat(section)
+                    .contains("\nC#:\n")
+                    .contains("UnityEngine.Object")
+                    .doesNotContain("\nC/C++:\n")
+                    .doesNotContain("\nShell:\n");
+        }
+
+        @Test
+        void includesTheCAndCppAndShellChecklists() {
+            String section = LanguageChecklists.sectionFor(List.of("src/a.cpp", "run.sh"));
+
+            assertThat(section)
+                    .contains("\nC/C++:\n")
+                    .contains("virtual destructor")
+                    .contains("\nShell:\n")
+                    .contains("mktemp")
+                    .doesNotContain("\nC#:\n");
         }
     }
 }

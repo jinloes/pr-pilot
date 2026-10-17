@@ -31,7 +31,8 @@ public final class ReviewPrompts {
      */
     public static final String PROMPT_VERSION =
             "2026-10-thread-state-incremental-scope-corroboration-rule-gating-suggested-changes"
-                    + "-stable-pagination-discarded-records";
+                    + "-stable-pagination-discarded-records"
+                    + "-security-reliability-test-integrity-claims-gated-checklists";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -89,6 +90,7 @@ public final class ReviewPrompts {
                         manifest.files().stream()
                                 .map(InspectionManifest.FileTarget::path)
                                 .toList()));
+        prompt.append(TriggeredChecklists.sectionFor(manifest.files()));
         appendPrMetadata(prompt, request.getPr());
         appendContextSections(prompt, request);
         prompt.append("\n<inspection_manifest>\n")

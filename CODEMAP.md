@@ -10,7 +10,7 @@ only the map for the module you are changing.
 | Task | Start here | Follow through | Primary tests |
 |---|---|---|---|
 | Inspect internal source coverage (not readiness) | `model/SourceInventory.java`, `review/SourceInventoryClient.java` | `SourceInventoryFiles.java`, IntelliJ `SourceInventoryService.java` and `SourceInventoryMcpProvider.java` | `SourceInventoryTest`, `SourceInventoryFilesTest`, `SourceInventoryClientTest`, `SourceInventoryServiceTest`, `SourceInventoryMcpProviderTest` (positive-traversal tests carry `@RequiresSecureTraversal`); manual protocol recipe in `docs/intellij-assisted-review.md` |
-| Change review generation or prompts | `review-engine/.../ReviewPrompts.java` and its per-stage `Review*Prompts.java`/`ReviewInstructions.java` siblings, `ReviewResultParser.java`, `ClaudeService.java`, `CopilotService.java` | `ReviewEngineApi.java`, `ReviewSessionService.java`, host request wiring | Matching `review-engine` service tests; prompt mirrors listed in `scripts/host-mirrors.mjs` |
+| Change review generation or prompts | `review-engine/.../ReviewPrompts.java` and its per-stage `Review*Prompts.java`/`ReviewInstructions.java`/`*Checklists.java` siblings, `ReviewResultParser.java`, `ClaudeService.java`, `CopilotService.java` | `ReviewEngineApi.java`, `ReviewSessionService.java`, host request wiring | Matching `review-engine` service tests; prompt mirrors listed in `scripts/host-mirrors.mjs` |
 | Add an engine capability | `GitHubEngineApi.java` or `ReviewEngineApi.java` | `StdioJsonRpcServerGitHubHandlers.java`/`StdioJsonRpcServerReviewHandlers.java` (cancellable or streaming work: `StdioJsonRpcServerAsyncReviewHandlers.java`), `SidecarBootstrapService.java`, `vscode-extension/src/sidecarGitHubClient.ts`/`sidecarReviewClient.ts` | `EngineCapabilityCoverageTest.java`, `wireCatalog.test.ts` |
 | Change PR discovery, metadata, diff, or draft mutations | `github-engine/.../sidecar/pr/` | `GitHubEngine.java`, both host bridges, shared webview messages | Matching `github-engine` service test plus host bridge tests |
 | Change the shared review UI | `webview/src/App.tsx`, `webview/src/components/` | `webview/src/bridge/types.ts`, both host bridge handlers | Component tests plus accessibility/visual suites when behavior or layout changes |
@@ -36,10 +36,10 @@ only the map for the module you are changing.
 - `.nvmrc` - Node version for webview/extension tooling (matches CI).
 - `.ignore` - Hides lockfiles, visual snapshots, and build output from ripgrep-based search tools.
 - `ARCHITECTURE.md` - Design-constraint index, settings persistence, and local data.
-- `docs/architecture/*.md` - Full design-constraint sections by topic (review pipeline, benchmarks,
-  comments and context, diff coverage, providers, semantic review, hosts and sidecar, sidecar
-  capabilities, module and runtime boundaries, GitHub drafts and worktrees, webview, local data, CI
-  and releases) plus the settings reference.
+- `docs/architecture/*.md` - Full design-constraint sections by topic (review pipeline, review
+  checklists, benchmarks, comments and context, diff coverage, providers, semantic
+  review, hosts and sidecar, sidecar capabilities, module and runtime boundaries, GitHub drafts and
+  worktrees, webview, local data, CI and releases) plus the settings reference.
 - `docs/codemap/*.md` - Per-module file maps and the semantic-review lifecycle entry points.
 - `diagrams/` - Mermaid architecture and PR review-generation sequence diagrams.
 - `.github/workflows/ci.yml` - Pull-request and `main` gate: Gradle check with JaCoCo, IntelliJ

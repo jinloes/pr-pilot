@@ -18,7 +18,8 @@ class ReviewPromptsTest {
             assertThat(ReviewPrompts.PROMPT_VERSION)
                     .isEqualTo(
                             "2026-10-thread-state-incremental-scope-corroboration-rule-gating"
-                                    + "-suggested-changes-stable-pagination-discarded-records");
+                                    + "-suggested-changes-stable-pagination-discarded-records"
+                                    + "-security-reliability-test-integrity-claims-gated-checklists");
         }
 
         @Test
@@ -40,6 +41,87 @@ class ReviewPromptsTest {
             assertThat(prompt)
                     .contains(
                             "persisted, cached, queued, or exchanged between separately deployed");
+        }
+
+        @Test
+        void passBCarriesEvidenceGatedSecurityAndReliabilityClasses() {
+            String prompt =
+                    ReviewPrompts.buildPrompt(PRReviewRequest.builder(fakePr(), "").build());
+
+            assertThat(ReviewInstructions.BUG_HUNT_CHECKLIST)
+                    .contains(ReviewInstructions.SECURITY_CHECKLIST)
+                    .contains("- Fail-open decisions:")
+                    .contains("must deny on error")
+                    .contains("- Partial failure:")
+                    .contains("- Internal input limits:")
+                    .contains("exponential backoff with jitter and a cap")
+                    .contains("- Stale decisions:")
+                    .contains("- Unguarded rollout:")
+                    .contains("- Library contracts:")
+                    .contains("- Placeholder logic:");
+            assertThat(ReviewInstructions.SECURITY_CHECKLIST)
+                    .contains("name the caller-controlled source")
+                    .contains("  - Authorization:")
+                    .contains("  - Injection:")
+                    .contains("  - Unsafe deserialization:")
+                    .contains("  - Secrets and cryptography:")
+                    .contains("  - Error exposure:")
+                    .contains("Do not report generic hardening");
+            assertThat(prompt).contains(ReviewInstructions.SECURITY_CHECKLIST);
+        }
+
+        @Test
+        void checksAuthorClaimsAgainstTheCode() {
+            String prompt =
+                    ReviewPrompts.buildPrompt(PRReviewRequest.builder(fakePr(), "").build());
+
+            assertThat(prompt)
+                    .contains("Claims are not evidence.")
+                    .contains("quote the claim in \"rationale\"")
+                    .contains("asking the author to")
+                    .contains("A test deleted, disabled, or weakened")
+                    .contains("lock, cleanup, required call, or test assertion")
+                    .contains("a deleted test or assertion may anchor on an");
+        }
+
+        @Test
+        void recallPromptCarriesTheSameChecklists() {
+            String prompt =
+                    ReviewPrompts.buildPrompt(
+                            PRReviewRequest.builder(fakePr(), "").candidateRecall(true).build());
+
+            assertThat(prompt)
+                    .contains(ReviewInstructions.BUG_HUNT_CHECKLIST)
+                    .contains("Claims are not evidence.");
+        }
+
+        @Test
+        void addsChangeSpecificChecklistsOnlyForMatchingChanges() {
+            String workflowDiff =
+                    """
+                    diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+                    --- a/.github/workflows/ci.yml
+                    +++ b/.github/workflows/ci.yml
+                    @@ -1 +1 @@
+                    -on: push
+                    +on: pull_request_target
+                    """;
+            String javaDiff =
+                    workflowDiff
+                            .replace(".github/workflows/ci.yml", "src/Api.java")
+                            .replace("on: pull_request_target", "int a = 2;");
+
+            String workflowPrompt =
+                    ReviewPrompts.buildPrompt(
+                            PRReviewRequest.builder(fakePr(), workflowDiff).build());
+            String javaPrompt =
+                    ReviewPrompts.buildPrompt(PRReviewRequest.builder(fakePr(), javaDiff).build());
+
+            assertThat(workflowPrompt)
+                    .contains("Change-specific checks.")
+                    .contains("\nCI workflows:\n")
+                    .doesNotContain("\nSchema migrations:\n");
+            assertThat(javaPrompt).doesNotContain("Change-specific checks.");
         }
 
         @Test
