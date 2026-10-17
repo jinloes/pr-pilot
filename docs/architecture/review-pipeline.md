@@ -79,57 +79,6 @@ second reviewer, and always in deep review, every comment has empty `sources` an
 unchanged. Sources are display-only: the parser ignores them in model output, the sidecar accepts
 and drops them when saving a draft, and VS Code draft recovery omits them.
 
-### Review rules are trigger-gated and applied one agent per rule
-`reviewRulesDirectory` rules never enter `repo_guidelines`. `LocalReviewRules.load` reads up to 50
-`.md`/`.yaml`/`.yml` files (path order, depth 4, no links inside the folder, 32 KB per file, no
-total cap). A YAML mapping with a valid `name` and non-blank `description`, `trigger` and `prompt`
-is a structured rule (`enabled: false` skips it; `severity`, `owner` and `model` are ignored; a
-duplicate name is skipped). Every other readable file is an unstructured rule named by its path
-whose prompt is its content.
-
-Built-in rules are structured YAML files in review-engine's `review-rules/` resources, listed in
-`LocalReviewRules.BUILT_IN_RULE_FILES` (a test fails when the list and the folder disagree, since a
-jar cannot be listed reliably). With `builtInRules` on (the default; a null wire value means on),
-`load(dir, true)` puts them first and the folder's rules after. A built-in is dropped when a folder
-rule declares the same name, either as a valid structured rule (which replaces it) or with
-`enabled: false` (which turns it off). Unstructured `.md` rules are named by path, so they never
-override one. Built-ins do not count toward the 50-file folder cap, but they do count toward the
-25-rule agent cap. Their sources start with `built-in/`.
-
-`ReviewRulesPass` runs after the candidate is built and after the attribution snapshot, and before
-the hygiene pass. When structured rules exist, one tool-free selection call (90 s) sees the PR
-metadata, description, changed paths with added/removed counts, and each rule's name, description
-and trigger, and returns `{"triggered":[...]}`. Unknown names are ignored. Any failure or
-unparseable output fails open to every structured rule, because a missed rule is worse than an extra
-agent. Unstructured rules are always selected. At most 25 rules run (the rest are named in a
-status), each in its own read-only agent with MCP off (10 min each, 3 concurrently on daemon
-threads). An agent sees only its rule, `OUTPUT_CONTRACT`, PR metadata and the diff (the condensed
-index for chunked reviews, as the hygiene pass does). Its findings are anchor-validated, end their
-rationale with ` (rule: <name>)`, and are merged into the candidate only when non-empty, so a review
-without rules is unchanged. A failed agent is reported and skipped.
-
-Status lines come only from the calling thread, which polls `checkCancelled` while it waits;
-providers receive a no-op status consumer because host status sinks are not thread-safe. The whole
-phase has a 12-minute deadline. At expiry, queued rules are skipped and running agents are cancelled
-with `Future.cancel(true)`. That interrupt makes Claude's `waitFor` and Copilot's `get` destroy or
-close their run, without calling `cancelCurrentRequest`, whose token is one-way and would abort the
-whole review. Findings already collected are kept. User cancellation cancels every agent and
-propagates; `ClaudeService` and `CopilotService` track concurrent runs in sets so one cancel stops
-them all. In deep review, the authority check runs before the selection call and before each agent
-submission, and both prompts carry the semantic sections.
-
-In recall mode, rule findings the critique dropped are restored by the hygiene restore rule (not low
-confidence, anchored, not covered by a same-category finding within `HYGIENE_COVER_LINES`). Rule
-findings carry no `sources` of their own and are not in the attribution snapshot. After critique,
-`ReviewerAttribution.reattach` runs unchanged, and `unattributeUnmatchedRuleFindings` then clears
-the primary-label fallback it gives a rule finding that no reviewer candidate matched, so a rule
-finding is labeled only through a match (same file, same category, within two lines). Rule identity
-is engine-owned, not read from the critique's text: before critique the pipeline snapshots each rule
-finding's file, category and line as `RuleSite` values, and a final comment at such a site counts as
-a rule finding even when the critique reworded it and dropped its ` (rule: <name>)` tag. A comment
-that still carries the tag for a loaded rule also counts. Other unmatched comments keep the
-fallback.
-
 ### Suggested changes are literal, one-line, high-confidence replacements
 A comment may carry `suggestedChange`, the literal full replacement for its anchored line that
 GitHub renders as a committable suggestion. `OUTPUT_CONTRACT` allows it only when the fix is
@@ -190,13 +139,10 @@ is `draftReviewJson` over an already-parsed draft, so by then no low-confidence 
 the old "drop a low-confidence issue" rule could never match anything. It now requires each
 surviving low-confidence comment to be confirmed and raised, or dropped.
 
-`PROMPT_VERSION` is
-`2026-10-thread-state-incremental-scope-corroboration-rule-gating-suggested-changes-stable-pagination-discarded-records-security-reliability-test-integrity-claims-gated-checklists-protobuf-schema-delta`.
-Pass B appends `BUG_HUNT_CHECKLIST` (failure disposition, swallowed failures, fail-open checks,
-partial failure, removed safeguards, unchecked absent (protobuf default) inputs, unchecked internal
-input limits, mixed versions, check-then-act races, unguarded rollouts, library contract misuse,
-placeholder logic, evidence-gated security classes, and the other defect classes a generic "look for
-bugs" instruction skips), `LanguageChecklists` entries for only the languages the diff changes, and
+`ReviewPrompts.PROMPT_VERSION` names the prompt revision; bump it with any prompt-text change.
+Pass B appends `BUG_HUNT_CHECKLIST` (the defect classes a generic "look for bugs" instruction skips,
+including evidence-gated security classes), `LanguageChecklists` entries for only the languages the
+diff changes, and
 `TriggeredChecklists` entries for only the kinds of file it changes (see
 [review-checklists.md](review-checklists.md)). Two scope rules close gaps the evidence policy used to
 open: a finding caused by a deleted line anchors on the nearest added line in the same hunk or file

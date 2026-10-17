@@ -51,7 +51,6 @@ line here.
 - [Review guidance, file history and call sites come from the base commit](docs/architecture/review-pipeline.md#review-guidance-file-history-and-call-sites-come-from-the-base-commit)
 - [Recall: second reviewer and candidate validation](docs/architecture/review-pipeline.md#recall-second-reviewer-and-candidate-validation)
 - [Reviewer attribution and corroboration](docs/architecture/review-pipeline.md#reviewer-attribution-and-corroboration)
-- [Review rules are trigger-gated and applied one agent per rule](docs/architecture/review-pipeline.md#review-rules-are-trigger-gated-and-applied-one-agent-per-rule)
 - [Suggested changes are literal, one-line, high-confidence replacements](docs/architecture/review-pipeline.md#suggested-changes-are-literal-one-line-high-confidence-replacements)
 - [Review JSON parsing is self-healing, not all-or-nothing](docs/architecture/review-pipeline.md#review-json-parsing-is-self-healing-not-all-or-nothing)
 - [Low confidence is a gate, not a label](docs/architecture/review-pipeline.md#low-confidence-is-a-gate-not-a-label)
@@ -61,6 +60,7 @@ line here.
 
 - [Security findings name their evidence](docs/architecture/review-checklists.md#security-findings-name-their-evidence)
 - [Change-triggered checklists are deterministic and path-free](docs/architecture/review-checklists.md#change-triggered-checklists-are-deterministic-and-path-free)
+- [Review rules are trigger-gated and applied one agent per rule](docs/architecture/review-checklists.md#review-rules-are-trigger-gated-and-applied-one-agent-per-rule)
 
 **Protobuf review** ([proto-review.md](docs/architecture/proto-review.md))
 
