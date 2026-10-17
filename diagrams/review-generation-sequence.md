@@ -84,8 +84,12 @@ sequenceDiagram
     end
     Note over Host,Pipeline: PRReviewRequest strips any trailer into DiffCoverage, so pr_diff never contains it.<br/>Incomplete coverage adds an escaped omitted_files section to review and critique prompts.
 
+    Pipeline->>Pipeline: GeneratedProtoCode leaves regenerated protobuf code out of the reviewed diff (coverage kept) and lists generated files in generated_code
+
     opt baseSha supplied
-        Pipeline->>Pipeline: BaseCommitContext reads guidance (configured guidance globs first, then built-in defaults), changed-file history and call sites of changed symbols from base-commit git objects only (fetch by SHA if missing; fail-open)
+        Pipeline->>Pipeline: BaseCommitContext reads guidance (configured guidance globs first, then built-in defaults) and changed-file history from base-commit git objects only (fetch by SHA if missing, fail-open)
+        Pipeline->>Pipeline: For changed .proto files, compares each schema with the old side of the diff (incremental baseline or merge base) into proto_schema_changes, noting committed generated code left stale (own sub-budget)
+        Pipeline->>Pipeline: Finds call sites of changed symbols, including generated-code names of changed .proto elements (last, own sub-budget)
     end
 
     opt builtInRules on or reviewRulesDirectory configured

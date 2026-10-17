@@ -214,8 +214,10 @@ public final class ReviewPipelineService {
         if (request.getSemanticContext() != null && execution == null)
             throw new IOException("Semantic prompt data cannot authorize deep review");
         provider.checkCancelled();
+        GeneratedProtoCode.Plan generated = GeneratedProtoCode.plan(request.getDiff());
+        request = generated.applyTo(request);
         InspectionManifest manifest = InspectionManifest.fromDiff(request.getDiff());
-        request = withBaseCommitContext(request, manifest, onStatus);
+        request = withBaseCommitContext(request, manifest, generated.paths(), onStatus);
         List<LocalReviewRules.Rule> rules =
                 LocalReviewRules.load(request.getRulesDirectory(), request.isBuiltInRules());
         boolean recall = selfCritique || secondary != null;
@@ -354,8 +356,15 @@ public final class ReviewPipelineService {
         }
     }
 
+    /**
+     * Adds base-commit context. {@code omittedPaths} are changed files left out of the reviewed
+     * diff, so the schema check does not report them as missing from it.
+     */
     private PRReviewRequest withBaseCommitContext(
-            PRReviewRequest request, InspectionManifest manifest, Consumer<String> onStatus)
+            PRReviewRequest request,
+            InspectionManifest manifest,
+            Set<String> omittedPaths,
+            Consumer<String> onStatus)
             throws InterruptedException {
         File projectDir = provider.projectDir();
         if (StringUtils.isBlank(request.getBaseSha()) || projectDir == null) {
@@ -366,16 +375,22 @@ public final class ReviewPipelineService {
         BaseCommitContext.Result resolved =
                 baseContextResolver.resolve(
                         projectDir,
-                        request.getBaseSha(),
-                        manifest,
-                        request.getGuidanceGlobs(),
+                        new BaseCommitContext.Scope(
+                                request.getBaseSha(),
+                                request.getIncrementalBaselineSha(),
+                                manifest,
+                                omittedPaths,
+                                request.getGuidanceGlobs()),
                         provider::checkCancelled);
         String guidelines =
                 StringUtils.isBlank(resolved.guidelines())
                         ? request.getRepoGuidelines()
                         : resolved.guidelines();
         return request.withBaseCommitContext(
-                guidelines, resolved.fileHistory(), resolved.callSites());
+                guidelines,
+                resolved.fileHistory(),
+                resolved.callSites(),
+                resolved.protoSchemaChanges());
     }
 
     /**
@@ -700,14 +715,12 @@ public final class ReviewPipelineService {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
     }
 
-    /** Resolves base-commit guidance and file history; injectable for tests. */
+    /** Resolves base-commit context for a review's scope; injectable for tests. */
     @FunctionalInterface
     interface BaseContextResolver {
         BaseCommitContext.Result resolve(
                 File repoDir,
-                String baseSha,
-                InspectionManifest manifest,
-                List<String> guidanceGlobs,
+                BaseCommitContext.Scope scope,
                 BaseCommitContext.CancellationCheck cancellation)
                 throws InterruptedException;
     }

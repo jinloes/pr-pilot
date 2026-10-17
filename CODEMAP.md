@@ -37,7 +37,7 @@ only the map for the module you are changing.
 - `.ignore` - Hides lockfiles, visual snapshots, and build output from ripgrep-based search tools.
 - `ARCHITECTURE.md` - Design-constraint index, settings persistence, and local data.
 - `docs/architecture/*.md` - Full design-constraint sections by topic (review pipeline, review
-  checklists, benchmarks, comments and context, diff coverage, providers, semantic
+  checklists, protobuf review, benchmarks, comments and context, diff coverage, providers, semantic
   review, hosts and sidecar, sidecar capabilities, module and runtime boundaries, GitHub drafts and
   worktrees, webview, local data, CI and releases) plus the settings reference.
 - `docs/codemap/*.md` - Per-module file maps and the semantic-review lifecycle entry points.
@@ -109,7 +109,8 @@ only the map for the module you are changing.
 ### Review generation
 
 `ReviewPane`/`App.tsx` -> host bridge -> `ReviewEngineApi` -> `ReviewSessionService` ->
-`ReviewPipelineService` -> base-commit guidance/history enrichment -> direct or chunked primary pass
+`ReviewPipelineService` -> regenerated protobuf code left out of the diff -> base-commit
+guidance/history/protobuf-schema-delta/call-site enrichment -> direct or chunked primary pass
 (plus optional parallel second reviewer, merged) -> optional bounded supervisor/follow-up ->
 optional `ReviewRulesPass` (trigger selection, one agent per rule) -> contract-index-backed final
 critique/CI suppression -> status/chunk notifications -> host bridge -> shared webview.

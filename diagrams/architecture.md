@@ -43,7 +43,7 @@ flowchart LR
             ReviewApi["ReviewEngineApi"]
             Session["ReviewSessionService"]
             Pipeline["ReviewPipelineService<br/>primary or chunked review,<br/>optional second reviewer,<br/>bounded supervision,<br/>critique, CI suppression"]
-            BaseContext["BaseCommitContext<br/>base-commit guidance and history"]
+            BaseContext["BaseCommitContext<br/>base-commit guidance, history,<br/>call sites, protobuf schema delta"]
             Worktrees["GitWorktreeService"]
             Outcomes["ReviewOutcomeLog"]
             ReviewApi --> Session

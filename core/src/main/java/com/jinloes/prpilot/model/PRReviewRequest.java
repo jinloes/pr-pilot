@@ -42,6 +42,8 @@ public final class PRReviewRequest {
     private final boolean builtInRules;
     private final String fileHistory;
     private final String callSites;
+    private final String protoSchemaChanges;
+    private final String generatedCode;
     private final boolean candidateRecall;
 
     private PRReviewRequest(Builder builder) {
@@ -70,6 +72,8 @@ public final class PRReviewRequest {
         this.builtInRules = builder.builtInRules;
         this.fileHistory = builder.fileHistory;
         this.callSites = builder.callSites;
+        this.protoSchemaChanges = builder.protoSchemaChanges;
+        this.generatedCode = builder.generatedCode;
         this.candidateRecall = builder.candidateRecall;
         this.ciAnnotations =
                 builder.ciAnnotations == null
@@ -212,6 +216,22 @@ public final class PRReviewRequest {
     }
 
     /**
+     * Rendered structural differences between each changed .proto file's version on the diff's old
+     * side and its head version, plus committed generated code the diff leaves stale.
+     */
+    public String getProtoSchemaChanges() {
+        return protoSchemaChanges;
+    }
+
+    /**
+     * Rendered list of generated protobuf code: files left out of {@link #getDiff()} because they
+     * were regenerated, and files that may have been edited by hand.
+     */
+    public String getGeneratedCode() {
+        return generatedCode;
+    }
+
+    /**
      * Whether the primary pass should surface unconfirmed candidate findings as low-confidence
      * notes. Only set when a validation pass will confirm or drop them.
      */
@@ -234,6 +254,29 @@ public final class PRReviewRequest {
                 .fileHistory(history)
                 .callSites(callSites)
                 .build();
+    }
+
+    /**
+     * Copies this request, replacing guidance, file history, call sites, and protobuf schema
+     * changes resolved from the base commit.
+     */
+    public PRReviewRequest withBaseCommitContext(
+            String guidelines, String history, String callSites, String protoSchemaChanges) {
+        return toBuilder()
+                .repoGuidelines(guidelines)
+                .fileHistory(history)
+                .callSites(callSites)
+                .protoSchemaChanges(protoSchemaChanges)
+                .build();
+    }
+
+    /**
+     * Copies this request with generated code left out of the diff. {@code body} is used verbatim,
+     * without splitting off a coverage trailer, because it is this request's already-split body
+     * minus whole file sections; this request's coverage is carried over.
+     */
+    public PRReviewRequest withGeneratedCodeOmitted(String body, String generatedCode) {
+        return copyInto(new Builder(pr, body, diffCoverage)).generatedCode(generatedCode).build();
     }
 
     public PRReviewRequest withCandidateRecall(boolean value) {
@@ -275,6 +318,8 @@ public final class PRReviewRequest {
                 .builtInRules(builtInRules)
                 .fileHistory(fileHistory)
                 .callSites(callSites)
+                .protoSchemaChanges(protoSchemaChanges)
+                .generatedCode(generatedCode)
                 .candidateRecall(candidateRecall);
     }
 
@@ -314,6 +359,8 @@ public final class PRReviewRequest {
         private boolean builtInRules = true;
         private String fileHistory;
         private String callSites;
+        private String protoSchemaChanges;
+        private String generatedCode;
         private boolean candidateRecall;
 
         private Builder(PullRequest pr, String diff) {
@@ -434,6 +481,16 @@ public final class PRReviewRequest {
 
         public Builder callSites(String value) {
             this.callSites = value;
+            return this;
+        }
+
+        public Builder protoSchemaChanges(String value) {
+            this.protoSchemaChanges = value;
+            return this;
+        }
+
+        public Builder generatedCode(String value) {
+            this.generatedCode = value;
             return this;
         }
 

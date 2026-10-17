@@ -13,7 +13,8 @@ Plain Java 17 shared models with no host dependencies.
 - `model/LineComment.java` - Inline comment anchor and quality metadata.
 - `model/ChatMessage.java` - Immutable chat role and content.
 - `model/PRReviewRequest.java` - Immutable review-generation parameter object; its builder strips a
-  diff-coverage trailer from the diff into a never-null `diffCoverage`.
+  diff-coverage trailer from the diff into a never-null `diffCoverage`, which
+  `withGeneratedCodeOmitted` keeps when it swaps in a diff without regenerated protobuf code.
 - `model/DiffCoverage.java` - Engine-authored diff-coverage trailer: omitted/listed counts, budget,
   scan completeness, up to 200 omitted paths, strict end-anchored `split`, and escaped prompt text.
   Pinned with its webview mirror by `core/src/test/resources/diff-coverage/trailer.golden.txt`.

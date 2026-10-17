@@ -138,7 +138,9 @@ class ReviewPromptsScopeTest {
             assertThat(ReviewPrompts.buildPrompt(fakeRequest()))
                     .contains("<pr_diff>, <omitted_files>, <inspection_manifest>");
             assertThat(ReviewCritiquePrompts.buildCritiquePrompt(fakeRequest(), draft()))
-                    .contains("<pr_diff>, <omitted_files>, <linked_issue>");
+                    .contains(
+                            "<pr_diff>, <omitted_files>, <proto_schema_changes>, <generated_code>,"
+                                    + " <linked_issue>");
         }
 
         @Test

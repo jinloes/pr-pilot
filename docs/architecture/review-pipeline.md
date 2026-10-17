@@ -37,8 +37,10 @@ review; only cancellation propagates. Call sites are whole-word name matches (`C
 declarations from removed lines and hunk-header context, skipping test files) in files the PR does
 not change; they can include unrelated same-name symbols, so the prompt labels them as candidates to
 confirm, and they run last on their own sub-budget so a large repository cannot starve guidance or
-history. Configured guidance globs (`PRReviewRequest.guidanceGlobs`, from the active profile's or
-default `reviewGuidanceGlobs`) are honored and additive to the built-in defaults: each becomes a
+history. Changed `.proto` files also get a computed schema delta; see
+[proto-review.md](proto-review.md). Configured guidance globs (`PRReviewRequest.guidanceGlobs`,
+from the active profile's or default `reviewGuidanceGlobs`) are honored and additive to the
+built-in defaults: each becomes a
 literal pathspec prefix, so `..`, absolute, and wildcard-leading globs read nothing, and matches are
 read only from the base commit like every other guidance file. No repository-specific path is built
 in; a repo whose review rules live elsewhere (for example `.linkedin/ai-agent/*.md`) needs that glob
@@ -189,7 +191,7 @@ the old "drop a low-confidence issue" rule could never match anything. It now re
 surviving low-confidence comment to be confirmed and raised, or dropped.
 
 `PROMPT_VERSION` is
-`2026-10-thread-state-incremental-scope-corroboration-rule-gating-suggested-changes-stable-pagination-discarded-records-security-reliability-test-integrity-claims-gated-checklists`.
+`2026-10-thread-state-incremental-scope-corroboration-rule-gating-suggested-changes-stable-pagination-discarded-records-security-reliability-test-integrity-claims-gated-checklists-protobuf-schema-delta`.
 Pass B appends `BUG_HUNT_CHECKLIST` (failure disposition, swallowed failures, fail-open checks,
 partial failure, removed safeguards, unchecked absent (protobuf default) inputs, unchecked internal
 input limits, mixed versions, check-then-act races, unguarded rollouts, library contract misuse,

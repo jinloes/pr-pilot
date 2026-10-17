@@ -1,12 +1,18 @@
 package com.jinloes.prpilot.review;
 
+import com.jinloes.prpilot.model.DiffCoverage;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -17,12 +23,14 @@ import org.slf4j.LoggerFactory;
 /**
  * Reads trusted review context from a pull request's <b>base</b> commit: repository guidance
  * documents, the recent history of each changed file, and textual call sites of the declarations
- * the diff changes.
+ * the diff changes. It also compares each changed {@code .proto} schema with its version on the
+ * diff's old side and finds committed code generated from it that the diff leaves as it was.
  *
  * <p>Guidance at the PR head is author-controlled, so it is never read from the worktree or the
- * head tree. Every read goes through read-only git plumbing against the base commit's objects, with
- * per-command and overall time bounds. Any failure degrades to empty context; only cancellation
- * propagates.
+ * head tree. Every read goes through read-only git plumbing against commit objects, with
+ * per-command and overall time bounds. A schema's old side can be an earlier PR head, for an
+ * incremental review; only a structural summary of the diff is derived from it, never guidance. Any
+ * failure degrades to empty context; only cancellation propagates.
  */
 final class BaseCommitContext {
     private static final Logger log = LoggerFactory.getLogger(BaseCommitContext.class);
@@ -37,6 +45,7 @@ final class BaseCommitContext {
     static final int MAX_LISTED_REFERENCES = 40;
     static final int MAX_CALL_SITE_LINE_CHARS = 160;
     private static final long CALL_SITES_TIMEOUT_SECONDS = 30;
+    private static final long PROTO_SCHEMA_TIMEOUT_SECONDS = 30;
     private static final int HISTORY_COMMITS_PER_FILE = 3;
     private static final long COMMAND_TIMEOUT_SECONDS = 15;
     private static final long FETCH_TIMEOUT_SECONDS = 60;
@@ -50,6 +59,10 @@ final class BaseCommitContext {
 
     private static final Pattern COMMIT_SHA = Pattern.compile("(?i)[0-9a-f]{40}|[0-9a-f]{64}");
     private static final Pattern BLOB_SHA = Pattern.compile("(?i)[0-9a-f]{40}|[0-9a-f]{64}");
+
+    /** A schema file name safe to splice into a search pattern once its dots are escaped. */
+    private static final Pattern PROTO_FILE_NAME = Pattern.compile("[A-Za-z0-9_.-]+\\.proto");
+
     private static final Set<String> SCOPED_NAMES = Set.of("AGENTS.md", "CLAUDE.md");
     private static final Set<String> TRAILING_PATHS =
             Set.of(
@@ -59,8 +72,31 @@ final class BaseCommitContext {
                     ".github/pull_request_template.md");
 
     /** Resolved context; any part is empty when unavailable. */
-    record Result(String guidelines, String fileHistory, String callSites) {
-        static final Result EMPTY = new Result("", "", "");
+    record Result(
+            String guidelines, String fileHistory, String callSites, String protoSchemaChanges) {
+        static final Result EMPTY = new Result("", "", "", "");
+
+        Result(String guidelines, String fileHistory, String callSites) {
+            this(guidelines, fileHistory, callSites, "");
+        }
+    }
+
+    /**
+     * What to resolve context for. {@code diffBaseSha} is the commit an incremental diff was taken
+     * against, or null for a full pull request diff. {@code omittedPaths} are files the diff
+     * changes but the review leaves out, such as regenerated code. {@code guidanceGlobs} are the
+     * user-configured guidance globs, matched before the built-in defaults; null or empty means
+     * defaults only.
+     */
+    record Scope(
+            String baseSha,
+            String diffBaseSha,
+            InspectionManifest manifest,
+            Set<String> omittedPaths,
+            List<String> guidanceGlobs) {
+        Scope {
+            omittedPaths = omittedPaths == null ? Set.of() : Set.copyOf(omittedPaths);
+        }
     }
 
     /** Checked before every git command so a cancelled review stops promptly. */
@@ -105,10 +141,24 @@ final class BaseCommitContext {
             List<String> guidanceGlobs,
             CancellationCheck cancellation)
             throws InterruptedException {
+        return resolve(
+                repoDir, new Scope(baseSha, null, manifest, Set.of(), guidanceGlobs), cancellation);
+    }
+
+    /**
+     * Resolves context for {@code scope}, as {@link #resolve(File, String, InspectionManifest,
+     * List, CancellationCheck)} does, adding the changed schemas' compatibility delta.
+     *
+     * @throws InterruptedException when {@code cancellation} reports the review was cancelled
+     */
+    Result resolve(File repoDir, Scope scope, CancellationCheck cancellation)
+            throws InterruptedException {
+        String baseSha = scope.baseSha();
+        InspectionManifest manifest = scope.manifest();
         List<String> configuredGlobs =
-                guidanceGlobs == null
+                scope.guidanceGlobs() == null
                         ? List.of()
-                        : guidanceGlobs.stream()
+                        : scope.guidanceGlobs().stream()
                                 .filter(glob -> glob != null && !glob.isBlank())
                                 .map(String::strip)
                                 .distinct()
@@ -132,21 +182,10 @@ final class BaseCommitContext {
                 log.warn("{} is not a git work tree; reviewing without guidance", repoDir);
                 return Result.EMPTY;
             }
-            if (!commitExists(repoDir, baseSha, deadline)) {
-                GitOutput fetch =
-                        git(
-                                repoDir,
-                                deadline,
-                                FETCH_TIMEOUT_SECONDS,
-                                "fetch",
-                                "--no-tags",
-                                "--",
-                                "origin",
-                                baseSha);
-                if (fetch.exitCode() != 0 || !commitExists(repoDir, baseSha, deadline)) {
-                    log.warn("Base commit {} is unavailable; reviewing without guidance", baseSha);
-                    return Result.EMPTY;
-                }
+            if (!commitExists(repoDir, baseSha, deadline)
+                    && !fetchCommit(repoDir, baseSha, deadline)) {
+                log.warn("Base commit {} is unavailable; reviewing without guidance", baseSha);
+                return Result.EMPTY;
             }
         } catch (IOException | TimeoutException e) {
             log.warn("Could not resolve base commit {}; reviewing without guidance", baseSha, e);
@@ -154,12 +193,12 @@ final class BaseCommitContext {
         }
         String guidelines = guidelines(repoDir, baseSha, changedPaths, configuredGlobs, deadline);
         String fileHistory = fileHistory(repoDir, baseSha, changedPaths, deadline);
-        return new Result(
-                guidelines,
-                fileHistory,
+        String protoSchemaChanges = protoSchemaChanges(repoDir, scope, changedPaths, deadline);
+        String callSites =
                 callSitesEnabled()
                         ? callSites(repoDir, baseSha, changedPaths, manifest, deadline)
-                        : "");
+                        : "";
+        return new Result(guidelines, fileHistory, callSites, protoSchemaChanges);
     }
 
     static boolean callSitesEnabled() {
@@ -169,6 +208,183 @@ final class BaseCommitContext {
     private boolean commitExists(File repoDir, String sha, Deadline deadline)
             throws IOException, TimeoutException, InterruptedException {
         return git(repoDir, deadline, "cat-file", "-e", sha + "^{commit}").exitCode() == 0;
+    }
+
+    /** Fetches {@code sha} from origin; true when the commit is present afterwards. */
+    private boolean fetchCommit(File repoDir, String sha, Deadline deadline)
+            throws IOException, TimeoutException, InterruptedException {
+        GitOutput fetch =
+                git(
+                        repoDir,
+                        deadline,
+                        FETCH_TIMEOUT_SECONDS,
+                        "fetch",
+                        "--no-tags",
+                        "--",
+                        "origin",
+                        sha);
+        return fetch.exitCode() == 0 && commitExists(repoDir, sha, deadline);
+    }
+
+    /**
+     * The compatibility delta of each changed {@code .proto} schema against its version on the
+     * diff's old side, plus committed code generated from a schema changed in place that the diff
+     * leaves as it was. Runs with its own sub-budget; a review that changes no schema skips it
+     * without running git.
+     */
+    private String protoSchemaChanges(
+            File repoDir, Scope scope, List<String> changedPaths, Deadline overall)
+            throws InterruptedException {
+        InspectionManifest manifest = scope.manifest();
+        if (manifest == null
+                || manifest.files().stream()
+                        .noneMatch(file -> ProtoSchemaChanges.isSchemaPath(file.path()))) {
+            return "";
+        }
+        Deadline deadline = overall.within(PROTO_SCHEMA_TIMEOUT_SECONDS);
+        String oldSide = diffOldSide(repoDir, scope, deadline);
+        Set<String> excluded = new HashSet<>(changedPaths);
+        excluded.addAll(scope.omittedPaths());
+        return ProtoSchemaChanges.compute(
+                manifest,
+                path -> fileAt(repoDir, oldSide, path, deadline),
+                schemaPaths ->
+                        staleGeneratedCode(repoDir, oldSide, schemaPaths, excluded, deadline));
+    }
+
+    /**
+     * The commit the diff's old side shows. An incremental diff compares against its baseline,
+     * which is in the head's history. A pull request diff compares against the merge base of the
+     * base commit and the head, which is the checked-out {@code HEAD} in a review worktree. Falls
+     * back to the base commit, already known to exist; a diff that does not apply to the version
+     * read there is reported as unparsed rather than compared.
+     */
+    private String diffOldSide(File repoDir, Scope scope, Deadline deadline)
+            throws InterruptedException {
+        String baseSha = scope.baseSha();
+        String baseline = scope.diffBaseSha();
+        try {
+            if (baseline != null
+                    && COMMIT_SHA.matcher(baseline).matches()
+                    && !baseline.equalsIgnoreCase(baseSha)) {
+                if (commitExists(repoDir, baseline, deadline)
+                        || fetchCommit(repoDir, baseline, deadline)) {
+                    return baseline;
+                }
+                log.debug("Incremental baseline {} is unavailable; using the merge base", baseline);
+            }
+            GitOutput mergeBase = git(repoDir, deadline, "merge-base", baseSha, "HEAD");
+            String sha = mergeBase.output().trim();
+            if (mergeBase.exitCode() == 0 && COMMIT_SHA.matcher(sha).matches()) {
+                return sha;
+            }
+        } catch (IOException | TimeoutException e) {
+            log.debug("Could not resolve the diff's old side: {}", e.getMessage());
+        }
+        return baseSha;
+    }
+
+    /**
+     * A regular file's exact text at {@code commit}; empty when it is missing, larger than a schema
+     * may be, not UTF-8, or unreadable in time.
+     */
+    private Optional<String> fileAt(File repoDir, String commit, String path, Deadline deadline)
+            throws InterruptedException {
+        if (!InspectionManifest.isSafeRelativePath(path)) {
+            return Optional.empty();
+        }
+        try {
+            GitOutput tree =
+                    git(
+                            repoDir,
+                            deadline,
+                            "ls-tree",
+                            "-r",
+                            "-z",
+                            "-l",
+                            "--full-tree",
+                            commit,
+                            "--",
+                            path);
+            if (tree.exitCode() != 0) return Optional.empty();
+            List<Blob> blobs =
+                    parseTree(tree.output()).stream()
+                            .filter(blob -> blob.path().equals(path))
+                            .toList();
+            if (blobs.size() != 1 || blobs.get(0).size() > ProtoSchemaChanges.MAX_FILE_BYTES) {
+                return Optional.empty();
+            }
+            GitOutput content = git(repoDir, deadline, "cat-file", "blob", blobs.get(0).sha());
+            if (content.exitCode() != 0 || content.output().indexOf('\uFFFD') >= 0) {
+                return Optional.empty();
+            }
+            return Optional.of(content.output());
+        } catch (IOException | TimeoutException e) {
+            log.debug("Could not read {} at {}: {}", path, commit, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Files at {@code commit} whose generator comment names one of {@code schemaPaths} as their
+     * source, keyed by schema. Files in {@code excluded}, schemas, vendored files and paths the
+     * prompt cannot name are skipped. A failed search finds nothing.
+     */
+    private Map<String, List<String>> staleGeneratedCode(
+            File repoDir,
+            String commit,
+            List<String> schemaPaths,
+            Set<String> excluded,
+            Deadline deadline)
+            throws InterruptedException {
+        List<String> args = new ArrayList<>(List.of("grep", "--full-name", "-z", "-I", "-E"));
+        int fixedArgs = args.size();
+        schemaPaths.stream()
+                .map(BaseCommitContext::fileName)
+                .distinct()
+                .filter(name -> PROTO_FILE_NAME.matcher(name).matches())
+                .forEach(
+                        name -> {
+                            args.add("-e");
+                            args.add(
+                                    "(source:|@generated from file)[[:space:]]*([^[:space:]]*/)?"
+                                            + name.replace(".", "[.]")
+                                            + "([[:space:]]|$)");
+                        });
+        if (args.size() == fixedArgs) return Map.of();
+        args.add(commit);
+        GitOutput matches;
+        try {
+            matches = git(repoDir, deadline, args.toArray(String[]::new));
+        } catch (IOException | TimeoutException e) {
+            log.debug("Could not search for generated code: {}", e.getMessage());
+            return Map.of();
+        }
+        if (matches.exitCode() != 0) return Map.of();
+        String prefix = commit + ":";
+        Map<String, Set<String>> found = new LinkedHashMap<>();
+        for (String line : matches.output().split("\n")) {
+            String[] parts = line.split("\0", 2);
+            if (parts.length < 2 || !parts[0].startsWith(prefix)) continue;
+            String path = parts[0].substring(prefix.length());
+            if (excluded.contains(path)
+                    || path.toLowerCase(Locale.ROOT).endsWith(".proto")
+                    || ProtoSchemaChanges.isVendored(path)
+                    || !DiffCoverage.listablePath(path)
+                    || !InspectionManifest.isSafeRelativePath(path)) {
+                continue;
+            }
+            Optional<String> source = GeneratedProtoCode.sourceProto(parts[1]);
+            if (source.isEmpty()) continue;
+            for (String schema : schemaPaths) {
+                if (GeneratedProtoCode.sameProto(schema, source.get())) {
+                    found.computeIfAbsent(schema, key -> new LinkedHashSet<>()).add(path);
+                }
+            }
+        }
+        Map<String, List<String>> stale = new LinkedHashMap<>();
+        found.forEach((schema, paths) -> stale.put(schema, List.copyOf(paths)));
+        return stale;
     }
 
     private String guidelines(
@@ -402,9 +618,9 @@ final class BaseCommitContext {
 
     /**
      * Lists base-commit lines outside the changed files that mention each changed declaration by
-     * whole word. The matches are textual, so they can include unrelated symbols that share a name;
-     * the prompt says so. Runs last, with its own sub-budget, so a large repository cannot starve
-     * guidance or history.
+     * whole word, or for a protobuf element, any name generated code gives it. The matches are
+     * textual, so they can include unrelated symbols that share a name; the prompt says so. Runs
+     * last, with its own sub-budget, so a large repository cannot starve guidance or history.
      */
     private String callSites(
             File repoDir,
@@ -415,13 +631,7 @@ final class BaseCommitContext {
             throws InterruptedException {
         List<ChangedSymbols.Symbol> symbols = ChangedSymbols.extract(manifest);
         if (symbols.isEmpty()) return "";
-        Deadline deadline =
-                new Deadline(
-                        Math.min(
-                                overall.deadlineNanos(),
-                                System.nanoTime()
-                                        + TimeUnit.SECONDS.toNanos(CALL_SITES_TIMEOUT_SECONDS)),
-                        overall.cancellation());
+        Deadline deadline = overall.within(CALL_SITES_TIMEOUT_SECONDS);
         Set<String> changed = Set.copyOf(changedPaths);
         String prefix = baseSha + ":";
         StringBuilder sb = new StringBuilder();
@@ -455,19 +665,10 @@ final class BaseCommitContext {
             ChangedSymbols.Symbol symbol,
             Deadline deadline)
             throws IOException, TimeoutException, InterruptedException {
-        GitOutput counts =
-                git(
-                        repoDir,
-                        deadline,
-                        "grep",
-                        "-z",
-                        "-c",
-                        "-I",
-                        "-w",
-                        "-F",
-                        "-e",
-                        symbol.name(),
-                        baseSha);
+        List<String> countArgs = new ArrayList<>(List.of("grep", "-z", "-c", "-I", "-w", "-F"));
+        addPatterns(countArgs, symbol);
+        countArgs.add(baseSha);
+        GitOutput counts = git(repoDir, deadline, countArgs.toArray(String[]::new));
         if (counts.exitCode() != 0) return "";
         List<String> files = new ArrayList<>();
         int references = 0;
@@ -491,6 +692,9 @@ final class BaseCommitContext {
                         + (symbol.declarationChanged() ? "declaration" : "body")
                         + " changed in "
                         + symbol.path()
+                        + (symbol.aliases().isEmpty()
+                                ? ""
+                                : "; matches include the names generated code gives it")
                         + ")";
         if (references > MAX_LISTED_REFERENCES) {
             return header
@@ -500,19 +704,10 @@ final class BaseCommitContext {
                     + files.size()
                     + " files outside the changed files; too many to list";
         }
-        List<String> args =
-                new ArrayList<>(
-                        List.of(
-                                "grep",
-                                "-z",
-                                "-n",
-                                "-I",
-                                "-w",
-                                "-F",
-                                "-e",
-                                symbol.name(),
-                                baseSha,
-                                "--"));
+        List<String> args = new ArrayList<>(List.of("grep", "-z", "-n", "-I", "-w", "-F"));
+        addPatterns(args, symbol);
+        args.add(baseSha);
+        args.add("--");
         args.addAll(files.stream().limit(MAX_CALL_SITE_FILES).toList());
         GitOutput matches = git(repoDir, deadline, args.toArray(String[]::new));
         if (matches.exitCode() != 0) return "";
@@ -535,6 +730,14 @@ final class BaseCommitContext {
             listed++;
         }
         return listed == 0 ? "" : sb.toString();
+    }
+
+    /** One {@code -e} per search term; git grep matches a line containing any of them. */
+    private static void addPatterns(List<String> args, ChangedSymbols.Symbol symbol) {
+        for (String term : symbol.searchTerms()) {
+            args.add("-e");
+            args.add(term);
+        }
     }
 
     private GitOutput git(File dir, Deadline deadline, String... args)
@@ -572,6 +775,13 @@ final class BaseCommitContext {
                 throw new TimeoutException("Base-commit context exceeded its overall time budget");
             }
             return remaining;
+        }
+
+        /** A sub-budget of at most {@code seconds} from now, inside this one. */
+        Deadline within(long seconds) {
+            return new Deadline(
+                    Math.min(deadlineNanos, System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds)),
+                    cancellation);
         }
     }
 

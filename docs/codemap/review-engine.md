@@ -42,8 +42,9 @@ guidance.
   tools such as the recall benchmark.
 - `review/ChunkedReviewService.java` - Shared diff batching, contract-index generation, and
   mandatory global reconciliation.
-- `review/ReviewPipelineService.java` - Shared primary/chunked orchestration, base-commit context
-  enrichment, optional parallel Copilot second reviewer, bounded supervision, the review-rules pass,
+- `review/ReviewPipelineService.java` - Shared primary/chunked orchestration, leaving regenerated
+  protobuf code out of the reviewed diff, base-commit context enrichment, optional parallel Copilot
+  second reviewer, bounded supervision, the review-rules pass,
   the recall-mode hygiene pass, recall-candidate critique, opt-in dropped-finding statuses,
   cancellation checkpoints, fallback behavior, final CI suppression, and the final comment cap.
   Tests: `ReviewPipelineServiceTest`, `ReviewPipelineRecallTest`,
@@ -58,12 +59,23 @@ guidance.
   candidate earned from rule findings. Tests: `ReviewPipelineFindingsTest`.
 - `review/BaseCommitContext.java` - Trusted guidance files (configured globs, then defaults),
   changed-file commit history and textual call sites read only from the PR base commit's git
-  objects, time-bounded and fail-open. Tests: `BaseCommitContextTest`.
+  objects, plus each changed `.proto` schema's delta against the diff's old side (merge base or
+  incremental baseline) and its stale committed generated code; time-bounded and fail-open. Tests:
+  `BaseCommitContextTest`.
+- `review/ProtoSchemaChanges.java`, `ProtoSchemaDelta.java`, `ProtoSchema.java`, and
+  `UnifiedPatch.java` - The `<proto_schema_changes>` section: strict application of each changed
+  schema's hunks to its old-side version, a proto2/proto3/editions parser, and Buf-style rule IDs
+  with impact tags. Tests: `ProtoSchemaChangesTest`, `ProtoSchemaDeltaTest` plus
+  `ProtoSchemaDelta{Type,Field,Declaration}Test` (shared `ProtoSchemaDeltaTestSupport`),
+  `ProtoSchemaTest`, `UnifiedPatchTest`.
+- `review/GeneratedProtoCode.java` - Recognizes protoc-generated files in a diff, leaves the
+  regenerated ones out of the reviewed diff, and lists them for `<generated_code>`. Tests:
+  `GeneratedProtoCodeTest`.
 - `review/LanguageChecklists.java` - Per-language Pass B checks (Java, Kotlin, JS/TS, Python, Go,
   Rust, C#, C/C++, Shell) added only for languages in the diff. Tests: `LanguageChecklistsTest`.
 - `review/TriggeredChecklists.java` - Change-specific Pass B checks (CI workflows, dependency
-  manifests, container images, schema migrations, LLM integrations, test
-  changes) added only when a changed path or added line matches.
+  manifests, container images, schema migrations, protobuf schemas and tooling config, protobuf and
+  gRPC code, LLM integrations, test changes) added only when a changed path or added line matches.
   Tests: `TriggeredChecklistsTest`.
 - `review/LocalReviewRules.java` - Bounded loader for the reviewer's `reviewRulesDirectory`:
   structured YAML rules (name, description, trigger, prompt) and always-selected unstructured files,
@@ -74,7 +86,8 @@ guidance.
   Tests: `ReviewRulesPassTest`; pipeline wiring in `ReviewPipelineServiceTest` and
   `ReviewPipelineRulesAndHygieneTest`.
 - `review/ChangedSymbols.java` - Extracts the existing declarations a diff changes (removed-line
-  declarations, then hunk-header context) for the call-site search. Tests: `ChangedSymbolsTest`.
+  declarations, then hunk-header context) for the call-site search; a changed `.proto` element also
+  carries the names generated code gives it. Tests: `ChangedSymbolsTest`.
 - `review/ChangedLogStatements.java` - Mechanically extracts the production log statements a diff
   adds or edits (multi-line calls included) into the hygiene pass's `<changed_log_statements>`
   inventory. Tests: `ChangedLogStatementsTest`.

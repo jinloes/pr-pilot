@@ -37,10 +37,12 @@ class ReviewPipelineBaseCommitTest {
 
             pipeline(
                             provider,
-                            (dir, sha, manifest, globs, cancellation) -> {
+                            (dir, scope, cancellation) -> {
                                 assertThat(dir).isEqualTo(semanticRoot.toFile());
-                                assertThat(globs).containsExactly("rules/*.md");
-                                resolvedShas.add(sha);
+                                assertThat(scope.guidanceGlobs()).containsExactly("rules/*.md");
+                                assertThat(scope.diffBaseSha()).isNull();
+                                assertThat(scope.omittedPaths()).isEmpty();
+                                resolvedShas.add(scope.baseSha());
                                 return new BaseCommitContext.Result(
                                         "## AGENTS.md\nBase rule.",
                                         "## src/Api.java\nabc1234 2026-01-01 Keep it stable",
@@ -75,10 +77,7 @@ class ReviewPipelineBaseCommitTest {
             provider.projectDir = semanticRoot.toFile();
             provider.primaryResult = pass(result());
 
-            pipeline(
-                            provider,
-                            (dir, sha, manifest, globs, cancellation) ->
-                                    BaseCommitContext.Result.EMPTY)
+            pipeline(provider, (dir, scope, cancellation) -> BaseCommitContext.Result.EMPTY)
                     .review(
                             request(oneRiskyHunk()).toBuilder()
                                     .baseSha(BASE_SHA)
@@ -98,7 +97,7 @@ class ReviewPipelineBaseCommitTest {
         void skipsEnrichmentWithoutAProjectDirectoryOrBaseSha() throws Exception {
             AtomicInteger resolutions = new AtomicInteger();
             ReviewPipelineService.BaseContextResolver resolver =
-                    (dir, sha, manifest, globs, cancellation) -> {
+                    (dir, scope, cancellation) -> {
                         resolutions.incrementAndGet();
                         return BaseCommitContext.Result.EMPTY;
                     };
@@ -121,5 +120,98 @@ class ReviewPipelineBaseCommitTest {
 
             assertThat(resolutions).hasValue(0);
         }
+
+        @Test
+        void leavesRegeneratedCodeOutAndCarriesTheSchemaDeltaIntoTheReview() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.projectDir = semanticRoot.toFile();
+            provider.primaryResult = pass(result());
+            provider.completions.add(emptyReviewJson());
+            List<BaseCommitContext.Scope> scopes = new ArrayList<>();
+            String baseline = "c".repeat(40);
+
+            pipeline(
+                            provider,
+                            (dir, scope, cancellation) -> {
+                                scopes.add(scope);
+                                return new BaseCommitContext.Result(
+                                        "",
+                                        "",
+                                        "",
+                                        "- api/user.proto:3 GENERATED_CODE_NOT_UPDATED [generated]"
+                                                + " committed generated files not in this diff:"
+                                                + " py/user_pb2.py");
+                            })
+                    .review(
+                            request(SCHEMA_AND_GENERATED_CODE).toBuilder()
+                                    .baseSha(BASE_SHA)
+                                    .incrementalBaselineSha(baseline)
+                                    .build(),
+                            false,
+                            true,
+                            false,
+                            s -> {},
+                            null);
+
+            assertThat(scopes).hasSize(1);
+            BaseCommitContext.Scope scope = scopes.get(0);
+            assertThat(scope.baseSha()).isEqualTo(BASE_SHA);
+            assertThat(scope.diffBaseSha()).isEqualTo(baseline);
+            assertThat(scope.omittedPaths()).containsExactly("gen/user.pb.go");
+            assertThat(scope.manifest().files())
+                    .extracting(InspectionManifest.FileTarget::path)
+                    .containsExactly("api/user.proto");
+            PRReviewRequest reviewed = provider.primaryRequests.get(0);
+            assertThat(reviewed.getDiff())
+                    .contains("api/user.proto")
+                    .doesNotContain("gen/user.pb.go");
+            assertThat(reviewed.getGeneratedCode()).contains("- gen/user.pb.go");
+            assertThat(reviewed.getProtoSchemaChanges()).contains("GENERATED_CODE_NOT_UPDATED");
+            assertThat(provider.completeCalls)
+                    .anySatisfy(
+                            call ->
+                                    assertThat(call.prompt())
+                                            .contains("<proto_schema_changes>", "py/user_pb2.py"));
+        }
+
+        @Test
+        void leavesRegeneratedCodeOutWithoutABaseCommit() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult = pass(result());
+
+            pipeline(
+                            provider,
+                            (dir, scope, cancellation) -> {
+                                throw new AssertionError("no base commit to resolve");
+                            })
+                    .review(request(SCHEMA_AND_GENERATED_CODE), false, false, false, s -> {}, null);
+
+            PRReviewRequest reviewed = provider.primaryRequests.get(0);
+            assertThat(reviewed.getDiff())
+                    .contains("api/user.proto")
+                    .doesNotContain("gen/user.pb.go");
+            assertThat(reviewed.getGeneratedCode()).contains("- gen/user.pb.go");
+            assertThat(reviewed.getProtoSchemaChanges()).isNullOrEmpty();
+        }
+
+        private static final String SCHEMA_AND_GENERATED_CODE =
+                """
+                diff --git a/api/user.proto b/api/user.proto
+                --- a/api/user.proto
+                +++ b/api/user.proto
+                @@ -1,3 +1,4 @@
+                 syntax = "proto3";
+                 message User {
+                +  string email = 2;
+                 }
+                diff --git a/gen/user.pb.go b/gen/user.pb.go
+                --- a/gen/user.pb.go
+                +++ b/gen/user.pb.go
+                @@ -1,3 +1,4 @@
+                 // Code generated by protoc-gen-go. DO NOT EDIT.
+                 // source: api/user.proto
+                +// regenerated
+                 package gen
+                """;
     }
 }

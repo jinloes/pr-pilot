@@ -27,12 +27,15 @@ anchors in its own file.
 
 ### Change-triggered checklists are deterministic and path-free
 `TriggeredChecklists` adds Pass B checklists for CI workflows, dependency manifests and lockfiles,
-container images, schema migrations, LLM integrations, and test changes only when a changed file's path, or one of its added lines (DDL
+container images, schema migrations, protobuf schemas and tooling config, protobuf and gRPC code, LLM
+integrations, and test changes only when a changed file's path, or one of its added lines (DDL
 statements, model SDK calls), shows that kind of change. The
 triggers are regular expressions over the diff, not a model call as in `ReviewRulesPass`, so the
 same diff always yields the same prompt and a change that triggers nothing costs nothing. A path
 trigger fires for removal-only changes such as a deleted test file, while an added-line trigger
-reads only `+` lines, so DDL in a context or removed line does not add the migration checklist.
+reads only `+` lines, so DDL in a context or removed line does not add the migration checklist. A
+checklist can also exclude files outright: the protobuf and gRPC code checklist ignores generated
+protobuf code, whose runtime calls would otherwise add advice meant for hand-written callers.
 
 The section lists each triggered checklist once, in a fixed order, and never echoes a file path:
 paths are author-controlled, and only trusted titles and items may enter the instruction part of the

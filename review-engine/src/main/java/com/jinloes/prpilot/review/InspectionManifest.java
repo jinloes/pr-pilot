@@ -54,21 +54,33 @@ final class InspectionManifest {
     }
 
     static InspectionManifest fromDiff(String diff) {
+        List<FileTarget> files = new ArrayList<>();
+        for (String section : fileSections(diff)) {
+            parseFile(section).ifPresent(files::add);
+        }
+        return new InspectionManifest(files);
+    }
+
+    /**
+     * Splits a diff into per-file sections, each running from its {@code diff --git} line to the
+     * next one, so the sections are contiguous to the end of the diff. Text before the first file
+     * is not part of any section.
+     */
+    static List<String> fileSections(String diff) {
         String source = diff == null ? "" : diff;
         Matcher matcher = FILE_START.matcher(source);
         List<Integer> starts = new ArrayList<>();
         while (matcher.find()) {
             starts.add(matcher.start());
         }
-        List<FileTarget> files = new ArrayList<>();
+        List<String> sections = new ArrayList<>(starts.size());
         for (int index = 0; index < starts.size(); index++) {
-            String section =
+            sections.add(
                     source.substring(
                             starts.get(index),
-                            index + 1 < starts.size() ? starts.get(index + 1) : source.length());
-            parseFile(section).ifPresent(files::add);
+                            index + 1 < starts.size() ? starts.get(index + 1) : source.length()));
         }
-        return new InspectionManifest(files);
+        return sections;
     }
 
     List<FileTarget> files() {
@@ -150,7 +162,8 @@ final class InspectionManifest {
                 .orElse("");
     }
 
-    private static Optional<FileTarget> parseFile(String section) {
+    /** Parses one section from {@link #fileSections}; empty when its path is not a safe path. */
+    static Optional<FileTarget> parseFile(String section) {
         String path = "";
         for (String line : DIFF_RECORD.split(section)) {
             if (line.startsWith("+++ b/")) {

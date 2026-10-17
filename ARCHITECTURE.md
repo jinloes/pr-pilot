@@ -62,6 +62,15 @@ line here.
 - [Security findings name their evidence](docs/architecture/review-checklists.md#security-findings-name-their-evidence)
 - [Change-triggered checklists are deterministic and path-free](docs/architecture/review-checklists.md#change-triggered-checklists-are-deterministic-and-path-free)
 
+**Protobuf review** ([proto-review.md](docs/architecture/proto-review.md))
+
+- [Protobuf schema compatibility is computed, not inferred](docs/architecture/proto-review.md#protobuf-schema-compatibility-is-computed-not-inferred)
+- [The schema delta compares against the diff's old side](docs/architecture/proto-review.md#the-schema-delta-compares-against-the-diffs-old-side)
+- [Field comparisons follow the wire encoding](docs/architecture/proto-review.md#field-comparisons-follow-the-wire-encoding)
+- [Regenerated protobuf code is left out of the reviewed diff](docs/architecture/proto-review.md#regenerated-protobuf-code-is-left-out-of-the-reviewed-diff)
+- [Stale generated code is found by its generator comment](docs/architecture/proto-review.md#stale-generated-code-is-found-by-its-generator-comment)
+- [Schema call sites include generated-code names](docs/architecture/proto-review.md#schema-call-sites-include-generated-code-names)
+
 **Review benchmarks** ([review-benchmarks.md](docs/architecture/review-benchmarks.md))
 
 - [Recall benchmark withholds the reference answers](docs/architecture/review-benchmarks.md#recall-benchmark-withholds-the-reference-answers)

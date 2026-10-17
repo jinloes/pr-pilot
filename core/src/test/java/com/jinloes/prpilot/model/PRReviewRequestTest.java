@@ -110,6 +110,23 @@ class PRReviewRequestTest {
             assertThat(deep.diffCoverage()).isEqualTo(request.diffCoverage());
             assertThat(deep.diffCoverage().omitted()).isEqualTo(5);
         }
+
+        @Test
+        void withGeneratedCodeOmittedUsesTheBodyVerbatimAndKeepsCoverage() {
+            String stacked = BODY + TRAILER + TRAILER.replace("omitted=2", "omitted=5");
+            PRReviewRequest request =
+                    PRReviewRequest.builder(pr(), stacked).customInstructions("custom").build();
+
+            // A stripped body that now ends in a lookalike trailer must not be split again.
+            PRReviewRequest stripped =
+                    request.withGeneratedCodeOmitted(BODY + TRAILER, "omitted list");
+
+            assertThat(stripped.getDiff()).isEqualTo(BODY + TRAILER);
+            assertThat(stripped.diffCoverage()).isEqualTo(request.diffCoverage());
+            assertThat(stripped.getGeneratedCode()).isEqualTo("omitted list");
+            assertThat(stripped.getCustomInstructions()).isEqualTo("custom");
+            assertThat(request.getGeneratedCode()).isNull();
+        }
     }
 
     @Nested
@@ -338,6 +355,8 @@ class PRReviewRequestTest {
                     .builtInRules(false)
                     .fileHistory("history")
                     .callSites("sites")
+                    .protoSchemaChanges("schema")
+                    .generatedCode("generated")
                     .candidateRecall(true)
                     .diffCoverage(new DiffCoverage(1, List.of("x"), 10, true))
                     .build();
@@ -356,6 +375,8 @@ class PRReviewRequestTest {
             assertThat(copy.getGuidanceGlobs()).containsExactly("docs/rules/*.md");
             assertThat(copy.getRulesDirectory()).isEqualTo("/rules");
             assertThat(copy.isBuiltInRules()).isFalse();
+            assertThat(copy.getProtoSchemaChanges()).isEqualTo("schema");
+            assertThat(copy.getGeneratedCode()).isEqualTo("generated");
         }
 
         @Test
@@ -377,6 +398,8 @@ class PRReviewRequestTest {
             assertThat(copy.getBaseSha()).isEqualTo(SHA);
             assertThat(copy.getFileHistory()).isEqualTo("history");
             assertThat(copy.getCallSites()).isEqualTo("sites");
+            assertThat(copy.getProtoSchemaChanges()).isEqualTo("schema");
+            assertThat(copy.getGeneratedCode()).isEqualTo("generated");
             assertThat(copy.isCandidateRecall()).isTrue();
             assertThat(copy.getSemanticContext().getEvidence()).isEqualTo("evidence");
         }
@@ -388,6 +411,8 @@ class PRReviewRequestTest {
             assertThat(request.getBaseSha()).isNull();
             assertThat(request.getFileHistory()).isNull();
             assertThat(request.getCallSites()).isNull();
+            assertThat(request.getProtoSchemaChanges()).isNull();
+            assertThat(request.getGeneratedCode()).isNull();
             assertThat(request.isCandidateRecall()).isFalse();
         }
 
@@ -410,7 +435,20 @@ class PRReviewRequestTest {
             assertThat(enriched.getFileHistory()).isEqualTo("base history");
             assertThat(enriched.getCallSites()).isEqualTo("base sites");
             assertThat(enriched.getCustomInstructions()).isEqualTo("custom");
+            assertThat(enriched.getProtoSchemaChanges()).isEqualTo("schema");
             assertThat(source.getRepoGuidelines()).isEqualTo("guidelines");
+        }
+
+        @Test
+        void withBaseCommitContextCanAlsoReplaceProtoSchemaChanges() {
+            PRReviewRequest source = full();
+            PRReviewRequest enriched =
+                    source.withBaseCommitContext("rules", "history", "sites", "base schema");
+
+            assertThat(enriched.getProtoSchemaChanges()).isEqualTo("base schema");
+            assertThat(enriched.getCallSites()).isEqualTo("sites");
+            assertThat(enriched.getGeneratedCode()).isEqualTo("generated");
+            assertThat(source.getProtoSchemaChanges()).isEqualTo("schema");
         }
 
         @Test

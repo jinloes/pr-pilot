@@ -46,6 +46,40 @@ class ReviewCritiquePromptsTest {
         }
 
         @Test
+        void critiqueKeepsSchemaDeltaFindingsButDowngradesUnevidencedJsonOrSourceBreaks() {
+            String prompt = ReviewCritiquePrompts.buildCritiquePrompt(req(), draft());
+
+            assertThat(prompt)
+                    .contains("cites a <proto_schema_changes> entry needs no located caller")
+                    .contains(
+                            "downgrade it to a \"note\" when it reports a change tagged only json,"
+                                    + " source, or both as an issue")
+                    .contains(
+                            "an unreserved removed protobuf field or enum value, or a deleted"
+                                    + " reserved entry) is not a style finding");
+        }
+
+        @Test
+        void critiqueCarriesTheProtobufSectionsAsUntrustedData() {
+            PRReviewRequest request =
+                    PRReviewRequest.builder(fakePr(), "")
+                            .protoSchemaChanges("- api.proto:4 FIELD_NUMBER_REUSED [wire] User.id")
+                            .generatedCode("Possibly edited by hand:\n- gen/api.pb.go\n")
+                            .build();
+
+            String prompt = ReviewCritiquePrompts.buildCritiquePrompt(request, draft());
+
+            assertThat(prompt)
+                    .contains(
+                            "<omitted_files>, <proto_schema_changes>, <generated_code>,"
+                                    + " <linked_issue>")
+                    .contains("<proto_schema_changes>\n")
+                    .contains("- api.proto:4 FIELD_NUMBER_REUSED [wire] User.id")
+                    .contains("<generated_code>\n")
+                    .contains("- gen/api.pb.go");
+        }
+
+        @Test
         void critiqueKeepsEvidenceBackedSecurityAndIntegrityFindings() {
             String prompt = ReviewCritiquePrompts.buildCritiquePrompt(req(), draft());
 

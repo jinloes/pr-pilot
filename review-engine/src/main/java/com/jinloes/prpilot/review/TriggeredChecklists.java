@@ -7,8 +7,8 @@ import java.util.regex.Pattern;
 
 /**
  * Pass B checklists for kinds of change that need checks the always-on bug hunt does not carry: CI
- * workflows, dependency manifests, container images, schema migrations, LLM integrations, and test
- * changes.
+ * workflows, dependency manifests, container images, schema migrations, protobuf schemas and code,
+ * LLM integrations, and test changes.
  *
  * <p>A checklist is added to the first-pass prompt only when a changed file's path, or one of its
  * added lines, shows that kind of change, so a review pays for these checks only on the pull
@@ -91,6 +91,28 @@ final class TriggeredChecklists {
 
     private static final Pattern PROMPT_PATH =
             Pattern.compile("(?i)(?:^|/)prompts?/|\\.prompty?$|\\.prompt\\.[a-z0-9]+$");
+
+    private static final Pattern PROTO_PATH = Pattern.compile("(?i)\\.proto$");
+
+    private static final Pattern PROTO_TOOLING_PATH =
+            Pattern.compile(
+                    "(?i)(?:^|/)(?:buf(?:\\.work|\\.gen|\\.policy)?\\.ya?ml|buf\\.lock"
+                            + "|proto\\.lock)$");
+
+    /** Protobuf and gRPC runtime imports, types, and calls in hand-written code. */
+    private static final Pattern PROTO_CODE_LINE =
+            Pattern.compile(
+                    "com\\.google\\.protobuf|\\bio\\.grpc\\b"
+                            + "|google\\.golang\\.org/(?:protobuf|grpc)|_pb2(?:_grpc)?\\b"
+                            + "|@bufbuild/protobuf|@connectrpc/|\\bGoogle\\.Protobuf\\b"
+                            + "|\\bGrpc\\.(?:Core|Net)\\b|\\bgrpc\\.aio\\b"
+                            + "|\\bprotojson\\.|\\bJsonFormat\\b|\\bjson_format\\b"
+                            + "|\\bproto\\.(?:Marshal|Unmarshal|Merge|Equal|Clone)\\b"
+                            + "|\\b(?:mergeFrom|MergeFrom|SerializeToString|ParseFromString)\\("
+                            + "|\\bUNRECOGNIZED\\b|\\bnew(?:Blocking|Future)?Stub\\("
+                            + "|\\bwithDeadline(?:After)?\\(|\\bstatus\\.Errorf?\\("
+                            + "|\\bStatusRuntimeException\\b"
+                            + "|\\bgrpc\\.(?:NewClient|Dial|DialContext|NewServer)\\(");
 
     /**
      * Model SDKs, model names, and prompt or tool-call identifiers. SDK names match as identifier
@@ -223,6 +245,140 @@ final class TriggeredChecklists {
                                     + "- A destructive DROP, TRUNCATE, or DELETE with no"
                                     + " down-migration, backup, or note that the data loss is"
                                     + " intended.\n"),
+                    new Checklist(
+                            "Protobuf schemas",
+                            PROTO_PATH,
+                            null,
+                            "- A field whose number changed, or a field number or name that a"
+                                    + " different field used in the base version or that a"
+                                    + " reserved statement lists: data written by one version is"
+                                    + " misread by the other.\n"
+                                    + "- A type or label change on an existing field. Only these"
+                                    + " keep the binary wire format, and an old reader still"
+                                    + " truncates values out of its range: among int32, uint32,"
+                                    + " int64, uint64, and bool; sint32 and sint64; fixed32 and"
+                                    + " sfixed32; fixed64 and sfixed64; string to bytes; an enum"
+                                    + " and an integer type. Of these, only int32 and uint32,"
+                                    + " int64 and uint64, and the fixed and sfixed pairs also"
+                                    + " keep JSON. Repeated to singular loses data. Adding or"
+                                    + " removing optional, required, or a oneof around a field"
+                                    + " changes its presence and its generated code.\n"
+                                    + "- A renamed field or enum value, or a changed json_name:"
+                                    + " the binary wire format is unaffected, but ProtoJSON,"
+                                    + " text format, and FieldMask paths break.\n"
+                                    + "- A new enum whose zero value is not <ENUM>_UNSPECIFIED or"
+                                    + " has a business meaning, or an enum whose zero value"
+                                    + " changes, which changes what unset means.\n"
+                                    + "- A service or RPC removed or renamed, or an RPC's request"
+                                    + " type, response type, or streaming changed: each breaks"
+                                    + " existing clients. A changed package or language option"
+                                    + " moves generated imports and Any type URLs.\n"
+                                    + "- A meaning change with no structural one: a changed"
+                                    + " default, a comment that changes a field's unit, format,"
+                                    + " or meaning, an existing field made REQUIRED, IMMUTABLE,"
+                                    + " or OUTPUT_ONLY, a tightened protovalidate or PGV rule,"
+                                    + " pagination added to an existing RPC, or a changed"
+                                    + " google.api.http binding.\n"
+                                    + "- A new RPC whose shape is cheap to fix only now: no"
+                                    + " dedicated request and response messages"
+                                    + " (google.protobuf.Empty or a wrapper type instead), a"
+                                    + " List RPC without page_size, page_token, and"
+                                    + " next_page_token, an Update RPC without update_mask, or a"
+                                    + " mutation that clients retry without request_id. Report"
+                                    + " these as \"suggestion\" unless the file's other RPCs"
+                                    + " already follow the pattern.\n"
+                                    + "A break on a message reachable from a service RPC or"
+                                    + " serialized by code is type \"issue\", category"
+                                    + " \"compatibility\", severity \"major\", or \"blocker\""
+                                    + " when the message is persisted (a database, cache, queue,"
+                                    + " or event log). A break that affects only JSON, text"
+                                    + " format, or generated source needs the evidence the"
+                                    + " protobuf rule above asks for. In an alpha package"
+                                    + " (v1alpha1) breaks are allowed, so report them as"
+                                    + " \"note\"; in a beta package, say that a removal needs a"
+                                    + " deprecation period first. A removed field or enum value"
+                                    + " left unreserved, or a deleted reserved entry, belongs to"
+                                    + " the separate schema-evolution hygiene check; report it"
+                                    + " here only when a number or name is actually reused.\n"),
+                    new Checklist(
+                            "Protobuf tooling config",
+                            PROTO_TOOLING_PATH,
+                            null,
+                            "- A weaker breaking-change policy: breaking.use moved to a looser"
+                                    + " category (FILE, then PACKAGE, WIRE_JSON, WIRE), new"
+                                    + " except, ignore, or ignore_only entries,"
+                                    + " ignore_unstable_packages turned on, or the breaking"
+                                    + " section removed. Name the schema change in this pull"
+                                    + " request that the loosening lets through.\n"
+                                    + "- Lint exceptions added for files this pull request"
+                                    + " changes.\n"
+                                    + "- A changed module name or managed-mode prefix"
+                                    + " (go_package_prefix, java_package_prefix), which moves the"
+                                    + " generated import paths of every consumer.\n"
+                                    + "- A buf.gen.yaml plugin or version change while neither"
+                                    + " the diff nor <generated_code> shows regenerated"
+                                    + " output.\n"
+                                    + "- A buf.lock dependency change (googleapis,"
+                                    + " protovalidate): review it as a dependency upgrade.\n"
+                                    + "- proto.lock entries deleted or edited by hand: the file"
+                                    + " records the field numbers already used, and editing it"
+                                    + " hides their reuse.\n"),
+                    new Checklist(
+                            "Protobuf and gRPC code",
+                            null,
+                            PROTO_CODE_LINE,
+                            GeneratedProtoCode::isGenerated,
+                            "- A switch, when, or match over a protobuf enum read from"
+                                    + " another process with no default branch: enums are open,"
+                                    + " so a newer writer's value arrives as an unknown number."
+                                    + " In Java, getNumber() throws on UNRECOGNIZED; use the"
+                                    + " field's Value getter.\n"
+                                    + "- A Java or Kotlin message getter compared with null:"
+                                    + " getters return a default instance, never null; use"
+                                    + " hasX().\n"
+                                    + "- A partial update applied by merging, or by replacing the"
+                                    + " stored message, without a FieldMask: an"
+                                    + " implicit-presence field cannot be set to zero, empty, or"
+                                    + " false that way, and merging appends to repeated fields"
+                                    + " instead of replacing them.\n"
+                                    + "- Serialized message bytes used as a cache key, hash,"
+                                    + " signature input, ETag, or equality check: serialization"
+                                    + " is not canonical across versions, languages, or map"
+                                    + " order. In Go, reflect.DeepEqual or == on messages is"
+                                    + " wrong too (use proto.Equal), as are copying a message by"
+                                    + " value and encoding one with encoding/json (use"
+                                    + " protojson).\n"
+                                    + "- At a JSON boundary: a parser that rejects unknown fields"
+                                    + " (JsonFormat.parser() without ignoringUnknownFields(),"
+                                    + " json_format.Parse without ignore_unknown_fields) on data"
+                                    + " from another deployable, so a newer writer's new field"
+                                    + " fails the read; a message relayed through JSON or a"
+                                    + " field-by-field copy, which drops unknown fields; or an"
+                                    + " int64 read as a JSON number, although ProtoJSON writes"
+                                    + " it as a string.\n"
+                                    + "- A gRPC call with no deadline or context timeout (gRPC"
+                                    + " sets none by default); a handler that calls downstream"
+                                    + " with a fresh context instead of the incoming one, losing"
+                                    + " its deadline and cancellation; or a channel created per"
+                                    + " request.\n"
+                                    + "- A gRPC handler that returns validation failures as"
+                                    + " UNKNOWN or INTERNAL instead of INVALID_ARGUMENT, passes a"
+                                    + " downstream error status straight to its own caller, or"
+                                    + " returns NOT_FOUND before checking permission, which"
+                                    + " leaks existence.\n"
+                                    + "- REQUIRED field_behavior, protovalidate, or PGV"
+                                    + " annotations relied on with no validator or interceptor"
+                                    + " on the server path (annotations validate nothing on"
+                                    + " their own), or an OUTPUT_ONLY field accepted from the"
+                                    + " client and stored.\n"
+                                    + "- From untrusted input: an Any unpacked without checking"
+                                    + " its type (Python's Unpack() returns False and leaves the"
+                                    + " message empty), a raised recursion or size limit, or a"
+                                    + " page_token whose embedded filter or tenant is trusted"
+                                    + " without authorizing each page.\n"
+                                    + "Report a trap the diff shows firing as type \"issue\";"
+                                    + " channel reuse, keepalive tuning, and similar design"
+                                    + " advice are \"suggestion\".\n"),
                     new Checklist(
                             "LLM integrations",
                             PROMPT_PATH,
