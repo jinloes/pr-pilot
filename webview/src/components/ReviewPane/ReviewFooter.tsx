@@ -30,7 +30,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n/I18nProvider'
 import type { ReviewQualityReport } from '@/lib/reviewQuality'
-import { FALLBACK_REVIEW_BODY, type PublishedBodySections } from './publishBody'
+import { defaultReviewBody, FALLBACK_REVIEW_BODY, type PublishedBodySections } from './publishBody'
 import type { PaneState, Verdict } from './reviewState'
 
 /** Matches the app's narrow layout breakpoint (`sm`). */
@@ -50,7 +50,6 @@ interface ReviewFooterProps {
   inlineCommentCount: number
   publishSections: PublishedBodySections
   commentsMovedToBody: boolean
-  summary: string
   qualityReport: ReviewQualityReport | null
   diffUnavailable: boolean
 }
@@ -119,7 +118,6 @@ export function ReviewFooter({
   inlineCommentCount,
   publishSections,
   commentsMovedToBody,
-  summary,
   qualityReport,
   diffUnavailable,
 }: ReviewFooterProps) {
@@ -136,7 +134,6 @@ export function ReviewFooter({
     publishSections,
     commentsMovedToBody,
     importedFromGitHub,
-    summary,
     qualityReport,
     diffUnavailable,
   }
@@ -450,7 +447,6 @@ function SubmitReviewButton({
   publishSections,
   commentsMovedToBody,
   importedFromGitHub,
-  summary,
   qualityReport,
   diffUnavailable,
   compact = false,
@@ -465,7 +461,6 @@ function SubmitReviewButton({
   publishSections: PublishedBodySections
   commentsMovedToBody: boolean
   importedFromGitHub: boolean
-  summary: string
   qualityReport: ReviewQualityReport | null
   diffUnavailable: boolean
 }) {
@@ -485,7 +480,7 @@ function SubmitReviewButton({
 
   function openDialog() {
     setSelectedVerdict(verdict)
-    setComment(summary.trim())
+    setComment(defaultReviewBody(publishSections.inlineCount))
     setOpen(true)
   }
 

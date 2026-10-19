@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { LineComment } from '../../bridge/types'
-import { FALLBACK_REVIEW_BODY, publishedBodySections } from './publishBody'
+import { defaultReviewBody, FALLBACK_REVIEW_BODY, publishedBodySections } from './publishBody'
 
 function comment(file: string, line: number, body: string): LineComment {
   return { file, line, type: 'note', body }
@@ -56,5 +56,20 @@ describe('publishedBodySections', () => {
     for (const [event, text] of Object.entries(FALLBACK_REVIEW_BODY)) {
       expect(engine).toContain(`case "${event}" -> "${text}";`)
     }
+  })
+})
+
+describe('defaultReviewBody', () => {
+  it('is empty with no inline comments so the verdict fallback applies', () => {
+    expect(defaultReviewBody(0)).toBe('')
+    expect(defaultReviewBody(-1)).toBe('')
+  })
+
+  it('counts one comment in the singular', () => {
+    expect(defaultReviewBody(1)).toBe('Left 1 comment.')
+  })
+
+  it('counts several comments in the plural', () => {
+    expect(defaultReviewBody(3)).toBe('Left 3 comments.')
   })
 })

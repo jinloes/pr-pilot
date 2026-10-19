@@ -18,35 +18,43 @@ describe('publish review body', () => {
     return screen.getByRole('alertdialog')
   }
 
-  it('prefills the review body with the summary and publishes the edited text', async () => {
+  it('prefills a comment count instead of the summary and publishes the edited text', async () => {
     const user = userEvent.setup()
     const cefQuery = installHost()
     render(<ReviewPane pr={pr} />)
-    loadDraftPresent({ summary: '  Looks good.  ', verdict: 'APPROVE', lineComments: [] })
+    const diff = diffWithFiles(1)
+    loadDraftPresent({
+      summary: '## Overview\nA long generated summary.',
+      verdict: 'COMMENT',
+      lineComments: [
+        { file: 'src/file-0.ts', line: 1, type: 'note', body: 'First finding.' },
+        { file: 'src/file-0.ts', line: 2, type: 'note', body: 'Second finding.' },
+      ],
+    }, { diff, validationDiff: diff })
 
     const dialog = await openPublish(user)
     const body = within(dialog).getByRole('textbox', { name: 'Review body' })
-    expect(body).toHaveValue('Looks good.')
+    expect(body).toHaveValue('Left 2 comments.')
     expect(body).toHaveAccessibleDescription(
-      "Published as the review's main comment. It starts with the generated summary; edit or clear it.",
+      "Published as the review's main comment. It starts with a short comment count; edit or clear it.",
     )
     expect(within(dialog).queryByText('Final review body (optional)')).not.toBeInTheDocument()
-    await user.click(within(dialog).getByRole('button', { name: 'Publish as Approve' }))
+    await user.clear(body)
+    await user.type(body, 'A couple of comments.')
+    await user.click(within(dialog).getByRole('button', { name: 'Publish as Comment' }))
 
     expect(outgoingOf(cefQuery, 'submitReview')).toEqual([
-      expect.objectContaining({ verdict: 'APPROVE', comment: 'Looks good.' }),
+      expect.objectContaining({ verdict: 'COMMENT', comment: 'A couple of comments.' }),
     ])
   })
 
-  it('warns about the canned fallback when the body is cleared and nothing else is published', async () => {
+  it('starts empty and warns about the canned fallback when there is nothing else to publish', async () => {
     const user = userEvent.setup()
     const cefQuery = installHost()
     render(<I18nProvider><ReviewPane pr={pr} /></I18nProvider>)
     loadDraftPresent({ summary: 'Looks good.', verdict: 'APPROVE', lineComments: [] })
 
     const dialog = await openPublish(user)
-    expect(within(dialog).queryByRole('status')).not.toBeInTheDocument()
-    await user.clear(within(dialog).getByRole('textbox', { name: 'Review body' }))
     expect(within(dialog).getByRole('status'))
       .toHaveTextContent('The review body is empty, so PR Pilot will publish “Looks good to me!”.')
     await user.click(within(dialog).getByRole('radio', { name: 'Request changes' }))
@@ -87,11 +95,16 @@ describe('publish review body', () => {
     expect(within(dialog).queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it('discards edits on cancel and prefills the summary again on the next open', async () => {
+  it('discards edits on cancel and prefills the comment count again on the next open', async () => {
     const user = userEvent.setup()
     installHost()
     render(<ReviewPane pr={pr} />)
-    loadDraftPresent({ summary: 'Generated summary.', verdict: 'COMMENT', lineComments: [] })
+    const diff = diffWithFiles(1)
+    loadDraftPresent({
+      summary: 'Generated summary.',
+      verdict: 'COMMENT',
+      lineComments: [{ file: 'src/file-0.ts', line: 1, type: 'issue', body: 'Inline finding.' }],
+    }, { diff, validationDiff: diff })
 
     let dialog = await openPublish(user)
     const body = within(dialog).getByRole('textbox', { name: 'Review body' })
@@ -100,7 +113,7 @@ describe('publish review body', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
 
     dialog = await openPublish(user)
-    expect(within(dialog).getByRole('textbox', { name: 'Review body' })).toHaveValue('Generated summary.')
+    expect(within(dialog).getByRole('textbox', { name: 'Review body' })).toHaveValue('Left 1 comment.')
   })
 
   it('mentions comments moved into the body by a save until a new draft loads', async () => {

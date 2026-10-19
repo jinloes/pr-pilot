@@ -121,7 +121,10 @@ proper hidden metadata to GitHub so the draft reloads cleanly next time. GitHub 
 review's body with an explicit submit `body` and keeps it when `body` is omitted (observed for
 COMMENT on 2026-09-25). Submission therefore always sends the composed body, never an omitted or
 empty body and never the hidden metadata, so General Notes and detached comments stored in the draft
-body are published; the webview publish dialog previews that composition (`publishBody.ts`).
+body are published; the webview publish dialog previews that composition (`publishBody.ts`). The
+dialog pre-fills the reviewer's text with a short comment count ("Left N comments.",
+`defaultReviewBody`), not the generated summary, which stays in the pane; with no inline comments
+it starts empty, so the verdict's canned fallback is published.
 
 ### Suggested changes are posted as GitHub suggestion blocks
 `DraftReviewCodec.LineComment` and `DraftReviewMutationService.CommentInput` carry

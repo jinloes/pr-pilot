@@ -468,7 +468,7 @@ test('the suggested verdict is changed with the keyboard in the publish dialog',
       __hostFixture: { outgoing: Array<{ type?: string; verdict?: string }> }
     }).__hostFixture
     return fixture.outgoing.filter((message) => message.type === 'submitReview')
-  })).toEqual([expect.objectContaining({ verdict: 'COMMENT', comment: 'Ready to submit' })])
+  })).toEqual([expect.objectContaining({ verdict: 'COMMENT', comment: '' })])
 })
 
 test('finding navigation is keyboard operable and has no axe violations', async ({ page }) => {

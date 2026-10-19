@@ -396,7 +396,7 @@ for (const [width, height] of [[320, 568], [1280, 800]] as const) {
       await page.getByRole('button', { name: 'Submit review…' }).click()
       const dialog = page.getByRole('alertdialog')
       await expect(dialog).toContainText('This will publish the pending GitHub review with 1 inline comment.')
-      await expect(dialog.getByRole('textbox', { name: 'Review body' })).toHaveValue('Generated summary for publishing.')
+      await expect(dialog.getByRole('textbox', { name: 'Review body' })).toHaveValue('Left 1 comment.')
       const region = dialog.getByRole('region', { name: 'Also published in the review body' })
       await expect(region).toContainText('General note about the whole change.')
       await expect(region).toContainText('src/auth.ts:999')

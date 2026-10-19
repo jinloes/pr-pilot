@@ -12,6 +12,16 @@ export const FALLBACK_REVIEW_BODY: Record<Verdict, string> = {
   COMMENT: 'Leaving comments.',
 }
 
+/**
+ * The review body the publish dialog starts with. It is a short count rather than the generated
+ * summary, which stays in the pane for the reviewer. With no inline comments it is empty, so the
+ * verdict's {@link FALLBACK_REVIEW_BODY} is published instead.
+ */
+export function defaultReviewBody(inlineCount: number): string {
+  if (inlineCount <= 0) return ''
+  return inlineCount === 1 ? 'Left 1 comment.' : `Left ${inlineCount} comments.`
+}
+
 export interface UnanchoredSection {
   file: string
   line: number

@@ -321,7 +321,6 @@ describe('regenerate confirmation', () => {
           inlineCommentCount={0}
           publishSections={{ generalNotes: [], unanchored: [], inlineCount: 0 }}
           commentsMovedToBody={false}
-          summary="Fresh review."
           qualityReport={null}
           diffUnavailable={false}
         />

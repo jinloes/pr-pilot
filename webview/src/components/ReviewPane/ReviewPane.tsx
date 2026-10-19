@@ -379,7 +379,6 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
           inlineCommentCount={model.publishSections.inlineCount}
           publishSections={model.publishSections}
           commentsMovedToBody={model.commentsMovedToBody}
-          summary={model.result?.summary ?? ''}
           qualityReport={model.qualityReport}
           diffUnavailable={model.diffUnavailable}
         />

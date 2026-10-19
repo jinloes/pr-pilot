@@ -12,7 +12,7 @@ export const englishMessages = {
   'review.customInstructions': 'Custom instructions for this review',
   'review.advanced': 'Advanced review options',
   'review.finalBody': 'Review body',
-  'review.finalBodyHelp': "Published as the review's main comment. It starts with the generated summary; edit or clear it.",
+  'review.finalBodyHelp': "Published as the review's main comment. It starts with a short comment count; edit or clear it.",
   'review.publishedAlso': 'Also published in the review body',
   'review.publishedImported': "Text already in the GitHub draft's review body is kept.",
   'review.publishedMoved': 'Comments GitHub could not place inline when this draft was saved are also included.',
