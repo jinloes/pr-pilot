@@ -92,6 +92,16 @@ class ReviewCritiquePromptsTest {
         }
 
         @Test
+        void critiqueConfirmsScopedIdentifierAndDataAnomalyFindingsFromDefinitions() {
+            String prompt = ReviewCritiquePrompts.buildCritiquePrompt(req(), draft());
+
+            assertThat(prompt)
+                    .contains("Confirm a scoped-identifier finding when the key, URN, or")
+                    .contains("do not require proof that values collide in production data")
+                    .contains("Confirm a stated-data-anomaly finding");
+        }
+
+        @Test
         void draftReviewJsonSerializesSchemaFields() {
             String json = ReviewCritiquePrompts.draftReviewJson(draft());
             assertThat(json)
