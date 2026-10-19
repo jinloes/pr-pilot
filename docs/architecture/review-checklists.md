@@ -85,8 +85,9 @@ them all. In deep review, the authority check runs before the selection call and
 submission, and both prompts carry the semantic sections.
 
 In recall mode, rule findings the critique dropped are restored by the hygiene restore rule (not low
-confidence, anchored, not covered by a same-category finding within `HYGIENE_COVER_LINES`). Rule
-findings carry no `sources` of their own and are not in the attribution snapshot. After critique,
+confidence, anchored, not covered by a same-category finding within `HYGIENE_COVER_LINES` or a
+nearby validated rewording). Rule findings carry no `sources` of their own and are not in the
+attribution snapshot. After critique,
 `ReviewerAttribution.reattach` runs unchanged, and `unattributeUnmatchedRuleFindings` then clears
 the primary-label fallback it gives a rule finding that no reviewer candidate matched, so a rule
 finding is labeled only through a match (same file, same category, within two lines). Rule identity

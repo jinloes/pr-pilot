@@ -97,6 +97,27 @@ class ReviewerAttributionTest {
         }
 
         @Test
+        void collapsesARewordingBeyondTheLineWindow() {
+            LineComment primary =
+                    comment("A.java", 237, "maintainability", FindingSimilarityTest.FIRST_WORDING);
+
+            ReviewerAttribution.Collapsed collapsed =
+                    ReviewerAttribution.collapse(
+                            result(primary),
+                            result(
+                                    comment(
+                                            "A.java",
+                                            241,
+                                            "maintainability",
+                                            FindingSimilarityTest.SECOND_WORDING)),
+                            LABELS);
+
+            assertThat(collapsed.primary().getLineComments()).containsExactly(primary);
+            assertThat(collapsed.second().getLineComments()).isEmpty();
+            assertThat(primary.getSources()).containsExactly("claude-opus", "gpt-5");
+        }
+
+        @Test
         void neverCollapsesBlankCategories() {
             ReviewerAttribution.Collapsed collapsed =
                     ReviewerAttribution.collapse(

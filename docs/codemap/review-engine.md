@@ -99,6 +99,9 @@ guidance.
 - `review/ReviewAnchorValidator.java` and `ReviewResultMerger.java` - Changed-line filtering,
   baseline/follow-up/second-reviewer deduplication, low-confidence candidate removal, and the final
   cap.
+- `review/FindingSimilarity.java` - Cross-pass detection of reworded duplicate findings nearby,
+  used by the merger, attribution collapse, and hygiene restore. Tests: `FindingSimilarityTest`,
+  `ReviewResultMergerTest`.
 - `review/ReviewerAttribution.java` - Second-reviewer near-duplicate collapse and reviewer `sources`
   re-attachment after critique. Tests: `ReviewerAttributionTest`,
   `ReviewPipelineSecondReviewerTest`, `ReviewPipelineFindingsTest`.

@@ -79,6 +79,20 @@ second reviewer, and always in deep review, every comment has empty `sources` an
 unchanged. Sources are display-only: the parser ignores them in model output, the sidecar accepts
 and drops them when saving a draft, and VS Code draft recovery omits them.
 
+### Cross-pass rewordings are deduplicated by content
+Two passes (primary and second reviewer, rule or hygiene pass, follow-up) often report one defect a
+few lines apart in different words, which the two-line window and exact-body key miss.
+`FindingSimilarity.duplicates` also treats two comments as one finding when they share file, type
+and category, sit within `NEAR_LINES` (10) lines, and their bodies match: equal after normalizing
+case and whitespace, at least three shared code identifiers (camelCase or underscored tokens) that
+cover 60% of the smaller set, or 60% Jaccard overlap of words of four or more characters. It
+applies only across passes, in `ReviewResultMerger.merge` (a follow-up comment against baseline
+comments; the higher-priority comment is kept, ties keep the baseline, sources are unioned),
+`ReviewerAttribution.collapse`, and `restoreHygieneFindings` (against validated comments only).
+Never apply it within one pass: a reviewer repeats a finding at each call site on purpose, and
+those comments share identifiers and wording. `Evidence.matches` and rule-site matching keep the
+two-line window, since the evidence snapshot carries no body.
+
 ### Suggested changes are literal, one-line, high-confidence replacements
 A comment may carry `suggestedChange`, the literal full replacement for its anchored line that
 GitHub renders as a committable suggestion. `OUTPUT_CONTRACT` allows it only when the fix is

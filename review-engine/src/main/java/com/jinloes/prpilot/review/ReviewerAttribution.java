@@ -128,9 +128,10 @@ final class ReviewerAttribution {
     }
 
     static boolean sameFinding(LineComment a, LineComment b) {
-        return StringUtils.isNotBlank(a.getCategory())
-                && Objects.equals(a.getFile(), b.getFile())
-                && Objects.equals(a.getCategory(), b.getCategory())
-                && Math.abs(a.getLine() - b.getLine()) <= SAME_FINDING_LINES;
+        return (StringUtils.isNotBlank(a.getCategory())
+                        && Objects.equals(a.getFile(), b.getFile())
+                        && Objects.equals(a.getCategory(), b.getCategory())
+                        && Math.abs(a.getLine() - b.getLine()) <= SAME_FINDING_LINES)
+                || FindingSimilarity.duplicates(a, b);
     }
 }

@@ -28,7 +28,8 @@ final class ReviewPipelineFindings {
      * which loses exactly the findings production reviewers such as Mae report. A hygiene finding
      * is kept unless it is low confidence, does not anchor to a changed line, or a validated
      * finding of the same category already sits within {@link #HYGIENE_COVER_LINES} lines of it in
-     * the same file (the validator reworded or merged it).
+     * the same file (the validator reworded or merged it), or a validated finding rewords it nearby
+     * ({@link FindingSimilarity}).
      */
     static ReviewResult restoreHygieneFindings(
             ReviewResult validated, ReviewResult hygiene, InspectionManifest manifest) {
@@ -37,7 +38,9 @@ final class ReviewPipelineFindings {
         for (LineComment comment : hygiene.getLineComments()) {
             if ("low".equals(comment.getConfidence())
                     || manifest.hunkFor(comment.getFile(), comment.getLine()).isEmpty()
-                    || kept.stream().anyMatch(other -> covers(other, comment))) {
+                    || kept.stream().anyMatch(other -> covers(other, comment))
+                    || validated.getLineComments().stream()
+                            .anyMatch(other -> FindingSimilarity.duplicates(other, comment))) {
                 continue;
             }
             kept.add(comment);

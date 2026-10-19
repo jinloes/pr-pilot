@@ -168,6 +168,29 @@ class ReviewPipelineFindingsTest {
         }
 
         @Test
+        void treatsAValidatedRewordingFurtherAwayAsCoveringTheFinding() {
+            ReviewResult validated =
+                    result(
+                            FindingSimilarityTest.comment(
+                                    "F1.java",
+                                    5,
+                                    "suggestion",
+                                    "maintainability",
+                                    FindingSimilarityTest.SECOND_WORDING));
+            ReviewResult hygiene =
+                    result(
+                            FindingSimilarityTest.comment(
+                                    "F1.java",
+                                    1,
+                                    "suggestion",
+                                    "maintainability",
+                                    FindingSimilarityTest.FIRST_WORDING));
+
+            assertThat(ReviewPipelineFindings.restoreHygieneFindings(validated, hygiene, manifest))
+                    .isSameAs(validated);
+        }
+
+        @Test
         void keepsAHygieneFindingNextToAFindingOfAnotherCategory() {
             ReviewResult validated = result(finding("F1.java", 1, "correctness", "high"));
             ReviewResult hygiene = result(finding("F1.java", 1, "maintainability", "medium"));

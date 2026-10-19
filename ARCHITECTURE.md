@@ -51,6 +51,7 @@ line here.
 - [Review guidance, file history and call sites come from the base commit](docs/architecture/review-pipeline.md#review-guidance-file-history-and-call-sites-come-from-the-base-commit)
 - [Recall: second reviewer and candidate validation](docs/architecture/review-pipeline.md#recall-second-reviewer-and-candidate-validation)
 - [Reviewer attribution and corroboration](docs/architecture/review-pipeline.md#reviewer-attribution-and-corroboration)
+- [Cross-pass rewordings are deduplicated by content](docs/architecture/review-pipeline.md#cross-pass-rewordings-are-deduplicated-by-content)
 - [Suggested changes are literal, one-line, high-confidence replacements](docs/architecture/review-pipeline.md#suggested-changes-are-literal-one-line-high-confidence-replacements)
 - [Review JSON parsing is self-healing, not all-or-nothing](docs/architecture/review-pipeline.md#review-json-parsing-is-self-healing-not-all-or-nothing)
 - [Low confidence is a gate, not a label](docs/architecture/review-pipeline.md#low-confidence-is-a-gate-not-a-label)
