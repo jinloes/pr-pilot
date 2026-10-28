@@ -128,3 +128,28 @@ Use it when the PR Pilot source repo is open in the main VS Code window but PR P
 PRs for a different local checkout; `workspace.ts` makes repo detection, worktree creation, and CLI
 working directories resolve against the target repo instead of whichever folder VS Code opened in
 the dev host.
+
+Both launch configs' preLaunchTask also restages the webview build into
+`vscode-extension/webview-dist/` and runs `:sidecar:bootJar`, restaging the jar into
+`vscode-extension/sidecar/`. `webviewAssets.ts` and `sidecarJar.ts` prefer those staged copies over
+`webview/dist` and `sidecar/build/libs`. A stale staged webview silently rejects newer bridge
+payloads (for example a new comment category), leaving a finished review stuck on "Generating
+review". A stale jar fails the `initialize` capability check.
+
+### No silent review drops
+A review run has three hand-offs (sidecar response, host delivery, webview processing), and a silent
+drop at any of them leaves the webview showing "Generating review" indefinitely with nothing logged.
+Keep each hand-off loud:
+
+- `StdioJsonRpcServerOperationScheduler` sends an error response for any operation that throws
+  (including `Error`, which the executor's `Future` would otherwise swallow) or returns without
+  completing, so the client is never left waiting on its 35-minute request timeout.
+- The VS Code host logs (`[pr-pilot] Discarded ...`) whenever `handleGenerateReview` drops a result
+  or error because the generation went stale, using `staleGenerationReason`. It does not notify the
+  webview: every stale cause (view closed, PR switched or reselected, newer run) has already reset
+  the webview's run. `push` also logs undelivered webview messages.
+- The webview's `reviewResult` handler ends the run as failed if processing the result throws.
+- When bridge validation rejects a host message, the webview logs which type and (for review
+  results) which comment's enum fields failed, never bodies or paths. A rejected `reviewResult` or
+  `reviewError` is replaced by a `reviewError` telling the user to reload. The usual cause is a UI
+  older than its host, which is why the launch task restages `webview-dist`.

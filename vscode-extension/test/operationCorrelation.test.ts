@@ -7,6 +7,7 @@ import {
     invalidateChat,
     invalidateChatAndCancel,
     invalidateGenerationAndCancel,
+    staleGenerationReason,
     type OperationCorrelationState,
 } from '../src/operationCorrelation';
 
@@ -112,4 +113,34 @@ test('outgoing PR drafts require an explicit review snapshot', () => {
     assert.equal(canPersistDraft(true, false), true);
     assert.equal(canPersistDraft(false, true), true);
     assert.equal(canPersistDraft(false, false), false);
+});
+
+test('staleGenerationReason is null while the generation still owns the view', () => {
+    const snapshot = { prKey: 'o/r#1', selectionRevision: 1, generationRevision: 3 };
+    assert.equal(staleGenerationReason(state(), 'o/r#1', snapshot), null);
+});
+
+test('staleGenerationReason explains each way a generation goes stale', () => {
+    const snapshot = { prKey: 'o/r#1', selectionRevision: 1, generationRevision: 3 };
+    assert.equal(
+        staleGenerationReason({ ...state(), disposed: true }, 'o/r#1', snapshot),
+        'the PR Pilot view was closed',
+    );
+    assert.equal(staleGenerationReason(state(), 'o/r#2', snapshot), 'a different pull request was selected');
+    assert.equal(
+        staleGenerationReason({ ...state(), selectionRevision: 2, generationRevision: 4 }, 'o/r#1', snapshot),
+        'the pull request was reselected',
+    );
+    assert.equal(
+        staleGenerationReason({ ...state(), generationRevision: 4 }, 'o/r#1', snapshot),
+        'a newer review generation started',
+    );
+});
+
+test('staleGenerationReason reports disposal before any other cause', () => {
+    const snapshot = { prKey: 'o/r#1', selectionRevision: 1, generationRevision: 3 };
+    assert.equal(
+        staleGenerationReason({ ...state(), disposed: true, generationRevision: 9 }, 'o/r#2', snapshot),
+        'the PR Pilot view was closed',
+    );
 });

@@ -1,4 +1,5 @@
 import { BRIDGE_PROTOCOL_VERSION, parseIncomingMessage } from './validation'
+import { describeRejectedHostMessage, fallbackForRejectedHostMessage } from './rejectedMessage'
 
 /**
  * Messages sent FROM the IntelliJ plugin TO the webview via JCEF executeJavaScript.
@@ -474,16 +475,23 @@ function _dispatch(msg: IncomingMessage) {
   _handlers.forEach((h) => h(msg))
 }
 
+function _receive(payload: unknown) {
+  const message = parseIncomingMessage(payload)
+  if (message) {
+    _dispatch(message)
+    return
+  }
+  console.error(`[bridge] rejected invalid host message ${describeRejectedHostMessage(payload)}`)
+  const fallback = fallbackForRejectedHostMessage(payload)
+  if (fallback) _dispatch(fallback)
+}
+
 function _ensureGlobalDispatcher() {
   if (_vsCodeApi) {
     // VS Code delivers messages via window.addEventListener('message', ...).
     // Register once; the listener is never removed because it must outlive any
     // individual component that calls onHostMessage.
-    window.addEventListener('message', (event: MessageEvent) => {
-      const message = parseIncomingMessage(event.data)
-      if (message) _dispatch(message)
-      else console.error('[bridge] rejected invalid host message')
-    })
+    window.addEventListener('message', (event: MessageEvent) => _receive(event.data))
   } else {
     // JCEF: the plugin calls window.__handleMessage(payload). Payload is normally a parsed
     // object (the host embeds JSON directly as a JS expression), but legacy/dev code may pass
@@ -492,28 +500,18 @@ function _ensureGlobalDispatcher() {
     const w = window as unknown as { __handleMessage?: (payload: HostMessage) => void }
     if (w.__handleMessage) return
     w.__handleMessage = (payload: HostMessage) => {
-      let msg: IncomingMessage
-      if (typeof payload === 'string') {
-        try {
-          const parsed = parseIncomingMessage(JSON.parse(payload))
-          if (!parsed) {
-            console.error('[bridge] rejected invalid host message')
-            return
-          }
-          msg = parsed
-        } catch (e) {
-          console.error('[bridge] failed to parse host message:', payload, e)
-          return
-        }
-      } else {
-        const parsed = parseIncomingMessage(payload)
-        if (!parsed) {
-          console.error('[bridge] rejected invalid host message')
-          return
-        }
-        msg = parsed
+      if (typeof payload !== 'string') {
+        _receive(payload)
+        return
       }
-      _dispatch(msg)
+      let decoded: unknown
+      try {
+        decoded = JSON.parse(payload)
+      } catch (e) {
+        console.error('[bridge] failed to parse host message:', payload, e)
+        return
+      }
+      _receive(decoded)
     }
   }
 }

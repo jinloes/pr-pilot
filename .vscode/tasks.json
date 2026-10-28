@@ -1,18 +1,30 @@
 {
   // Build tasks backing the "Run PR Pilot Extension" launch config.
   // "Build PR Pilot extension" is the default build task and is used as the
-  // preLaunchTask: it first builds the webview, then compiles the extension.
+  // preLaunchTask: it builds the webview and the Java sidecar, then compiles the extension.
   // Each task runs `npm install` first so a fresh checkout launches without a
   // manual setup step (npm no-ops quickly when dependencies are already present).
   "version": "2.0.0",
   "tasks": [
     {
+      // The extension prefers the staged vscode-extension/webview-dist over webview/dist, so
+      // restage it every launch; a stale copy silently rejects host messages it doesn't know.
       "label": "Build webview",
       "type": "shell",
-      "command": "npm install --no-audit --no-fund && npm run build",
+      "command": "npm install --no-audit --no-fund && npm run build && node ../vscode-extension/scripts/stage-webview.mjs",
       "options": { "cwd": "${workspaceFolder}/webview" },
       "group": "build",
       "problemMatcher": ["$tsc"]
+    },
+    {
+      // The extension prefers the staged vscode-extension/sidecar jar over sidecar/build/libs, so
+      // rebuild and restage it every launch; a stale jar fails the capability handshake.
+      "label": "Build sidecar",
+      "type": "shell",
+      "command": "./gradlew :sidecar:bootJar && node vscode-extension/scripts/stage-sidecar.mjs",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": []
     },
     {
       "label": "Build PR Pilot extension",
@@ -22,7 +34,7 @@
       "group": { "kind": "build", "isDefault": true },
       "problemMatcher": ["$tsc"],
       "dependsOrder": "sequence",
-      "dependsOn": ["Build webview"]
+      "dependsOn": ["Build webview", "Build sidecar"]
     },
     {
       "label": "Watch PR Pilot extension",

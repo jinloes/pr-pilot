@@ -368,7 +368,16 @@ function prKeyFromParts(number: number, owner: string, repo: string): string {
 }
 
 function push(state: ViewState, msg: object): void {
-    state.webview.postMessage({ protocolVersion: BRIDGE_PROTOCOL_VERSION, ...msg });
+    const type = String((msg as { type?: unknown }).type);
+    // An undelivered terminal message leaves the webview spinning, so never drop one silently.
+    void Promise.resolve(state.webview.postMessage({ protocolVersion: BRIDGE_PROTOCOL_VERSION, ...msg }))
+        .then(
+            (delivered) => {
+                if (!delivered && !state.disposed) console.warn(`[pr-pilot] webview did not accept "${type}" message`);
+            },
+            (err: unknown) => console.warn(`[pr-pilot] posting "${type}" to the webview failed:`,
+                err instanceof Error ? err.message : String(err)),
+        );
 }
 
 function enqueueMutation(state: ViewState, action: () => Promise<void>): Promise<void> {

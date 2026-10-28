@@ -6,7 +6,9 @@ Paths are relative to `webview/`.
 Shared Vite/React/TypeScript UI used by both IDE hosts.
 
 - `src/App.tsx` - Application state and top-level host workflow.
-- `src/bridge/types.ts` - Cross-host message schemas.
+- `src/bridge/types.ts` - Cross-host message schemas and the receive path; `validation.ts`
+  validates every host message, and `rejectedMessage.ts` diagnoses rejected ones and ends a
+  review run whose terminal message was rejected.
 - `src/components/` - PR discovery, diff, review, chat, settings-adjacent UI, and reusable controls.
 - `src/components/PRList/PRList.tsx` - Pull-request discovery state, host-message ingestion,
   shared current-repository context, and local text/#number filtering.
@@ -24,7 +26,8 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
   contract, composed from `useReviewHostMessages` (PR-scoped bridge events), `useReviewAutosave`
   (autosave and mutation watchdogs), `useReviewGeneration` (normal/assisted/chunked generation), and
   `useReviewChatEffects` (chat sizing/selection); pure types and helpers in
-  `reviewControllerState.ts`.
+  `reviewControllerState.ts`. Tests: `useReviewController.component.test.tsx`;
+  `useReviewHostMessages.component.test.tsx` covers a `reviewResult` that fails to process.
 - `src/components/DiffViewer/DiffViewer.tsx` - Diff viewer composition; rows in
   `DiffViewerRows.tsx`, line mapping/comment grouping in `diffHelpers.ts`, highlighting in
   `diffSyntax.ts`.

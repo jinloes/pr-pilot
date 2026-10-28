@@ -3,8 +3,10 @@
   // Open the repository root in VS Code and press F5 (or pick one of these configs
   // in the Run and Debug view) to launch an Extension Development Host with PR Pilot loaded.
   //
-  // The preLaunchTask builds the webview (../webview/dist, served by the extension)
-  // and the extension itself (vscode-extension/dist/extension.js). It also runs
+  // The preLaunchTask builds the webview (staged into vscode-extension/webview-dist, served by
+  // the extension),
+  // the Java sidecar (staged into vscode-extension/sidecar), and the extension itself
+  // (vscode-extension/dist/extension.js). It also runs
   // `npm install` so a fresh checkout works on first launch — analogous to how
   // `:intellij-plugin:runIde` builds the webview before starting the sandbox IDE.
   "version": "0.2.0",

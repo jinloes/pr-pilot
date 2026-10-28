@@ -5,6 +5,7 @@ import { GitHubOperationError, providerNotInstalledMessage, toUserFacingError } 
 import {
     canPersistDraft,
     invalidateChatAndCancel,
+    staleGenerationReason,
 } from './operationCorrelation';
 import type { LineComment, ReviewResult } from './models';
 import type { OutcomeComment } from './sidecar';
@@ -52,6 +53,11 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         && deps.prKey(state.activePR) === key
         && state.selectionRevision === selectionRevision
         && state.generationRevision === generationRevision;
+    const logDiscarded = (what: string) => {
+        const reason = staleGenerationReason(state, deps.prKey(state.activePR) ?? '',
+            { prKey: key, selectionRevision, generationRevision });
+        console.warn(`[pr-pilot] Discarded ${what} for ${key}: ${reason ?? 'unknown reason'}`);
+    };
     const providerOperation = {
         kind: 'review' as const,
         revision: generationRevision,
@@ -262,7 +268,10 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 throw new Error('Deep review identity changed before delivery. Output was not published.');
             }
         }
-        if (!isCurrentGeneration()) return;
+        if (!isCurrentGeneration()) {
+            logDiscarded('generated review');
+            return;
+        }
         state.activeReviewResult = result;
         state.generatedReviews.set(key, {
             result,
@@ -283,7 +292,11 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         });
         reviewResultPublished = true;
     } catch (err) {
-        if (isCancellationError(err) || !isCurrentGeneration()) return;
+        if (isCancellationError(err)) return;
+        if (!isCurrentGeneration()) {
+            logDiscarded(`review error (${err instanceof Error ? err.message : String(err)})`);
+            return;
+        }
         if (deep) {
             state.deepReview.retry(deep.pending);
             deps.push(state, { type: 'deepReviewPrepared', operationId, prKey: key, ...deep.pending.preparation,

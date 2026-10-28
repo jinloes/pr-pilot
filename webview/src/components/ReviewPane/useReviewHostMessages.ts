@@ -27,6 +27,9 @@ import { validateComments } from '@/lib/validateComments'
 
 type Ref<T> = { current: T }
 
+export const REVIEW_DISPLAY_FAILED =
+  'The review finished but could not be displayed. Generate it again, and report the console error if it recurs.'
+
 type SetState<T> = Dispatch<SetStateAction<T>>
 
 interface UseReviewHostMessagesOptions {
@@ -184,17 +187,32 @@ export function useReviewHostMessages({
           break
 
         case 'reviewResult': {
+          let result: ReviewResult
+          let inlineCommentCount: number
+          const diff = message.diff ?? message.validationDiff ?? ''
+          const validationDiff = message.validationDiff ?? diff
+          try {
+            result = normalizeReviewResult(message.result, validationDiff)
+            inlineCommentCount = validateComments(validationDiff, result.lineComments).adjusted.length
+          } catch (error) {
+            // Throwing here would leave the run spinning forever, so surface it as a failed review.
+            console.error('[pr-pilot] could not display the generated review', error)
+            setDeepBusy(false)
+            activeReviewOperationIdRef.current = null
+            generationStartedAtRef.current = null
+            setReviewActivity((current) =>
+              finishReviewActivity(current, 'failed', 'Review failed', Date.now()),
+            )
+            dispatch({ type: 'reviewError', message: REVIEW_DISPLAY_FAILED })
+            break
+          }
           setCommentsMovedToBody(false)
           setDeepSetup(null)
           setDeepBusy(false)
-          const diff = message.diff ?? message.validationDiff ?? ''
-          const validationDiff = message.validationDiff ?? diff
-          const result = normalizeReviewResult(message.result, validationDiff)
           const nowMs = Date.now()
           const generationElapsedSec = generationStartedAtRef.current == null
             ? undefined
             : Math.max(0, Math.round((nowMs - generationStartedAtRef.current) / 1000))
-          const inlineCommentCount = validateComments(validationDiff, result.lineComments).adjusted.length
           setFocusedCommentIdx((index) => Math.min(index, Math.max(0, inlineCommentCount - 1)))
           activeReviewOperationIdRef.current = null
           generationStartedAtRef.current = null

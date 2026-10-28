@@ -36,7 +36,7 @@ function isPrKey(value: unknown): boolean {
 }
 
 
-function isRequiredPrKey(value: unknown): boolean {
+export function isRequiredPrKey(value: unknown): boolean {
   return isString(value, 512) && /^[^/\s]+\/[^#\s]+#[1-9]\d*$/.test(value)
 }
 
@@ -47,7 +47,7 @@ const PR_SCOPED_TYPES = new Set([
   'deepReviewPrepared', 'repositoryInstructionsSaved', 'repositoryInstructionsSaveError',
 ])
 
-function isLineComment(value: unknown): value is LineComment {
+export function isLineComment(value: unknown): value is LineComment {
   if (!isRecord(value)) return false
   return isString(value.file, 4_096)
     && Number.isInteger(value.line)

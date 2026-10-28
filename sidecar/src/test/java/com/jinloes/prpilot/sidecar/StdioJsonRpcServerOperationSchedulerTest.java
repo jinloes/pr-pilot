@@ -80,6 +80,85 @@ class StdioJsonRpcServerOperationSchedulerTest {
 
     @Nested
     class Submit {
+        private void submitFailing(Runnable body) {
+            scheduler.submit("op-1", REQUEST_ID, true, "Interrupted.", operation -> body.run());
+        }
+
+        private void assertSingleUnfinishedError() {
+            assertThat(written).hasSize(1);
+            assertThat(written.get(0).path("id").asInt()).isEqualTo(7);
+            assertThat(written.get(0).path("error").path("message").asText())
+                    .isEqualTo(StdioJsonRpcServerOperationScheduler.UNFINISHED_MESSAGE);
+        }
+
+        @Test
+        void writesAnErrorWhenTheOperationThrowsARuntimeException() throws Exception {
+            submitFailing(
+                    () -> {
+                        throw new IllegalStateException("boom");
+                    });
+            drainExecutor();
+
+            assertSingleUnfinishedError();
+        }
+
+        @Test
+        void writesAnErrorWhenTheOperationThrowsAnError() throws Exception {
+            submitFailing(
+                    () -> {
+                        throw new StackOverflowError();
+                    });
+            drainExecutor();
+
+            assertSingleUnfinishedError();
+        }
+
+        @Test
+        void writesAnErrorWhenTheOperationReturnsWithoutCompleting() throws Exception {
+            submitFailing(() -> {});
+            drainExecutor();
+
+            assertSingleUnfinishedError();
+        }
+
+        @Test
+        void freesTheOperationIdAfterAnUnfinishedRun() throws Exception {
+            submitFailing(() -> {});
+            drainExecutor();
+
+            assertThat(submitResult("op-1", "second")).isTrue();
+            drainExecutor();
+            assertThat(written).hasSize(2);
+            assertThat(written.get(1).path("result").asText()).isEqualTo("second");
+        }
+
+        @Test
+        void writesTheCancellationMessageWhenACancelledOperationReturnsWithoutCompleting()
+                throws Exception {
+            CountDownLatch started = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            scheduler.submit(
+                    "op-1",
+                    REQUEST_ID,
+                    true,
+                    "Interrupted.",
+                    operation -> {
+                        started.countDown();
+                        try {
+                            release.await(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                    });
+            assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
+            scheduler.cancel("op-1");
+            drainExecutor();
+
+            assertThat(written).hasSize(1);
+            assertThat(written.get(0).path("error").path("message").asText())
+                    .isEqualTo("Interrupted.");
+        }
+
         @Test
         void runsTheOperationAndWritesItsTerminalResponse() throws Exception {
             boolean accepted = submitResult("op-1", "done");

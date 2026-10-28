@@ -19,7 +19,8 @@ Thin Java 17, non-web Spring Boot stdio JSON-RPC adapter used only by VS Code.
   `vscode-extension/src/sidecarTransport.ts`.
 - `sidecar/StdioJsonRpcServerOperationScheduler.java` - Operation slots keyed by operation ID on the
   single-thread review executor: duplicate-ID rejection, cancellation of queued or running work,
-  exactly-once terminal responses, and no progress notifications after cancellation.
+  exactly-once terminal responses (an operation that throws or returns without completing gets an
+  error response), and no progress notifications after cancellation.
 - `sidecar/StdioJsonRpcServerSupport.java` - Shared JSON-RPC response, notification, and
   parameter-shape helpers.
   Tests: `StdioJsonRpcServerTest` (protocol), `StdioJsonRpcServerGitHubParamsTest`,

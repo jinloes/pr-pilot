@@ -8,6 +8,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Runs cancellable background operations keyed by client operation ID. Every operation produces
@@ -15,6 +17,10 @@ import java.util.function.Consumer;
  * progress notifications stop.
  */
 final class StdioJsonRpcServerOperationScheduler {
+    static final String UNFINISHED_MESSAGE =
+            "The operation ended unexpectedly without a result. Try again.";
+    private static final Logger log =
+            LoggerFactory.getLogger(StdioJsonRpcServerOperationScheduler.class);
     private final StdioJsonRpcServerSupport support;
     private final ExecutorService reviewExecutor;
     private final Consumer<JsonNode> writer;
@@ -65,7 +71,16 @@ final class StdioJsonRpcServerOperationScheduler {
                                 }
                                 try {
                                     scheduled.operation.accept(scheduled);
+                                } catch (RuntimeException | Error failure) {
+                                    // The executor's Future would swallow this, leaving the
+                                    // client waiting on a response that never comes.
+                                    log.error("Operation {} failed", operationId, failure);
                                 } finally {
+                                    if (scheduled.completeIfUnfinished(UNFINISHED_MESSAGE)) {
+                                        log.error(
+                                                "Operation {} ended without a response",
+                                                operationId);
+                                    }
                                     scheduledOperations.remove(operationId, scheduled);
                                 }
                             });
@@ -141,6 +156,13 @@ final class StdioJsonRpcServerOperationScheduler {
 
         void completeCancellation() {
             complete(support.error(requestId, -32000, cancellationMessage));
+        }
+
+        /** Sends an error response unless one was already sent; returns whether it sent one. */
+        boolean completeIfUnfinished(String message) {
+            if (completed.get()) return false;
+            complete(support.error(requestId, -32000, message));
+            return true;
         }
     }
 }

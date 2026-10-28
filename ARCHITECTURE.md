@@ -121,6 +121,7 @@ line here.
 - [Repo detection and webview hosting](docs/architecture/hosts-and-sidecar.md#repo-detection-and-webview-hosting)
 - [Pinned IntelliJ SDK versus local sandbox](docs/architecture/hosts-and-sidecar.md#pinned-intellij-sdk-versus-local-sandbox)
 - [VS Code extension development target repo](docs/architecture/hosts-and-sidecar.md#vs-code-extension-development-target-repo)
+- [No silent review drops](docs/architecture/hosts-and-sidecar.md#no-silent-review-drops)
 
 **Sidecar capabilities** ([sidecar-capabilities.md](docs/architecture/sidecar-capabilities.md))
 
@@ -246,4 +247,4 @@ equivalent state via extension `globalState` instead (see
 | `~/.pr-pilot/pending-prs.json` | Index of PRs with saved drafts (owner, repo, number, title, savedAt, headSha) |
 | `~/.pr-pilot/pending-prs.json.corrupt-<timestamp>` | User-triggered quarantine copy of an unreadable draft index; GitHub drafts are unchanged |
 | `~/.pr-pilot/seen-prs.json` | Set of `owner/repo#number` strings already notified about |
-| `~/.pr-pilot/review-outcomes.jsonl` | Append-only outcome log: one JSON object per generated/submitted comment (`ReviewOutcomeLog`, engine-owned), including category but never prose or paths, written by both hosts on submit |
+| `~/.pr-pilot/review-outcomes.jsonl` | Append-only outcome log: one JSON object per generated/submitted comment (`ReviewOutcomeLog`, engine-owned), with category but no prose or paths, written by both hosts on submit |
