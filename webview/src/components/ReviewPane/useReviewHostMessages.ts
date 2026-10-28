@@ -34,6 +34,7 @@ type SetState<T> = Dispatch<SetStateAction<T>>
 
 interface UseReviewHostMessagesOptions {
   currentPrRef: Ref<PR | null>
+  commentNavigatedRef: Ref<boolean>
   activeReviewOperationIdRef: Ref<string | null>
   generationStartedAtRef: Ref<number | null>
   maintenanceOperationRef: Ref<string | null>
@@ -72,6 +73,7 @@ interface UseReviewHostMessagesOptions {
 
 export function useReviewHostMessages({
   currentPrRef,
+  commentNavigatedRef,
   activeReviewOperationIdRef,
   generationStartedAtRef,
   maintenanceOperationRef,
@@ -161,6 +163,7 @@ export function useReviewHostMessages({
           if (message.prState === 'DRAFT_PRESENT' && normalizedResult) {
             lastSavedSnapshotRef.current = message.recoveryPending ? null : reviewSnapshot(normalizedResult)
             setFocusedCommentIdx(0)
+            commentNavigatedRef.current = false
           }
           dispatch({
             type: 'draftLoaded',

@@ -315,6 +315,8 @@ describe('useReviewController', () => {
       })
     })
     act(() => result.current.actions.focusNextComment())
+    expect(result.current.model.focusedCommentIdx).toBe(0)
+    act(() => result.current.actions.focusNextComment())
     expect(result.current.model.focusedCommentIdx).toBe(1)
 
     act(() => result.current.actions.generate())

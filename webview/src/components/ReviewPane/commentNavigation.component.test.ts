@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { adjacentCommentIndex, focusedIndexAfterCommentDeletion } from './commentNavigation'
+import { adjacentCommentIndex, focusedIndexAfterCommentDeletion, nextCommentIndex } from './commentNavigation'
 
 describe('adjacentCommentIndex', () => {
   it('wraps previous navigation from the first comment to the last', () => {
@@ -35,5 +35,26 @@ describe('focusedIndexAfterCommentDeletion', () => {
 
   it('returns the empty-state index when the only comment is removed', () => {
     expect(focusedIndexAfterCommentDeletion(0, 0, 1)).toBe(0)
+  })
+})
+
+describe('nextCommentIndex', () => {
+  it('lands on the focused comment before the reviewer has navigated', () => {
+    expect(nextCommentIndex(0, 3, false)).toBe(0)
+  })
+
+  it('advances once the reviewer has navigated', () => {
+    expect(nextCommentIndex(0, 3, true)).toBe(1)
+    expect(nextCommentIndex(2, 3, true)).toBe(0)
+  })
+
+  it('clamps a stale focused index before the reviewer has navigated', () => {
+    expect(nextCommentIndex(5, 3, false)).toBe(2)
+    expect(nextCommentIndex(-1, 3, false)).toBe(0)
+  })
+
+  it('returns zero when there are no comments', () => {
+    expect(nextCommentIndex(0, 0, false)).toBe(0)
+    expect(nextCommentIndex(0, 0, true)).toBe(0)
   })
 })

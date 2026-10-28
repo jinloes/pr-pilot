@@ -99,6 +99,50 @@ describe('useReviewHostMessages reviewResult', () => {
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('category="futuristic"'))
   })
 
+  describe('comment navigation after a review loads', () => {
+    const threeComments: ReviewResult = {
+      ...review,
+      lineComments: [0, 1, 2].map((n) => ({ ...review.lineComments[0], body: `Finding ${n}` })),
+    }
+
+    function loadReview() {
+      ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
+      const hook = renderHook(() => useReviewController({ pr }))
+      act(() => hook.result.current.actions.generate())
+      act(() => {
+        hostMessage({ type: 'reviewResult', prKey: 'acme/widget#42', result: threeComments, diff, validationDiff: diff })
+      })
+      return hook.result
+    }
+
+    it('jumps to the first comment on the first next press, then advances', () => {
+      const result = loadReview()
+      const requestBefore = result.current.model.commentFocusRequestId
+
+      act(() => result.current.actions.focusNextComment())
+      expect(result.current.model.focusedCommentIdx).toBe(0)
+      expect(result.current.model.commentFocusRequestId).toBe(requestBefore + 1)
+
+      act(() => result.current.actions.focusNextComment())
+      expect(result.current.model.focusedCommentIdx).toBe(1)
+    })
+
+    it('advances from a clicked comment', () => {
+      const result = loadReview()
+
+      act(() => result.current.actions.focusComment(1))
+      act(() => result.current.actions.focusNextComment())
+      expect(result.current.model.focusedCommentIdx).toBe(2)
+    })
+
+    it('keeps previous navigation wrapping to the last comment', () => {
+      const result = loadReview()
+
+      act(() => result.current.actions.focusPreviousComment())
+      expect(result.current.model.focusedCommentIdx).toBe(2)
+    })
+  })
+
   it('still completes a run whose result processes normally', () => {
     ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
     const { result } = renderHook(() => useReviewController({ pr }))

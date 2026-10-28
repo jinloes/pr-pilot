@@ -8,7 +8,7 @@ import { applyReviewQualityRepairs, runReviewQualityCheck, type ReviewQualityAct
 import { validateComments, withoutSuggestion } from '@/lib/validateComments'
 import type { VerifyResult } from '../ChatPane/structuredResult'
 import { CHAT_HEIGHT_KEY, clampChatHeight, loadChatHeight } from './chatHeight'
-import { adjacentCommentIndex, focusedIndexAfterCommentDeletion } from './commentNavigation'
+import { adjacentCommentIndex, focusedIndexAfterCommentDeletion, nextCommentIndex } from './commentNavigation'
 import { diffOf, initialPaneState, resultOf, reviewReducer, validationDiffOf, type DraftPresentState, type PaneState, type Verdict } from './reviewState'
 import { emptyReviewActivity, finishReviewActivity, formatReviewActivityLabel, type ReviewActivity } from './reviewActivity'
 import { buildExampleFixPrompt, buildVerifyCommentPrompt, resolveVerifyTarget } from './verifyPrompt'
@@ -93,6 +93,8 @@ export function useReviewController({
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedSnapshotRef = useRef<string | null>(null)
   const generatedBaselineRef = useRef<ReviewResult | null>(null)
+  // Whether the reviewer has moved comment focus since the current review or draft loaded.
+  const commentNavigatedRef = useRef(false)
   const nextSaveIdRef = useRef(0)
   const inFlightSaveRef = useRef<InFlightSave | null>(null)
   const pendingAutosaveRef = useRef<PendingAutosave | null>(null)
@@ -137,6 +139,7 @@ export function useReviewController({
     setDeleting(false)
     setFocusedCommentIdx(0)
     setCommentFocusRequestId(0)
+    commentNavigatedRef.current = false
     setChatVisible(false)
     setSelectedContext('')
     setPendingChatMessage(null)
@@ -161,6 +164,7 @@ export function useReviewController({
 
   useReviewHostMessages({
     currentPrRef,
+    commentNavigatedRef,
     activeReviewOperationIdRef,
     generationStartedAtRef,
     maintenanceOperationRef,
@@ -434,6 +438,7 @@ export function useReviewController({
       updateAtOriginal(inlineToOriginal(index), (comment) => withoutSuggestion({ ...comment, body }))
     },
     onDeleteComment: (index: number) => {
+      commentNavigatedRef.current = true
       setFocusedCommentIdx((focusedIndex) =>
         focusedIndexAfterCommentDeletion(focusedIndex, index, partition.adjusted.length),
       )
@@ -446,6 +451,7 @@ export function useReviewController({
     },
     onAddComment: (comment: LineComment) => {
       if (state.kind !== 'draftPresent' && state.kind !== 'reviewUnsaved') return
+      commentNavigatedRef.current = true
       setFocusedCommentIdx(partition.adjusted.length)
       dispatch({ type: 'addComment', comment })
     },
@@ -652,13 +658,19 @@ export function useReviewController({
       runQualityCheck: () => setQualityExpanded(true),
       applyQualityRepair,
       collapseQualityCheck: () => setQualityExpanded(false),
-      focusComment: (index) => setFocusedCommentIdx(index),
+      focusComment: (index) => {
+        commentNavigatedRef.current = true
+        setFocusedCommentIdx(index)
+      },
       focusPreviousComment: () => {
+        commentNavigatedRef.current = true
         setFocusedCommentIdx((index) => adjacentCommentIndex(index, -1, partition.adjusted.length))
         setCommentFocusRequestId((requestId) => requestId + 1)
       },
       focusNextComment: () => {
-        setFocusedCommentIdx((index) => adjacentCommentIndex(index, 1, partition.adjusted.length))
+        const navigated = commentNavigatedRef.current
+        commentNavigatedRef.current = true
+        setFocusedCommentIdx((index) => nextCommentIndex(index, partition.adjusted.length, navigated))
         setCommentFocusRequestId((requestId) => requestId + 1)
       },
       toggleChat: () => setChatVisible((visible) => !visible),

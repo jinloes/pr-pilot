@@ -29,3 +29,13 @@ export function focusedIndexAfterCommentDeletion(
   if (deletedIndex === currentIndex) return Math.min(currentIndex, lastIndex - 1)
   return currentIndex
 }
+
+/**
+ * Returns the comment index the "next" control should focus. Until the reviewer has navigated,
+ * the focused comment (the first one, after a load) has never been scrolled to, so the first
+ * press lands on it instead of skipping past it.
+ */
+export function nextCommentIndex(focusedIndex: number, commentCount: number, navigated: boolean): number {
+  if (navigated || commentCount <= 0) return adjacentCommentIndex(focusedIndex, 1, commentCount)
+  return Math.min(Math.max(focusedIndex, 0), commentCount - 1)
+}
