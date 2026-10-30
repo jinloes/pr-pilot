@@ -11,12 +11,13 @@ repositories {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
 }
 
 dependencies {
-    // core: shared review request/result/PR models (plain Java 17 module, no Kotlin).
+    // core: shared review request/result/PR models (plain Java 21 module, no Kotlin).
     api project(':core')
 
     implementation 'com.github:copilot-sdk-java:1.0.26'

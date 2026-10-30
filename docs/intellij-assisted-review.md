@@ -54,7 +54,7 @@ tracked source bytes against Git blobs without filters, and repeats Git,
 inventory, hashes and native VERIFY with a fresh nonce. Only the worker's `COVERED` attests source
 bytes, **not whole-worktree cleanliness** or a future-use lease.
 
-Build the minimal, Java17-bytecode worker with `:review-engine:sourceInventoryWorkerJar`.
+Build the minimal, Java21-bytecode worker with `:review-engine:sourceInventoryWorkerJar`.
 Its stable output is `review-engine/build/libs/pr-pilot-source-inventory-worker.jar`.
 It contains only the inventory classes, bounded runner and existing Jackson dependencies:
 no IntelliJ, Spring, Copilot, dependency manifest/classpath or test code.
@@ -163,7 +163,7 @@ unresolved high-contrast toast baseline mismatch; passing unit tests are not com
 
 ### Source inventory verification and manual setup
 
-Secure no-follow traversal is mandatory **in the external worker only**. On macOS the old Microsoft JDK 17 and the
+Secure no-follow traversal is mandatory **in the external worker only**. On macOS the Microsoft JDK 21 and the
 261 SDK's test JBR may not supply `SecureDirectoryStream`; inventory explicitly
 returns `UNSUPPORTED_API` rather than falling back to path-based traversal.
 JDK 25 on the implementation machine supplies secure traversal. An explicitly chosen
@@ -178,7 +178,7 @@ global Gradle settings to get there. Without JDK 25, tests annotated `@RequiresS
 (review-engine test sources, reused by the plugin tests) are skipped with that reason rather than
 failing on the correct `UNSUPPORTED_API` result. Annotate any new test that needs a positive
 traversal. `-PtestOnJdk25=false` keeps the daemon JDK so the skip path can be checked. Linux CI on
-JDK 17 supplies secure traversal and runs everything.
+JDK 21 supplies secure traversal and runs everything.
 
 The SDK wrapper regressions use the actual compiled SDK provider, plus an isolated
 loader for the installed SDK262 under `~/Applications/IntelliJ IDEA.app/Contents`.

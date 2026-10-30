@@ -193,7 +193,7 @@ context, and draft mutations belong only in `github-engine`.
 For VS Code, `extension.ts` owns one process-wide `SidecarClient` created and initialized in
 `activate()` and disposed during extension teardown. Initialization verifies protocol version 1 and
 every required GitHub capability before requests proceed. The sidecar is mandatory for GitHub
-operations: missing Java 17+, a missing/corrupt jar, process failure, timeout, incompatible
+operations: missing Java 21+, a missing/corrupt jar, process failure, timeout, incompatible
 capabilities, or malformed protocol output is surfaced as a setup/runtime error and must never
 activate a TypeScript GitHub fallback. RPC requests have a 60-second bound for GitHub network
 operations. A user-facing **Retry** action restarts the stopped sidecar, clears only transport

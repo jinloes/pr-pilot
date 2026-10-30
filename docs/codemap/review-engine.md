@@ -126,7 +126,7 @@ guidance.
   classpath.
 - `review/SemanticRuntime.java` - Owner-controlled schema-1 launch configuration, Node/ijctl
   version enforcement, classloader-resource digest verification and owned worker extraction.
-  `SemanticRuntimeTest` exercises open/close, forked settings, unsupported macOS JDK17,
+  `SemanticRuntimeTest` exercises open/close, forked settings, unsupported macOS JDK21,
   ordinary JAR and physically nested resource streams; actual installed Boot loading is separate.
 - `review/CopilotModelDiscovery.java` - Copilot model discovery from the live account catalog
   (help-config fallback), cached with refresh-on-open.

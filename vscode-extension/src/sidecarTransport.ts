@@ -144,7 +144,7 @@ export class SidecarTransport {
             child.on('error', (err: NodeJS.ErrnoException) => {
                 if (this.disposed || this.child !== child) return;
                 const failure = err.code === 'ENOENT'
-                    ? new StickySidecarFailure('Java was not found. Install Java 17 or newer and ensure java is on PATH.')
+                    ? new StickySidecarFailure('Java was not found. Install Java 21 or newer and ensure java is on PATH.')
                     : new Error(`PR Pilot Java sidecar failed to start: ${err.message}`);
                 if (failure instanceof StickySidecarFailure) this.markStartupFailure(failure, child);
                 else this.markRuntimeFailure(failure, child);
@@ -167,7 +167,7 @@ export class SidecarTransport {
         } catch (err) {
             const failure = (err as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
                 ? new StickySidecarFailure(
-                    'Java was not found. Install Java 17 or newer and ensure java is on PATH.',
+                    'Java was not found. Install Java 21 or newer and ensure java is on PATH.',
                 )
                 : err instanceof Error
                     ? new Error(`PR Pilot Java sidecar failed to start: ${err.message}`)
@@ -349,7 +349,7 @@ export class SidecarTransport {
         const diagnostics = this.stderr.trim();
         if (/UnsupportedClassVersionError|class file version/i.test(diagnostics)) {
             return new StickySidecarFailure(
-                'PR Pilot requires Java 17 or newer. Update Java and reload VS Code.',
+                'PR Pilot requires Java 21 or newer. Update Java and reload VS Code.',
             );
         }
         if (/Unable to access jarfile|Invalid or corrupt jarfile/i.test(diagnostics)) {

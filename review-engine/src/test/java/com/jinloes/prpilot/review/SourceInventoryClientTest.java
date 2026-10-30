@@ -443,16 +443,16 @@ public class SourceInventoryClientTest {
         }
 
         @Test
-        void unsupportedInstalledJava17FailsClosedWithoutARequest() throws Exception {
-            Path java17 =
+        void unsupportedInstalledJava21FailsClosedWithoutARequest() throws Exception {
+            Path java21 =
                     Path.of(
-                            "/Library/Java/JavaVirtualMachines/jdk17.0.5-msft.jdk/Contents/Home/bin/java");
+                            "/Library/Java/JavaVirtualMachines/jdk21.0.6-msft.jdk/Contents/Home/bin/java");
             org.junit.jupiter.api.Assumptions.assumeTrue(
-                    Files.isExecutable(java17), "Optional macOS JDK17 negative control");
+                    Files.isExecutable(java21), "Optional macOS JDK21 negative control");
             var valid = launch(config);
             var old =
                     new SourceInventoryClient.Launch(
-                            java17,
+                            java21,
                             valid.workerJar(),
                             valid.git(),
                             valid.ijctl(),

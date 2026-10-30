@@ -32,7 +32,7 @@ flowchart LR
         Sidecar["Stdio JSON-RPC adapter<br/>validation, dispatch, notifications"]
     end
 
-    subgraph Engines["Host-neutral Java 17 engines"]
+    subgraph Engines["Host-neutral Java 21 engines"]
         subgraph GitHubEngine["github-engine/"]
             GitHubApi["GitHubEngineApi"]
             GitHubServices["PR discovery and review freshness,<br/>context, diff, draft, and submission services"]

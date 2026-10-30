@@ -66,9 +66,7 @@ jobs:
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: |
-            21
-            17
+          java-version: "21"
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -82,7 +80,7 @@ jobs:
           cache-disabled: true
 
       - name: Trust JDKs for SemanticRuntime
-        run: bash .github/scripts/trusted-jdks.sh "$JAVA_HOME_17_X64" "$JAVA_HOME_21_X64"
+        run: bash .github/scripts/trusted-jdks.sh "$JAVA_HOME_21_X64"
 
       - name: Derive installable versions from tag
         id: version

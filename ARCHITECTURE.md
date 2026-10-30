@@ -13,7 +13,7 @@ using a local AI CLI/runtime (Claude Code or GitHub Copilot, selected per-host i
 
 ## System shape
 
-PR Pilot is a multi-module Java 17 project with two IDE hosts sharing one React webview. `core`,
+PR Pilot is a multi-module Java 21 project with two IDE hosts sharing one React webview. `core`,
 `github-engine`, and `review-engine` own host-neutral behavior. IntelliJ calls the engines
 in-process; VS Code reaches the same capabilities through the stdio JSON-RPC `sidecar`. Host modules
 own only IDE lifecycle, settings integration, and bridge wiring.

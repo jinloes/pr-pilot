@@ -29,7 +29,7 @@ project close; no persistent settings/state are added. Java/Jar/Git/ijctl/config
 PATH are explicit caller-trusted assets outside the worktree; no project SDK or ambient runtime
 arguments are inherited. Cleared child environments and fixed commands apply to worker/tool
 launches. Private client request temporaries live outside the worktree and are removed only after
-bounded owned-process-tree teardown. The worker is Java17-compatible but requires a
+bounded owned-process-tree teardown. The worker is Java21-compatible but requires a
 secure-handle-capable runtime/filesystem (ordinary JDK/JBR25 on the tested macOS host). The engine
 JAR embeds the minimal worker and a schema-2 digest manifest under `semantic-worker/`;
 `SemanticRuntime` reads resources through its classloader and extracts them into owned 0700
