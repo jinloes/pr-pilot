@@ -75,6 +75,7 @@ line here.
 **Review benchmarks** ([review-benchmarks.md](docs/architecture/review-benchmarks.md))
 
 - [Recall benchmark withholds the reference answers](docs/architecture/review-benchmarks.md#recall-benchmark-withholds-the-reference-answers)
+- [Recall benchmark diffs against the base the reference reviewer saw](docs/architecture/review-benchmarks.md#recall-benchmark-diffs-against-the-base-the-reference-reviewer-saw)
 - [ReviewBench runs never consult GitHub and delegate scoring](docs/architecture/review-benchmarks.md#reviewbench-runs-never-consult-github-and-delegate-scoring)
 
 **Review comments and context**

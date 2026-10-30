@@ -11,21 +11,22 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Mae's inline review comments on a pull request, used as the benchmark's expected findings.
+ * The reference reviewer's inline review comments on a pull request, used as the benchmark's
+ * expected findings.
  *
- * <p>Mae reviews the commit that was the PR head when it ran. The benchmark reviews that same
- * commit, so only comments Mae left on its first reviewed commit count; later rounds reviewed code
- * PR Pilot never sees. Replies are ignored because they are conversation, not findings.
+ * <p>The reference reviewer reviews the commit that was the PR head when it ran. The benchmark
+ * reviews that same commit, so only comments the reference reviewer left on its first reviewed
+ * commit count; later rounds reviewed code PR Pilot never sees. Replies are ignored because they
+ * are conversation, not findings.
  */
-final class MaeComments {
-    static final String DEFAULT_LOGIN_PREFIX = "svc-mae";
+final class ReferenceComments {
     private static final int PAGE_SIZE = 100;
     private static final int MAX_PAGES = 30;
 
     private final GitHubApiClient client;
     private final ObjectMapper mapper;
 
-    MaeComments(GitHubApiClient client, ObjectMapper mapper) {
+    ReferenceComments(GitHubApiClient client, ObjectMapper mapper) {
         this.client = client;
         this.mapper = mapper;
     }
@@ -39,7 +40,10 @@ final class MaeComments {
             String createdAt,
             String body) {}
 
-    /** The commit Mae first reviewed and the findings it left there; empty when Mae never ran. */
+    /**
+     * The commit the reference reviewer first reviewed and the findings it left there; empty when
+     * the reference reviewer never ran.
+     */
     record Baseline(String commitId, List<Comment> comments) {
         boolean isEmpty() {
             return comments.isEmpty();

@@ -9,11 +9,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Scores PR Pilot's findings against Mae's.
+ * Scores PR Pilot's findings against the reference reviewer's.
  *
  * <p>Location narrows, the judge decides: only pairs on the same file within {@code lineWindow}
  * lines are shown to the judge, and each finding on either side can match at most once, so one
- * broad comment cannot claim several of Mae's findings.
+ * broad comment cannot claim several of the reference reviewer's findings.
  */
 final class FindingMatcher {
     static final String NO_NEARBY_FINDING = "no_nearby_finding";
@@ -45,10 +45,10 @@ final class FindingMatcher {
 
     static List<Pair> candidates(List<Finding> expected, List<Finding> actual, int lineWindow) {
         List<Pair> pairs = new ArrayList<>();
-        for (Finding mae : expected) {
+        for (Finding reference : expected) {
             for (Finding pilot : actual) {
-                Pair pair = new Pair(mae, pilot);
-                if (normalizePath(mae.path()).equals(normalizePath(pilot.path()))
+                Pair pair = new Pair(reference, pilot);
+                if (normalizePath(reference.path()).equals(normalizePath(pilot.path()))
                         && pair.distance() <= lineWindow) {
                     pairs.add(pair);
                 }
@@ -81,12 +81,12 @@ final class FindingMatcher {
         candidates.forEach(pair -> nearby.add(pair.expected().id()));
         List<Miss> misses =
                 expected.stream()
-                        .filter(mae -> !usedExpected.contains(mae.id()))
+                        .filter(reference -> !usedExpected.contains(reference.id()))
                         .map(
-                                mae ->
+                                reference ->
                                         new Miss(
-                                                mae,
-                                                nearby.contains(mae.id())
+                                                reference,
+                                                nearby.contains(reference.id())
                                                         ? JUDGED_DIFFERENT
                                                         : NO_NEARBY_FINDING))
                         .toList();

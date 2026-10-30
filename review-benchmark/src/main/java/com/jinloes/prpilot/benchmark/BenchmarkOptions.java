@@ -27,7 +27,7 @@ record BenchmarkOptions(
         String judgeModel,
         int lineWindow,
         int repeat,
-        String maeLoginPrefix,
+        String reviewerLoginPrefix,
         Path outDir,
         boolean verbose,
         boolean help) {
@@ -51,17 +51,18 @@ record BenchmarkOptions(
                     "--judge-model",
                     "--line-window",
                     "--repeat",
-                    "--mae-login-prefix",
+                    "--reviewer-login-prefix",
                     "--out");
 
     static final String USAGE =
             """
             Usage: ./gradlew :review-benchmark:reviewBenchmark --args="--prs FILE --repos-root DIR --provider claude|copilot [options]"
 
-            Reviews each pull request at the commit Mae reviewed and reports how many of Mae's
+            Reviews each pull request at the commit the reference reviewer reviewed and reports how many of the reference reviewer's
             inline findings PR Pilot also raised.
 
-              --prs FILE              Pull request URLs, one per line (# comments allowed)
+              --prs FILE              Pull request URLs, one per line (# comments allowed),
+                                      each optionally followed by base=<sha> to pin the diff base
               --repos-root DIR        Directory holding local clones as <repo> or <owner>/<repo>
               --provider NAME         claude or copilot
               --model ID              Review model (provider default when omitted)
@@ -80,7 +81,9 @@ record BenchmarkOptions(
               --judge-model ID        Judge model (defaults to --model)
               --line-window N         Max line distance for a candidate match (default 10)
               --repeat N              Run the whole benchmark N times and summarize (default 1)
-              --mae-login-prefix P    Reviewer login prefix (default svc-mae)
+              --reviewer-login-prefix P
+                                      Login prefix of the reference reviewer whose inline
+                                      comments are the expected findings (required)
               --out DIR               Report directory (default build/review-benchmark)
               --verbose               Print review status updates
               --help                  Show this help
@@ -105,7 +108,7 @@ record BenchmarkOptions(
         String judgeModel = "";
         int window = DEFAULT_LINE_WINDOW;
         int repeat = 1;
-        String prefix = MaeComments.DEFAULT_LOGIN_PREFIX;
+        String prefix = null;
         Path out = Path.of("build", "review-benchmark");
         boolean verbose = false;
         for (int i = 0; i < args.size(); i++) {
@@ -158,7 +161,7 @@ record BenchmarkOptions(
                         case "--judge-model" -> judgeModel = value;
                         case "--line-window" -> window = lineWindow(value);
                         case "--repeat" -> repeat = repeat(value);
-                        case "--mae-login-prefix" -> prefix = value;
+                        case "--reviewer-login-prefix" -> prefix = value;
                         case "--out" -> out = Path.of(value);
                         default -> throw new IllegalArgumentException("Unknown option: " + arg);
                     }
@@ -172,6 +175,9 @@ record BenchmarkOptions(
         }
         if (!JUDGE_LLM.equals(judge) && !JUDGE_LOCATION.equals(judge)) {
             throw new IllegalArgumentException("--judge must be llm or location.");
+        }
+        if (StringUtils.isBlank(prefix)) {
+            throw new IllegalArgumentException("--reviewer-login-prefix is required.");
         }
         return new BenchmarkOptions(
                 prs,

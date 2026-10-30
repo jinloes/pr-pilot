@@ -36,12 +36,18 @@ class ReviewBenchDiagnosticsTest {
             ReviewBenchDiagnostics diagnostics =
                     ReviewBenchDiagnostics.of(
                             List.of("Found 3 findings"),
-                            List.of(new Finding("d1", "./src\\a.py", 12, "Unchecked index.")));
+                            List.of(
+                                    new Finding("d1", "./src\\a.py", 12, "Unchecked index."),
+                                    new Finding(
+                                            "d2", "src/b.py", 3, "Leak.", "Closed by caller.")));
 
             assertThat(diagnostics.stages()).containsExactly("Found 3 findings");
             assertThat(diagnostics.dropped())
                     .containsExactly(
-                            new ReviewBenchDiagnostics.Dropped("src/a.py", 12, "Unchecked index."));
+                            new ReviewBenchDiagnostics.Dropped(
+                                    "src/a.py", 12, "Unchecked index.", null),
+                            new ReviewBenchDiagnostics.Dropped(
+                                    "src/b.py", 3, "Leak.", "Closed by caller."));
         }
 
         @Test

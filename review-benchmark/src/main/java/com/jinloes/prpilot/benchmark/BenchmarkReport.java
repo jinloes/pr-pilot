@@ -30,9 +30,9 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
             String judgeModel,
             int lineWindow) {}
 
-    record Match(Finding mae, Finding prPilot) {}
+    record Match(Finding reference, Finding prPilot) {}
 
-    record Miss(Finding mae, String reason) {}
+    record Miss(Finding reference, String reason) {}
 
     record PrResult(
             String pr,
@@ -42,7 +42,7 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
             String reviewedCommit,
             long reviewMillis,
             boolean diffTruncated,
-            int maeFindings,
+            int referenceFindings,
             int prPilotFindings,
             List<Match> matches,
             List<Miss> misses,
@@ -58,7 +58,7 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
                 String reviewedCommit,
                 long reviewMillis,
                 boolean diffTruncated,
-                int maeFindings,
+                int referenceFindings,
                 int prPilotFindings,
                 List<Match> matches,
                 List<Miss> misses,
@@ -72,7 +72,7 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
                     reviewedCommit,
                     reviewMillis,
                     diffTruncated,
-                    maeFindings,
+                    referenceFindings,
                     prPilotFindings,
                     matches,
                     misses,
@@ -104,42 +104,43 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
             int scored,
             int skipped,
             int failed,
-            int maeFindings,
+            int referenceFindings,
             int matched,
             int prPilotFindings,
             double recall,
             double meanPrRecall,
-            int completeDiffMaeFindings,
+            int completeDiffReferenceFindings,
             int completeDiffMatched,
             double completeDiffRecall) {
 
         static Totals of(List<PrResult> prs) {
             List<PrResult> scored =
                     prs.stream().filter(pr -> STATUS_SCORED.equals(pr.status())).toList();
-            int mae = scored.stream().mapToInt(PrResult::maeFindings).sum();
+            int reference = scored.stream().mapToInt(PrResult::referenceFindings).sum();
             int matched = scored.stream().mapToInt(pr -> pr.matches().size()).sum();
             double mean =
                     scored.stream()
-                            .filter(pr -> pr.maeFindings() > 0)
-                            .mapToDouble(pr -> (double) pr.matches().size() / pr.maeFindings())
+                            .filter(pr -> pr.referenceFindings() > 0)
+                            .mapToDouble(
+                                    pr -> (double) pr.matches().size() / pr.referenceFindings())
                             .average()
                             .orElse(0);
             List<PrResult> complete = scored.stream().filter(pr -> !pr.diffTruncated()).toList();
-            int completeMae = complete.stream().mapToInt(PrResult::maeFindings).sum();
+            int completeReference = complete.stream().mapToInt(PrResult::referenceFindings).sum();
             int completeMatched = complete.stream().mapToInt(pr -> pr.matches().size()).sum();
             return new Totals(
                     prs.size(),
                     scored.size(),
                     count(prs, STATUS_SKIPPED),
                     count(prs, STATUS_FAILED),
-                    mae,
+                    reference,
                     matched,
                     scored.stream().mapToInt(PrResult::prPilotFindings).sum(),
-                    mae == 0 ? 0 : (double) matched / mae,
+                    reference == 0 ? 0 : (double) matched / reference,
                     mean,
-                    completeMae,
+                    completeReference,
                     completeMatched,
-                    completeMae == 0 ? 0 : (double) completeMatched / completeMae);
+                    completeReference == 0 ? 0 : (double) completeMatched / completeReference);
         }
 
         private static int count(List<PrResult> prs, String status) {
@@ -152,7 +153,8 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
     }
 
     String markdown() {
-        StringBuilder md = new StringBuilder("# PR Pilot recall against Mae\n\n");
+        StringBuilder md =
+                new StringBuilder("# PR Pilot recall against the reference reviewer\n\n");
         md.append("Generated ")
                 .append(generatedAt)
                 .append(". Provider `")
@@ -172,12 +174,12 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
         md.append("| Metric | Value |\n|---|---|\n");
         row(
                 md,
-                "Recall (matched / Mae findings)",
+                "Recall (matched / reference findings)",
                 percent(totals.recall())
                         + " ("
                         + totals.matched()
                         + " / "
-                        + totals.maeFindings()
+                        + totals.referenceFindings()
                         + ")");
         row(
                 md,
@@ -186,7 +188,7 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
                         + " ("
                         + totals.completeDiffMatched()
                         + " / "
-                        + totals.completeDiffMaeFindings()
+                        + totals.completeDiffReferenceFindings()
                         + ")");
         row(md, "Mean per-PR recall", percent(totals.meanPrRecall()));
         row(md, "PR Pilot findings", Integer.toString(totals.prPilotFindings()));
@@ -196,7 +198,7 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
                 totals.scored() + " / " + totals.skipped() + " / " + totals.failed());
 
         md.append("\n## Per pull request\n\n");
-        md.append("| PR | Status | Mae | Matched | Recall | PR Pilot | Review time |\n");
+        md.append("| PR | Status | Reference | Matched | Recall | PR Pilot | Review time |\n");
         md.append("|---|---|---|---|---|---|---|\n");
         for (PrResult pr : prs) {
             boolean scored = STATUS_SCORED.equals(pr.status());
@@ -208,13 +210,13 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
                     .append(pr.status())
                     .append(pr.diffTruncated() ? " (diff truncated)" : "")
                     .append(" | ")
-                    .append(scored ? pr.maeFindings() : "-")
+                    .append(scored ? pr.referenceFindings() : "-")
                     .append(" | ")
                     .append(scored ? pr.matches().size() : "-")
                     .append(" | ")
                     .append(
-                            scored && pr.maeFindings() > 0
-                                    ? percent((double) pr.matches().size() / pr.maeFindings())
+                            scored && pr.referenceFindings() > 0
+                                    ? percent((double) pr.matches().size() / pr.referenceFindings())
                                     : "-")
                     .append(" | ")
                     .append(scored ? pr.prPilotFindings() : "-")
@@ -223,7 +225,7 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
                     .append(" |\n");
         }
 
-        md.append("\n## Missed Mae findings\n");
+        md.append("\n## Missed reference findings\n");
         boolean anyMiss = false;
         for (PrResult pr : prs) {
             if (pr.misses().isEmpty()) continue;
@@ -231,11 +233,11 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
             md.append("\n### ").append(pr.pr()).append("\n\n");
             for (Miss miss : pr.misses()) {
                 md.append("- `")
-                        .append(location(miss.mae()))
+                        .append(location(miss.reference()))
                         .append("` — ")
                         .append(missReason(miss.reason()))
                         .append(": ")
-                        .append(excerpt(miss.mae().body()))
+                        .append(excerpt(miss.reference().body()))
                         .append('\n');
             }
         }
@@ -260,7 +262,11 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
                     if (nearMiss(dropped, pr.misses(), settings.lineWindow())) {
                         md.append(" (near miss)");
                     }
-                    md.append(" — ").append(excerpt(dropped.body())).append('\n');
+                    md.append(" — ").append(excerpt(dropped.body()));
+                    if (StringUtils.isNotBlank(dropped.reason())) {
+                        md.append(" **Reason:** ").append(excerpt(dropped.reason()));
+                    }
+                    md.append('\n');
                 }
             }
         }
@@ -294,14 +300,18 @@ record BenchmarkReport(String generatedAt, Settings settings, Totals totals, Lis
         return md;
     }
 
-    /** True when a dropped finding sat within the line window of a Mae finding PR Pilot missed. */
+    /**
+     * True when a dropped finding sat within the line window of a reference finding PR Pilot
+     * missed.
+     */
     static boolean nearMiss(Finding dropped, List<Miss> misses, int lineWindow) {
         return misses.stream()
-                .map(Miss::mae)
+                .map(Miss::reference)
                 .anyMatch(
-                        mae ->
-                                StringUtils.equals(mae.path(), dropped.path())
-                                        && Math.abs(mae.line() - dropped.line()) <= lineWindow);
+                        reference ->
+                                StringUtils.equals(reference.path(), dropped.path())
+                                        && Math.abs(reference.line() - dropped.line())
+                                                <= lineWindow);
     }
 
     private static String missReason(String reason) {

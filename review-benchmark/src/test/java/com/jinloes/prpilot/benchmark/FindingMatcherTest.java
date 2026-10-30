@@ -45,7 +45,7 @@ class FindingMatcherTest {
         }
 
         @Test
-        void recordsWhyEachMaeFindingWasMissedAndKeepsExtras() throws Exception {
+        void recordsWhyEachReferenceFindingWasMissedAndKeepsExtras() throws Exception {
             FindingMatcher.Outcome outcome =
                     FindingMatcher.match(
                             List.of(M1, M3), List.of(P1, P2, P3), 10, candidates -> List.of());

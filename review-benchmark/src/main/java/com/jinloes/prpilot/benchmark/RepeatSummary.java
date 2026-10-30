@@ -34,8 +34,8 @@ record RepeatSummary(List<BenchmarkReport> runs) {
     }
 
     /**
-     * Matched Mae findings per PR label and run, in the order PRs first appear. A run in which the
-     * PR was not scored holds {@code null}.
+     * Matched reference findings per PR label and run, in the order PRs first appear. A run in
+     * which the PR was not scored holds {@code null}.
      */
     Map<String, List<Integer>> matchedByPr() {
         Map<String, List<Integer>> byPr = new LinkedHashMap<>();
@@ -59,13 +59,13 @@ record RepeatSummary(List<BenchmarkReport> runs) {
             md.append("| ")
                     .append(i + 1)
                     .append(" | ")
-                    .append(ratio(totals.recall(), totals.matched(), totals.maeFindings()))
+                    .append(ratio(totals.recall(), totals.matched(), totals.referenceFindings()))
                     .append(" | ")
                     .append(
                             ratio(
                                     totals.completeDiffRecall(),
                                     totals.completeDiffMatched(),
-                                    totals.completeDiffMaeFindings()))
+                                    totals.completeDiffReferenceFindings()))
                     .append(" |\n");
         }
         md.append("\nMean recall ")
@@ -74,17 +74,18 @@ record RepeatSummary(List<BenchmarkReport> runs) {
                 .append(BenchmarkReport.percent(minRecall()))
                 .append(", max ")
                 .append(BenchmarkReport.percent(maxRecall()))
-                .append(").\n\n## Matched Mae findings per pull request\n\n| PR | Mae |");
+                .append(
+                        ").\n\n## Matched reference findings per pull request\n\n| PR | Reference |");
         for (int i = 0; i < runs.size(); i++) md.append(" Run ").append(i + 1).append(" |");
         md.append(" Mean |\n|---|---|");
         md.append("---|".repeat(runs.size() + 1)).append('\n');
-        Map<String, Integer> maeByPr = maeByPr();
+        Map<String, Integer> referenceByPr = referenceByPr();
         matchedByPr()
                 .forEach(
                         (pr, counts) -> {
                             md.append("| ").append(pr).append(" | ");
-                            Integer mae = maeByPr.get(pr);
-                            md.append(mae == null ? "–" : mae.toString()).append(" |");
+                            Integer reference = referenceByPr.get(pr);
+                            md.append(reference == null ? "–" : reference.toString()).append(" |");
                             for (Integer count : counts) {
                                 md.append(' ')
                                         .append(count == null ? "–" : count.toString())
@@ -102,16 +103,16 @@ record RepeatSummary(List<BenchmarkReport> runs) {
         return md;
     }
 
-    private Map<String, Integer> maeByPr() {
-        Map<String, Integer> mae = new LinkedHashMap<>();
+    private Map<String, Integer> referenceByPr() {
+        Map<String, Integer> reference = new LinkedHashMap<>();
         for (BenchmarkReport run : runs) {
             for (BenchmarkReport.PrResult pr : run.prs()) {
                 if (BenchmarkReport.STATUS_SCORED.equals(pr.status())) {
-                    mae.putIfAbsent(pr.pr(), pr.maeFindings());
+                    reference.putIfAbsent(pr.pr(), pr.referenceFindings());
                 }
             }
         }
-        return mae;
+        return reference;
     }
 
     private static List<Integer> blankCounts(int size) {

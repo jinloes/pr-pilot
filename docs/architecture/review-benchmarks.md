@@ -7,9 +7,20 @@ active constraint future code must respect.
 `review-benchmark` is a developer tool, not an engine capability, so it has no RPC, sidecar, or host
 wiring. It reviews the exact commit Mae first commented on, rendering the diff locally from
 `base...commit` rather than fetching GitHub's current PR diff, and it passes blank existing reviews,
-prior review, and commit messages so Mae's comments (or replies to them) cannot leak into the
+prior review, and commit messages so the reference reviewer's comments (or replies to them) cannot leak into the
 prompt. Matching requires the same file and a nearby line before the judge may pair two findings, so
 the judge can only reject location matches, never invent distant ones.
+
+### Recall benchmark diffs against the base the reference reviewer saw
+GitHub reports only a PR's current base. For a stacked PR whose parent was squash-merged, that is
+the default branch, and diffing it against the reference reviewer's commit re-reviews the whole stack: one 2-file PR
+became a 38-file, 200k-token prompt that exceeded the model limit. The benchmark therefore reads the
+base branch's `BaseRefForcePushedEvent` history from the PR's GraphQL timeline and, among those tips
+and the current base, uses the one whose three-dot diff to the reviewed commit spans the fewest
+commits, skipping tips that already contain that commit. A `base=<sha>` entry after the URL in the
+PRs file overrides this. If the history is unavailable, the current base is used, so a GraphQL
+failure never fails a PR. Patch-id matching (`git cherry`) was rejected because a stack revised
+after review squash-merges different content.
 
 ### ReviewBench runs never consult GitHub and delegate scoring
 `ReviewBenchRunner` builds the review from the corpus entry only: its title, body, a diff rendered

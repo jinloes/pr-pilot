@@ -121,7 +121,7 @@ class LocalCheckoutTest {
         }
     }
 
-    private static String git(Path dir, String... args) throws Exception {
+    static String git(Path dir, String... args) throws Exception {
         List<String> command =
                 new ArrayList<>(
                         List.of(

@@ -16,15 +16,15 @@ import org.junit.jupiter.api.Test;
 class RepeatSummaryTest {
     private static final PrRef PR_A = new PrRef("https://github.com", "o", "a", 1);
     private static final PrRef PR_B = new PrRef("https://github.com", "o", "b", 2);
-    private static final Finding MAE = new Finding("M", "A.java", 3, "bug");
+    private static final Finding REFERENCE = new Finding("M", "A.java", 3, "bug");
     private static final Finding OURS = new Finding("P", "A.java", 3, "bug");
     private static final BenchmarkReport.Settings SETTINGS =
             new BenchmarkReport.Settings(
                     "copilot", "", "", "", true, false, false, true, "llm", "", 10);
 
-    private static BenchmarkReport.PrResult scored(PrRef pr, int mae, int matched) {
+    private static BenchmarkReport.PrResult scored(PrRef pr, int reference, int matched) {
         List<BenchmarkReport.Match> matches =
-                Collections.nCopies(matched, new BenchmarkReport.Match(MAE, OURS));
+                Collections.nCopies(matched, new BenchmarkReport.Match(REFERENCE, OURS));
         return new BenchmarkReport.PrResult(
                 pr.label(),
                 "u",
@@ -33,7 +33,7 @@ class RepeatSummaryTest {
                 "c".repeat(40),
                 1_000,
                 false,
-                mae,
+                reference,
                 matched,
                 matches,
                 List.of(),
@@ -91,7 +91,7 @@ class RepeatSummaryTest {
                     .contains("| 1 | 25.0% (2 / 8) | 25.0% (2 / 8) |")
                     .contains("| 2 | 75.0% (3 / 4) | 75.0% (3 / 4) |")
                     .contains("Mean recall 50.0% (min 25.0%, max 75.0%).")
-                    .contains("| PR | Mae | Run 1 | Run 2 | Mean |")
+                    .contains("| PR | Reference | Run 1 | Run 2 | Mean |")
                     .contains("| o/a#1 | 4 | 1 | 3 | 2.0 |")
                     .contains("| o/b#2 | 4 | 1 | – | 1.0 |");
         }

@@ -31,11 +31,11 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
-// Developer tool: measures review recall against Mae's review comments.
+// Developer tool: measures review recall against a reference reviewer's review comments.
 //   ./gradlew :review-benchmark:reviewBenchmark --args="--prs prs.txt --repos-root ~/src --provider copilot"
 tasks.register('reviewBenchmark', JavaExec) {
     group = 'verification'
-    description = 'Runs PR Pilot reviews on PRs Mae reviewed and reports recall.'
+    description = 'Runs PR Pilot reviews on PRs a reference reviewer reviewed and reports recall.'
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.jinloes.prpilot.benchmark.ReviewBenchmark'
     workingDir = rootProject.projectDir

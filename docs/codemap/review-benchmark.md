@@ -5,22 +5,25 @@ Paths omit `src/main/java/com/jinloes/prpilot/` and equivalent test roots where 
 makes them unambiguous; other paths are relative to the module directory.
 
 Developer-only CLIs: `./gradlew :review-benchmark:reviewBenchmark` measures PR Pilot's recall
-against Mae's GitHub review comments, and `reviewBench` (driven by `scripts/reviewbench.mjs`)
+against a reference reviewer's GitHub review comments, and `reviewBench` (driven by `scripts/reviewbench.mjs`)
 produces findings for ReviewBench's judge. It is not shipped with either host.
 
 - `benchmark/ReviewBenchmark.java` - Entry point and per-PR orchestration.
 - `benchmark/BenchmarkOptions.java` - Argument parsing (including repeatable `--guidance-glob`),
   defaults, and usage.
-- `benchmark/PrRef.java` - `owner/repo#N` and PR-URL parsing.
-- `benchmark/MaeComments.java` - Paginated review-comment fetch, Mae filtering, and
+- `benchmark/PrRef.java` - `owner/repo#N` and PR-URL parsing, plus the optional per-PR `base=<sha>`
+  override in the PRs file.
+- `benchmark/BaseHistory.java` - Paginated GraphQL read of the PR base branch's force-push tips.
+- `benchmark/ReferenceComments.java` - Paginated review-comment fetch, reviewer-login filtering, and
   first-reviewed-commit baseline.
 - `benchmark/LocalCheckout.java` - Worktree at the reviewed commit and a locally rendered diff,
-  bounded at the review limit or, for `--chunked`, the validation limit.
+  bounded at the review limit or, for `--chunked`, the validation limit; `reviewBase` picks the
+  candidate base with the smallest diff (tests: `LocalCheckoutTest`, `LocalCheckoutReviewBaseTest`).
 - `benchmark/FindingMatcher.java` - Same-file/nearby-line candidate pairing and one-to-one
   assignment.
 - `benchmark/LlmJudge.java` - Model judge prompt and JSON verdict parsing for candidate pairs.
 - `benchmark/BenchmarkReport.java` - Totals (including complete-diff recall), dropped-by-validation
-  findings with near-miss marking, and Markdown/JSON report rendering.
+  findings with near-miss marking and the validator's reason, and Markdown/JSON report rendering.
 - `benchmark/RepeatSummary.java` - Per-run recall spread and per-PR matched counts for `--repeat`.
 - `benchmark/ReviewBenchRunner.java` - ReviewBench entry point (`:review-benchmark:reviewBench`):
   reviews each corpus PR per round and writes judge-ready findings, resuming past existing files.

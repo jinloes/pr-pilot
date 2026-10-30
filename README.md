@@ -96,8 +96,10 @@ always runs. Each selected rule is applied by its own read-only agent (at most 2
 its findings are labeled `(rule: <name>)`.
 
 PR Pilot also ships built-in rules, such as reusing an existing helper instead of duplicating it,
-not hiding a missing telemetry value behind a default, and not joining values with a delimiter
-that can appear inside them. They run the same way. Turn them off with
+not hiding a missing telemetry value behind a default, not joining values with a delimiter that
+can appear inside them, and not fanning out per-element work that can overrun a fixed budget such
+as a deadline or workflow history limit, and not publishing "done" state before an await that
+lets a concurrent caller act on it. They run the same way. Turn them off with
 **Use PR Pilot's built-in review rules**, or put a rule with the same `name` in your folder to
 replace one (or turn it off with `enabled: false`).
 
@@ -178,7 +180,7 @@ code, or sensitive pull-request content.
 - `core/` - Plain Java 17 shared models and diff parser used by both hosts
 - `github-engine/` - Plain Java 17 GitHub/repository/review engine shared by both hosts
 - `intellij-plugin/` - IntelliJ host integration
-- `review-benchmark/` - Developer CLIs that measure review recall against Mae's comments and on
+- `review-benchmark/` - Developer CLIs that measure review recall against a reference reviewer's comments and on
   [ReviewBench](https://github.com/review-bench/ReviewBench)
 - `sidecar/` - Thin stdio JSON-RPC process adapter used by the VS Code extension
 - `vscode-extension/` - VS Code host integration
@@ -252,15 +254,17 @@ Output:
 
 - `intellij-plugin/build/distributions/*.zip`
 
-### Measure review recall against Mae
+### Measure review recall against a reference reviewer
 
 List PRs (`owner/repo#N` or PR URLs, one per line) in a file and keep local clones under
-`<repos-root>/<repo>`. The benchmark reviews the commit Mae first reviewed and writes Markdown and
-JSON reports under `build/review-benchmark/<timestamp>/`.
+`<repos-root>/<repo>`. The benchmark reviews the commit the reference reviewer first reviewed and writes Markdown and
+JSON reports under `build/review-benchmark/<timestamp>/`. `--reviewer-login-prefix` (required) names
+the reference reviewer: inline comments from logins starting with it, case-insensitively, are the
+expected findings.
 
 ```bash
 ./gradlew :review-benchmark:reviewBenchmark \
-  --args="--prs prs.txt --repos-root ~/src --provider copilot --model <model>"
+  --args="--prs prs.txt --repos-root ~/src --provider copilot --model <model> --reviewer-login-prefix svc-review-bot"
 ```
 
 Run with `--args="--help"` for the matching window, judge, and output options. Add `--chunked` to
@@ -274,7 +278,7 @@ maximum, plus matched findings per pull request in each run. A "Pipeline stages"
 each status line that carries a finding count, such as the draft count before validation and how
 many findings validation kept, so a low score shows whether findings were never raised or were
 dropped during validation. A "Dropped by validation" section lists each finding the critique
-removed, marked `near miss` when it sat within the line window of a Mae finding PR Pilot missed in
+removed, marked `near miss` when it sat within the line window of a reference finding PR Pilot missed in
 the same file.
 
 The engine reads only built-in guidance files (`AGENTS.md`, `CLAUDE.md`, contributing and PR
@@ -283,7 +287,7 @@ more from each PR's base commit, for example a repository that keeps review rule
 
 ```bash
 ./gradlew :review-benchmark:reviewBenchmark \
-  --args="--prs prs.txt --repos-root ~/src --provider copilot --guidance-glob '.linkedin/ai-agent/*.md'"
+  --args="--prs prs.txt --repos-root ~/src --provider copilot --reviewer-login-prefix svc-review-bot --guidance-glob '.review/ai-agent/*.md'"
 ```
 
 Pass `--rules-dir DIR` to apply a local rules folder the same way the **Rules folder** setting does

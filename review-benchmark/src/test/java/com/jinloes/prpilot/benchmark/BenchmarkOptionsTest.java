@@ -10,7 +10,15 @@ import org.junit.jupiter.api.Test;
 
 class BenchmarkOptionsTest {
     private static final List<String> REQUIRED =
-            List.of("--prs", "prs.txt", "--repos-root", "/src", "--provider", "Copilot");
+            List.of(
+                    "--prs",
+                    "prs.txt",
+                    "--repos-root",
+                    "/src",
+                    "--provider",
+                    "Copilot",
+                    "--reviewer-login-prefix",
+                    "svc-review-bot");
 
     private static BenchmarkOptions parse(String... extra) {
         List<String> args = new java.util.ArrayList<>(REQUIRED);
@@ -34,7 +42,7 @@ class BenchmarkOptionsTest {
             assertThat(options.judge()).isEqualTo(BenchmarkOptions.JUDGE_LLM);
             assertThat(options.lineWindow()).isEqualTo(10);
             assertThat(options.repeat()).isEqualTo(1);
-            assertThat(options.maeLoginPrefix()).isEqualTo("svc-mae");
+            assertThat(options.reviewerLoginPrefix()).isEqualTo("svc-review-bot");
             assertThat(options.outDir()).isEqualTo(Path.of("build", "review-benchmark"));
         }
 
@@ -43,12 +51,12 @@ class BenchmarkOptionsTest {
             BenchmarkOptions options =
                     parse(
                             "--guidance-glob",
-                            ".linkedin/ai-agent/*.md",
+                            ".review/ai-agent/*.md",
                             "--guidance-glob",
                             "docs/x.md");
 
             assertThat(options.guidanceGlobs())
-                    .containsExactly(".linkedin/ai-agent/*.md", "docs/x.md");
+                    .containsExactly(".review/ai-agent/*.md", "docs/x.md");
         }
 
         @Test
@@ -58,8 +66,8 @@ class BenchmarkOptionsTest {
 
         @Test
         void resolvesTheRulesDirectoryToAnAbsolutePath() {
-            assertThat(parse("--rules-dir", "rules/../mae").rulesDirectory())
-                    .isEqualTo(Path.of("mae").toAbsolutePath().toString());
+            assertThat(parse("--rules-dir", "rules/../custom").rulesDirectory())
+                    .isEqualTo(Path.of("custom").toAbsolutePath().toString());
         }
 
         @Test
@@ -112,6 +120,19 @@ class BenchmarkOptionsTest {
         void rejectsMissingRequiredOptions() {
             assertThatThrownBy(() -> BenchmarkOptions.parse(List.of("--prs", "x")))
                     .hasMessageContaining("--repos-root");
+            assertThatThrownBy(
+                            () ->
+                                    BenchmarkOptions.parse(
+                                            List.of(
+                                                    "--prs",
+                                                    "p",
+                                                    "--repos-root",
+                                                    "r",
+                                                    "--provider",
+                                                    "copilot")))
+                    .hasMessageContaining("--reviewer-login-prefix is required");
+            assertThatThrownBy(() -> parse("--reviewer-login-prefix", " "))
+                    .hasMessageContaining("--reviewer-login-prefix needs a value");
         }
 
         @Test

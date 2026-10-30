@@ -26,7 +26,7 @@ class BenchmarkReportTest {
 
     private static BenchmarkReport.PrResult scored(
             PrRef pr,
-            int mae,
+            int reference,
             List<BenchmarkReport.Match> matches,
             List<BenchmarkReport.Miss> misses,
             List<Finding> extras) {
@@ -38,7 +38,7 @@ class BenchmarkReportTest {
                 "c".repeat(40),
                 61_000,
                 false,
-                mae,
+                reference,
                 matches.size() + extras.size(),
                 matches,
                 misses,
@@ -80,14 +80,14 @@ class BenchmarkReportTest {
                 base.reviewedCommit(),
                 base.reviewMillis(),
                 base.diffTruncated(),
-                base.maeFindings(),
+                base.referenceFindings(),
                 base.prPilotFindings(),
                 base.matches(),
                 base.misses(),
                 base.prPilotOnly(),
                 base.stages(),
                 List.of(
-                        new Finding(null, "A.java", 12, "Close to the miss"),
+                        new Finding(null, "A.java", 12, "Close to the miss", "Contradicted | here"),
                         new Finding(null, "A.java", 30, "Too far away"),
                         new Finding(null, "B.java", 3, "Other file")));
     }
@@ -101,7 +101,7 @@ class BenchmarkReportTest {
             assertThat(totals.scored()).isEqualTo(2);
             assertThat(totals.skipped()).isEqualTo(1);
             assertThat(totals.failed()).isEqualTo(1);
-            assertThat(totals.maeFindings()).isEqualTo(3);
+            assertThat(totals.referenceFindings()).isEqualTo(3);
             assertThat(totals.matched()).isEqualTo(1);
             assertThat(totals.prPilotFindings()).isEqualTo(2);
             assertThat(totals.recall()).isEqualTo(1.0 / 3);
@@ -134,7 +134,7 @@ class BenchmarkReportTest {
                             base.reviewedCommit(),
                             base.reviewMillis(),
                             true,
-                            base.maeFindings(),
+                            base.referenceFindings(),
                             base.prPilotFindings(),
                             base.matches(),
                             base.misses(),
@@ -144,7 +144,7 @@ class BenchmarkReportTest {
             BenchmarkReport.Totals totals = BenchmarkReport.Totals.of(List.of(complete, truncated));
 
             assertThat(totals.recall()).isEqualTo(1.0 / 6);
-            assertThat(totals.completeDiffMaeFindings()).isEqualTo(2);
+            assertThat(totals.completeDiffReferenceFindings()).isEqualTo(2);
             assertThat(totals.completeDiffMatched()).isEqualTo(1);
             assertThat(totals.completeDiffRecall()).isEqualTo(0.5);
         }
@@ -161,7 +161,7 @@ class BenchmarkReportTest {
         void summarizesRecallAndListsMissesWithReasons() {
             String md = report().markdown();
             assertThat(md)
-                    .contains("| Recall (matched / Mae findings) | 33.3% (1 / 3) |")
+                    .contains("| Recall (matched / reference findings) | 33.3% (1 / 3) |")
                     .contains(
                             "| Recall on complete diffs (truncated PRs excluded) | 33.3% (1 / 3) |")
                     .contains("| PRs scored / skipped / failed | 2 / 1 / 1 |")
@@ -196,7 +196,7 @@ class BenchmarkReportTest {
         }
 
         @Test
-        void listsDroppedFindingsAndMarksNearMissesOfMissedMaeFindings() {
+        void listsDroppedFindingsAndMarksNearMissesOfMissedReferenceFindings() {
             BenchmarkReport.PrResult base =
                     scored(
                             PR_A,
@@ -208,7 +208,9 @@ class BenchmarkReportTest {
 
             assertThat(md)
                     .contains("## Dropped by validation")
-                    .contains("- `A.java:12` (near miss) — Close to the miss\n")
+                    .contains(
+                            "- `A.java:12` (near miss) — Close to the miss **Reason:** Contradicted"
+                                    + " \\| here\n")
                     .contains("- `A.java:30` — Too far away\n")
                     .contains("- `B.java:3` — Other file\n");
         }

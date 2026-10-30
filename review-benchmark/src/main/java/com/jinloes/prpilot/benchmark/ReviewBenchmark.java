@@ -10,6 +10,7 @@ import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.PromptCompleter;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
+import com.jinloes.prpilot.sidecar.github.GitHubApiBase;
 import com.jinloes.prpilot.sidecar.github.GitHubApiClient;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
 import com.jinloes.prpilot.sidecar.github.GitHubSession;
@@ -38,11 +39,11 @@ import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringUtils;
 
 /**
- * Measures how many of Mae's inline review findings PR Pilot also raises.
+ * Measures how many of the reference reviewer's inline review findings PR Pilot also raises.
  *
- * <p>Each PR is reviewed at the exact commit Mae first reviewed. Existing reviews, the prior
- * review, and the commit list are withheld from the prompt: they can contain Mae's own comments or
- * replies to them, which would leak the answers.
+ * <p>Each PR is reviewed at the exact commit the reference reviewer first reviewed. Existing
+ * reviews, the prior review, and the commit list are withheld from the prompt: they can contain the
+ * reference reviewer's own comments or replies to them, which would leak the answers.
  */
 public final class ReviewBenchmark {
     /** Mirrors {@code BaseCommitContext.CALL_SITES_PROPERTY}, which is package-private. */
@@ -52,7 +53,9 @@ public final class ReviewBenchmark {
     static final String REPORT_DROPPED_PROPERTY = "prpilot.review.reportDropped";
 
     private static final Pattern DROPPED =
-            Pattern.compile("^Validation dropped finding at (.+):(\\d+) — (.*)$", Pattern.DOTALL);
+            Pattern.compile(
+                    "^Validation dropped finding at (.+):(\\d+) — (.*?)(?: — Reason: (.*))?$",
+                    Pattern.DOTALL);
 
     private static final DateTimeFormatter STEM =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
@@ -152,18 +155,21 @@ public final class ReviewBenchmark {
     private BenchmarkReport.PrResult benchmark(PrRef pr, Consumer<String> say)
             throws IOException, InterruptedException {
         GitHubSession session = session(pr.githubBaseUrl());
-        say.accept("fetching Mae comments");
-        MaeComments.Baseline mae =
-                MaeComments.firstReview(
-                        new MaeComments(GitHubApiClient.http(), mapper)
+        say.accept("fetching reference comments");
+        ReferenceComments.Baseline reference =
+                ReferenceComments.firstReview(
+                        new ReferenceComments(GitHubApiClient.http(), mapper)
                                 .fetch(
                                         session.apiBaseUrl(),
                                         session.token(),
                                         pr,
-                                        options.maeLoginPrefix()));
-        if (mae.comments().isEmpty()) {
+                                        options.reviewerLoginPrefix()));
+        if (reference.comments().isEmpty()) {
             return BenchmarkReport.PrResult.notScored(
-                    pr, url(pr), BenchmarkReport.STATUS_SKIPPED, "Mae left no inline comments.");
+                    pr,
+                    url(pr),
+                    BenchmarkReport.STATUS_SKIPPED,
+                    "The reference reviewer left no inline comments.");
         }
         PrDetailResult detailResult =
                 github.getPullRequestDetail(
@@ -177,14 +183,16 @@ public final class ReviewBenchmark {
         }
 
         File repoDir = repoDir(pr);
-        say.accept("checking out " + StringUtils.left(mae.commitId(), 12));
+        String baseSha =
+                reviewBase(pr, session, detail.baseSha(), reference.commitId(), repoDir, say);
+        say.accept("checking out " + StringUtils.left(reference.commitId(), 12));
         try (LocalCheckout checkout =
                 LocalCheckout.open(
                         worktrees,
                         repoDir,
                         pr.number(),
-                        detail.baseSha(),
-                        mae.commitId(),
+                        baseSha,
+                        reference.commitId(),
                         options.chunked())) {
             if (!"ok".equals(checkout.diff().status())) {
                 throw new IOException("Diff unavailable: " + checkout.diff().message());
@@ -193,7 +201,10 @@ public final class ReviewBenchmark {
             CheckStatusResult ci =
                     github.getCheckStatus(
                             new CheckRunService.Params(
-                                    pr.githubBaseUrl(), pr.owner(), pr.repo(), mae.commitId()));
+                                    pr.githubBaseUrl(),
+                                    pr.owner(),
+                                    pr.repo(),
+                                    reference.commitId()));
             String linkedIssue =
                     github.getLinkedIssues(
                                     new LinkedIssueService.Params(
@@ -219,7 +230,7 @@ public final class ReviewBenchmark {
                                     ci,
                                     linkedIssue,
                                     profile,
-                                    mae.commitId()),
+                                    reference.commitId()),
                             status -> {
                                 Finding droppedFinding = parseDropped(status);
                                 if (droppedFinding != null) {
@@ -235,7 +246,7 @@ public final class ReviewBenchmark {
             List<Finding> expected =
                     findings(
                             "M",
-                            mae.comments(),
+                            reference.comments(),
                             c -> new Finding(null, c.path(), c.line(), c.body()));
             List<Finding> actual =
                     findings(
@@ -247,7 +258,8 @@ public final class ReviewBenchmark {
                                             c.getFile(),
                                             Math.max(0, c.getLine()),
                                             c.getBody()));
-            say.accept("matching " + expected.size() + " Mae / " + actual.size() + " PR Pilot");
+            say.accept(
+                    "matching " + expected.size() + " reference / " + actual.size() + " PR Pilot");
             FindingMatcher.Outcome outcome =
                     FindingMatcher.match(expected, actual, options.lineWindow(), judge(worktree));
             return new BenchmarkReport.PrResult(
@@ -255,7 +267,7 @@ public final class ReviewBenchmark {
                     url(pr),
                     BenchmarkReport.STATUS_SCORED,
                     "",
-                    mae.commitId(),
+                    reference.commitId(),
                     reviewMillis,
                     checkout.diff().truncated(),
                     expected.size(),
@@ -273,8 +285,53 @@ public final class ReviewBenchmark {
     }
 
     /**
-     * Parses a {@code Validation dropped finding at <file>:<line> — <body>} status, or returns null
-     * for any other status.
+     * The base to diff the reviewed commit against: the PRs-file override when given, otherwise
+     * whichever of the current base and the base branch's force-push history yields the smallest
+     * diff ({@link LocalCheckout#reviewBase}). Falls back to the current base when the history is
+     * unavailable, so a GraphQL failure never fails the PR.
+     */
+    private String reviewBase(
+            PrRef pr,
+            GitHubSession session,
+            String currentBase,
+            String commit,
+            File repoDir,
+            Consumer<String> say)
+            throws IOException, InterruptedException {
+        if (pr.base() != null) {
+            say.accept("using base " + StringUtils.left(pr.base(), 12) + " from the PRs file");
+            return pr.base();
+        }
+        List<String> candidates = new ArrayList<>(List.of(currentBase));
+        GitHubApiBase api = GitHubApiBase.parse(pr.githubBaseUrl());
+        try {
+            if (api == null) throw new IOException("unrecognized GitHub URL");
+            candidates.addAll(
+                    new BaseHistory(BaseHistory.http(), mapper)
+                            .baseTips(api.graphqlUrl(), session.token(), pr));
+        } catch (IOException unavailable) {
+            say.accept(
+                    "base history unavailable ("
+                            + unavailable.getMessage()
+                            + "); diffing against the current base");
+            return currentBase;
+        }
+        LocalCheckout.Base chosen = LocalCheckout.reviewBase(repoDir, commit, candidates);
+        if (chosen == null) return currentBase;
+        if (!chosen.sha().equals(currentBase)) {
+            say.accept(
+                    "using base "
+                            + StringUtils.left(chosen.sha(), 12)
+                            + " from the base branch's history ("
+                            + chosen.commits()
+                            + " commit(s) under review)");
+        }
+        return chosen.sha();
+    }
+
+    /**
+     * Parses a {@code Validation dropped finding at <file>:<line> — <body>[ — Reason: <reason>]}
+     * status, or returns null for any other status.
      */
     static Finding parseDropped(String status) {
         if (status == null) return null;
@@ -282,7 +339,11 @@ public final class ReviewBenchmark {
         if (!matcher.matches()) return null;
         try {
             return new Finding(
-                    null, matcher.group(1), Integer.parseInt(matcher.group(2)), matcher.group(3));
+                    null,
+                    matcher.group(1),
+                    Integer.parseInt(matcher.group(2)),
+                    matcher.group(3),
+                    matcher.group(4));
         } catch (NumberFormatException overflow) {
             return null;
         }
@@ -439,8 +500,8 @@ public final class ReviewBenchmark {
         return "matched "
                 + result.matches().size()
                 + "/"
-                + result.maeFindings()
-                + " Mae findings ("
+                + result.referenceFindings()
+                + " reference findings ("
                 + result.prPilotFindings()
                 + " PR Pilot findings)";
     }
