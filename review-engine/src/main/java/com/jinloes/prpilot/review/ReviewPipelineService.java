@@ -256,18 +256,23 @@ public final class ReviewPipelineService {
             onStatus.accept(draftStatus(draftCount));
             onStatus.accept(ClaudeService.STATUS_REFINING);
             validateAuthority();
+            boolean reportDropped = Boolean.getBoolean(REPORT_DROPPED_PROPERTY);
+            String critiqueRaw = null;
+            ReviewResult critiqued = null;
             try {
                 PRReviewRequest critiqueRequest =
                         chunkedReviewService.finalValidationRequest(request);
                 String raw =
                         provider.complete(
                                 ReviewCritiquePrompts.buildCritiquePrompt(
-                                        critiqueRequest, candidate),
+                                        critiqueRequest, candidate, reportDropped),
                                 CRITIQUE_TIMEOUT_MS,
                                 true,
                                 true,
                                 onStatus);
                 candidate = ReviewResultParser.parseReview(raw);
+                critiqueRaw = raw;
+                critiqued = candidate;
             } catch (InterruptedException interrupted) {
                 throw interrupted;
             } catch (IOException | IllegalArgumentException exception) {
@@ -291,8 +296,12 @@ public final class ReviewPipelineService {
             if (restoredRules > 0) {
                 onStatus.accept("Kept " + findings(restoredRules) + " from review rules");
             }
-            if (Boolean.getBoolean(REPORT_DROPPED_PROPERTY)) {
-                ReviewPipelineFindings.droppedStatuses(draft, candidate).forEach(onStatus);
+            if (reportDropped) {
+                ReviewPipelineFindings.droppedStatuses(
+                                draft,
+                                candidate,
+                                ReviewPipelineFindings.dropReasons(draft, critiqueRaw, critiqued))
+                        .forEach(onStatus);
             }
             onStatus.accept(validatedStatus(candidate.getLineComments().size(), draftCount));
         }

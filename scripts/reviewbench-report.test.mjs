@@ -93,7 +93,7 @@ function fixture(fn) {
             ],
           },
         ],
-        diagnostics: { [KEY]: { stages: [], dropped: [{ file: 'a.py', line: 14, message: 'dropped bound check' }] } },
+        diagnostics: { [KEY]: { stages: [], dropped: [{ file: 'a.py', line: 14, message: 'dropped bound check', reason: 'caller checks bounds' }] } },
       },
       {
         round: 2,
@@ -228,7 +228,10 @@ test('renderReport covers metrics, misses, false positives, and a baseline compa
     assert.match(report, /### Pull requests that gained recall/)
     assert.match(report, /1 never caught, 1 caught in only some rounds\. 1 had a critique-dropped finding/)
     assert.match(report, /#0 — high\/correctness, caught 0\/2/)
-    assert.match(report, /\*\*Dropped by critique\*\* \(round 1, line 14\): dropped bound check/)
+    assert.match(
+      report,
+      /\*\*Dropped by critique\*\* \(round 1, line 14\): dropped bound check Reason: caller checks bounds/,
+    )
     assert.match(report, /## False positives\n\n1 finding\(s\) across 2 round\(s\)/)
     assert.doesNotMatch(report, /\n{3,}/)
   })

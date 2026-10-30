@@ -24,7 +24,8 @@ guidance.
   JSON response contract appended by every finding-emitting stage.
 - `review/ReviewHygienePrompts.java`, `ReviewRulePrompts.java`, and `ReviewCritiquePrompts.java` -
   Recall-mode hygiene pass, review-rule selection and per-rule review, and self-critique (with
-  reviewer corroboration) prompts. Tests: `ReviewRulePromptsTest`, `ReviewCritiquePromptsTest`;
+  reviewer corroboration, and opt-in drop reasons) prompts. Tests: `ReviewRulePromptsTest`,
+  `ReviewCritiquePromptsTest`, `ReviewCritiquePromptsDropReasonsTest`;
   hygiene coverage lives in `ReviewPromptsRecallAndHistoryTest`.
 - `review/ReviewChatPrompts.java` - PR chat and focused-chat prompts; `CHAT_PERSONA` and
   `buildFocusedChatPrompt` are mirrored in `vscode-extension/src/claude.ts`. Tests:
@@ -32,7 +33,8 @@ guidance.
 - `review/DiffLineAnnotator.java` - New-side line-number annotation of unified diffs for prompts.
   Tests: `DiffLineAnnotatorTest`.
 - `review/ReviewResultParser.java` - Review JSON parsing, comment repair, and category validation
-  including compatibility findings. Tests: `ReviewResultParserTest`.
+  including compatibility findings, plus the critique's optional dropped-finding reasons. Tests:
+  `ReviewResultParserTest`, `ReviewResultParserDroppedReasonsTest`.
 - `review/CopilotService.java` - Copilot SDK execution with the same review API. Tests:
   `CopilotServiceTest` and `CopilotServiceCancellationTest`, sharing `CopilotServiceTestSupport`.
 - `review/CopilotSdkRuntime.java` - Seam over the official Copilot Java SDK: client and session
@@ -55,8 +57,8 @@ guidance.
   drive (first pass, later-stage prompt completions, cooperative cancellation), with Claude and
   Copilot adapters.
 - `review/ReviewPipelineFindings.java` - Post-validation bookkeeping: restores the hygiene and rule
-  findings validation dropped, reports dropped findings when asked, and strips reviewer labels no
-  candidate earned from rule findings. Tests: `ReviewPipelineFindingsTest`.
+  findings validation dropped, reports dropped findings and why when asked, and strips reviewer
+  labels no candidate earned from rule findings. Tests: `ReviewPipelineFindingsTest`.
 - `review/BaseCommitContext.java` - Trusted guidance files (configured globs, then defaults),
   changed-file commit history and textual call sites read only from the PR base commit's git
   objects, plus each changed `.proto` schema's delta against the diff's old side (merge base or

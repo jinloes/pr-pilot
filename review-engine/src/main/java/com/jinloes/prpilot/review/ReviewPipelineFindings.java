@@ -4,7 +4,9 @@ import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.ReviewResult;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
@@ -16,6 +18,12 @@ import org.apache.commons.lang3.StringUtils;
  */
 final class ReviewPipelineFindings {
     private static final int DROPPED_BODY_MAX_CHARS = 120;
+    static final String DROP_REASON_SEPARATOR = " — Reason: ";
+    static final String NO_DROP_REASON = "validation gave no reason";
+    static final String STILL_LOW_CONFIDENCE =
+            "validation left it at low confidence, so it was removed as unconfirmed";
+    static final String UNCONFIRMED_AFTER_FAILED_VALIDATION =
+            "unconfirmed low-confidence candidate removed because validation failed";
     // A validated finding this close to a hygiene finding, in the same category, already covers it.
     static final int HYGIENE_COVER_LINES = 2;
 
@@ -25,11 +33,11 @@ final class ReviewPipelineFindings {
      * Re-adds confirmed hygiene findings that validation dropped; review-rule findings are restored
      * the same way. The hygiene rules are mechanical (log level, attached exception, comment
      * wording), and the validator reliably discards them as low-value even when told to keep them,
-     * which loses exactly the findings production reviewers such as Mae report. A hygiene finding
-     * is kept unless it is low confidence, does not anchor to a changed line, or a validated
-     * finding of the same category already sits within {@link #HYGIENE_COVER_LINES} lines of it in
-     * the same file (the validator reworded or merged it), or a validated finding rewords it nearby
-     * ({@link FindingSimilarity}).
+     * which loses exactly the findings production code reviewers report. A hygiene finding is kept
+     * unless it is low confidence, does not anchor to a changed line, or a validated finding of the
+     * same category already sits within {@link #HYGIENE_COVER_LINES} lines of it in the same file
+     * (the validator reworded or merged it), or a validated finding rewords it nearby ({@link
+     * FindingSimilarity}).
      */
     static ReviewResult restoreHygieneFindings(
             ReviewResult validated, ReviewResult hygiene, InspectionManifest manifest) {
@@ -63,10 +71,12 @@ final class ReviewPipelineFindings {
 
     /**
      * One diagnostic status per draft finding whose file and line no longer appear after
-     * validation. Opt-in via {@link ReviewPipelineService#REPORT_DROPPED_PROPERTY} so recall
-     * benchmarks can tell a finding that was never produced from one validation discarded.
+     * validation, ending with {@code " — Reason: "} and why it went (see {@link #dropReasons}).
+     * Opt-in via {@link ReviewPipelineService#REPORT_DROPPED_PROPERTY} so recall benchmarks can
+     * tell a finding that was never produced from one validation discarded, and why.
      */
-    static List<String> droppedStatuses(ReviewResult draft, ReviewResult validated) {
+    static List<String> droppedStatuses(
+            ReviewResult draft, ReviewResult validated, Map<String, String> reasons) {
         Set<String> kept = new HashSet<>();
         for (LineComment comment : validated.getLineComments()) {
             kept.add(comment.getFile() + ":" + comment.getLine());
@@ -82,9 +92,40 @@ final class ReviewPipelineFindings {
                             + " — "
                             + StringUtils.abbreviate(
                                     StringUtils.normalizeSpace(comment.getBody()),
-                                    DROPPED_BODY_MAX_CHARS));
+                                    DROPPED_BODY_MAX_CHARS)
+                            + DROP_REASON_SEPARATOR
+                            + reasons.getOrDefault(location, NO_DROP_REASON));
         }
         return statuses;
+    }
+
+    /**
+     * Why each dropped draft finding went, keyed by {@code file:line}. The validator's own reasons
+     * come first; a comment it kept at low confidence was removed afterwards as unconfirmed. When
+     * validation failed ({@code critiqued} is null) only unconfirmed low-confidence draft comments
+     * can have been dropped.
+     */
+    static Map<String, String> dropReasons(
+            ReviewResult draft, String critiqueRaw, ReviewResult critiqued) {
+        if (critiqued == null) {
+            Map<String, String> reasons = new LinkedHashMap<>();
+            for (LineComment comment : draft.getLineComments()) {
+                if ("low".equals(comment.getConfidence())) {
+                    reasons.putIfAbsent(
+                            comment.getFile() + ":" + comment.getLine(),
+                            UNCONFIRMED_AFTER_FAILED_VALIDATION);
+                }
+            }
+            return reasons;
+        }
+        Map<String, String> reasons = ReviewResultParser.parseDroppedReasons(critiqueRaw);
+        for (LineComment comment : critiqued.getLineComments()) {
+            if ("low".equals(comment.getConfidence())) {
+                reasons.putIfAbsent(
+                        comment.getFile() + ":" + comment.getLine(), STILL_LOW_CONFIDENCE);
+            }
+        }
+        return reasons;
     }
 
     /**

@@ -7,7 +7,9 @@ import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewResult;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -26,6 +28,7 @@ final class ReviewResultParser {
 
     private static final int MAX_SUMMARY_CHARS = 800;
     private static final int MAX_RATIONALE_CHARS = 200;
+    private static final int MAX_DROP_REASON_CHARS = 300;
     static final int MAX_LINE_COMMENTS = 20;
     private static final Set<String> VALID_TYPES = Set.of("issue", "suggestion", "note");
     private static final Set<String> VALID_SEVERITIES = Set.of("blocker", "major", "minor", "nit");
@@ -63,26 +66,7 @@ final class ReviewResultParser {
 
     /** Parses a review keeping at most {@code maxComments} line comments in emission order. */
     static ReviewResult parseReview(String raw, int maxComments) throws IOException {
-        String json = raw.trim();
-
-        if (json.startsWith("```")) {
-            int newline = json.indexOf('\n');
-            int closing = json.lastIndexOf("```");
-            if (newline > 0 && closing > newline) {
-                json = json.substring(newline + 1, closing).trim();
-            }
-        }
-
-        int start = json.indexOf('{');
-        int end = json.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            json = json.substring(start, end + 1);
-        }
-
-        JsonNode root = JSON.readTree(json);
-        if (root == null || !root.isObject()) {
-            throw new IllegalArgumentException("review JSON is not an object");
-        }
+        JsonNode root = readObject(raw);
 
         JsonNode summaryNode = root.get("summary");
         if (summaryNode == null || !summaryNode.isTextual()) {
@@ -202,6 +186,67 @@ final class ReviewResultParser {
         result.setRationale(rationale);
         result.setSuggestedChange(optionalString(element, "suggestedChange"));
         return result;
+    }
+
+    /**
+     * The validator's stated reason for each finding it dropped, keyed by {@code file:line}, from
+     * the optional top-level {@code "droppedFindings"} array. Diagnostic only, so malformed output
+     * or entries yield an empty map or are skipped rather than failing the review.
+     */
+    static Map<String, String> parseDroppedReasons(String raw) {
+        Map<String, String> reasons = new LinkedHashMap<>();
+        if (raw == null) {
+            return reasons;
+        }
+        JsonNode entries;
+        try {
+            entries = readObject(raw).get("droppedFindings");
+        } catch (IOException | IllegalArgumentException malformed) {
+            return reasons;
+        }
+        if (entries == null || !entries.isArray()) {
+            return reasons;
+        }
+        for (JsonNode entry : entries) {
+            String file = optionalString(entry, "file");
+            JsonNode line = entry.get("line");
+            String reason = StringUtils.normalizeSpace(optionalString(entry, "reason"));
+            if (StringUtils.isBlank(file)
+                    || line == null
+                    || !line.canConvertToInt()
+                    || StringUtils.isBlank(reason)) {
+                continue;
+            }
+            reasons.putIfAbsent(
+                    file + ":" + line.intValue(),
+                    StringUtils.abbreviate(reason, MAX_DROP_REASON_CHARS));
+        }
+        return reasons;
+    }
+
+    /** The JSON object in raw model output, which may include markdown fences or prose. */
+    private static JsonNode readObject(String raw) throws IOException {
+        String json = raw.trim();
+
+        if (json.startsWith("```")) {
+            int newline = json.indexOf('\n');
+            int closing = json.lastIndexOf("```");
+            if (newline > 0 && closing > newline) {
+                json = json.substring(newline + 1, closing).trim();
+            }
+        }
+
+        int start = json.indexOf('{');
+        int end = json.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            json = json.substring(start, end + 1);
+        }
+
+        JsonNode root = JSON.readTree(json);
+        if (root == null || !root.isObject()) {
+            throw new IllegalArgumentException("review JSON is not an object");
+        }
+        return root;
     }
 
     private static LineComment dropComment(String reason) {

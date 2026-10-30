@@ -43,7 +43,7 @@ from the active profile's or default `reviewGuidanceGlobs`) are honored and addi
 built-in defaults: each becomes a
 literal pathspec prefix, so `..`, absolute, and wildcard-leading globs read nothing, and matches are
 read only from the base commit like every other guidance file. No repository-specific path is built
-in; a repo whose review rules live elsewhere (for example `.linkedin/ai-agent/*.md`) needs that glob
+in; a repo whose review rules live elsewhere (for example `.review/ai-agent/*.md`) needs that glob
 configured. Resolved base-commit guidance replaces host-supplied `repoGuidelines`; the host value
 (always blank today) is kept only when the base commit yields none.
 
@@ -172,7 +172,7 @@ misplaced doc comments, unreserved removed protobuf fields) with fixed type, cat
 Pass A also compares each new type against the existing sibling it mirrors, because a missing
 annotation or serialization convention is invisible from the diff alone. It also flags new or
 changed code that re-implements logic an existing base class or shared helper already provides,
-naming the type to reuse. On the Mae benchmark these were most of the misses, and the self-critique
+naming the type to reuse. On the recall benchmark these were most of the misses, and the self-critique
 pass is told they are not style findings so it keeps them. In recall mode (self-critique or a second
 reviewer) the review prompt runs only passes A and B and tells the model to read every changed file
 in full and look up each new or changed symbol's definition; the hygiene rules move to a dedicated
@@ -181,14 +181,19 @@ passes and before the critique. Bundling them into the main prompt let the seman
 them out. Its findings are anchor-validated against the diff and merged into the draft, but the
 critique's judgement does not remove them: after validation the pipeline restores every anchored,
 non-low-confidence hygiene finding the critique dropped unless a kept finding of the same category
-sits within two lines of it (`ReviewPipelineFindings.restoreHygieneFindings`). On the Mae benchmark
+sits within two lines of it (`ReviewPipelineFindings.restoreHygieneFindings`). On the recall benchmark
 the critic discarded confirmed hot-path and exception-logging findings in every run despite being
 told to keep them, so the critique can only reword or deduplicate them. A failed hygiene pass
 reports a status and the review continues without it. Deep reviews carry the pinned semantic
 sections into the hygiene prompt too, because every deep-review provider call must see the same
 trusted evidence. With the JVM property `prpilot.review.reportDropped=true`, the pipeline emits one
-`Validation dropped finding at <file>:<line> — <body>` status per draft finding the critique
-removed; the recall benchmark sets it to tell a never-raised finding from one validation discarded.
+`Validation dropped finding at <file>:<line> — <body> — Reason: <reason>` status per draft finding
+the critique removed; the recall benchmark sets it to tell a never-raised finding from one
+validation discarded, and why. Only then does the critique prompt also ask for a top-level
+`droppedFindings` array of `{file, line, reason}`, so production reviews keep the output contract
+and token cost unchanged. The reason is the validator's own when it gave one, otherwise that the
+comment stayed at low confidence (or was an unconfirmed candidate when validation failed), and
+otherwise `validation gave no reason`. Parsing it never fails the review.
 Both the merge instruction and the self-critique dedupe rule treat the same problem at separate code
 sites as separate findings; without that, a repeated rule violation collapsed to one comment. The
 output contract tells the model to anchor each comment on the exact offending statement rather than

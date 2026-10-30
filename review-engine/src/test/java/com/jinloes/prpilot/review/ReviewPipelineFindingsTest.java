@@ -5,10 +5,12 @@ import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.fileDiff;
 import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.result;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.ReviewResult;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -234,7 +236,7 @@ class ReviewPipelineFindingsTest {
     @Nested
     class DroppedStatuses {
         @Test
-        void droppedStatusesSkipKeptLocationsDeduplicateAndAbbreviate() {
+        void droppedStatusesSkipKeptLocationsDeduplicateAbbreviateAndAppendReasons() {
             String longBody = "word ".repeat(60);
             ReviewResult draft =
                     result(
@@ -244,22 +246,86 @@ class ReviewPipelineFindingsTest {
                             comment("src/B.java", 9, "high", longBody));
             ReviewResult validated = result(comment("src/A.java", 1, "high", "Kept."));
 
-            List<String> statuses = ReviewPipelineFindings.droppedStatuses(draft, validated);
+            List<String> statuses =
+                    ReviewPipelineFindings.droppedStatuses(
+                            draft, validated, Map.of("src/A.java:4", "Contradicted by load()."));
 
             assertThat(statuses).hasSize(2);
             assertThat(statuses.get(0))
-                    .isEqualTo("Validation dropped finding at src/A.java:4 — First dropped.");
+                    .isEqualTo(
+                            "Validation dropped finding at src/A.java:4 — First dropped."
+                                    + " — Reason: Contradicted by load().");
             assertThat(statuses.get(1))
                     .startsWith("Validation dropped finding at src/B.java:9 — word word")
-                    .endsWith("...");
-            assertThat(statuses.get(1).substring(statuses.get(1).indexOf("— ") + 2)).hasSize(120);
+                    .endsWith("... — Reason: " + ReviewPipelineFindings.NO_DROP_REASON);
+            String body =
+                    statuses.get(1)
+                            .substring(
+                                    statuses.get(1).indexOf("— ") + 2,
+                                    statuses.get(1)
+                                            .indexOf(ReviewPipelineFindings.DROP_REASON_SEPARATOR));
+            assertThat(body).hasSize(120);
         }
 
         @Test
         void droppedStatusesAreEmptyWhenEverythingIsKept() {
             ReviewResult draft = result(comment("src/A.java", 1, "high", "Kept."));
 
-            assertThat(ReviewPipelineFindings.droppedStatuses(draft, draft)).isEmpty();
+            assertThat(ReviewPipelineFindings.droppedStatuses(draft, draft, Map.of())).isEmpty();
+        }
+    }
+
+    @Nested
+    class DropReasons {
+        private static final ObjectMapper JSON = new ObjectMapper();
+
+        @Test
+        void usesTheValidatorsReasonsAndMarksCommentsItLeftAtLowConfidence() throws Exception {
+            ReviewResult draft =
+                    result(
+                            comment("src/A.java", 4, "high", "Dropped."),
+                            comment("src/A.java", 7, "low", "Candidate."));
+            ReviewResult critiqued =
+                    result(
+                            comment("src/A.java", 7, "low", "Candidate."),
+                            comment("src/A.java", 9, "low", "Also low."));
+            String raw =
+                    JSON.writeValueAsString(
+                            Map.of(
+                                    "summary",
+                                    "s",
+                                    "lineComments",
+                                    List.of(),
+                                    "droppedFindings",
+                                    List.of(
+                                            Map.of(
+                                                    "file", "src/A.java",
+                                                    "line", 4,
+                                                    "reason", "Contradicted."),
+                                            Map.of(
+                                                    "file", "src/A.java",
+                                                    "line", 9,
+                                                    "reason", "Validator reason wins."))));
+
+            assertThat(ReviewPipelineFindings.dropReasons(draft, raw, critiqued))
+                    .containsOnly(
+                            Map.entry("src/A.java:4", "Contradicted."),
+                            Map.entry("src/A.java:9", "Validator reason wins."),
+                            Map.entry("src/A.java:7", ReviewPipelineFindings.STILL_LOW_CONFIDENCE));
+        }
+
+        @Test
+        void blamesFailedValidationForUnconfirmedLowConfidenceDraftComments() {
+            ReviewResult draft =
+                    result(
+                            comment("src/A.java", 4, "high", "Kept."),
+                            comment("src/A.java", 7, "low", "Candidate."));
+
+            assertThat(ReviewPipelineFindings.dropReasons(draft, null, null))
+                    .containsOnly(
+                            Map.entry(
+                                    "src/A.java:7",
+                                    ReviewPipelineFindings.UNCONFIRMED_AFTER_FAILED_VALIDATION));
         }
     }
 }

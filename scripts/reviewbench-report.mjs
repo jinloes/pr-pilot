@@ -331,7 +331,11 @@ export function renderReport({ run, golden, baseline, window = DEFAULT_WINDOW })
         '',
       )
       for (const d of m.droppedNearby) {
-        out.push(`- **Dropped by critique** (round ${d.round}, line ${d.line}): ${clip(d.message)}`)
+        out.push(
+          `- **Dropped by critique** (round ${d.round}, line ${d.line}): ${clip(d.message)}${
+            d.reason ? ` Reason: ${clip(d.reason)}` : ''
+          }`,
+        )
       }
       for (const o of m.nearby) {
         out.push(`- Ours, ${o.status} (round ${o.round}, line ${o.line}): ${clip(o.message)}`)

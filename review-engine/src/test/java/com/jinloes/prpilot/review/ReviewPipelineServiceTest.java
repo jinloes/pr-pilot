@@ -70,7 +70,15 @@ class ReviewPipelineServiceTest {
                             provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer())
                     .review(request, false, false, false, status::add, null);
 
-            assertThat(status).anySatisfy(line -> assertThat(line).startsWith("Rules: 3 loaded"));
+            assertThat(status)
+                    .anySatisfy(
+                            line ->
+                                    assertThat(line)
+                                            .startsWith(
+                                                    "Rules: "
+                                                            + LocalReviewRules.BUILT_IN_RULE_FILES
+                                                                    .size()
+                                                            + " loaded"));
             assertThat(provider.callOrder).startsWith("review", "rule-selection");
         }
 

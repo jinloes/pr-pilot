@@ -125,6 +125,25 @@ final class ReviewCritiquePrompts {
                     + " diff contradicts it.\n";
 
     /**
+     * Appended only when dropped findings are being reported, so production reviews keep the output
+     * contract unchanged and do not pay for the extra field.
+     */
+    static final String DROP_REASONS_DIRECTIVE =
+            "Also add a top-level \"droppedFindings\" array to the JSON: one object per"
+                    + " <draft_review> comment you drop or merge into another, with the draft"
+                    + " comment's \"file\" and \"line\" and a one-sentence \"reason\" naming the"
+                    + " evidence that failed (for example, the code that contradicts it or the"
+                    + " comment it duplicates). Omit kept comments. This field does not change"
+                    + " which comments you keep.\n";
+
+    /**
+     * {@link #buildCritiquePrompt(PRReviewRequest, ReviewResult, boolean)} without drop reasons.
+     */
+    public static String buildCritiquePrompt(PRReviewRequest request, ReviewResult draft) {
+        return buildCritiquePrompt(request, draft, false);
+    }
+
+    /**
      * Builds the self-critique prompt: a lean validation preamble plus the shared {@link
      * #OUTPUT_CONTRACT}, the PR metadata, the same context sections the first pass saw, the
      * annotated diff needed to re-verify line numbers and symbols, the first-pass review as {@code
@@ -132,9 +151,11 @@ final class ReviewCritiquePrompts {
      * ReviewPrompts#buildPrompt} it drops the full fresh-review narrative so the second pass does
      * not pay to resend the entire first-pass framing — but it keeps the context, because a
      * validator that cannot see the repo guideline or focus area behind a finding will read that
-     * finding as unsupported and drop it.
+     * finding as unsupported and drop it. {@code reportDropped} also asks for a reason per dropped
+     * comment ({@link #DROP_REASONS_DIRECTIVE}).
      */
-    public static String buildCritiquePrompt(PRReviewRequest request, ReviewResult draft) {
+    static String buildCritiquePrompt(
+            PRReviewRequest request, ReviewResult draft, boolean reportDropped) {
         StringBuilder prompt =
                 new StringBuilder(CRITIQUE_PREAMBLE).append(ReviewOutputContract.OUTPUT_CONTRACT);
         ReviewPrompts.appendPrMetadata(prompt, request.getPr());
@@ -146,6 +167,9 @@ final class ReviewCritiquePrompts {
                 .append(CRITIQUE_DIRECTIVE);
         if (draft.getLineComments().stream().anyMatch(ReviewCritiquePrompts::corroborated)) {
             prompt.append(CORROBORATION_DIRECTIVE);
+        }
+        if (reportDropped) {
+            prompt.append(DROP_REASONS_DIRECTIVE);
         }
         return prompt.toString();
     }

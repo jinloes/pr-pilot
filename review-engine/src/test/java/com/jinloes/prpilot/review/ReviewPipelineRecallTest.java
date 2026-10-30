@@ -8,7 +8,6 @@ import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.pass;
 import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.pipeline;
 import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.request;
 import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.result;
-import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.reviewJson;
 import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.withSecondary;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -123,17 +122,33 @@ class ReviewPipelineRecallTest {
                     .review(request(oneRiskyHunk()), false, true, false, statuses::add, null);
 
             assertThat(statuses).noneMatch(status -> status.startsWith("Validation dropped"));
+            assertThat(provider.completeCalls.get(0).prompt())
+                    .doesNotContain(ReviewCritiquePrompts.DROP_REASONS_DIRECTIVE);
         }
 
         @Test
-        void reportsEachDroppedFindingWhenAskedTo() throws Exception {
+        void reportsEachDroppedFindingWithTheValidatorsReasonWhenAskedTo() throws Exception {
             FakeProvider provider = new FakeProvider();
             provider.primaryResult =
                     pass(
                             result(
                                     comment("src/A.java", 1, "high", "Kept."),
                                     comment("src/A.java", 3, "high", "Dropped.")));
-            provider.completions.add(reviewJson(comment("src/A.java", 1, "high", "Kept.")));
+            provider.completions.add(
+                    JSON.writeValueAsString(
+                            Map.of(
+                                    "summary",
+                                    "validated",
+                                    "verdict",
+                                    "COMMENT",
+                                    "lineComments",
+                                    List.of(comment("src/A.java", 1, "high", "Kept.")),
+                                    "droppedFindings",
+                                    List.of(
+                                            Map.of(
+                                                    "file", "src/A.java",
+                                                    "line", 3,
+                                                    "reason", "The caller already checks it.")))));
             List<String> statuses = new ArrayList<>();
             System.setProperty(ReviewPipelineService.REPORT_DROPPED_PROPERTY, "true");
             try {
@@ -143,13 +158,15 @@ class ReviewPipelineRecallTest {
                 System.clearProperty(ReviewPipelineService.REPORT_DROPPED_PROPERTY);
             }
 
+            String dropped =
+                    "Validation dropped finding at src/A.java:3 — Dropped."
+                            + " — Reason: The caller already checks it.";
             assertThat(statuses)
                     .filteredOn(status -> status.startsWith("Validation dropped"))
-                    .containsExactly("Validation dropped finding at src/A.java:3 — Dropped.");
-            assertThat(statuses)
-                    .containsSubsequence(
-                            "Validation dropped finding at src/A.java:3 — Dropped.",
-                            "Validation kept 1 of 2 findings");
+                    .containsExactly(dropped);
+            assertThat(statuses).containsSubsequence(dropped, "Validation kept 1 of 2 findings");
+            assertThat(provider.completeCalls.get(0).prompt())
+                    .contains(ReviewCritiquePrompts.DROP_REASONS_DIRECTIVE);
         }
 
         @Test
