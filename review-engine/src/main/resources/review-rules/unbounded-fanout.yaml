@@ -1,0 +1,49 @@
+name: unbounded-fanout
+description: >-
+  Flags code where one unit of work (a request, handler, transaction, batch, message, or workflow
+  turn) does work per element of a collection whose size grows with input, when the largest
+  allowed size can overrun a fixed budget that unit has, such as a deadline, a payload or
+  transaction size, or a workflow history limit.
+trigger: >-
+  The PR adds or changes a loop, stream, or bulk operation that makes a remote call, sends a
+  signal, message, or event, writes a row, starts a task or child workflow, or schedules a timer
+  per element, inside a single request handler, RPC, transaction, batch call, message, job step,
+  or workflow method, signal, query, or update handler.
+prompt: |
+  Find per-element fan-out whose worst case can overrun a fixed budget of the unit doing it.
+
+  1. In <pr_diff>, list every added or changed place that does per-element work inside one unit
+     of work: a remote call (RPC, REST, client), a signal, message, or event sent, a row or
+     document written, a task, child workflow, activity, or timer started, or an item added to a
+     single batch, request, or message. Record which unit runs it (a request handler, a
+     transaction, one batch call, one message, a workflow step or an Update or signal handler)
+     and what collection drives it. Include work in nested loops, and work spread across
+     sibling loops in the same unit, since the total is what matters.
+  2. Find the largest size that collection can reach. Read where it comes from (request fields,
+     query results, a job manifest, members or accounts of an entity) and look for caps: request
+     validation, page sizes, config limits, constants such as MAX_ROWS, or documented limits in
+     the proto or Javadoc. Use Grep on the cap name to confirm it is enforced on this path.
+     Record "unbounded" when nothing limits it.
+  3. Identify the budget the unit actually has. Examples: a request or RPC deadline or timeout;
+     a downstream rate limit or connection pool; a database transaction, lock, or statement
+     size; a maximum batch size, message size, or payload size (for example Kafka message or
+     gRPC message limits); and an event-sourced workflow's history length, history size, or
+     per-turn command budget (for example Temporal, Cadence, or Durable Functions, where
+     Continue-As-New or an equivalent only runs at specific points). Read the framework calls
+     and config in the repository to confirm which budget applies.
+  4. Report a finding only when the maximum from step 2 (including "unbounded") can plausibly
+     overrun the budget from step 3, for example 5,000 rows times one signal each in a single
+     workflow Update when history is limited and cannot be reset mid-Update. Do not report when
+     the size is small and fixed, when the work is already batched, paged, chunked, rate limited,
+     or spread across separate units (separate requests, child workflows, later turns, queued
+     jobs), or when the only concern is general efficiency with no budget at risk.
+
+  Anchor each finding on the line inside the loop that performs the per-element work. Use type
+  "issue", category "performance", severity "major" when exceeding the budget fails or wedges
+  the operation (a terminated or stuck workflow, a rejected oversized message or transaction),
+  otherwise "minor". In the body, name the unit, the collection and its maximum size with where
+  that maximum comes from, the budget and its limit, and what happens when it is exceeded; then
+  suggest a fix such as batching, capping with a clear error, paging across turns or requests,
+  or moving the fan-out into a child task that can checkpoint. In "rationale", cite the paths
+  you read for the maximum size and for the budget. Do not report when your reading did not
+  establish both a growing collection and a concrete budget it can exceed.

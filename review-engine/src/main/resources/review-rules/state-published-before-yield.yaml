@@ -1,0 +1,48 @@
+name: state-published-before-yield
+description: >-
+  Flags handlers that record shared state another caller trusts as "done" (a last command, a
+  status, a processed flag, an idempotency key, a cache entry) and then yield or await before the
+  work that state promises has finished, so a concurrent caller can act on the half-finished
+  state.
+trigger: >-
+  The PR adds or changes a handler that both writes shared mutable state and then waits or yields
+  before returning: async or reactive request handlers (await, CompletableFuture or Promise
+  chains, suspend functions), workflow update, signal, or query handlers that await activities,
+  signals, timers, or conditions, actor or message handlers, idempotency or deduplication logic,
+  or caches and memoization filled from asynchronous work.
+prompt: |
+  Find shared state that is published before the work it vouches for has finished, so a
+  concurrent caller that reads it at an interleaving point wrongly concludes the work is done.
+
+  1. In <pr_diff>, list every added or changed handler that writes shared state (fields of a
+     workflow, actor, service, or singleton; a database row; a cache or idempotency entry) and
+     then yields before returning. A yield is any await, Promise or future `get`/`join` inside
+     a workflow, `Workflow.await`, `Workflow.sleep`, activity or child-workflow call, signal
+     send, suspend call, reactive operator boundary, or lock release. Note the state written,
+     the yield that follows it, and the work still outstanding at that yield.
+  2. Find who reads that state concurrently. Use Grep for the field or key across the class and
+     its callers. Look for other entry points that can run while the first handler is suspended:
+     a second invocation of the same handler (retries, duplicate requests, repeated commands),
+     other update, signal, or query handlers of the same workflow or actor, other request
+     threads, or background jobs. Confirm the framework actually interleaves them at that yield
+     (for example, Temporal runs other Update and signal handlers whenever a handler awaits;
+     an async web server serves other requests during an await).
+  3. Report a finding only when all of these are concrete: the state written, the yield after
+     it, the concurrent entry point that reads it during the yield, and the wrong conclusion that
+     reader draws, such as returning "already applied" or "idempotent" success, skipping
+     required work, or serving an incomplete value, and what then goes wrong (for example, a
+     caller told an abort took effect while a downstream system still accepts work). Do not
+     report when the reader waits for completion (for example it awaits the same in-flight
+     future or a completion condition), when the state is written only after the work finishes,
+     when a lock or single-threaded section covers the whole operation, or when acting on the
+     intermediate state is harmless.
+
+  Anchor each finding on the line that publishes the state, or on the early return in the
+  concurrent reader when that is where the wrong conclusion is made. Use type "issue", category
+  "correctness", severity "major" when the wrong conclusion is reported to a caller or lets an
+  irreversible action proceed, otherwise "minor". In the body, name the state, the yield, the
+  concurrent entry point, and the outcome, and suggest a fix: publish the state only after the
+  work completes, have repeated callers wait on the in-flight operation or a completion
+  condition, or record an explicit in-progress state that readers treat as not done. In
+  "rationale", cite the paths and lines you read for the writer, the yield, and the concurrent
+  reader. Do not report speculative interleavings your reading did not establish.

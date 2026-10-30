@@ -58,7 +58,9 @@ final class LocalReviewRules {
             List.of(
                     "helper-reuse.yaml",
                     "telemetry-default-semantics.yaml",
-                    "ambiguous-delimiter.yaml");
+                    "ambiguous-delimiter.yaml",
+                    "unbounded-fanout.yaml",
+                    "state-published-before-yield.yaml");
 
     static final String BUILT_IN_SOURCE_PREFIX = "built-in/";
 

@@ -221,14 +221,20 @@ class LocalReviewRulesTest {
             assertThat(builtIn)
                     .extracting(Rule::name)
                     .containsExactly(
-                            "helper-reuse", "telemetry-default-semantics", "ambiguous-delimiter");
+                            "helper-reuse",
+                            "telemetry-default-semantics",
+                            "ambiguous-delimiter",
+                            "unbounded-fanout",
+                            "state-published-before-yield");
             assertThat(builtIn).allSatisfy(rule -> assertThat(rule.structured()).isTrue());
             assertThat(builtIn)
                     .extracting(Rule::source)
                     .containsExactly(
                             "built-in/helper-reuse.yaml",
                             "built-in/telemetry-default-semantics.yaml",
-                            "built-in/ambiguous-delimiter.yaml");
+                            "built-in/ambiguous-delimiter.yaml",
+                            "built-in/unbounded-fanout.yaml",
+                            "built-in/state-published-before-yield.yaml");
         }
 
         @Test
@@ -253,6 +259,8 @@ class LocalReviewRulesTest {
                             "helper-reuse",
                             "telemetry-default-semantics",
                             "ambiguous-delimiter",
+                            "unbounded-fanout",
+                            "state-published-before-yield",
                             "team");
         }
 
@@ -261,7 +269,11 @@ class LocalReviewRulesTest {
             assertThat(LocalReviewRules.load(null, true))
                     .extracting(Rule::name)
                     .containsExactly(
-                            "helper-reuse", "telemetry-default-semantics", "ambiguous-delimiter");
+                            "helper-reuse",
+                            "telemetry-default-semantics",
+                            "ambiguous-delimiter",
+                            "unbounded-fanout",
+                            "state-published-before-yield");
         }
 
         @Test
@@ -283,9 +295,13 @@ class LocalReviewRulesTest {
             assertThat(loaded)
                     .extracting(Rule::name)
                     .containsExactly(
-                            "telemetry-default-semantics", "ambiguous-delimiter", "helper-reuse");
-            assertThat(loaded.get(2).source()).isEqualTo("mine.yaml");
-            assertThat(loaded.get(2).trigger()).isEqualTo("my trigger");
+                            "telemetry-default-semantics",
+                            "ambiguous-delimiter",
+                            "unbounded-fanout",
+                            "state-published-before-yield",
+                            "helper-reuse");
+            assertThat(loaded.get(4).source()).isEqualTo("mine.yaml");
+            assertThat(loaded.get(4).trigger()).isEqualTo("my trigger");
         }
 
         @Test
@@ -294,7 +310,11 @@ class LocalReviewRulesTest {
 
             assertThat(LocalReviewRules.load(rules.toString(), true))
                     .extracting(Rule::name)
-                    .containsExactly("helper-reuse", "ambiguous-delimiter");
+                    .containsExactly(
+                            "helper-reuse",
+                            "ambiguous-delimiter",
+                            "unbounded-fanout",
+                            "state-published-before-yield");
         }
 
         @Test
@@ -307,6 +327,8 @@ class LocalReviewRulesTest {
                             "helper-reuse",
                             "telemetry-default-semantics",
                             "ambiguous-delimiter",
+                            "unbounded-fanout",
+                            "state-published-before-yield",
                             "helper-reuse.md");
         }
     }
