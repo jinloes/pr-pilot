@@ -225,7 +225,7 @@ or tokens are written to disk.
 | `reviewBuiltInRules` | `true` | Runs the review rules bundled with PR Pilot |
 | `reviewSecondReviewerModel` | `""` | Parallel Copilot second reviewer; blank disables it |
 | `experimentalIntellijAssistedReview` | `false` | IntelliJ-assisted review opt-in |
-| `reviewGuidanceGlobs` | `""` (hidden) | Base-commit guidance globs; in neither settings UI |
+| `reviewGuidanceGlobs` | `[]` | Base-commit guidance globs; VS Code settings view only |
 
 ## Local data files
 

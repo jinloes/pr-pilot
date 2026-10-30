@@ -187,7 +187,14 @@ test('buildSettingsHtml renders reusable review-guidance profile controls', () =
     assert.match(html, /activeProfileId: activeGuidanceProfileId/);
     assert.match(html, /msg\.requestId !== latestSaveRequestId/);
     assert.doesNotMatch(html, /save\('activeReviewGuidanceProfileId'/);
-    assert.doesNotMatch(html, /id="guidanceGlobs"/);
+    assert.match(html, /<label for="guidanceGlobs">Repository guidance files<\/label>/);
+    assert.match(html, /<textarea id="guidanceGlobs"[^>]*aria-describedby="guidanceGlobsHint"/);
+    assert.match(html, /Read from the pull request's base commit/);
+    assert.ok(
+        html.indexOf('id="guidanceGlobs"') > html.indexOf('id="customInstructions"')
+            && html.indexOf('id="guidanceGlobs"') < html.indexOf('id="repositoryInstructionsRepo"'),
+        'guidance files sit with the profile fields, before remembered repository instructions',
+    );
     assert.doesNotMatch(html, /guidance-file selections remain inactive/);
     assert.match(html, /profile \? profile\.guidanceGlobs/);
     assert.match(html, /id="profileNameDialog".*role="dialog"/);

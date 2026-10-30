@@ -208,6 +208,13 @@
           },
           "markdownDescription": "Review instructions PR Pilot remembers per repository, keyed by lowercase `owner/repo`. They are added to every review of that repository, ahead of the per-review or default custom instructions. Add them from a review's instructions with **Remember for this repository**, and edit or forget them in the PR Pilot settings view."
         },
+        "pr-pilot.reviewGuidanceGlobs": {
+          "type": "array",
+          "default": [],
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 500 },
+          "markdownDescription": "Extra repository guidance files added to every review prompt, as paths or globs relative to the repository root (for example `.review/ai-agent/*.md`). Files are read from the pull request's base commit, never from the PR branch, so a PR cannot change its own review rules. Added to the built-in guidance (`AGENTS.md`, `CLAUDE.md`, contributing and PR-template files). An active review-guidance profile uses its own list instead."
+        },
         "pr-pilot.reviewGuidanceProfiles": {
           "type": "array",
           "default": [],

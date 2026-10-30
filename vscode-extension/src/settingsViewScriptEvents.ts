@@ -74,6 +74,7 @@ export function buildSettingsScriptEvents(): string {
   }
   $('focusAreas').addEventListener('change', () => saveGuidanceField('reviewFocusAreas'));
   $('customInstructions').addEventListener('change', () => saveGuidanceField('reviewCustomInstructions'));
+  $('guidanceGlobs').addEventListener('change', () => saveGuidanceField('reviewGuidanceGlobs'));
   $('repositoryInstructionsRepo').addEventListener('change', (event) => {
     selectedRepository = event.target.value;
     renderRepositoryInstructions();

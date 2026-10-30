@@ -59,7 +59,7 @@ function readState(notificationHealth: NotificationHealth = EMPTY_NOTIFICATION_H
 const ALLOWED_KEYS = new Set([
     'reviewProvider', 'reviewModel', 'reviewModelCopilot', 'reviewEffort', 'githubBaseUrl',
     'copilotInheritMcp', 'copilotAutoEnableMcpOnReview', 'copilotConfigDir', 'reviewFocusAreas',
-    'reviewCustomInstructions', 'reviewGuidanceProfiles',
+    'reviewCustomInstructions', 'reviewGuidanceGlobs', 'reviewGuidanceProfiles',
     'activeReviewGuidanceProfileId', 'repositoryReviewInstructions', 'reviewSelfCritique', 'reviewSupervisorEnabled',
     'reviewSecondReviewerModel', 'reviewRulesDirectory', 'reviewBuiltInRules',
     'experimentalIntellijAssistedReview',
@@ -152,6 +152,17 @@ async function persistSetting(webview: vscode.Webview, msg: SettingsMessage): Pr
                 return;
             }
             await config().update(key, profiles, vscode.ConfigurationTarget.Global);
+            postSaveResult(webview, msg, key, true, 'Saved.');
+            return;
+        }
+        if (key === 'reviewGuidanceGlobs') {
+            const globs = normalizeReviewGuidanceGlobs(msg.value);
+            if (globs === null) {
+                postSaveResult(webview, msg, key, false,
+                    'Guidance files are limited to 100 entries of 500 characters each.');
+                return;
+            }
+            await config().update(key, globs, vscode.ConfigurationTarget.Global);
             postSaveResult(webview, msg, key, true, 'Saved.');
             return;
         }

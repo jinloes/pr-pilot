@@ -170,12 +170,18 @@ export function buildSettingsScriptHelpers(baseUrlError: string, profileNameErro
     return guidanceProfiles.find((profile) => profile.id === activeGuidanceProfileId) || null;
   }
 
+  function guidanceGlobLines() {
+    return $('guidanceGlobs').value
+      .split('\\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '');
+  }
+
   function guidanceValues() {
-    const profile = activeGuidanceProfile();
     return {
       focusAreas: $('focusAreas').value.trim(),
       customInstructions: $('customInstructions').value.trim(),
-      guidanceGlobs: [...(profile ? profile.guidanceGlobs : (state.reviewGuidanceGlobs || []))],
+      guidanceGlobs: guidanceGlobLines(),
     };
   }
 
@@ -203,6 +209,7 @@ export function buildSettingsScriptHelpers(baseUrlError: string, profileNameErro
     const profile = activeGuidanceProfile();
     $('focusAreas').value = profile ? profile.focusAreas : (state.reviewFocusAreas || '');
     $('customInstructions').value = profile ? profile.customInstructions : (state.reviewCustomInstructions || '');
+    $('guidanceGlobs').value = (profile ? profile.guidanceGlobs : (state.reviewGuidanceGlobs || [])).join('\\n');
   }
 
   function saveGuidanceField(defaultKey) {
@@ -215,6 +222,7 @@ export function buildSettingsScriptHelpers(baseUrlError: string, profileNameErro
     }
     if (defaultKey === 'reviewFocusAreas') state.reviewFocusAreas = values.focusAreas;
     if (defaultKey === 'reviewCustomInstructions') state.reviewCustomInstructions = values.customInstructions;
+    if (defaultKey === 'reviewGuidanceGlobs') state.reviewGuidanceGlobs = values.guidanceGlobs;
     save(defaultKey, state[defaultKey]);
   }
 

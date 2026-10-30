@@ -108,7 +108,17 @@ test('experimentalIntellijAssistedReview defaults to off and matches the reader 
 
 test('review-guidance profile settings default to the built-in profile', () => {
     const properties = packageJsonDefaults();
-    assert.equal(properties['pr-pilot.reviewGuidanceGlobs'], undefined);
+    const globs = properties['pr-pilot.reviewGuidanceGlobs'] as {
+        type: string; default: unknown[]; maxItems: number;
+        items: { type: string; maxLength: number }; markdownDescription: string;
+    };
+    assert.equal(globs.type, 'array');
+    assert.deepEqual(globs.default, []);
+    assert.equal(globs.maxItems, 100);
+    assert.deepEqual(globs.items, { type: 'string', maxLength: 500 });
+    assert.match(globs.markdownDescription, /base commit/);
+    assert.match(fs.readFileSync(path.join(extensionRoot, 'src', 'settings.ts'), 'utf8'),
+        /c\.get<unknown>\('reviewGuidanceGlobs', \[\]\)/);
     const profiles = properties['pr-pilot.reviewGuidanceProfiles'] as {
         default: unknown[];
         maxItems: number;

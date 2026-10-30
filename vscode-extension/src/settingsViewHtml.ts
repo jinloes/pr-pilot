@@ -143,7 +143,7 @@ ${SETTINGS_VIEW_STYLES}
         <button id="renameGuidanceProfile" class="secondary">Rename</button>
         <button id="deleteGuidanceProfile" class="secondary">Delete</button>
       </div>
-      <div class="hint">Save and reuse focus areas and custom instructions.</div>
+      <div class="hint">Save and reuse focus areas, custom instructions, and guidance files.</div>
     </div>
 
     <div class="field">
@@ -156,6 +156,12 @@ ${SETTINGS_VIEW_STYLES}
       <label for="customInstructions">Custom review instructions</label>
       <textarea id="customInstructions" rows="3" placeholder="Extra instructions appended to every review prompt (for example team conventions to enforce)."></textarea>
       <div class="hint">Plain text. Use this for conventions or repeated review guidance.</div>
+    </div>
+
+    <div class="field">
+      <label for="guidanceGlobs">Repository guidance files</label>
+      <textarea id="guidanceGlobs" rows="3" placeholder=".review/ai-agent/*.md" aria-describedby="guidanceGlobsHint"></textarea>
+      <div class="hint" id="guidanceGlobsHint">One path or glob per line, relative to the repository root. Read from the pull request's base commit, so a PR cannot change its own review rules. Added to AGENTS.md, CLAUDE.md, and contributing files.</div>
     </div>
 
     <div class="field">

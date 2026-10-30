@@ -170,6 +170,41 @@ function postedUpdates(posted: Array<Record<string, unknown>>) {
         && message.key === 'repositoryReviewInstructions').map((message) => message.value))) as unknown[];
 }
 
+test('the guidance files field loads and saves the default glob list one entry per line', () => {
+    const { element, posted, deliver } = runSettingsScript();
+    deliver({ type: 'init', state: { ...initState({}), reviewGuidanceGlobs: ['.review/ai-agent/*.md', 'docs/review.md'] } });
+    assert.equal(element('guidanceGlobs').value, '.review/ai-agent/*.md\ndocs/review.md');
+
+    element('guidanceGlobs').value = '  .review/ai-agent/proto-api-guide.md \n\n docs/review.md\n';
+    element('guidanceGlobs').dispatch('change');
+
+    const update = posted.filter((message) => message.type === 'update' && message.key === 'reviewGuidanceGlobs');
+    assert.deepEqual(JSON.parse(JSON.stringify(update.map((message) => message.value))),
+        [['.review/ai-agent/proto-api-guide.md', 'docs/review.md']]);
+});
+
+test('the guidance files field edits the active profile instead of the defaults', () => {
+    const { element, posted, deliver } = runSettingsScript();
+    const profile = { id: 'p1', name: 'Proto', focusAreas: '', customInstructions: '', guidanceGlobs: ['a.md'] };
+    deliver({ type: 'init', state: {
+        ...initState({}), reviewGuidanceGlobs: ['default.md'], reviewGuidanceProfiles: [profile],
+        activeReviewGuidanceProfileId: 'p1',
+    } });
+    assert.equal(element('guidanceGlobs').value, 'a.md');
+
+    element('guidanceGlobs').value = 'a.md\nb.md';
+    element('guidanceGlobs').dispatch('change');
+
+    assert.equal(posted.some((message) => message.type === 'update' && message.key === 'reviewGuidanceGlobs'), false);
+    const saved = posted.filter((message) => message.type === 'updateReviewGuidanceState');
+    const profiles = JSON.parse(JSON.stringify(saved[saved.length - 1].profiles)) as Array<{ guidanceGlobs: string[] }>;
+    assert.deepEqual(profiles[0].guidanceGlobs, ['a.md', 'b.md']);
+
+    element('guidanceProfile').value = '';
+    element('guidanceProfile').dispatch('change');
+    assert.equal(element('guidanceGlobs').value, 'default.md');
+});
+
 test('buildSettingsHtml renders the remembered repository instructions editor under Review guidance', () => {
     const html = buildSettingsHtml('csp', 'n');
     const guidance = html.slice(html.indexOf('>Review guidance<'), html.indexOf('>Review validation<'));

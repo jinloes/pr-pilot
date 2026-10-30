@@ -3,8 +3,7 @@
 Full semantics of the persisted settings summarized in
 [ARCHITECTURE.md](../../ARCHITECTURE.md#settings-persistence). IntelliJ stores them in
 `PluginSettings` (`claudeReviews.xml`). VS Code contributes each as `pr-pilot.<name>` in
-`vscode-extension/package.json`, except the hidden `reviewGuidanceGlobs`. No API keys or tokens
-are written to disk.
+`vscode-extension/package.json`. No API keys or tokens are written to disk.
 
 ## Fields
 
@@ -33,8 +32,8 @@ are written to disk.
 - `reviewGuidanceProfiles` (default `[]`) — named reusable bundles of focus areas and custom
   instructions. Profiles use stable IDs so renames preserve selection. Invalid, duplicate, or
   missing IDs fall back to the built-in legacy defaults rather than partially applying a profile.
-  The `guidanceGlobs` profile field remains readable, is preserved on edits, and is sent to the
-  engine, but is not exposed in settings UI.
+  Each profile also carries its own `guidanceGlobs`, which the VS Code settings view edits in the
+  same "Repository guidance files" field as the defaults.
 - `repositoryReviewInstructions` (default `{}`; VS Code `pr-pilot.repositoryReviewInstructions`) —
   review instructions remembered per repository, keyed by lowercase `owner/repo` (at most 200
   repositories and 10,000 characters each; `RepositoryReviewInstructions` in IntelliJ,
@@ -91,10 +90,14 @@ are written to disk.
   therefore removable again only after the setting is turned back on, which both hosts' setting
   hints state. While off, a `generateReview` request with `intellijAssisted: true` is rejected with
   a `reviewError` and never downgraded to an ordinary review. Shared by both hosts.
-- `reviewGuidanceGlobs` (hidden) — retained in host settings and profiles. It is not contributed as
-  a public VS Code setting or rendered in either settings UI, but the resolved value is sent to the
-  engine as `guidanceGlobs`, which reads matching files from the PR's base commit only (never the PR
-  worktree).
+- `reviewGuidanceGlobs` (default `[]`; VS Code `pr-pilot.reviewGuidanceGlobs`, at most 100 entries
+  of 500 characters) — extra guidance paths or globs, for repositories whose review rules live
+  outside the built-in locations (for example `.review/ai-agent/*.md`). The resolved value (the
+  active profile's list, else this default) is sent to the engine as `guidanceGlobs`, which reads
+  matching files from the PR's base commit only, never the PR worktree. The VS Code settings view
+  edits it as "Repository guidance files", one entry per line. **IntelliJ lag:** `PluginSettings`
+  stores and sends it, but the IntelliJ settings page does not lay out its text area yet
+  (`ReviewGuidanceEditor.guidanceGlobsArea()` has no caller), so IntelliJ users cannot edit it.
 
 ## Guidance profiles
 
