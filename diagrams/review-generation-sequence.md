@@ -48,6 +48,8 @@ sequenceDiagram
         Host->>GitHubEngine: getIncrementalDiff(prKey)
         GitHubEngine->>GitHub: Viewer's latest review commit, PR history, compare baseline...head
         GitHub-->>GitHubEngine: Baseline and compare diff
+        GitHubEngine->>GitHub: PR diff (validation size)
+        GitHubEngine->>GitHubEngine: Drop base-branch changes a merge brought in (files and hunks outside the PR diff)
         alt Baseline trusted and diff non-empty
             GitHubEngine-->>Host: scope incremental (baselineSha, bounded diff)
             Host->>Host: Use incremental diff as model diff and set incrementalBaselineSha (chunked mode off)

@@ -175,6 +175,60 @@ class IncrementalDiffServiceTest {
         }
     }
 
+    @Nested
+    class MergedBaseChanges {
+        private static final String FEATURE =
+                "diff --git a/src/Feature.java b/src/Feature.java\n"
+                        + "--- a/src/Feature.java\n+++ b/src/Feature.java\n"
+                        + "@@ -10,3 +10,3 @@\n context\n+fix\n";
+        private static final String FROM_BASE =
+                "diff --git a/src/FromMaster.java b/src/FromMaster.java\n"
+                        + "--- a/src/FromMaster.java\n+++ b/src/FromMaster.java\n"
+                        + "@@ -1,2 +1,2 @@\n context\n+master\n";
+
+        @Test
+        void dropsFilesThePullRequestDoesNotChangeUsingTheValidationSizedPrDiff() throws Exception {
+            Fixture fixture =
+                    new Fixture(
+                            page(HEAD, BASELINE, List.of(BASELINE, HEAD)),
+                            compare(PrDiffService.Response.ok(FEATURE + FROM_BASE, false), 200));
+            fixture.pullRequestDiff = PrDiffService.Response.ok(FEATURE, false);
+
+            IncrementalDiffResult result = fixture.get();
+
+            assertThat(result.scope()).isEqualTo(IncrementalDiffResult.SCOPE_INCREMENTAL);
+            assertThat(result.diff()).isEqualTo(FEATURE);
+            assertThat(fixture.diffCalls)
+                    .containsExactly("7|" + PrDiffService.VALIDATION_LIMIT_BYTES);
+            assertThat(fixture.tokenCalls).isEqualTo(1);
+        }
+
+        @Test
+        void fallsBackToAFullReviewWhenEveryChangeCameFromTheBase() throws Exception {
+            Fixture fixture =
+                    new Fixture(
+                            page(HEAD, BASELINE, List.of(BASELINE, HEAD)),
+                            compare(PrDiffService.Response.ok(FROM_BASE, false), 200));
+            fixture.pullRequestDiff = PrDiffService.Response.ok(FEATURE, false);
+
+            assertFullFallback(fixture.get(), IncrementalDiffResult.EMPTY_INCREMENTAL_DIFF);
+        }
+
+        @Test
+        void keepsTheCompareDiffUnchangedWhenThePrDiffCannotBeLoaded() throws Exception {
+            Fixture fixture =
+                    new Fixture(
+                            page(HEAD, BASELINE, List.of(BASELINE, HEAD)),
+                            compare(PrDiffService.Response.ok(FEATURE + FROM_BASE, true), 200));
+            fixture.pullRequestDiff = PrDiffService.Response.of(PrDiffService.Status.TOO_LARGE);
+
+            IncrementalDiffResult result = fixture.get();
+
+            assertThat(result.diff()).isEqualTo(FEATURE + FROM_BASE);
+            assertThat(result.truncated()).isTrue();
+        }
+    }
+
     private static void assertFullFallback(IncrementalDiffResult result, String reason) {
         assertThat(result.status()).isEqualTo("ok");
         assertThat(result.scope()).isEqualTo(IncrementalDiffResult.SCOPE_FULL);
@@ -245,6 +299,8 @@ class IncrementalDiffServiceTest {
         private final PrDiffService.CompareResponse compareResponse;
         private final List<String> apiCalls = new ArrayList<>();
         private final List<String> compareCalls = new ArrayList<>();
+        private final List<String> diffCalls = new ArrayList<>();
+        private PrDiffService.Response pullRequestDiff;
         private GitHubAuthService.TokenResolution token =
                 GitHubAuthService.TokenResolution.resolved("secret-token");
         private int tokenCalls;
@@ -267,7 +323,10 @@ class IncrementalDiffServiceTest {
                                 tokenCalls++;
                                 return token;
                             },
-                            (api, token, owner, repo, number, limit) -> null,
+                            (api, token, owner, repo, number, limit) -> {
+                                diffCalls.add(number + "|" + limit);
+                                return pullRequestDiff;
+                            },
                             (api, token, owner, repo, base, head, limit) -> {
                                 compareCalls.add(
                                         String.join(

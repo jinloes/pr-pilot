@@ -90,6 +90,29 @@ public final class PrDiffService {
         return response;
     }
 
+    /**
+     * Fetches the pull request's own diff with an already resolved token, using the same retry
+     * policy as {@link #get}. A client that returns no response counts as an API failure.
+     */
+    Response pullRequestDiff(
+            String apiBaseUrl,
+            String token,
+            String owner,
+            String repo,
+            int number,
+            int limitBytes) {
+        Response response = Response.of(Status.NETWORK);
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            response = diffClient.get(apiBaseUrl, token, owner, repo, number, limitBytes);
+            if (response == null) return Response.of(Status.API);
+            if (!retryable(response.status())
+                    || attempt == MAX_ATTEMPTS
+                    || Thread.currentThread().isInterrupted()) break;
+            backoff.pause(attempt);
+        }
+        return response;
+    }
+
     public PrDiffResult get(Params params) {
         if (params.number() <= 0
                 || !valid(params.owner())
@@ -109,21 +132,14 @@ public final class PrDiffService {
                     "not_authenticated", "Run 'gh auth login' in a terminal for this GitHub host.");
         int limitBytes =
                 "validation".equals(params.mode()) ? VALIDATION_LIMIT_BYTES : REVIEW_LIMIT_BYTES;
-        Response response = Response.of(Status.NETWORK);
-        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            response =
-                    diffClient.get(
-                            base.apiBaseUrl(),
-                            token.token(),
-                            params.owner(),
-                            params.repo(),
-                            params.number(),
-                            limitBytes);
-            if (!retryable(response.status())
-                    || attempt == MAX_ATTEMPTS
-                    || Thread.currentThread().isInterrupted()) break;
-            backoff.pause(attempt);
-        }
+        Response response =
+                pullRequestDiff(
+                        base.apiBaseUrl(),
+                        token.token(),
+                        params.owner(),
+                        params.repo(),
+                        params.number(),
+                        limitBytes);
         return switch (response.status()) {
             case OK -> PrDiffResult.success(response.diff(), response.truncated(), limitBytes);
             case UNAUTHENTICATED ->

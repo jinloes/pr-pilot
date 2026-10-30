@@ -85,6 +85,18 @@ appear in the PR's current commit history (up to 3 backward pages of 100). The e
 GitHub's `compare/{baseline}...{head}` and bounds the result with the same whole-file review budget
 as `prs/getDiff`.
 
+When the author merged the base branch after the review, that compare range also carries every
+base-branch change the merge brought in. The model would review code the PR did not write, and every
+finding on it would land under "Unanchored comments" because anchors validate against the PR diff.
+`IncrementalDiffScope` therefore restricts the compare diff to the PR's own changes: the engine also
+fetches the PR diff (validation size), drops compare file sections the PR diff does not contain, and
+inside shared files keeps only hunks whose new-side range overlaps a PR hunk. Both diffs end at the
+head commit, so new-side line numbers agree. It removes only what it can prove is absent: a file the
+PR diff may have omitted (listed in its coverage trailer, unlisted paths, or an incomplete scan) is
+kept, and when the PR diff cannot be loaded the compare diff is used unchanged. Base-only paths are
+also removed from the compare diff's own coverage trailer. If nothing remains, the result is the
+`empty_incremental_diff` fallback.
+
 Anything that makes the incremental diff untrustworthy falls back to a full review with a
 `fallbackReason` instead of failing:
 - `no_prior_review` and `up_to_date`.

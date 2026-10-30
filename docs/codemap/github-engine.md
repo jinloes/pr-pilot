@@ -23,6 +23,8 @@ receive GitHub tokens.
 - `sidecar/pr/IncrementalDiffService.java` - Diff of commits since the viewer's last submitted
   review (`prs/getIncrementalDiff`), using `PrReviewStatusService.reviewBaseline` and
   `PrDiffService.compare`, with typed full-review fallback reasons.
+- `sidecar/pr/IncrementalDiffScope.java` - Restricts the incremental compare diff to files and hunks
+  the PR diff contains, so base-branch changes from a merge are not reviewed.
 - `sidecar/pr/PrDiffService.java` - Whole-file, UTF-8-safe review/validation diff bounding
   (smallest-first, 250 KB per file, coverage trailer) and HTTP 406 as `diff_too_large`.
 - `sidecar/pr/DraftReviewService.java` - Pending-review lookup and decoding.

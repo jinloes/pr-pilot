@@ -92,18 +92,23 @@ public final class IncrementalDiffService {
         }
         PrDiffService.Response response = compare.response();
         return switch (response.status()) {
-            case OK ->
-                    response.diff() == null || response.diff().isBlank()
-                            ? fallback(
-                                    IncrementalDiffResult.EMPTY_INCREMENTAL_DIFF,
-                                    baselineSha,
-                                    headSha)
-                            : IncrementalDiffResult.incremental(
-                                    baselineSha,
-                                    headSha,
-                                    response.diff(),
-                                    response.truncated(),
-                                    LIMIT_BYTES);
+            case OK -> {
+                if (response.diff() == null || response.diff().isBlank()) {
+                    yield fallback(
+                            IncrementalDiffResult.EMPTY_INCREMENTAL_DIFF, baselineSha, headSha);
+                }
+                IncrementalDiffScope.Restricted scoped =
+                        restrictToPullRequest(base, token.token(), params, response);
+                yield scoped.diff().isBlank()
+                        ? fallback(
+                                IncrementalDiffResult.EMPTY_INCREMENTAL_DIFF, baselineSha, headSha)
+                        : IncrementalDiffResult.incremental(
+                                baselineSha,
+                                headSha,
+                                scoped.diff(),
+                                scoped.truncated(),
+                                LIMIT_BYTES);
+            }
             case UNAUTHENTICATED -> notAuthenticated();
             case RATE_LIMITED ->
                     IncrementalDiffResult.failure(
@@ -117,6 +122,27 @@ public final class IncrementalDiffService {
                             LIMIT_BYTES);
             case NOT_FOUND, TOO_LARGE, API, TRANSIENT_API -> apiFailed();
         };
+    }
+
+    /**
+     * Drops base-branch changes a merge brought into the compare range. Without the pull request's
+     * own diff nothing can be proven base-only, so the compare diff is returned unchanged.
+     */
+    private IncrementalDiffScope.Restricted restrictToPullRequest(
+            GitHubApiBase base, String token, Params params, PrDiffService.Response compare) {
+        PrDiffService.Response pullRequest =
+                diffService.pullRequestDiff(
+                        base.apiBaseUrl(),
+                        token,
+                        params.owner(),
+                        params.repo(),
+                        params.number(),
+                        PrDiffService.VALIDATION_LIMIT_BYTES);
+        if (pullRequest.status() != PrDiffService.Status.OK || pullRequest.diff() == null) {
+            return new IncrementalDiffScope.Restricted(compare.diff(), compare.truncated(), 0);
+        }
+        return IncrementalDiffScope.restrict(
+                compare.diff(), compare.truncated(), pullRequest.diff());
     }
 
     private static IncrementalDiffResult fallback(
