@@ -34,7 +34,7 @@ Both hosts require:
   - Claude Code CLI (`claude`)
   - GitHub Copilot CLI (`copilot`)
 
-The VS Code extension also requires Java 17 or newer to run its bundled sidecar. IntelliJ uses the
+The VS Code extension also requires Java 21 or newer to run its bundled sidecar. IntelliJ uses the
 IDE runtime and does not launch the sidecar.
 
 Run these preflight checks in a terminal:
@@ -144,7 +144,7 @@ selected CLI if the command fails, then restart the IDE so it inherits the updat
 
 ### VS Code reports a Java or sidecar error
 
-Run `java -version` in the environment that launches VS Code and confirm Java 17 or newer is first
+Run `java -version` in the environment that launches VS Code and confirm Java 21 or newer is first
 on `PATH`, then reload the VS Code window. Reinstall the VSIX if the bundled sidecar is reported as
 missing or corrupt.
 
@@ -177,8 +177,8 @@ code, or sensitive pull-request content.
 
 ## Repository layout
 
-- `core/` - Plain Java 17 shared models and diff parser used by both hosts
-- `github-engine/` - Plain Java 17 GitHub/repository/review engine shared by both hosts
+- `core/` - Plain Java 21 shared models and diff parser used by both hosts
+- `github-engine/` - Plain Java 21 GitHub/repository/review engine shared by both hosts
 - `intellij-plugin/` - IntelliJ host integration
 - `review-benchmark/` - Developer CLIs that measure review recall against a reference reviewer's comments and on
   [ReviewBench](https://github.com/review-bench/ReviewBench)
@@ -194,7 +194,8 @@ code, or sensitive pull-request content.
 
 ## Development requirements
 
-- Java 17+ (for Gradle builds and at VS Code extension runtime)
+- An installed JDK 21 (Gradle builds use it as the Java toolchain) and Java 21+ at VS Code
+  extension runtime
 - Node.js 20.17 or newer
 - npm
 - GitHub CLI (`gh`) authenticated (`gh auth login`)
@@ -204,7 +205,7 @@ code, or sensitive pull-request content.
 
 The IntelliJ plugin calls `github-engine` directly in the IDE JVM. The VS Code extension bundles
 the sidecar JAR and launches it with `java`; it checks protocol compatibility and required
-capabilities during activation. If Java 17+ is unavailable, PR Pilot reports an actionable setup
+capabilities during activation. If Java 21+ is unavailable, PR Pilot reports an actionable setup
 error instead of falling back to a separate TypeScript GitHub implementation.
 
 ## Local development
@@ -407,7 +408,7 @@ manual dispatch. Its job names are the checks a pull request must pass:
   build
 - **Webview visual regression** - Playwright screenshot tests inside the pinned Playwright container
   image, which the committed baselines are rendered in
-- **VS Code extension** - Lint, typecheck, unit tests with coverage, the Java 17 sidecar protocol
+- **VS Code extension** - Lint, typecheck, unit tests with coverage, the Java 21 sidecar protocol
   smoke test, and packaged `.vsix` content checks
 - **VS Code extension host smoke** - Activates the extension in VS Code 1.90 and checks its commands
   and sidecar capabilities
@@ -428,7 +429,7 @@ Releases are tag-driven via `.github/workflows/release.yml`.
 What the workflow does:
 
 1. Runs the visual regression tests in the same Playwright container as CI
-2. Sets up Java 17 and 21 and Node from `.nvmrc` for the exact tagged commit, restoring no caches
+2. Sets up Java 21 and Node from `.nvmrc` for the exact tagged commit, restoring no caches
 3. Runs Gradle formatting/checks and JVM tests
 4. Runs webview lint, typecheck, unit tests, accessibility tests, and build
 5. Runs VS Code extension lint, typecheck, and unit tests, verifies the IntelliJ plugin against

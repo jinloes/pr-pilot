@@ -33,10 +33,7 @@ jobs:
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          # The last entry becomes JAVA_HOME and runs Gradle; intellij-plugin uses the 21 toolchain.
-          java-version: |
-            21
-            17
+          java-version: "21"
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -55,7 +52,7 @@ jobs:
           cache-provider: basic
 
       - name: Trust JDKs for SemanticRuntime
-        run: bash .github/scripts/trusted-jdks.sh "$JAVA_HOME_17_X64" "$JAVA_HOME_21_X64"
+        run: bash .github/scripts/trusted-jdks.sh "$JAVA_HOME_21_X64"
 
       - name: Spotless check
         run: |
@@ -107,9 +104,7 @@ jobs:
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: |
-            21
-            17
+          java-version: "21"
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -128,7 +123,7 @@ jobs:
 
       # Pull requests verify against the pinned platform; release.yml verifies every recommended IDE.
       - name: Build and verify plugin
-        run: ./gradlew :intellij-plugin:buildPlugin :intellij-plugin:verifyPlugin -Porg.gradle.java.installations.fromEnv=JAVA_HOME_17_X64,JAVA_HOME_21_X64
+        run: ./gradlew :intellij-plugin:buildPlugin :intellij-plugin:verifyPlugin -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
 
       - name: Upload verifier report
         if: failure()
@@ -256,7 +251,7 @@ jobs:
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -337,7 +332,7 @@ jobs:
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -454,7 +449,7 @@ jobs:
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -511,9 +506,7 @@ jobs:
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: |
-            21
-            17
+          java-version: "21"
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -531,7 +524,7 @@ jobs:
           cache-provider: basic
 
       - name: Gradle check
-        run: node scripts/run-gradle.mjs check --continue "-Porg.gradle.java.installations.fromEnv=JAVA_HOME_17_X64,JAVA_HOME_21_X64"
+        run: node scripts/run-gradle.mjs check --continue "-Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64"
 
       - name: Webview unit tests
         if: success() || failure()

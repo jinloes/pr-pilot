@@ -103,7 +103,7 @@ test('SidecarClient reports missing Java with installation guidance', async () =
   };
   const client = new SidecarClient(fakeJar, 'java', spawnSidecar);
 
-  await assert.rejects(client.initialize(), /Install Java 17 or newer/);
+  await assert.rejects(client.initialize(), /Install Java 21 or newer/);
 });
 
 test('SidecarClient rejects incompatible protocols and missing capabilities', async () => {

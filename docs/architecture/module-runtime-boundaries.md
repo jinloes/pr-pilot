@@ -4,7 +4,7 @@ Key design decisions moved from [ARCHITECTURE.md](../../ARCHITECTURE.md). Each s
 active constraint future code must respect.
 
 ### Module boundaries
-`core` is a plain Java 17 JVM module (Kotlin Multiplatform was removed once the `js` target and
+`core` is a plain Java 21 JVM module (Kotlin Multiplatform was removed once the `js` target and
 every shared model class had no reason to stay Kotlin — the review-engine extraction moved the JS
 target's last real consumers to the sidecar, and none of `PullRequest`/ `ReviewResult`/
 `LineComment`/ `ChatMessage`/ `PRReviewRequest`/ `ReviewProvider` ever exercised
@@ -18,8 +18,8 @@ IntelliJ-only local-file-index services (`PendingReviewIndex`, `SeenPRSet`, plai
 records/classes using Jackson) rather than `core`, since they are not shared with VS Code — the VS
 Code equivalent (`globalState`, see [Notification parity](hosts-and-sidecar.md#notification-parity))
 is a different persistence mechanism entirely, so there is no cross-host code-sharing benefit to
-keeping them in `core`. `github-engine` is a plain Java 17 library with no Spring or IDE APIs; both
-`intellij-plugin` and `sidecar` depend on it. `review-engine` is a plain Java 17 library owning
+keeping them in `core`. `github-engine` is a plain Java 21 library with no Spring or IDE APIs; both
+`intellij-plugin` and `sidecar` depend on it. `review-engine` is a plain Java 21 library owning
 Claude/Copilot CLI invocation, prompt building, and review-JSON parsing (`ClaudeService`,
 `CopilotService`, `CopilotModelDiscovery`, `GitWorktreeService`); both `intellij-plugin` and
 `sidecar` depend on it, so AI review generation has exactly one JVM implementation rather than being
@@ -27,7 +27,7 @@ duplicated per host. `github-engine` and `review-engine` depend on `core` for sh
 `intellij-plugin` also depends on `core` and no longer needs `jackson-module-kotlin`/`KotlinModule`
 now that `core`'s models are plain Java.
 
-`sidecar` is a Java 17 Spring Boot application configured with `WebApplicationType.NONE`; it is not
+`sidecar` is a Java 21 Spring Boot application configured with `WebApplicationType.NONE`; it is not
 an HTTP server. Its protocol uses bounded `Content-Length`-framed UTF-8 JSON-RPC over standard
 input/output. Standard output must contain protocol frames only—diagnostics belong on standard
 error. GitHub, PR, repository, and review behavior belongs in `github-engine`/`review-engine`;
@@ -40,18 +40,23 @@ Spring remains only the sidecar composition and lifecycle layer.
 all.
 
 ### Modules compile with --release
-The sidecar runs on the user's Java 17 or newer, and it bundles `core`, `github-engine` and
-`review-engine`, so those modules may only call Java 17 APIs. `targetCompatibility` alone sets only
-the bytecode version: on the JDK 21 that builds the project, a call such as `List.getFirst()` still
-compiles and then throws `NoSuchMethodError` on Java 17. The root `build.gradle` sets every compile
-task's `options.release` from the module's declared `targetCompatibility`, so javac rejects JDK APIs
-newer than each module's target on every build, including the required `Gradle check`. Raise a
-module's floor by changing its `targetCompatibility`; do not set `options.release` separately.
+The sidecar runs on the user's Java 21 or newer, and it bundles `core`, `github-engine` and
+`review-engine`, so those modules may only call Java 21 APIs. `targetCompatibility` alone sets only
+the bytecode version: on a newer JDK building the project, a call to an API added after Java 21
+still compiles and then throws `NoSuchMethodError` on Java 21. The root `build.gradle` sets every compile
+task's `options.release` from the module's `targetCompatibility`, so javac rejects JDK APIs
+newer than each module's target on every build, including the required `Gradle check`.
+
+Each module declares a Java toolchain (`java.toolchain.languageVersion`) rather than
+`sourceCompatibility`/`targetCompatibility`; Gradle derives the target from the toolchain, and
+compiles and tests on a detected JDK of that version whatever JDK runs the Gradle daemon (for
+example, a user-wide `org.gradle.java.home`). Raise a module's floor by changing its toolchain
+`languageVersion`; do not set `options.release` or the compatibility properties separately.
 
 ### Java sources compile as UTF-8
 The root `build.gradle` sets `options.encoding = 'UTF-8'` on every `JavaCompile` task, test sources
-included. Without it javac reads sources in the platform charset, which JDK 17 on Windows takes
-from the code page: a test literal such as `…` then decodes differently from the main code it
+included. Without it javac reads sources in the JDK's default charset, which JDKs before 18 on
+Windows take from the code page: a test literal such as `…` then decodes differently from the main code it
 checks, and the test fails only there. Do not set the encoding per module or only on `compileJava`.
 
 ### Threading model

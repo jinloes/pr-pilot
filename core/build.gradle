@@ -10,11 +10,12 @@ repositories {
     mavenCentral()
 }
 
-// core is a plain Java 17 module: all shared models are plain Java so downstream Java modules
+// core is a plain Java 21 module: all shared models are plain Java so downstream Java modules
 // don't need Kotlin-Java interop shims (no jackson-module-kotlin, no @JvmOverloads/@JvmStatic).
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
 }
 
 dependencies {

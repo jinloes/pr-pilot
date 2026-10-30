@@ -4,7 +4,7 @@ Part of the [code map](../../CODEMAP.md), which holds the task-to-code index and
 Paths omit `src/main/java/com/jinloes/prpilot/` and equivalent test roots where the module context
 makes them unambiguous; other paths are relative to the module directory.
 
-Plain Java 17 shared models with no host dependencies.
+Plain Java 21 shared models with no host dependencies.
 
 - `model/PullRequest.java` - Immutable PR identity, metadata, and review-freshness state.
 - `model/ReviewStatus.java` - Authenticated-user review freshness (`UNREVIEWED`, `REVIEWED`,

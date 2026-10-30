@@ -12,8 +12,9 @@ repositories {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
 }
 
 // The dependency-management plugin enforces Spring Boot's BOM versions over Gradle's highest-wins

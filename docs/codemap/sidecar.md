@@ -4,7 +4,7 @@ Part of the [code map](../../CODEMAP.md), which holds the task-to-code index and
 Paths omit `src/main/java/com/jinloes/prpilot/` and equivalent test roots where the module context
 makes them unambiguous; other paths are relative to the module directory.
 
-Thin Java 17, non-web Spring Boot stdio JSON-RPC adapter used only by VS Code.
+Thin Java 21, non-web Spring Boot stdio JSON-RPC adapter used only by VS Code.
 
 - `sidecar/PrPilotSidecarApplication.java` - Process entry point and stdio lifecycle.
 - `sidecar/SidecarConfiguration.java` - Engine composition.

@@ -66,14 +66,14 @@ subprojects {
     }
 
     plugins.withId('java') {
-        // targetCompatibility alone only sets the bytecode version: on the JDK 21 build, a call to
-        // a newer API (List.getFirst() for a Java 17 target) compiles, then fails at runtime.
+        // targetCompatibility alone only sets the bytecode version: on a newer JDK, a call to an
+        // API added after the target release compiles, then fails at runtime.
         def declaredRelease = providers.provider {
             java.targetCompatibility.majorVersion.toInteger()
         }
         tasks.withType(JavaCompile).configureEach {
             options.release.set(declaredRelease)
-            // Test sources too: JDK 17 on Windows reads unspecified sources in the code page.
+            // Test sources too: don't depend on the JDK's default charset (pre-18 Windows code page).
             options.encoding = 'UTF-8'
         }
 

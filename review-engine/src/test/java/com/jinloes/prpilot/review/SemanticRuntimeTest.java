@@ -251,17 +251,17 @@ class SemanticRuntimeTest {
         }
 
         @Test
-        void unsupportedMacJava17FailsClosedThroughConfiguredPackagedRuntime() throws Exception {
+        void unsupportedMacJava21FailsClosedThroughConfiguredPackagedRuntime() throws Exception {
             assumeTrue(System.getProperty("os.name").startsWith("Mac"), "macOS negative control");
-            Path java17 =
+            Path java21 =
                     Path.of(
-                            "/Library/Java/JavaVirtualMachines/jdk17.0.5-msft.jdk/Contents/Home/bin/java");
+                            "/Library/Java/JavaVirtualMachines/jdk21.0.6-msft.jdk/Contents/Home/bin/java");
             assumeTrue(
-                    Files.isExecutable(java17), "Optional installed macOS JDK17 negative control");
+                    Files.isExecutable(java21), "Optional installed macOS JDK21 negative control");
             Path config = config("v20.20.2", "0.3.0");
             var json = new ObjectMapper();
             var settings = (ObjectNode) json.readTree(Files.readAllBytes(config));
-            settings.put("java", java17.toString());
+            settings.put("java", java21.toString());
             json.writeValue(config.toFile(), settings);
             Path worktree = Files.createDirectory(root.resolve("project"));
             Path setting = Files.writeString(worktree.resolve("build.gradle"), "// fixture\n");
