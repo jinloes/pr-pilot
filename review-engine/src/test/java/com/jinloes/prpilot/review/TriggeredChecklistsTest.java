@@ -201,6 +201,15 @@ class TriggeredChecklistsTest {
             assertThat(changed(path)).contains("\nTest changes:\n");
         }
 
+        @Test
+        void testChecklistAsksForAFakeClockAndTheFastRunTagForWallClockWaits() {
+            assertThat(changed("src/test/java/FlowTest.java"))
+                    .contains("waits on real wall-clock time")
+                    .contains("fake or time-skipping clock")
+                    .contains("excludeTags")
+                    .contains("a new tag added to that exclusion");
+        }
+
         @ParameterizedTest
         @ValueSource(
                 strings = {

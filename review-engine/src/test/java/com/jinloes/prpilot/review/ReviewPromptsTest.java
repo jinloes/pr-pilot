@@ -20,7 +20,9 @@ class ReviewPromptsTest {
                             "2026-10-thread-state-incremental-scope-corroboration-rule-gating"
                                     + "-suggested-changes-stable-pagination-discarded-records"
                                     + "-security-reliability-test-integrity-claims-gated-checklists"
-                                    + "-protobuf-schema-delta-data-anomalies-scoped-ids");
+                                    + "-protobuf-schema-delta-data-anomalies-scoped-ids"
+                                    + "-inconsistent-acceptance-consumers-wall-clock-tests"
+                                    + "-stated-constraints");
         }
 
         @Test
@@ -39,7 +41,12 @@ class ReviewPromptsTest {
                     .contains("- Stated data anomalies:")
                     .contains("use the later of the two")
                     .contains("- Scoped identifiers:")
-                    .contains("compare the full key");
+                    .contains("compare the full key")
+                    .contains("- Inconsistent acceptance:")
+                    .contains("Compare what each one accepts")
+                    .contains("what its consumers can parse is what it must let through")
+                    .contains("convert the value to that form in the check")
+                    .contains("does not show it is intended");
             assertThat(prompt)
                     .contains("A deleted ('-') line is in scope when removing it creates the")
                     .contains("the removed code in \"rationale\"");
@@ -83,6 +90,8 @@ class ReviewPromptsTest {
             assertThat(prompt)
                     .contains("Claims are not evidence.")
                     .contains("quote the claim in \"rationale\"")
+                    .contains("a comment that states a constraint on a field or argument")
+                    .contains("name what the annotation actually checks")
                     .contains("asking the author to")
                     .contains("A test deleted, disabled, or weakened")
                     .contains("lock, cleanup, required call, or test assertion")
