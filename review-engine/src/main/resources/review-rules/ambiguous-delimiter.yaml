@@ -18,8 +18,8 @@ prompt: |
      metric tag, cache or map key, header, query parameter, persisted column, message).
   2. Work out what the joined values look like. Read their types and where they come from, using
      Grep on the callers and on any URN, ID, or key builders. Watch especially for:
-     - LinkedIn URNs and other URNs with tuple keys, such as
-       `urn:li:enterpriseProfile:(urn:li:enterpriseAccount:7,1)`. Any URN type with a
+     - URNs with tuple keys, such as
+       `urn:example:profile:(urn:example:account:7,1)`. Any URN type with a
        parenthesized key contains commas, and URNs always contain colons.
      - Free text: names, titles, descriptions, error messages, file paths, and user input.
      - Values that are themselves already joined or encoded strings.

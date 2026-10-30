@@ -187,6 +187,22 @@ see `docs/architecture/ci.md`.
 - Use comments only for non-obvious "why", not to restate code.
 - No `Co-Authored-By` trailers in commit messages.
 
+## Keep the repository company-neutral
+
+PR Pilot is a general-purpose tool. Code, review prompts, built-in rules, checklists, tests,
+fixtures, docs, and diagrams must not name any employer or its internal systems: company names,
+internal products, services, repositories, bot or service accounts, hostnames, URLs, ticket keys,
+URN namespaces, build tools, or internal guide paths.
+
+- Use neutral placeholders instead: `acme/widgets` for repositories, `urn:example:…` for URNs,
+  `.review/ai-agent/*.md` for repository guidance globs, `svc-review-bot` for bot logins.
+- When a review gap is found on a real pull request, add the check as a generic pattern (the defect
+  class and how to confirm it), never the PR's file, field, or service names.
+- Repository-specific rules belong in that repository's own guidance files, which reviews load
+  through `reviewGuidanceGlobs`, not in PR Pilot.
+- Before finishing a task, search your changes for company names and internal identifiers you saw
+  while working, and replace them.
+
 ## Scope reminder
 
 - Keep this file short and operational; put design constraints in `ARCHITECTURE.md` and

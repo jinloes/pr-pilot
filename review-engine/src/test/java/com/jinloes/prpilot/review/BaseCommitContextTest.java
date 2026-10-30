@@ -122,10 +122,10 @@ class BaseCommitContextTest {
         @Test
         void configuredGlobsSelectTopLevelMatchesInPathOrderBeforeDefaults() throws Exception {
             write("AGENTS.md", "root");
-            write(".linkedin/ai-agent/b_rules.md", "b");
-            write(".linkedin/ai-agent/a_rules.md", "a");
-            write(".linkedin/ai-agent/nested/deep.md", "nested");
-            write(".linkedin/ai-agent/config.yaml", "yaml");
+            write(".review/ai-agent/b_rules.md", "b");
+            write(".review/ai-agent/a_rules.md", "a");
+            write(".review/ai-agent/nested/deep.md", "nested");
+            write(".review/ai-agent/config.yaml", "yaml");
             write("f.txt", "code");
             String base = commit("base");
 
@@ -134,22 +134,22 @@ class BaseCommitContextTest {
                                     repo,
                                     base,
                                     manifest("f.txt"),
-                                    List.of(".linkedin/ai-agent/*.md"),
+                                    List.of(".review/ai-agent/*.md"),
                                     () -> {})
                             .guidelines();
 
             assertThat(headings(guidance))
                     .containsExactly(
-                            ".linkedin/ai-agent/a_rules.md",
-                            ".linkedin/ai-agent/b_rules.md",
+                            ".review/ai-agent/a_rules.md",
+                            ".review/ai-agent/b_rules.md",
                             "AGENTS.md");
             assertThat(guidance).doesNotContain("nested").doesNotContain("yaml");
         }
 
         @Test
         void withoutConfiguredGlobsNoRepoSpecificDirectoryIsRead() throws Exception {
-            write(".linkedin/ai-agent/x.md", "repo specific");
-            write(".linkedin/ai-agent/review_guidelines.md", "repo specific");
+            write(".review/ai-agent/x.md", "repo specific");
+            write(".review/ai-agent/review_guidelines.md", "repo specific");
             write("f.txt", "code");
             String base = commit("base");
 

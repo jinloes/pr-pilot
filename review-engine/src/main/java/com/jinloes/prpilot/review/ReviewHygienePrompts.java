@@ -12,10 +12,10 @@ final class ReviewHygienePrompts {
     private ReviewHygienePrompts() {}
 
     /**
-     * Built-in hygiene rules that production reviewers such as Mae enforce but a bug hunt skips
-     * because nothing is broken. On the recall benchmark they were most of the missed findings, so
-     * they get their own pass with fixed type, category and severity to keep them from crowding out
-     * real defects. In candidate-recall mode the same rules run as a separate {@link
+     * Built-in hygiene rules that production code reviewers enforce but a bug hunt skips because
+     * nothing is broken. On the recall benchmark they were most of the missed findings, so they get
+     * their own pass with fixed type, category and severity to keep them from crowding out real
+     * defects. In candidate-recall mode the same rules run as a separate {@link
      * #buildHygienePrompt} call instead, so the bug hunt keeps the whole first-pass budget.
      */
     static final String HYGIENE_RULES =

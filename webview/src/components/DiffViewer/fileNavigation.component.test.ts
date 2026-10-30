@@ -38,7 +38,7 @@ describe('buildDiffFileTree', () => {
     expect(tree[1].children[0].children[0].file?.status).toBe('rename')
 
     const deepItems = buildDiffFileNavItems(
-      [{ oldPath: 'example-grpc-api/src/main/proto/com/example/gagarin/grpc/api/crm/decorated.proto', newPath: 'example-grpc-api/src/main/proto/com/example/gagarin/grpc/api/crm/decorated.proto', type: 'modify' }],
+      [{ oldPath: 'example-grpc-api/src/main/proto/com/example/widgets/grpc/api/crm/decorated.proto', newPath: 'example-grpc-api/src/main/proto/com/example/widgets/grpc/api/crm/decorated.proto', type: 'modify' }],
       [],
     )
     const deepTree = buildDiffFileTree(deepItems)
