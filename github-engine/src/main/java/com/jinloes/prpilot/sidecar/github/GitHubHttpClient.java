@@ -108,6 +108,9 @@ public final class GitHubHttpClient {
                 }
                 return response;
             } catch (IOException exception) {
+                if (GitHubFailure.isCertificateFailure(exception)) {
+                    return GitHubResponse.tlsError();
+                }
                 if (attempt == MAX_ATTEMPTS) {
                     return GitHubResponse.networkError();
                 }
@@ -124,7 +127,9 @@ public final class GitHubHttpClient {
         try {
             return transport.send(request);
         } catch (IOException exception) {
-            return GitHubResponse.networkError();
+            return GitHubFailure.isCertificateFailure(exception)
+                    ? GitHubResponse.tlsError()
+                    : GitHubResponse.networkError();
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             return GitHubResponse.networkError();

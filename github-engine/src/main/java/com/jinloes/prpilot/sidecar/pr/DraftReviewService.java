@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.sidecar.github.GitHubApiBase;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
+import com.jinloes.prpilot.sidecar.github.GitHubFailure;
 import com.jinloes.prpilot.sidecar.github.GitHubHttpClient;
 import com.jinloes.prpilot.sidecar.github.GitHubResponse;
 import java.io.IOException;
@@ -198,8 +199,8 @@ public final class DraftReviewService {
                         "Run 'gh auth login' in a terminal for this GitHub host.");
             }
             if (response.isNetworkError()) {
-                throw new PendingReviewFetchException(
-                        "network_error", "Unable to reach GitHub. Check your connection.");
+                GitHubFailure failure = GitHubFailure.networkFailure(response);
+                throw new PendingReviewFetchException(failure.status(), failure.message());
             }
             if (!response.isSuccess()) {
                 throw new PendingReviewFetchException("api_failed", "GitHub API request failed.");

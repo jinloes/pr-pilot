@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jinloes.prpilot.sidecar.github.GitHubApiBase;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
+import com.jinloes.prpilot.sidecar.github.GitHubFailure;
 import com.jinloes.prpilot.sidecar.github.GitHubHttpClient;
 import com.jinloes.prpilot.sidecar.github.GitHubResponse;
 import java.io.IOException;
@@ -433,8 +434,10 @@ public final class PrSupplementalService {
         if (response.isUnauthenticated())
             return new Failure(
                     "not_authenticated", "Run 'gh auth login' in a terminal for this GitHub host.");
-        if (response.isNetworkError())
-            return new Failure("network_error", "Unable to reach GitHub. Check your connection.");
+        if (response.isNetworkError()) {
+            GitHubFailure failure = GitHubFailure.networkFailure(response);
+            return new Failure(failure.status(), failure.message());
+        }
         return new Failure("api_failed", "GitHub API request failed.");
     }
 

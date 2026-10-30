@@ -25,6 +25,7 @@ public final class UserFacingErrors {
     private static final String TEMPLATE_REQUEST_TIMED_OUT = "request_timed_out";
     private static final String TEMPLATE_INVALID_REVIEW_FORMAT = "invalid_review_format";
     private static final String TEMPLATE_NETWORK_ERROR = "network_error";
+    private static final String TEMPLATE_TLS_CERTIFICATE_UNTRUSTED = "tls_certificate_untrusted";
     private static final String TEMPLATE_GENERIC_FAILURE = "generic_failure";
     private static final Map<String, String> TEMPLATES = loadTemplates();
 
@@ -99,7 +100,16 @@ public final class UserFacingErrors {
         if (containsAny(msg, "timed out", "timeout")) {
             return template(TEMPLATE_REQUEST_TIMED_OUT, Map.of("operation", op));
         }
-        if (containsAny(msg, "connection refused", "unknownhost", "enotfound", "network")) {
+        if (containsAny(msg, "tls certificate", "pkix path")) {
+            return template(TEMPLATE_TLS_CERTIFICATE_UNTRUSTED, Map.of("operation", op));
+        }
+        if (containsAny(
+                msg,
+                "connection refused",
+                "unknownhost",
+                "enotfound",
+                "network",
+                "unable to reach")) {
             return template(TEMPLATE_NETWORK_ERROR, Map.of("operation", op));
         }
         return template(TEMPLATE_GENERIC_FAILURE, Map.of("operation", op));

@@ -21,6 +21,7 @@ type TemplateKey =
     | 'request_timed_out'
     | 'invalid_review_format'
     | 'network_error'
+    | 'tls_certificate_untrusted'
     | 'generic_failure';
 
 const TEMPLATES = loadTemplates();
@@ -122,7 +123,10 @@ export function toUserFacingError(err: unknown, context: ErrorContext): string {
     if (includesAny(msg, ['failed to parse review json', 'unexpected token', 'produced no output'])) {
         return template('invalid_review_format', {});
     }
-    if (includesAny(msg, ['connection refused', 'unknownhost', 'enotfound', 'network'])) {
+    if (includesAny(msg, ['tls certificate', 'pkix path'])) {
+        return template('tls_certificate_untrusted', { operation: context });
+    }
+    if (includesAny(msg, ['connection refused', 'unknownhost', 'enotfound', 'network', 'unable to reach'])) {
         return template('network_error', { operation: context });
     }
 

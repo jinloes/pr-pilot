@@ -1,5 +1,9 @@
 package com.jinloes.prpilot.sidecar.github;
 
+import java.security.cert.CertPathBuilderException;
+import java.security.cert.CertPathValidatorException;
+import java.security.cert.CertificateException;
+
 /**
  * The uniform failure shape engine services report: a stable machine-readable {@code status} plus a
  * message safe to surface to a user.
@@ -29,6 +33,16 @@ public record GitHubFailure(String status, String message) {
     public static final GitHubFailure NETWORK_ERROR =
             new GitHubFailure("network_error", "Unable to reach GitHub. Check your connection.");
 
+    /**
+     * Hosts match the "TLS certificate" phrase to pick their truststore guidance, so keep it in the
+     * message.
+     */
+    public static final GitHubFailure TLS_UNTRUSTED =
+            new GitHubFailure(
+                    "network_error",
+                    "Java could not verify GitHub's TLS certificate. The Java runtime's truststore"
+                            + " (lib/security/cacerts) may be missing public root CAs.");
+
     public static final GitHubFailure API_FAILED =
             new GitHubFailure("api_failed", "GitHub API request failed.");
 
@@ -40,7 +54,28 @@ public record GitHubFailure(String status, String message) {
         if (response.isSuccess()) return null;
         if (response.isRateLimited()) return RATE_LIMITED;
         if (response.isUnauthenticated()) return NOT_AUTHENTICATED;
-        if (response.isNetworkError()) return NETWORK_ERROR;
+        if (response.isNetworkError()) return networkFailure(response);
         return API_FAILED;
+    }
+
+    /** The network failure for a transport error, distinguishing certificate validation. */
+    public static GitHubFailure networkFailure(GitHubResponse response) {
+        return response.isTlsError() ? TLS_UNTRUSTED : NETWORK_ERROR;
+    }
+
+    /**
+     * True when {@code error} or a cause failed certificate validation (untrusted root, expired or
+     * mismatched certificate). Such failures are deterministic, so callers should not retry them.
+     */
+    public static boolean isCertificateFailure(Throwable error) {
+        Throwable cause = error;
+        for (int depth = 0; cause != null && depth < 20; depth++, cause = cause.getCause()) {
+            if (cause instanceof CertificateException
+                    || cause instanceof CertPathBuilderException
+                    || cause instanceof CertPathValidatorException) {
+                return true;
+            }
+        }
+        return false;
     }
 }

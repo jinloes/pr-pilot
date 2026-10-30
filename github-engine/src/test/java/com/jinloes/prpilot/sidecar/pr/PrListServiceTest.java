@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jinloes.prpilot.model.ReviewStatus;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
+import com.jinloes.prpilot.sidecar.github.GitHubFailure;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -133,6 +134,28 @@ class PrListServiceTest {
 
         assertThat(result.status()).isEqualTo("invalid_base_url");
         assertThat(resolverCalled.get()).isFalse();
+    }
+
+    @Test
+    void reportsCertificateFailuresWithTheTruststoreMessageUnderTheNetworkStatus() {
+        PrListService tls = searchReturning(PrListService.SearchStatus.TLS_ERROR);
+        PrListService network = searchReturning(PrListService.SearchStatus.NETWORK_ERROR);
+
+        PrListResult tlsResult = list(tls);
+        PrListResult networkResult = list(network);
+
+        assertThat(tlsResult.status()).isEqualTo("network_error");
+        assertThat(tlsResult.message()).isEqualTo(GitHubFailure.TLS_UNTRUSTED.message());
+        assertThat(networkResult.status()).isEqualTo("network_error");
+        assertThat(networkResult.message()).contains("Unable to reach GitHub");
+    }
+
+    private PrListService searchReturning(PrListService.SearchStatus status) {
+        return new PrListService(
+                ignored -> GitHubAuthService.TokenResolution.resolved("token"),
+                (baseUrl, token, query) -> PrListService.SearchResponse.of(status),
+                (baseUrls, token, prs) -> available(prs),
+                new PrSearchQueryService());
     }
 
     private PrListResult list(PrListService service) {

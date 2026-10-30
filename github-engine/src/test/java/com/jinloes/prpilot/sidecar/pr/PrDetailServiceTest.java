@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
+import com.jinloes.prpilot.sidecar.github.GitHubFailure;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -88,6 +89,21 @@ class PrDetailServiceTest {
                 .isEqualTo("not_authenticated");
         assertThat(rateLimited.get(params("https://github.com")).status())
                 .isEqualTo("rate_limited");
+    }
+
+    @Test
+    void reportsCertificateFailuresWithTheTruststoreMessageUnderTheNetworkStatus() {
+        PrDetailService tls =
+                new PrDetailService(
+                        ignored -> GitHubAuthService.TokenResolution.resolved("token"),
+                        (baseUrl, token, owner, repo, number) ->
+                                PrDetailService.DetailResponse.of(
+                                        PrDetailService.DetailStatus.TLS_ERROR));
+
+        PrDetailResult result = tls.get(params("https://github.com"));
+
+        assertThat(result.status()).isEqualTo("network_error");
+        assertThat(result.message()).isEqualTo(GitHubFailure.TLS_UNTRUSTED.message());
     }
 
     @Test

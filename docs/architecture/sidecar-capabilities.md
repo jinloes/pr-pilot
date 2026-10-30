@@ -209,3 +209,15 @@ release pipeline runs `:sidecar:bootJar` before packaging so shipped `.vsix` bui
 
 IntelliJ intentionally does not spawn the sidecar process: the plugin already runs in the same JVM
 and calls `github-engine` directly. This is a container difference, not a behavior fork.
+
+Certificate failures keep the network status. `GitHubHttpClient` reports an `IOException` whose cause chain holds a certificate-validation error
+(`GitHubFailure.isCertificateFailure`) as `GitHubResponse.TLS_ERROR` and does not retry it, because
+an untrusted root or mismatched certificate fails the same way every time. `isNetworkError()` stays
+true for it and the wire status stays `network_error`, so no host status union or protocol
+validator changes; only the message differs (`GitHubFailure.TLS_UNTRUSTED`). Both hosts pick the
+`tls_certificate_untrusted` template in `vscode-extension/shared/user-facing-errors.yaml` by
+matching "TLS certificate" in that message (`userFacingError.ts`, IntelliJ `UserFacingErrors.forGitHub`),
+so keep that phrase when rewording it. The usual cause is a JDK whose `lib/security/cacerts` was
+replaced by a store without public roots; `curl` and `gh` still work because they trust the macOS
+keychain. The diff paths (`PrDiffService`, `IncrementalDiffService`) keep their own transport enum
+and still report the plain network message.

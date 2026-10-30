@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jinloes.prpilot.sidecar.github.GitHubApiBase;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
+import com.jinloes.prpilot.sidecar.github.GitHubFailure;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -564,6 +565,11 @@ public final class DraftReviewMutationService {
                     }
                     return new RestResponse(statusCode, response.body());
                 } catch (IOException exception) {
+                    if (GitHubFailure.isCertificateFailure(exception)) {
+                        throw new MutationException(
+                                GitHubFailure.TLS_UNTRUSTED.status(),
+                                GitHubFailure.TLS_UNTRUSTED.message());
+                    }
                     if (attempt == maxAttempts) {
                         throw new MutationException(
                                 "network_error", "Unable to reach GitHub. Check your connection.");

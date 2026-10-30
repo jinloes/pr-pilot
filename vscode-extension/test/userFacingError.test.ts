@@ -65,6 +65,20 @@ test('maps parse errors to structured-output guidance', () => {
   assert.match(msg, /invalid review format/i);
 });
 
+test('maps certificate validation failures to truststore guidance', () => {
+  const msg = toUserFacingError(
+    new Error("Java could not verify GitHub's TLS certificate. The Java runtime's truststore (lib/security/cacerts) may be missing public root CAs."),
+    'load pull requests',
+  );
+  assert.match(msg, /^Couldn't load pull requests: Java could not verify GitHub's TLS certificate/);
+  assert.match(msg, /cacerts/);
+});
+
+test('maps an unreachable GitHub to network guidance', () => {
+  const msg = toUserFacingError(new Error('Unable to reach GitHub. Check your connection.'), 'load pull requests');
+  assert.match(msg, /^Network error while trying to load pull requests/);
+});
+
 test('falls back to context-specific generic message', () => {
   const msg = toUserFacingError(new Error('some weird low-level failure'), 'delete draft review');
   assert.equal(msg, "Couldn't delete draft review. Please retry.");

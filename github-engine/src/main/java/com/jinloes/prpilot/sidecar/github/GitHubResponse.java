@@ -16,6 +16,12 @@ public record GitHubResponse(int statusCode, String body, Map<String, String> ra
     /** Synthetic status meaning the request never produced an HTTP response. */
     public static final int NETWORK_ERROR = 0;
 
+    /**
+     * Synthetic status for a transport failure caused by TLS certificate validation. Still a
+     * network error to every caller; only the user-facing message differs.
+     */
+    public static final int TLS_ERROR = -1;
+
     private static final List<String> SAFE_RATE_LIMIT_HEADERS =
             List.of("x-ratelimit-remaining", "x-ratelimit-reset", "retry-after");
 
@@ -54,8 +60,16 @@ public record GitHubResponse(int statusCode, String body, Map<String, String> ra
         return statusCode >= 200 && statusCode < 300;
     }
 
+    public static GitHubResponse tlsError() {
+        return new GitHubResponse(TLS_ERROR, "");
+    }
+
     public boolean isNetworkError() {
-        return statusCode == NETWORK_ERROR;
+        return statusCode == NETWORK_ERROR || statusCode == TLS_ERROR;
+    }
+
+    public boolean isTlsError() {
+        return statusCode == TLS_ERROR;
     }
 
     /** True when the token is missing, invalid, or receives a non-rate-limit permission denial. */

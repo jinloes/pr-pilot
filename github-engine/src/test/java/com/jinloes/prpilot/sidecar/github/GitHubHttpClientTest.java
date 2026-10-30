@@ -7,12 +7,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
+import java.security.cert.CertPathBuilderException;
+import java.security.cert.CertificateException;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import javax.net.ssl.SSLHandshakeException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -65,6 +68,17 @@ class GitHubHttpClientTest {
 
     private static GitHubResponse ok(String body) {
         return new GitHubResponse(200, body);
+    }
+
+    /** The shape HttpClient throws when the truststore lacks the server's root CA. */
+    static IOException untrustedCertificate() {
+        SSLHandshakeException handshake = new SSLHandshakeException("PKIX path building failed");
+        handshake.initCause(
+                new CertificateException(
+                        "PKIX path building failed",
+                        new CertPathBuilderException(
+                                "unable to find valid certification path to requested target")));
+        return handshake;
     }
 
     @Nested
@@ -199,6 +213,33 @@ class GitHubHttpClientTest {
             assertThat(result.isNetworkError()).isTrue();
             assertThat(result.statusCode()).isEqualTo(GitHubResponse.NETWORK_ERROR);
             assertThat(backoff.pauses).containsExactly(1, 2);
+        }
+
+        @Test
+        void reportsATlsErrorWithoutRetryingWhenCertificateValidationFails() {
+            RecordingBackoff backoff = new RecordingBackoff();
+            ScriptedTransport transport =
+                    new ScriptedTransport(untrustedCertificate(), ok("unexpected"));
+
+            GitHubResponse result =
+                    new GitHubHttpClient(transport, backoff)
+                            .get("https://api.github.com/user", "t");
+
+            assertThat(result.isTlsError()).isTrue();
+            assertThat(result.isNetworkError()).isTrue();
+            assertThat(transport.requests).hasSize(1);
+            assertThat(backoff.pauses).isEmpty();
+        }
+
+        @Test
+        void getOnceReportsATlsErrorForCertificateFailures() {
+            GitHubResponse result =
+                    new GitHubHttpClient(
+                                    new ScriptedTransport(untrustedCertificate()),
+                                    new RecordingBackoff())
+                            .getOnce("https://api.github.com/user", "t", Duration.ofSeconds(3));
+
+            assertThat(result.isTlsError()).isTrue();
         }
 
         @Test

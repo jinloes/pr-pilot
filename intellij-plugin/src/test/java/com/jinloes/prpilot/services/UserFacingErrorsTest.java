@@ -30,6 +30,27 @@ class UserFacingErrorsTest {
         }
 
         @Test
+        void certificateFailuresMapToTruststoreGuidance() {
+            String msg =
+                    UserFacingErrors.forGitHub(
+                            new IOException(
+                                    "Java could not verify GitHub's TLS certificate. The Java"
+                                            + " runtime's truststore (lib/security/cacerts) may be"
+                                            + " missing public root CAs."),
+                            "load pull requests");
+            assertThat(msg).contains("load pull requests").contains("cacerts").contains("JDK");
+        }
+
+        @Test
+        void unreachableGitHubMapsToNetworkGuidance() {
+            String msg =
+                    UserFacingErrors.forGitHub(
+                            new IOException("Unable to reach GitHub. Check your connection."),
+                            "load pull requests");
+            assertThat(msg).startsWith("Network error while trying to load pull requests");
+        }
+
+        @Test
         void ambiguousNotFoundStatusPreservesBothPossibleCauses() {
             String msg =
                     UserFacingErrors.forGitHub(

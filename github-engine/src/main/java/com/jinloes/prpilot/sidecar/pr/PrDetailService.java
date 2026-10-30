@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.sidecar.github.GitHubApiBase;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
+import com.jinloes.prpilot.sidecar.github.GitHubFailure;
 import com.jinloes.prpilot.sidecar.github.GitHubHttpClient;
 import com.jinloes.prpilot.sidecar.github.GitHubResponse;
 import java.io.IOException;
@@ -71,6 +72,10 @@ public final class PrDetailService {
             case NETWORK_ERROR ->
                     PrDetailResult.failure(
                             "network_error", "Unable to reach GitHub. Check your connection.");
+            case TLS_ERROR ->
+                    PrDetailResult.failure(
+                            GitHubFailure.TLS_UNTRUSTED.status(),
+                            GitHubFailure.TLS_UNTRUSTED.message());
             case API_FAILED -> PrDetailResult.failure("api_failed", "GitHub API request failed.");
         };
     }
@@ -96,6 +101,7 @@ public final class PrDetailService {
         NOT_AUTHENTICATED,
         RATE_LIMITED,
         NETWORK_ERROR,
+        TLS_ERROR,
         API_FAILED
     }
 
@@ -119,6 +125,9 @@ public final class PrDetailService {
             }
             if (response.isRateLimited()) {
                 return DetailResponse.of(DetailStatus.RATE_LIMITED);
+            }
+            if (response.isTlsError()) {
+                return DetailResponse.of(DetailStatus.TLS_ERROR);
             }
             if (response.isNetworkError()) {
                 return DetailResponse.of(DetailStatus.NETWORK_ERROR);
