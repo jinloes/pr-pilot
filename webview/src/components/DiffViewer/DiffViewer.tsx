@@ -341,17 +341,19 @@ export function DiffViewer({
                               'diff-findings__item',
                               finding.index === focusedCommentIdx && 'diff-findings__item--active',
                             )}
-                            aria-label={`${finding.label} in ${finding.comment.file}, line ${finding.comment.line}: ${finding.preview}`}
                             aria-current={finding.index === focusedCommentIdx ? 'location' : undefined}
                             onClick={() => handleSelectFinding(finding.index, finding.comment.file)}
                           >
-                            <span className={cn('diff-findings__label', findingToneClass(finding.comment))}>
+                            <span className="sr-only">
+                              {`${finding.label} in ${finding.comment.file}, line ${finding.comment.line}: ${finding.preview}`}
+                            </span>
+                            <span className={cn('diff-findings__label', findingToneClass(finding.comment))} aria-hidden="true">
                               {finding.label}
                             </span>
-                            <span className="diff-findings__location">
+                            <span className="diff-findings__location" aria-hidden="true">
                               {finding.comment.file}:{finding.comment.line}
                             </span>
-                            <span className="diff-findings__preview">{finding.preview}</span>
+                            <span className="diff-findings__preview" aria-hidden="true">{finding.preview}</span>
                           </button>
                         </li>
                       ))}
@@ -369,16 +371,18 @@ export function DiffViewer({
                             <button
                               type="button"
                               className="diff-findings__item"
-                              aria-label={`Unanchored ${finding.label} in ${finding.comment.file}, line ${finding.comment.line}: ${finding.preview}`}
                               onClick={() => handleSelectUnanchoredFinding(finding.index)}
                             >
-                              <span className={cn('diff-findings__label', findingToneClass(finding.comment))}>
+                              <span className="sr-only">
+                                {`Unanchored ${finding.label} in ${finding.comment.file}, line ${finding.comment.line}: ${finding.preview}`}
+                              </span>
+                              <span className={cn('diff-findings__label', findingToneClass(finding.comment))} aria-hidden="true">
                                 {finding.label}
                               </span>
-                              <span className="diff-findings__location">
+                              <span className="diff-findings__location" aria-hidden="true">
                                 {finding.comment.file}:{finding.comment.line}
                               </span>
-                              <span className="diff-findings__preview">{finding.preview}</span>
+                              <span className="diff-findings__preview" aria-hidden="true">{finding.preview}</span>
                             </button>
                           </li>
                         ))}
