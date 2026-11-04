@@ -9,6 +9,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Node 25+ defines a global localStorage that is undefined without --localstorage-file and
+    // shadows jsdom's window.localStorage inside workers.
+    execArgv: ['--no-experimental-webstorage'],
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.component.test.{ts,tsx}', 'src/i18n/**/*.test.ts'],
     coverage: {

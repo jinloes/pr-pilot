@@ -444,7 +444,7 @@ Release tags must be `vX.Y.Z` or `vX.Y.Z-rc.N`. The workflow derives that versio
 into both the IntelliJ plugin and VSIX manifests. Linux runs the full verification suite; Windows and
 macOS CI run targeted provider-binary, worktree-path, extension test, and packaging checks. These
 portable checks invoke npm through its JavaScript CLI and Gradle through the wrapper main class, so
-Node 20 never needs to spawn Windows `.cmd` or `.bat` shims.
+Node never needs to spawn Windows `.cmd` or `.bat` shims.
 
 ### RC vs final release tags
 

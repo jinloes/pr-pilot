@@ -153,7 +153,7 @@ Test framework and location rules:
 
 ## Required verification commands
 
-Use Node from `.nvmrc` (the script refuses Node older than 20.19). Run `./gradlew spotlessApply`
+Use Node from `.nvmrc` (the script refuses Node older than 26.0). Run `./gradlew spotlessApply`
 after Java edits, then:
 
 ```bash

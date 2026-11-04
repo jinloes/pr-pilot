@@ -112,8 +112,9 @@ test('windows-style paths are normalized', () => {
 })
 
 test('node version guard matches the webview engines floor', () => {
-  assert.equal(nodeVersionSupported('v16.19.0'), false)
-  assert.equal(nodeVersionSupported('v20.18.3'), false)
-  assert.equal(nodeVersionSupported('v20.19.0'), true)
-  assert.equal(nodeVersionSupported('v22.1.0'), true)
+  assert.equal(nodeVersionSupported('v20.19.0'), false)
+  assert.equal(nodeVersionSupported('v24.22.2'), false)
+  assert.equal(nodeVersionSupported('v26.0.0'), true)
+  assert.equal(nodeVersionSupported('v26.13.0'), true)
+  assert.equal(nodeVersionSupported('v27.1.0'), true)
 })
