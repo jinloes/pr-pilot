@@ -212,7 +212,7 @@ jobs:
     # Baselines are rendered in this exact image; scripts/playwright-image.mjs keeps its tag in step
     # with the locked @playwright/test version and with webview/AGENTS.md.
     container:
-      image: mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
       options: --user 1001 --ipc=host
     defaults:
       run:

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { deepPreparation, exampleDiff, examplePr, installHostFixture, latestHostRequest, pushHostMessage } from './hostFixture'
+import { deepPreparation, exampleDiff, examplePr, hostRequestCount, installHostFixture, latestHostRequest, pushHostMessage } from './hostFixture'
 import { expectNoViolations, openGeneratingReview } from './a11yHelpers'
 
 test.beforeEach(async ({ page }) => {
@@ -41,16 +41,24 @@ test('deep setup supports keyboard Continue, Retry, explicit fallback and safe n
   await pushHostMessage(page, { ...deepPreparation, operationId: prepare.operationId })
   await expect(page.getByRole('combobox', { name: 'Configured MCP server' })).toBeVisible()
   await expectNoViolations(page, 'section[aria-label="IntelliJ-assisted review setup"]')
-  await page.getByRole('button', { name: 'Continue / Retry' }).press('Enter')
+  // press() does not wait for enablement; each host reply re-enables these buttons asynchronously.
+  const continueButton = page.getByRole('button', { name: 'Continue / Retry' })
+  const ordinaryButton = page.getByRole('button', { name: 'Use ordinary review instead' })
+  await expect(continueButton).toBeEnabled()
+  await continueButton.press('Enter')
   const first = await latestHostRequest(page, 'continueDeepReview')
   expect(first.server).toBe('private')
   await pushHostMessage(page, { ...deepPreparation, operationId: first.operationId })
-  await page.getByRole('button', { name: 'Continue / Retry' }).press('Enter')
-  const retry = await latestHostRequest(page, 'continueDeepReview')
+  const continues = await hostRequestCount(page, 'continueDeepReview')
+  await expect(continueButton).toBeEnabled()
+  await continueButton.press('Enter')
+  const retry = await latestHostRequest(page, 'continueDeepReview', { after: continues })
   expect(retry.operationId).not.toBe(first.operationId)
   await pushHostMessage(page, { ...deepPreparation, operationId: retry.operationId })
-  await page.getByRole('button', { name: 'Use ordinary review instead' }).press('Enter')
-  expect((await latestHostRequest(page, 'generateReview')).intellijAssisted).toBeUndefined()
+  const generates = await hostRequestCount(page, 'generateReview')
+  await expect(ordinaryButton).toBeEnabled()
+  await ordinaryButton.press('Enter')
+  expect((await latestHostRequest(page, 'generateReview', { after: generates })).intellijAssisted).toBeUndefined()
 })
 test('populated discovery and provider-ready review have no axe violations', async ({ page }) => {
   await pushHostMessage(page, { type: 'prListLoaded', prs: [examplePr] })
