@@ -29,13 +29,27 @@ export async function pushHostMessage(page: Page, message: Record<string, unknow
   }, { protocolVersion, ...message })
 }
 
-export async function latestHostRequest(page: Page, type: string): Promise<Record<string, unknown>> {
+type FixtureWindow = { __hostFixture: { outgoing: Record<string, unknown>[] } }
+
+export async function hostRequestCount(page: Page, type: string): Promise<number> {
+  return page.evaluate((requestType) => (window as unknown as FixtureWindow).__hostFixture.outgoing
+    .filter(m => m.type === requestType).length, type)
+}
+
+/**
+ * Returns the newest request of `type`, waiting until more than `after` have been posted. Posting
+ * follows a keypress asynchronously, so a repeated request type must pass the count it saw before
+ * acting, or it can read the previous request.
+ */
+export async function latestHostRequest(
+  page: Page,
+  type: string,
+  { after = 0 }: { after?: number } = {},
+): Promise<Record<string, unknown>> {
+  await page.waitForFunction(([requestType, seen]) => (window as unknown as FixtureWindow).__hostFixture.outgoing
+    .filter(m => m.type === requestType).length > seen, [type, after] as const)
   return page.evaluate((requestType) => {
-    const { outgoing } = (window as unknown as {
-      __hostFixture: { outgoing: Record<string, unknown>[] }
-    }).__hostFixture
-    const requests = outgoing.filter(m => m.type === requestType)
-    if (!requests.length) throw new Error(`Missing host request: ${requestType}`)
+    const requests = (window as unknown as FixtureWindow).__hostFixture.outgoing.filter(m => m.type === requestType)
     return requests[requests.length - 1]
   }, type)
 }
