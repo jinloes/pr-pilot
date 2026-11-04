@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LineComment } from '@/bridge/types'
 import { AUTOSAVE_DEBOUNCE_MS } from '@/lib/autosave'
+import { withAttachedPatch } from '@/lib/attachPatch'
 import { DELETE_COMMENT_DESCRIPTION, DiffViewer } from './DiffViewer'
 
 const diff = `diff --git a/src/auth.ts b/src/auth.ts
@@ -277,6 +278,87 @@ describe('DiffViewer', () => {
     render(<DiffViewer diff={diff} comments={comments} onRemoveSuggestion={vi.fn()} />)
 
     expect(screen.queryByTestId('suggested-change')).not.toBeInTheDocument()
+  })
+
+  describe('placing a chat reply', () => {
+    it('opens the clicked line\'s editor prefilled with the reply and finishes placement on Add', async () => {
+      const user = userEvent.setup()
+      const onAddComment = vi.fn()
+      const onDone = vi.fn()
+      render(<DiffViewer diff={diff} comments={[]} onAddComment={onAddComment} commentPlacement={{ body: 'Use the filter framework.', onDone }} />)
+
+      expect(screen.getByTestId('comment-placement-banner')).toHaveTextContent('Click a line number')
+      await user.click(screen.getByRole('button', { name: 'Add comment on src/auth.ts, new line 2' }))
+
+      const editor = screen.getByRole('textbox', { name: 'Comment on src/auth.ts, line 2' })
+      expect(editor).toHaveValue('Use the filter framework.')
+      expect(screen.getByTestId('comment-placement-banner')).toHaveTextContent('Edit the chat reply below')
+      await user.type(editor, ' Then adapt it.')
+      await user.click(screen.getByRole('button', { name: 'Add' }))
+
+      expect(onAddComment).toHaveBeenCalledWith({
+        file: 'src/auth.ts',
+        line: 2,
+        type: 'note',
+        body: 'Use the filter framework. Then adapt it.',
+      })
+      expect(onDone).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps placement active when the prefilled editor is cancelled, and ends it from the banner', async () => {
+      const user = userEvent.setup()
+      const onDone = vi.fn()
+      render(<DiffViewer diff={diff} comments={[]} onAddComment={vi.fn()} commentPlacement={{ body: 'Reply.', onDone }} />)
+
+      await user.click(screen.getByRole('button', { name: 'Add comment on src/auth.ts, new line 2' }))
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByRole('textbox', { name: 'Comment on src/auth.ts, line 2' })).not.toBeInTheDocument()
+      expect(onDone).not.toHaveBeenCalled()
+
+      await user.click(screen.getByRole('button', { name: 'Cancel placement' }))
+      expect(onDone).toHaveBeenCalledTimes(1)
+    })
+
+    it('ends placement on Escape when no editor is open', async () => {
+      const user = userEvent.setup()
+      const onDone = vi.fn()
+      render(<DiffViewer diff={diff} comments={[]} onAddComment={vi.fn()} commentPlacement={{ body: 'Reply.', onDone }} />)
+
+      await user.keyboard('{Escape}')
+
+      expect(onDone).toHaveBeenCalledTimes(1)
+    })
+
+    it('ignores placement while the diff is read-only or cannot add comments', () => {
+      const placement = { body: 'Reply.', onDone: vi.fn() }
+      const { rerender } = render(<DiffViewer diff={diff} comments={[]} onAddComment={vi.fn()} commentPlacement={placement} readOnly />)
+      expect(screen.queryByTestId('comment-placement-banner')).not.toBeInTheDocument()
+
+      rerender(<DiffViewer diff={diff} comments={[]} commentPlacement={placement} />)
+      expect(screen.queryByTestId('comment-placement-banner')).not.toBeInTheDocument()
+    })
+
+    it('opens an empty editor for an ordinary gutter click', async () => {
+      const user = userEvent.setup()
+      render(<DiffViewer diff={diff} comments={[]} onAddComment={vi.fn()} />)
+
+      await user.click(screen.getByRole('button', { name: 'Add comment on src/auth.ts, new line 2' }))
+
+      expect(screen.getByRole('textbox', { name: 'Comment on src/auth.ts, line 2' })).toHaveValue('')
+    })
+  })
+
+  it('renders an attached patch as a collapsed block instead of raw HTML', () => {
+    const body = withAttachedPatch('Explain the new flag.', '```diff\n-old line\n+new line\n```')!
+    render(<DiffViewer diff={diff} comments={[{ ...comments[0], body }]} />)
+
+    const patch = screen.getByTestId('attached-patch')
+    expect(patch.tagName).toBe('DETAILS')
+    expect(patch).not.toHaveAttribute('open')
+    expect(within(patch).getByText('Suggested patch')).toBeInTheDocument()
+    expect(patch).toHaveTextContent('+new line')
+    expect(screen.getByText('Explain the new flag.')).toBeVisible()
+    expect(screen.queryByText(/<summary>/)).not.toBeInTheDocument()
   })
 
   it('hides the remove button while the diff is read-only', () => {

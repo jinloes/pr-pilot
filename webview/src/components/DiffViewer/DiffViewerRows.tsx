@@ -1,6 +1,7 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { splitAttachedPatch } from '@/lib/attachPatch'
 import type { FileData, HunkData } from 'react-diff-view'
 import {
   Check,
@@ -320,7 +321,13 @@ function HunkRows({
             ))}
 
             {pendingNew?.rowId === rowId && (
-              <NewCommentRow file={filePath} line={pendingNew.line} onSave={onPendingSave} onCancel={onPendingCancel} />
+              <NewCommentRow
+                file={filePath}
+                line={pendingNew.line}
+                initialBody={pendingNew.initialBody}
+                onSave={onPendingSave}
+                onCancel={onPendingCancel}
+              />
             )}
           </Fragment>
         )
@@ -570,8 +577,8 @@ function InlineCommentRow({
             </div>
           ) : (
             <div className="diff-comment__body">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{comment.body}</ReactMarkdown>
-          </div>
+              <CommentBody body={comment.body} />
+            </div>
           )}
           {comment.suggestedChange && !editing && (
             <SuggestedChangePreview
@@ -583,6 +590,26 @@ function InlineCommentRow({
         </div>
       </td>
     </tr>
+  )
+}
+
+/** Renders a comment body, showing an attached patch block as a collapsed `<details>`. */
+function CommentBody({ body }: { body: string }) {
+  const { text, patch } = splitAttachedPatch(body)
+  return (
+    <>
+      {text && <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>}
+      {patch !== null && (
+        <details className="mt-2 rounded border border-border" data-testid="attached-patch">
+          <summary className="cursor-pointer px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+            Suggested patch
+          </summary>
+          <div className="overflow-x-auto border-t border-border [&_pre]:m-0">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{patch}</ReactMarkdown>
+          </div>
+        </details>
+      )}
+    </>
   )
 }
 
@@ -634,19 +661,26 @@ function SuggestedChangePreview({
 function NewCommentRow({
   file,
   line,
+  initialBody = '',
   onSave,
   onCancel,
 }: {
   file: string
   line: number
+  initialBody?: string
   onSave: (type: LineComment['type'], body: string) => void
   onCancel: () => void
 }) {
   const [type, setType] = useState<LineComment['type']>('note')
-  const [body, setBody] = useState('')
+  const [body, setBody] = useState(initialBody)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  useEffect(() => { textareaRef.current?.focus() }, [])
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.focus()
+    if (textarea.value) textarea.style.height = textarea.scrollHeight + 'px'
+  }, [])
 
   function handleSave() {
     const trimmed = body.trim()

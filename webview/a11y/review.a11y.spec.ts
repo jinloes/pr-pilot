@@ -224,6 +224,10 @@ test('overflowing chat history can be focused and scrolled with the keyboard', a
   const bottom = await history.evaluate((element) => element.scrollTop)
   await input.focus()
   await page.keyboard.press('Shift+Tab')
+  const addButtons = page.getByRole('button', { name: 'Add to review' })
+  await expect(addButtons.last()).toBeFocused()
+  // Each reply's action sits between the history region and the composer in tab order.
+  for (let index = 0; index < await addButtons.count(); index += 1) await page.keyboard.press('Shift+Tab')
   await expect(history).toBeFocused()
   await page.keyboard.press('PageUp')
   await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBeLessThan(bottom)

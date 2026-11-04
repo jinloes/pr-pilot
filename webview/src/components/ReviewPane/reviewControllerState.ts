@@ -8,7 +8,7 @@ import type {
 } from '../../bridge/types'
 import { coverageGain, type DiffCoverage } from '@/lib/diffCoverage'
 import type { ReviewQualityAction, ReviewQualityReport } from '@/lib/reviewQuality'
-import type { VerifyResult } from '../ChatPane/structuredResult'
+import type { ExampleFixResult, VerifyResult } from '../ChatPane/structuredResult'
 import type { PaneState, Verdict } from './reviewState'
 import type { ReviewActivity } from './reviewActivity'
 import type { PublishedBodySections } from './publishBody'
@@ -83,6 +83,10 @@ export interface ReviewViewModel {
   contextSummary: string[]
   qualityExpanded: boolean
   hasReview: boolean
+  /** True while the diff is editable, so a chat reply can become an inline comment. */
+  canPlaceChatReply: boolean
+  /** Chat reply waiting for the reviewer to pick the diff line it should be commented on. */
+  chatCommentDraft: string | null
   statusMessage: string
 }
 
@@ -109,6 +113,7 @@ export interface ReviewActions {
   verifyComment: (comment: LineComment) => void
   suggestFixComment: (comment: LineComment) => void
   applyVerifyAction: (verify: VerifyResult, token: string) => void
+  attachExamplePatch: (fix: ExampleFixResult, token: string) => void
   editCommentHandlers: {
     onEditComment: (index: number, body: string) => void
     onDeleteComment: (index: number) => void
@@ -130,6 +135,9 @@ export interface ReviewActions {
   clearSelectedContext: () => void
   askAboutSelection: (question: string) => void
   pendingMessageSent: () => void
+  /** Starts "pick a line" mode in the diff with this chat reply as the new comment's text. */
+  placeChatReply: (body: string) => void
+  cancelChatReplyPlacement: () => void
   setChatHeight: (height: number) => void
   commitChatHeight: (height: number) => void
   startChatResize: (event: ReactPointerEvent) => void

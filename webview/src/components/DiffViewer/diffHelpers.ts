@@ -11,6 +11,14 @@ export interface PendingNew {
   file: string
   line: number
   rowId: string
+  /** Prefilled text when the editor was opened to place a chat reply. */
+  initialBody?: string
+}
+
+/** A chat reply waiting for the reviewer to click the diff line it belongs on. */
+export interface CommentPlacement {
+  body: string
+  onDone: () => void
 }
 
 /** Deletions persist through draft autosave, so the copy follows its debounce. */

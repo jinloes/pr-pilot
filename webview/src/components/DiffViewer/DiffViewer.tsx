@@ -18,7 +18,7 @@ import {
 import { buildFindingNavItems } from './findingNavigation'
 import { FileTreeNodeView, FileView } from './DiffViewerRows'
 export { DELETE_COMMENT_DESCRIPTION } from './diffHelpers'
-import { findByPathSuffix, findingToneClass, groupComments, type IndexedComment, type PendingNew } from './diffHelpers'
+import { findByPathSuffix, findingToneClass, groupComments, type CommentPlacement, type IndexedComment, type PendingNew } from './diffHelpers'
 import './DiffViewer.css'
 
 const MAX_CHANGES = 500
@@ -36,6 +36,8 @@ interface Props {
   onAddComment?: (comment: LineComment) => void
   onVerifyComment?: (comment: LineComment) => void
   onSuggestFixComment?: (comment: LineComment) => void
+  /** When set, the next line clicked opens the new-comment editor prefilled with this text. */
+  commentPlacement?: CommentPlacement
   readOnly?: boolean
 }
 
@@ -52,6 +54,7 @@ export function DiffViewer({
   onAddComment,
   onVerifyComment,
   onSuggestFixComment,
+  commentPlacement,
   readOnly = false,
 }: Props) {
   const t = useI18n()
@@ -75,6 +78,26 @@ export function DiffViewer({
   useEffect(() => {
     if (readOnly) setPendingNew(null)
   }, [readOnly])
+
+  const placing = commentPlacement && onAddComment && !readOnly ? commentPlacement : undefined
+  const placementBannerRef = useRef<HTMLDivElement>(null)
+  const placementBody = placing?.body
+
+  // The chat sits below the diff, so bring the instructions into view when placement starts.
+  useEffect(() => {
+    if (placementBody !== undefined) placementBannerRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [placementBody])
+
+  const placementDone = placing?.onDone
+  const editorOpen = pendingNew !== null
+  useEffect(() => {
+    if (!placementDone || editorOpen) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') placementDone()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [placementDone, editorOpen])
 
   const openSearch = useCallback(() => {
     setSearchOpen(true)
@@ -447,6 +470,33 @@ export function DiffViewer({
               )}
             </div>
 
+            {placing && (
+              <div
+                ref={placementBannerRef}
+                role="status"
+                data-testid="comment-placement-banner"
+                className="mx-3 my-2 flex flex-wrap items-center justify-between gap-2 rounded border border-primary/40 bg-primary/5 px-3 py-1.5 text-xs"
+              >
+                <span>
+                  {pendingNew?.initialBody !== undefined
+                    ? 'Edit the chat reply below, then add it to the review.'
+                    : 'Click a line number to comment there with the chat reply.'}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-xs gap-1"
+                  onClick={() => {
+                    if (pendingNew?.initialBody !== undefined) setPendingNew(null)
+                    placing.onDone()
+                  }}
+                >
+                  <X className="w-3 h-3" />
+                  Cancel placement
+                </Button>
+              </div>
+            )}
+
             {visibleFiles.map((file, fileIndex) => {
               const displayPath = displayPathForFile(file)
               const fileComments =
@@ -469,11 +519,12 @@ export function DiffViewer({
                     else sectionRefs.current.delete(displayPath)
                   }}
                   onLineClick={onAddComment && !readOnly
-                    ? ({ line, rowId }) => setPendingNew({ file: displayPath, line, rowId })
+                    ? ({ line, rowId }) => setPendingNew({ file: displayPath, line, rowId, initialBody: placing?.body })
                     : undefined}
                   onPendingCancel={() => setPendingNew(null)}
                   onPendingSave={(type, body) => {
                     if (pendingNew) onAddComment?.({ file: pendingNew.file, line: pendingNew.line, type, body })
+                    if (pendingNew?.initialBody !== undefined) placing?.onDone()
                     setPendingNew(null)
                   }}
                   onEditComment={onEditComment}

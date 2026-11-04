@@ -15,7 +15,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { formatBudget, splitDiffCoverage, unlistedCount, type DiffCoverage } from '@/lib/diffCoverage'
 import { cn } from '@/lib/utils'
-import { DiffViewer } from '../DiffViewer'
+import { DiffViewer, type CommentPlacement } from '../DiffViewer'
 import { ReviewDisplay } from '../ReviewDisplay'
 import { OrphanCommentsSection } from './OrphanComments'
 import type { PaneState } from './reviewState'
@@ -44,6 +44,8 @@ interface PaneContentProps {
   onSuggestFixComment?: (comment: LineComment) => void
   onFocusComment: (index: number) => void
   editCommentHandlers: EditCommentHandlers
+  /** Chat reply waiting to be placed on a diff line; honored only where the diff is editable. */
+  commentPlacement?: CommentPlacement
   inlineComments: LineComment[]
   orphanComments: LineComment[]
   onEditOrphan: (orphan: LineComment, body: string) => void
@@ -199,6 +201,7 @@ function ReviewAndDiff({
   onEditOrphan,
   onDeleteOrphan,
   readOnly = false,
+  commentPlacement,
   generationMessage,
   coverageGain,
   chunkedMode,
@@ -224,6 +227,7 @@ function ReviewAndDiff({
   onEditOrphan: (orphan: LineComment, body: string) => void
   onDeleteOrphan: (orphan: LineComment) => void
   readOnly?: boolean
+  commentPlacement?: CommentPlacement
   generationMessage?: string
 }) {
   const generationSummary = formatGenerationSummary(generationElapsedSec)
@@ -316,6 +320,7 @@ function ReviewAndDiff({
             onAddComment={editCommentHandlers.onAddComment}
             onVerifyComment={onVerifyComment}
             onSuggestFixComment={onSuggestFixComment}
+            commentPlacement={commentPlacement}
             readOnly={readOnly}
           />
         </div>
@@ -464,6 +469,7 @@ export function PaneContent({
   onSuggestFixComment,
   onFocusComment,
   editCommentHandlers,
+  commentPlacement,
   inlineComments,
   orphanComments,
   onEditOrphan,
@@ -587,6 +593,7 @@ export function PaneContent({
           importedFromGitHub={state.importedFromGitHub}
           reviewScope={state.reviewScope}
           onReanchor={onReanchor}
+          commentPlacement={commentPlacement}
           inlineComments={inlineComments}
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
@@ -608,6 +615,7 @@ export function PaneContent({
           focusedCommentIdx={focusedCommentIdx}
           commentFocusRequestId={commentFocusRequestId}
           editCommentHandlers={editCommentHandlers}
+          commentPlacement={commentPlacement}
           onFocusComment={onFocusComment}
           onVerifyComment={onVerifyComment}
           onSuggestFixComment={onSuggestFixComment}

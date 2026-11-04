@@ -162,6 +162,8 @@ line here.
 - [Webview draft mutation watchdog](docs/architecture/webview.md#webview-draft-mutation-watchdog)
 - [Chat pane structured verify/fix results](docs/architecture/webview.md#chat-pane-structured-verifyfix-results)
 - [Verify verdicts apply to the comment that was verified, not the latest one](docs/architecture/webview.md#verify-verdicts-apply-to-the-comment-that-was-verified-not-the-latest-one)
+- [Suggest fix patches attach as a collapsed diff, not a suggestion block](docs/architecture/webview.md#suggest-fix-patches-attach-as-a-collapsed-diff-not-a-suggestion-block)
+- [Chat replies become comments by picking a line](docs/architecture/webview.md#chat-replies-become-comments-by-picking-a-line)
 - [User-facing error copy](docs/architecture/webview.md#user-facing-error-copy)
 - [Bridge payload validation](docs/architecture/webview.md#bridge-payload-validation)
 - [PR chat scope](docs/architecture/webview.md#pr-chat-scope)

@@ -77,12 +77,14 @@ generation which can legitimately run for minutes.
 ### Chat pane structured verify/fix results
 The "Verify" and "Suggest fix" per-comment actions
 (`buildVerifyCommentPrompt`/`buildExampleFixPrompt` in `ReviewPane/verifyPrompt.ts`) instruct the
-model to return only a bare JSON object (no prose) matching one of two fixed schemas. Verification
-treats the supplied diff excerpt as primary evidence but may use provider read-only file tools
-against the detached PR-head worktree when the excerpt is insufficient; it must not use shell,
-write, network, or paths outside that worktree. The response records inspected repository-relative
+model to return only a bare JSON object (no prose) matching one of two fixed schemas. Both treat the
+supplied diff excerpt as primary evidence but may use provider read-only file tools against the
+detached PR-head worktree when the excerpt is insufficient; they must not use shell, write, network,
+or paths outside that worktree. The excerpt is a single hunk trimmed to ±6 changes around the
+comment, so restricting "Suggest fix" to it made the model return `examplePatch: null` whenever the
+fix sat in an unseen part of the method. Verification records inspected repository-relative
 files/lines or symbols in `evidence`, which the UI renders so the reviewer can see what was checked
-without exposing tool arguments or file contents. `ChatPane` treats every assistant reply as
+without exposing tool arguments or file contents; the example fix cites them in `why`. `ChatPane` treats every assistant reply as
 potentially structured: `structuredResult.ts`'s `parseStructuredResult` tries to parse the content
 (tolerating a stray ```` ```json ```` fence some models add despite instructions) against the verify
 schema (`verdict`/`why`/`evidence`/`action`/`replacementComment`) and the example-fix schema
@@ -106,6 +108,27 @@ object identity first, then `(file, line, body)` — and **no-ops when the comme
 or its body edited**, because applying a stale verdict to a different comment is worse than dropping
 it. Only `delete`, and `revise` with non-blank replacement text, render an Apply button; `keep`
 changes nothing, so offering one would be misleading.
+
+### Suggest fix patches attach as a collapsed diff, not a suggestion block
+"Add patch to comment" on a Suggest fix card appends the example patch to the comment it was
+requested for, located with the same token and `resolveVerifyTarget` rules as verify verdicts. A
+GitHub ```` ```suggestion ```` block replaces only the anchored line range, and AI patches usually
+span several hunks, so `lib/attachPatch.ts` appends a `<details><summary>Suggested patch</summary>`
+block with the fenced diff instead; re-attaching replaces it. The single-line `suggestedChange` is
+kept. The webview's Markdown renderer drops raw HTML (adding `rehype-raw` would let model text inject
+markup), so `DiffViewerRows` splits the block off with `splitAttachedPatch` and renders a real
+`<details>` element; the header string is the split key and must not change. Patches over
+`MAX_ATTACHED_PATCH_CHARS` (12,000) are refused with an explanation because every comment body is
+also base64-encoded into the draft review body, which GitHub caps at 65,536 characters.
+
+### Chat replies become comments by picking a line
+A chat reply carries no file or line, so "Add to review" never guesses an anchor. It puts the diff
+in placement mode (`chatCommentDraft` in `useReviewController`, `commentPlacement` on `DiffViewer`):
+a banner asks for a line, the next gutter click opens the new-comment editor prefilled with the
+reply, and adding the comment ends placement. Cancelling that editor keeps placement active so a
+mis-click costs nothing; the banner's "Cancel placement" or Escape (with no editor open) ends it.
+The button is offered only in `draftPresent` and `reviewUnsaved`, the states whose diff is
+editable, and never on errors or structured verify/fix cards, which have their own actions.
 
 ### User-facing error copy
 Do not surface raw provider/HTTP exception strings directly to users in review/draft/chat flows.

@@ -1,8 +1,9 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, type Mock } from 'vitest'
-import type { VerifyResult } from './structuredResult'
+import type { ExampleFixResult, VerifyResult } from './structuredResult'
 import type { PR } from '../../bridge/types'
+import { MAX_ATTACHED_PATCH_CHARS } from '@/lib/attachPatch'
 import { ChatPane } from './ChatPane'
 
 const pr: PR = {
@@ -293,6 +294,92 @@ describe('ChatPane', () => {
     expect(appliedButton).toBeDisabled()
     act(() => appliedButton.click())
     expect(onApplyVerifyAction).toHaveBeenCalledTimes(1)
+  })
+
+  function fixJson(examplePatch: string | null) {
+    return JSON.stringify({
+      approach: ['Fall back to any actor.'],
+      examplePatch,
+      why: 'Covers the gap.',
+      risks: [],
+      testUpdates: [],
+      missingContext: [],
+    })
+  }
+
+  async function renderWithPendingFix(token: string | undefined, onAttach = vi.fn<(result: ExampleFixResult, token: string) => void>()) {
+    Object.assign(window, { cefQuery: vi.fn() })
+    render(
+      <ChatPane
+        pr={pr}
+        pendingMessage={{ q: 'Suggest a fix', ctx: '', id: 1, token }}
+        onAttachExamplePatch={onAttach}
+      />,
+    )
+    await screen.findByText('Suggest a fix')
+    return onAttach
+  }
+
+  it('attaches an example patch to the comment Suggest fix was requested for, once', async () => {
+    const onAttach = await renderWithPendingFix('fix-1')
+    pushHostMessage({ type: 'chatResponse', response: fixJson('```diff\n-a\n+b\n```') })
+
+    const button = await screen.findByRole('button', { name: 'Add patch to comment' })
+    act(() => button.click())
+
+    expect(onAttach).toHaveBeenCalledTimes(1)
+    expect(onAttach.mock.calls[0][0]).toMatchObject({ kind: 'fix', examplePatch: '```diff\n-a\n+b\n```' })
+    expect(onAttach.mock.calls[0][1]).toBe('fix-1')
+    const added = await screen.findByRole('button', { name: 'Added to comment' })
+    expect(added).toBeDisabled()
+  })
+
+  it('offers no attach action when the reply has no patch', async () => {
+    await renderWithPendingFix('fix-2')
+    pushHostMessage({ type: 'chatResponse', response: fixJson(null) })
+    expect(await screen.findByText('Covers the gap.')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Add patch to comment' })).not.toBeInTheDocument()
+  })
+
+  it('explains instead of attaching when the patch is too large', async () => {
+    const onAttach = await renderWithPendingFix('fix-3')
+    pushHostMessage({ type: 'chatResponse', response: fixJson('x'.repeat(MAX_ATTACHED_PATCH_CHARS + 1)) })
+
+    expect(await screen.findByText(/too large to add to\s+the comment/)).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Add patch to comment' })).not.toBeInTheDocument()
+    expect(onAttach).not.toHaveBeenCalled()
+  })
+
+  it('offers Add to review on plain assistant replies and passes the reply text', async () => {
+    Object.assign(window, { cefQuery: vi.fn() })
+    const onAddReplyToReview = vi.fn<(body: string) => void>()
+    render(<ChatPane pr={pr} pendingMessage={{ q: 'Should this use the filter framework?', ctx: '', id: 1 }} onAddReplyToReview={onAddReplyToReview} />)
+    await screen.findByText('Should this use the filter framework?')
+
+    pushHostMessage({ type: 'chatResponse', response: 'Yes — use **FilterRequest** here.' })
+
+    const buttons = await screen.findAllByRole('button', { name: 'Add to review' })
+    expect(buttons).toHaveLength(1)
+    act(() => buttons[0].click())
+    expect(onAddReplyToReview).toHaveBeenCalledWith('Yes — use **FilterRequest** here.')
+  })
+
+  it('offers Add to review only when the host can place it, and never on errors or structured results', async () => {
+    Object.assign(window, { cefQuery: vi.fn() })
+    const { unmount } = render(<ChatPane pr={pr} pendingMessage={{ q: 'Q1', ctx: '', id: 1 }} />)
+    await screen.findByText('Q1')
+    pushHostMessage({ type: 'chatResponse', response: 'Plain answer.' })
+    expect(await screen.findByText('Plain answer.')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Add to review' })).not.toBeInTheDocument()
+    unmount()
+
+    render(<ChatPane pr={pr} pendingMessage={{ q: 'Q2', ctx: '', id: 2 }} onAddReplyToReview={vi.fn()} />)
+    await screen.findByText('Q2')
+    pushHostMessage({ type: 'chatResponse', response: verifyJson({ verdict: 'valid', action: 'keep' }) })
+    expect(await screen.findByText('Valid')).toBeVisible()
+    pushHostMessage({ type: 'chatError', message: 'Provider failed.' })
+    expect(await screen.findByText('Provider failed.')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Add to review' })).not.toBeInTheDocument()
   })
 
   it('exposes the scrollable history as a named keyboard-focusable region', () => {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Check, Send, Square, X, XCircle } from 'lucide-react'
+import { AlertTriangle, Check, MessageSquarePlus, Send, Square, X, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
@@ -8,6 +8,7 @@ import { LiveStatus } from '../a11y/LiveStatus'
 import { MarkdownContent } from '../MarkdownContent/MarkdownContent'
 import { useI18n } from '@/i18n/I18nProvider'
 import { parseStructuredResult, type ExampleFixResult, type StructuredResult, type VerifyResult } from './structuredResult'
+import { attachPatchBlocker, MAX_ATTACHED_PATCH_CHARS } from '@/lib/attachPatch'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -39,6 +40,10 @@ interface Props {
   contextSummary?: string[]
   /** Applies a verify verdict's suggested action to the comment identified by `token`. */
   onApplyVerifyAction?: (result: VerifyResult, token: string) => void
+  /** Appends an example fix's patch to the comment identified by `token`. */
+  onAttachExamplePatch?: (result: ExampleFixResult, token: string) => void
+  /** Starts placing an assistant reply as an inline review comment; absent when the diff is read-only. */
+  onAddReplyToReview?: (body: string) => void
 }
 
 function prKey(pr: Pick<PR, 'owner' | 'repo' | 'number'>): string {
@@ -58,6 +63,8 @@ export function ChatPane({
   onPendingMessageSent,
   contextSummary = [],
   onApplyVerifyAction,
+  onAttachExamplePatch,
+  onAddReplyToReview,
 }: Props) {
   const t = useI18n()
   const [messages, setMessages] = useState<Message[]>([])
@@ -168,6 +175,11 @@ export function ChatPane({
 
   function handleApplyVerifyAction(result: VerifyResult, token: string) {
     onApplyVerifyAction?.(result, token)
+    setAppliedTokens((prev) => new Set(prev).add(token))
+  }
+
+  function handleAttachExamplePatch(result: ExampleFixResult, token: string) {
+    onAttachExamplePatch?.(result, token)
     setAppliedTokens((prev) => new Set(prev).add(token))
   }
 
@@ -286,6 +298,11 @@ export function ChatPane({
                         ? (verify) => handleApplyVerifyAction(verify, m.token!)
                         : undefined
                     }
+                    onAttachExamplePatch={
+                      m.token && onAttachExamplePatch
+                        ? (fix) => handleAttachExamplePatch(fix, m.token!)
+                        : undefined
+                    }
                     applied={!!m.token && appliedTokens.has(m.token)}
                   />
                 ) : (
@@ -319,6 +336,18 @@ export function ChatPane({
                       </MarkdownContent>
                     )}
                   </div>
+                )}
+                {!structured && m.role === 'assistant' && !m.isError && !m.stopped && onAddReplyToReview && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground"
+                    title="Pick a diff line, then edit this reply into an inline comment"
+                    onClick={() => onAddReplyToReview(m.content)}
+                  >
+                    <MessageSquarePlus className="h-3 w-3" aria-hidden="true" />
+                    Add to review
+                  </Button>
                 )}
               </div>
             )
@@ -437,10 +466,12 @@ const ACTION_LABEL: Record<VerifyResult['action'], string> = {
 function StructuredResultCard({
   result,
   onApplyVerifyAction,
+  onAttachExamplePatch,
   applied = false,
 }: {
   result: StructuredResult
   onApplyVerifyAction?: (result: VerifyResult) => void
+  onAttachExamplePatch?: (result: ExampleFixResult) => void
   applied?: boolean
 }) {
   return (
@@ -448,7 +479,7 @@ function StructuredResultCard({
       {result.kind === 'verify' ? (
         <VerifyResultCard result={result} onApply={onApplyVerifyAction} applied={applied} />
       ) : (
-        <ExampleFixResultCard result={result} />
+        <ExampleFixResultCard result={result} onAttach={onAttachExamplePatch} attached={applied} />
       )}
     </div>
   )
@@ -530,7 +561,17 @@ function TextList({ title, items }: { title: string; items: string[] }) {
   )
 }
 
-function ExampleFixResultCard({ result }: { result: ExampleFixResult }) {
+function ExampleFixResultCard({
+  result,
+  onAttach,
+  attached = false,
+}: {
+  result: ExampleFixResult
+  onAttach?: (result: ExampleFixResult) => void
+  attached?: boolean
+}) {
+  const blocker = attachPatchBlocker(result.examplePatch)
+  const canAttach = !!onAttach && blocker === null
   return (
     <div className="p-3 space-y-2.5 text-sm">
       <TextList title="Approach" items={result.approach} />
@@ -547,6 +588,28 @@ function ExampleFixResultCard({ result }: { result: ExampleFixResult }) {
       <TextList title="Risks" items={result.risks} />
       <TextList title="Test updates" items={result.testUpdates} />
       <TextList title="Missing context" items={result.missingContext} />
+      {canAttach && (
+        <div className="flex items-center gap-2 pt-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs"
+            disabled={attached}
+            onClick={() => onAttach?.(result)}
+          >
+            {attached ? 'Added to comment' : 'Add patch to comment'}
+          </Button>
+          {!attached && (
+            <span className="text-[11px] text-muted-foreground">Appends it as a collapsed diff in the draft comment</span>
+          )}
+        </div>
+      )}
+      {onAttach && blocker === 'tooLarge' && (
+        <p className="pt-1 text-[11px] text-muted-foreground">
+          This patch is longer than {MAX_ATTACHED_PATCH_CHARS.toLocaleString('en-US')} characters, too large to add to
+          the comment. Copy the parts you need instead.
+        </p>
+      )}
     </div>
   )
 }

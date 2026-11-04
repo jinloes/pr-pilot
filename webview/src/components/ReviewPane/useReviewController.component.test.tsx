@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PR, ReviewResult } from '../../bridge/types'
+import type { ExampleFixResult } from '../ChatPane/structuredResult'
 import { MUTATION_WATCHDOG_MS, SELECTION_CAPTURE_DEBOUNCE_MS, useReviewController } from './useReviewController'
 
 const pr: PR = {
@@ -528,6 +529,73 @@ describe('useReviewController', () => {
       const revised = result.current.model.result?.lineComments[0]
       expect(revised?.body).toBe('Return a default instead.')
       expect(revised).not.toHaveProperty('suggestedChange')
+    })
+
+    it('holds a trimmed chat reply for placement while the draft is editable, until cancelled', () => {
+      const { result } = loadSuggestedDraft()
+      expect(result.current.model.canPlaceChatReply).toBe(true)
+
+      act(() => result.current.actions.placeChatReply('  Use the filter framework.  '))
+      expect(result.current.model.chatCommentDraft).toBe('Use the filter framework.')
+
+      act(() => result.current.actions.cancelChatReplyPlacement())
+      expect(result.current.model.chatCommentDraft).toBeNull()
+
+      act(() => result.current.actions.placeChatReply('   '))
+      expect(result.current.model.chatCommentDraft).toBeNull()
+    })
+
+    it('does not offer chat reply placement before a review exists', () => {
+      const { result } = renderHook(() => useReviewController({ pr }))
+
+      act(() => result.current.actions.placeChatReply('Reply.'))
+
+      expect(result.current.model.canPlaceChatReply).toBe(false)
+      expect(result.current.model.chatCommentDraft).toBeNull()
+    })
+
+    function exampleFix(examplePatch: string | null): ExampleFixResult {
+      return { kind: 'fix', approach: [], examplePatch, why: 'w', risks: [], testUpdates: [], missingContext: [] }
+    }
+
+    it('attaches an example patch to the comment Suggest fix was requested for', () => {
+      const { result } = loadSuggestedDraft()
+      act(() => result.current.actions.suggestFixComment(suggestedReview.lineComments[0]))
+      const token = result.current.model.pendingChatMessage?.token ?? ''
+      expect(token).toMatch(/^fix-/)
+
+      act(() => result.current.actions.attachExamplePatch(exampleFix('```diff\n-a\n+b\n```'), token))
+
+      const updated = result.current.model.result?.lineComments[0]
+      expect(updated?.body).toBe(
+        `${suggestedReview.lineComments[0].body}\n\n<details>\n<summary>Suggested patch</summary>\n\n`
+          + '```diff\n-a\n+b\n```\n\n</details>',
+      )
+      expect(updated?.suggestedChange).toBe(suggestedReview.lineComments[0].suggestedChange)
+      expect(result.current.model.autosaveDirty).toBe(true)
+    })
+
+    it('does nothing when the comment was edited after Suggest fix was requested', () => {
+      const { result } = loadSuggestedDraft()
+      act(() => result.current.actions.suggestFixComment(suggestedReview.lineComments[0]))
+      const token = result.current.model.pendingChatMessage?.token ?? ''
+      act(() => result.current.actions.editCommentHandlers.onEditComment(0, 'Rewritten.'))
+
+      act(() => result.current.actions.attachExamplePatch(exampleFix('```diff\n-a\n+b\n```'), token))
+
+      expect(result.current.model.result?.lineComments[0].body).toBe('Rewritten.')
+    })
+
+    it('does nothing for an unknown token or a missing patch', () => {
+      const { result } = loadSuggestedDraft()
+      act(() => result.current.actions.suggestFixComment(suggestedReview.lineComments[0]))
+      const token = result.current.model.pendingChatMessage?.token ?? ''
+
+      act(() => result.current.actions.attachExamplePatch(exampleFix('```diff\n-a\n+b\n```'), 'fix-unknown'))
+      act(() => result.current.actions.attachExamplePatch(exampleFix(null), token))
+
+      expect(result.current.model.result?.lineComments[0].body).toBe(suggestedReview.lineComments[0].body)
+      expect(result.current.model.autosaveDirty).toBe(false)
     })
   })
 

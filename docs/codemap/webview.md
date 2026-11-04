@@ -44,6 +44,8 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
 - `src/lib/diffCoverage.ts` - Strict mirror of `DiffCoverage.split` plus coverage-gain and budget
   formatting for the coverage banner and chunked-review recommendation.
 - `src/lib/autosave.ts` - Draft dirty-check, snapshot, and debounce decisions.
+- `src/lib/attachPatch.ts` - Appends, replaces, and splits the collapsed "Suggested patch" block
+  that a Suggest fix result adds to a draft comment body.
 - `src/lib/validateComments.ts` - Inline-comment validation.
 - `src/lib/keyboard.ts`, `layout.ts`, `motion.ts` - Shared interaction/layout policies.
 - `src/components/DiffViewer/fileNavigation.ts`, `findingNavigation.ts` - Changed-file and

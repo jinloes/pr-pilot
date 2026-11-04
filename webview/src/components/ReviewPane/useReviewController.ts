@@ -6,7 +6,8 @@ import { coverageGain, parseDiffCoverage } from '@/lib/diffCoverage'
 import { parseDiffSafely } from '@/lib/diffParse'
 import { applyReviewQualityRepairs, runReviewQualityCheck, type ReviewQualityAction, type ReviewQualityReport } from '@/lib/reviewQuality'
 import { validateComments, withoutSuggestion } from '@/lib/validateComments'
-import type { VerifyResult } from '../ChatPane/structuredResult'
+import type { ExampleFixResult, VerifyResult } from '../ChatPane/structuredResult'
+import { withAttachedPatch } from '@/lib/attachPatch'
 import { CHAT_HEIGHT_KEY, clampChatHeight, loadChatHeight } from './chatHeight'
 import { adjacentCommentIndex, focusedIndexAfterCommentDeletion, nextCommentIndex } from './commentNavigation'
 import { diffOf, initialPaneState, resultOf, reviewReducer, validationDiffOf, type DraftPresentState, type PaneState, type Verdict } from './reviewState'
@@ -66,6 +67,7 @@ export function useReviewController({
   const [commentFocusRequestId, setCommentFocusRequestId] = useState(0)
   const [chatVisible, setChatVisible] = useState(false)
   const [selectedContext, setSelectedContext] = useState('')
+  const [chatCommentDraft, setChatCommentDraft] = useState<string | null>(null)
   const [pendingChatMessage, setPendingChatMessage] = useState<PendingChatMessage | null>(null)
   const [chunkedMode, setChunkedMode] = useState(false)
   const [intellijAssisted, setIntellijAssisted] = useState(false)
@@ -84,7 +86,7 @@ export function useReviewController({
   const paneRef = useRef<HTMLDivElement>(null)
   const reviewBodyRef = useRef<HTMLDivElement>(null)
   const chatDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
-  const verifyTargetsRef = useRef<Map<string, LineComment>>(new Map())
+  const chatTargetsRef = useRef<Map<string, LineComment>>(new Map())
   const pendingSubmitRef = useRef<{ verdict: Verdict; comment: string } | null>(null)
   const submitInFlightRef = useRef(false)
   const currentPrRef = useRef(pr)
@@ -142,6 +144,7 @@ export function useReviewController({
     commentNavigatedRef.current = false
     setChatVisible(false)
     setSelectedContext('')
+    setChatCommentDraft(null)
     setPendingChatMessage(null)
     setQualityExpanded(false)
     setCommentsMovedToBody(false)
@@ -475,7 +478,7 @@ export function useReviewController({
     if (!chatVisible) setChatVisible(true)
     const id = Date.now()
     const token = `verify-${id}`
-    verifyTargetsRef.current.set(token, comment)
+    chatTargetsRef.current.set(token, comment)
     setPendingChatMessage({
       q: question,
       ctx: context,
@@ -486,7 +489,7 @@ export function useReviewController({
   }
 
   function handleApplyVerifyAction(verify: VerifyResult, token: string) {
-    const target = verifyTargetsRef.current.get(token)
+    const target = chatTargetsRef.current.get(token)
     if (!target || !result) return
 
     const index = resolveVerifyTarget(result.lineComments, target)
@@ -511,12 +514,28 @@ export function useReviewController({
   function handleSuggestFixComment(comment: LineComment) {
     const { question, context } = buildExampleFixPrompt(comment, validationDiff || diff)
     if (!chatVisible) setChatVisible(true)
+    const id = Date.now()
+    const token = `fix-${id}`
+    chatTargetsRef.current.set(token, comment)
     setPendingChatMessage({
       q: question,
       ctx: context,
-      id: Date.now(),
-      contextSummary: ['draft comment', 'diff excerpt'],
+      id,
+      token,
+      contextSummary: ['draft comment', 'diff excerpt', 'PR worktree (read-only)'],
     })
+  }
+
+  function handleAttachExamplePatch(fix: ExampleFixResult, token: string) {
+    const target = chatTargetsRef.current.get(token)
+    if (!target || !result || !fix.examplePatch) return
+
+    const index = resolveVerifyTarget(result.lineComments, target)
+    if (index < 0) return
+
+    const body = withAttachedPatch(result.lineComments[index].body, fix.examplePatch)
+    if (body === null) return
+    updateAtOriginal(index, (comment) => ({ ...comment, body }))
   }
 
   function applyQualityRepair(action: ReviewQualityAction) {
@@ -545,6 +564,8 @@ export function useReviewController({
   }
 
   const hasReview = result !== null
+  // Only these states render an editable diff, so a chat reply can be placed nowhere else.
+  const canPlaceChatReply = state.kind === 'draftPresent' || state.kind === 'reviewUnsaved'
   const showReviewOverrides = state.kind !== 'draftLoading'
     && state.kind !== 'generating'
     && state.kind !== 'merged'
@@ -611,6 +632,8 @@ export function useReviewController({
       contextSummary,
       qualityExpanded,
       hasReview,
+      canPlaceChatReply,
+      chatCommentDraft: canPlaceChatReply ? chatCommentDraft : null,
       statusMessage,
     },
     actions: {
@@ -653,6 +676,7 @@ export function useReviewController({
       verifyComment: handleVerifyComment,
       suggestFixComment: handleSuggestFixComment,
       applyVerifyAction: handleApplyVerifyAction,
+      attachExamplePatch: handleAttachExamplePatch,
       editCommentHandlers,
       orphanHandlers,
       runQualityCheck: () => setQualityExpanded(true),
@@ -681,6 +705,11 @@ export function useReviewController({
         setPendingChatMessage({ q: question, ctx: selectedContext, id: Date.now() })
       },
       pendingMessageSent: () => setPendingChatMessage(null),
+      placeChatReply: (body: string) => {
+        const trimmed = body.trim()
+        if (trimmed) setChatCommentDraft(trimmed)
+      },
+      cancelChatReplyPlacement: () => setChatCommentDraft(null),
       setChatHeight,
       commitChatHeight: (height) => localStorage.setItem(CHAT_HEIGHT_KEY, String(height)),
       startChatResize,

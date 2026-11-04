@@ -126,6 +126,9 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
       onSuggestFixComment={model.hasReview ? actions.suggestFixComment : undefined}
       onFocusComment={actions.focusComment}
       editCommentHandlers={actions.editCommentHandlers}
+      commentPlacement={model.chatCommentDraft !== null
+        ? { body: model.chatCommentDraft, onDone: actions.cancelChatReplyPlacement }
+        : undefined}
       inlineComments={model.inlineComments}
       orphanComments={model.orphanComments}
       onEditOrphan={actions.orphanHandlers.onEditOrphan}
@@ -361,6 +364,8 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
               onPendingMessageSent={actions.pendingMessageSent}
               contextSummary={model.contextSummary}
               onApplyVerifyAction={actions.applyVerifyAction}
+              onAttachExamplePatch={actions.attachExamplePatch}
+              onAddReplyToReview={model.canPlaceChatReply ? actions.placeChatReply : undefined}
             />
           </div>
         )}
