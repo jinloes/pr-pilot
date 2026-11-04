@@ -309,7 +309,8 @@
     "typescript-eslint": "^8.72.1"
   },
   "overrides": {
-    "serialize-javascript": "^7.0.5"
+    "serialize-javascript": "^7.0.5",
+    "zod": "^4.6.6"
   },
   "volta": {
     "node": "20.20.2"
