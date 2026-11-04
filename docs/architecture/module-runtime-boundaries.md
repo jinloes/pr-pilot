@@ -33,6 +33,14 @@ input/output. Standard output must contain protocol frames only—diagnostics be
 error. GitHub, PR, repository, and review behavior belongs in `github-engine`/`review-engine`;
 Spring remains only the sidecar composition and lifecycle layer.
 
+### Sidecar owns its Jackson 2 mapper
+Spring Boot 4 auto-configures only Jackson 3 (`tools.jackson`), while `core`, both engines, and the
+IntelliJ plugin speak Jackson 2 (`com.fasterxml.jackson`). `sidecar` therefore depends on
+`spring-boot-starter` without `spring-boot-starter-json`, and `SidecarConfiguration` declares the
+`ObjectMapper` that `StdioJsonRpcServer` uses. It keeps the Jackson 2 defaults Boot 3 applied, chiefly
+ignoring unknown properties, so a host sending a field an older sidecar does not know still
+succeeds. Moving to Jackson 3 is a repository-wide migration, not a sidecar change.
+
 ### core: plain Java module
 `core`'s shared models (`model/*.java`) are plain Java classes with JavaBean getters/setters (e.g.
 `getOwner()`, `isDraft()`) — no Kotlin-Java interop shims (`@JvmOverloads`, `@JvmStatic`,

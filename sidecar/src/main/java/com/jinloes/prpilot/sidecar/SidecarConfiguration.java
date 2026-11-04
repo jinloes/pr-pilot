@@ -1,6 +1,9 @@
 package com.jinloes.prpilot.sidecar;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.jinloes.prpilot.engine.GitHubEngine;
 import com.jinloes.prpilot.engine.GitHubEngineApi;
 import com.jinloes.prpilot.engine.ReviewEngineApi;
@@ -20,6 +23,23 @@ class SidecarConfiguration {
     @Bean
     SidecarBootstrapService sidecarBootstrapService() {
         return new SidecarBootstrapService();
+    }
+
+    /**
+     * The JSON-RPC mapper. Boot 4 only auto-configures Jackson 3, so this keeps the Jackson 2
+     * defaults Boot 3 applied: hosts may send fields a sidecar does not know yet, which must not
+     * fail a request.
+     */
+    @Bean
+    ObjectMapper objectMapper() {
+        return jsonRpcObjectMapper();
+    }
+
+    static ObjectMapper jsonRpcObjectMapper() {
+        return JsonMapper.builder()
+                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                .disable(MapperFeature.DEFAULT_VIEW_INCLUSION)
+                .build();
     }
 
     /**

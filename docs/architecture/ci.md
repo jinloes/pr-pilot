@@ -161,6 +161,8 @@ subproject's build classloader delegates to the root's first, so both blocks and
 declaration keep one Jackson version. In `sidecar`, Spring Boot's BOM overrides Gradle's
 highest-version-wins resolution: a patched Jackson, Log4j or Commons Lang declared by an engine
 module is downgraded unless `sidecar/build.gradle` raises the matching `ext[...]` BOM property.
+Since Boot 4, `jackson-bom.version` names the Jackson 3 BOM; the Jackson 2 line every module uses is
+`jackson-2-bom.version`, and setting the former to a 2.x version breaks the whole BOM import.
 npm has two floors of its own. `webview` overrides `qs`, because Stryker requires
 `typed-rest-client` 2.3.x, which pins `qs` 6.15.1 exactly. `vscode-extension` overrides
 `serialize-javascript`, because `@vscode/test-cli` requires mocha 11, and every mocha 11 release

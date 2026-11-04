@@ -134,6 +134,7 @@ line here.
 ([module-runtime-boundaries.md](docs/architecture/module-runtime-boundaries.md))
 
 - [Module boundaries](docs/architecture/module-runtime-boundaries.md#module-boundaries)
+- [Sidecar owns its Jackson 2 mapper](docs/architecture/module-runtime-boundaries.md#sidecar-owns-its-jackson-2-mapper)
 - [core: plain Java module](docs/architecture/module-runtime-boundaries.md#core-plain-java-module)
 - [Modules compile with --release](docs/architecture/module-runtime-boundaries.md#modules-compile-with---release)
 - [Java sources compile as UTF-8](docs/architecture/module-runtime-boundaries.md#java-sources-compile-as-utf-8)
