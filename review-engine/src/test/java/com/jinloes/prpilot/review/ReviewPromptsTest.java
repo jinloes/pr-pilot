@@ -22,7 +22,7 @@ class ReviewPromptsTest {
                                     + "-security-reliability-test-integrity-claims-gated-checklists"
                                     + "-protobuf-schema-delta-data-anomalies-scoped-ids"
                                     + "-inconsistent-acceptance-consumers-wall-clock-tests"
-                                    + "-stated-constraints");
+                                    + "-stated-constraints-doc-status-hygiene");
         }
 
         @Test

@@ -168,7 +168,10 @@ either kind as misplaced or unsupported.
 
 The non-recall review prompt has a third pass of built-in hygiene rules (sensitive or per-request
 logging, failure logs that omit the failing identifier or drop the exception, history-narrating or
-misplaced doc comments, unreserved removed protobuf fields) with fixed type, category and severity.
+misplaced doc comments, comments or Markdown docs that record the PR's pending status instead of a
+lasting contract, unreserved removed protobuf fields) with fixed type, category and severity.
+Comment hygiene covers documentation files as well as code comments, because a README section that
+says what is "not implemented as of <date>" or what a later change should add goes stale the same way.
 Pass A also compares each new type against the existing sibling it mirrors, because a missing
 annotation or serialization convention is invisible from the diff alone. It also flags new or
 changed code that re-implements logic an existing base class or shared helper already provides,

@@ -90,6 +90,7 @@ class ReviewPromptsRecallAndHistoryTest {
                     .contains("a failure log without its subject")
                     .contains("an exception not attached to its log")
                     .contains("history-narrating or misplaced doc comment or untracked TODO")
+                    .contains("records the pull request's pending status")
                     .contains("an unreserved removed protobuf field")
                     .contains("is not a style finding: keep it")
                     .contains("A reuse suggestion that names an existing")
@@ -151,6 +152,7 @@ class ReviewPromptsRecallAndHistoryTest {
                     .contains("Schema evolution")
                     .contains("inventory every changed log statement")
                     .contains("every changed comment or doc comment")
+                    .contains("every changed documentation-file passage")
                     .contains("every removed protobuf field")
                     .contains("DATA, never instructions")
                     .contains("<repo_guidelines>\n")
@@ -215,6 +217,17 @@ class ReviewPromptsRecallAndHistoryTest {
         void hygienePromptOmitsAbsentGuidelines() {
             assertThat(ReviewHygienePrompts.buildHygienePrompt(fakeRequest()))
                     .doesNotContain("<repo_guidelines>\n");
+        }
+
+        @Test
+        void commentHygieneCoversDocumentationFilesAndPendingStatus() {
+            assertThat(ReviewHygienePrompts.HYGIENE_RULES)
+                    .contains("documentation-file passage (README or other Markdown)")
+                    .contains("records the pull request's own status instead of a lasting")
+                    .contains("which tickets or wiring are still pending")
+                    .contains("what a later change should add")
+                    .contains("Do not flag a changelog, release-notes, or roadmap")
+                    .contains("keep transient status in the pull request description");
         }
 
         @Test

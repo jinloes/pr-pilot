@@ -66,7 +66,8 @@ public final class ReviewPrompts {
             "2026-10-thread-state-incremental-scope-corroboration-rule-gating-suggested-changes"
                     + "-stable-pagination-discarded-records"
                     + "-security-reliability-test-integrity-claims-gated-checklists"
-                    + "-protobuf-schema-delta-data-anomalies-scoped-ids-inconsistent-acceptance-consumers-wall-clock-tests-stated-constraints";
+                    + "-protobuf-schema-delta-data-anomalies-scoped-ids-inconsistent-acceptance-consumers-wall-clock-tests-stated-constraints"
+                    + "-doc-status-hygiene";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
