@@ -71,7 +71,6 @@ export function ReviewActivityLog({ activity, onCancel }: ReviewActivityLogProps
           className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           aria-expanded={expanded}
           aria-controls={contentId}
-          aria-label={`${expanded ? 'Hide' : 'Show'} details for ${running ? 'Generating review' : 'Review activity'}`}
           onClick={() => {
             if (!expanded) autoScrollRef.current = true
             setManualExpansion({
@@ -81,12 +80,15 @@ export function ReviewActivityLog({ activity, onCancel }: ReviewActivityLogProps
             })
           }}
         >
+          <span className="sr-only">
+            {`${expanded ? 'Hide' : 'Show'} details for ${running ? 'Generating review' : 'Review activity'}`}
+          </span>
           {expanded ? (
             <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
           ) : (
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
           )}
-          <span className="min-w-0 flex-1">
+          <span className="min-w-0 flex-1" aria-hidden="true">
             <span className="block text-sm font-medium">
               {running ? 'Generating review' : 'Review activity'}
             </span>
@@ -95,7 +97,7 @@ export function ReviewActivityLog({ activity, onCancel }: ReviewActivityLogProps
             </span>
           </span>
           {running && (
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground" aria-hidden="true">
               {formatActivityDuration(elapsedMs)}
             </span>
           )}

@@ -93,15 +93,17 @@ export function FileTreeNodeView({
           type="button"
           className={cn('diff-file-tree__file', node.file.displayPath === activeFilePath && 'diff-file-tree__file--active')}
           onClick={() => onSelectFile(node.file!.displayPath)}
-          aria-label={node.file.displayPath}
           aria-current={node.file.displayPath === activeFilePath ? 'location' : undefined}
           title={node.file.displayPath}
         >
+          {/* Named by the sr-only path rather than aria-label: the visible label may be truncated, and
+              axe's label-content-name-mismatch rejects an aria-label that omits visible text. */}
+          <span className="sr-only">{node.file.displayPath}</span>
           <span className={cn('diff-file-tree__status', `diff-file-tree__status--${node.file.status}`)} aria-hidden="true">
             {statusAbbreviation(node.file.status)}
           </span>
-          <span className="diff-file-tree__label">{middleTruncateFileName(node.name)}</span>
-          {node.file.commentCount > 0 && <span className="diff-file-tree__meta">{node.file.commentCount}</span>}
+          <span className="diff-file-tree__label" aria-hidden="true">{middleTruncateFileName(node.name)}</span>
+          {node.file.commentCount > 0 && <span className="diff-file-tree__meta" aria-hidden="true">{node.file.commentCount}</span>}
         </button>
       </li>
     )
