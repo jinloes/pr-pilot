@@ -213,7 +213,7 @@ function runCheck(check, repoRoot) {
   return { ok: result.status === 0, output, warnings: [] }
 }
 
-export const MIN_NODE = [20, 19]
+export const MIN_NODE = [26, 0]
 
 export function nodeVersionSupported(version) {
   const [major, minor] = version.replace(/^v/, '').split('.').map(Number)

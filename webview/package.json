@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=26.0.0"
   },
   "scripts": {
     "dev": "vite",
@@ -83,6 +83,6 @@
     "qs": "^6.15.2"
   },
   "volta": {
-    "node": "20.20.2"
+    "node": "26.13.0"
   }
 }
