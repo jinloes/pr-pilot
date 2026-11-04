@@ -7,7 +7,7 @@ makes them unambiguous; other paths are relative to the module directory.
 Thin Java 17, non-web Spring Boot stdio JSON-RPC adapter used only by VS Code.
 
 - `sidecar/PrPilotSidecarApplication.java` - Process entry point and stdio lifecycle.
-- `sidecar/SidecarConfiguration.java` - Engine composition.
+- `sidecar/SidecarConfiguration.java` - Engine composition and the Jackson 2 JSON-RPC `ObjectMapper`.
 - `sidecar/StdioFrameCodec.java` - Bounded Content-Length UTF-8 framing.
 - `sidecar/StdioJsonRpcServer.java` - Read loop, handler registry, dispatch, errors, the review
   executor, and the write lock that serializes frames from background threads.
@@ -31,4 +31,6 @@ Thin Java 17, non-web Spring Boot stdio JSON-RPC adapter used only by VS Code.
 - `src/main/resources/logback-spring.xml` - Stderr logging; stdout remains protocol-only.
 - `EngineCapabilityCoverageTest.java` - Enforces declaration, registration, and advertisement
   parity.
+- `SidecarConfigurationTest.java` - Pins the JSON-RPC mapper's Jackson 2 defaults and boots the
+  real Spring context.
 - Other tests mirror the frame codec and RPC server.
