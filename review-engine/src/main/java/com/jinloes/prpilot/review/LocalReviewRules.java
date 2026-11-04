@@ -57,6 +57,7 @@ final class LocalReviewRules {
     static final List<String> BUILT_IN_RULE_FILES =
             List.of(
                     "helper-reuse.yaml",
+                    "parallel-abstraction.yaml",
                     "telemetry-default-semantics.yaml",
                     "ambiguous-delimiter.yaml",
                     "unbounded-fanout.yaml",

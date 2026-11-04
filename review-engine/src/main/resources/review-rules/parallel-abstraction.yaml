@@ -1,0 +1,47 @@
+name: parallel-abstraction
+description: >-
+  Flags a new type or parameter set for a cross-cutting concern, such as filtering, search
+  criteria, sorting, paging, retries, or request options, when the repository already has a
+  generic framework for that concern that the new code bypasses.
+trigger: >-
+  The PR adds a new type, record, class, or method parameters that express filtering, search or
+  query criteria, sorting, paging (offset, count, cursor, or page token), retry or backoff
+  policy, request options, or validation of any of these.
+prompt: |
+  Find new code that builds its own mechanism for a concern the repository already handles with
+  a shared, generic framework.
+
+  1. In <pr_diff>, list every added type or added parameter set that expresses a cross-cutting
+     concern instead of domain logic: filter or criteria types (for example a record of optional
+     match fields with `with...` builders), sort specifications, paging parameters such as
+     start/count, offset/limit, cursors or page tokens and their validation, retry or backoff
+     settings, and request option objects. Name the concern for each.
+  2. Evaluate every item on its own. For each concern, search the working directory for an
+     existing generic framework before concluding that none exists:
+     a. Grep for type and file names that name the concern, such as `Filter`, `Criteria`,
+        `Predicate`, `Spec`, `Query`, `Sort`, `Order`, `Page`, `Paging`, `Pagination`,
+        `Cursor`, `Retry`, `Backoff`, or `Options`, including schema or interface definition
+        files (for example `.proto`, `.avsc`, `.graphql`, OpenAPI). Look for shared types whose
+        documentation describes them as generic or reusable.
+     b. Glob for supporting classes of such a framework: `*Validator`, `*Registry`,
+        `*Capabilit*`, `*Adapter`, `*Normalizer`, `*Builder`, and `*Utils` near the matches.
+     c. Read the other files in the changed file's package, and the other methods in each
+        changed file, and note how they express the same concern. An existing per-feature
+        adapter of the framework (for example a `<Feature>Filter` that validates and normalizes
+        a shared filter request) in the same or a sibling package is the strongest evidence.
+     d. Grep for the framework's main type to count its adopters, and read one adopter end to
+        end so the suggestion can point at a concrete pattern to copy.
+  3. Report a finding when a framework covers the concern and at least one other feature uses
+     it, even when adopting it needs a small adapter, a capability declaration, or a new
+     filterable field. Do not report when the framework belongs to a layer the new code cannot
+     reach or depend on, when the new code only forwards the framework's already-parsed values,
+     when its only adopters are tests, or when the PR description explains why the framework
+     does not fit. Do not count general-purpose language or library types such as `Optional` as
+     the existing framework.
+
+  Anchor each finding on the declaration line of the new type, or on the first new parameter
+  when no type is added. Use type "suggestion", category "maintainability", severity "minor".
+  In the body, name the existing framework type, one existing adopter to follow, which parts of
+  the new code it replaces, and the adapter or refactor needed to adopt it. In "rationale",
+  cite the paths of the framework and the adopter you actually read. Do not report a concern
+  when your searches found no shared framework, and do not report style issues.

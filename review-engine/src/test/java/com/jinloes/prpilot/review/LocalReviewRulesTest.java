@@ -222,6 +222,7 @@ class LocalReviewRulesTest {
                     .extracting(Rule::name)
                     .containsExactly(
                             "helper-reuse",
+                            "parallel-abstraction",
                             "telemetry-default-semantics",
                             "ambiguous-delimiter",
                             "unbounded-fanout",
@@ -231,10 +232,28 @@ class LocalReviewRulesTest {
                     .extracting(Rule::source)
                     .containsExactly(
                             "built-in/helper-reuse.yaml",
+                            "built-in/parallel-abstraction.yaml",
                             "built-in/telemetry-default-semantics.yaml",
                             "built-in/ambiguous-delimiter.yaml",
                             "built-in/unbounded-fanout.yaml",
                             "built-in/state-published-before-yield.yaml");
+        }
+
+        @Test
+        void parallelAbstractionRuleSearchesForAnExistingFrameworkAndAdopter() {
+            Rule rule =
+                    LocalReviewRules.builtIn().stream()
+                            .filter(candidate -> candidate.name().equals("parallel-abstraction"))
+                            .findFirst()
+                            .orElseThrow();
+
+            assertThat(rule.trigger()).contains("filtering").contains("paging");
+            assertThat(rule.prompt())
+                    .contains("*Validator")
+                    .contains("*Registry")
+                    .contains("one existing adopter to follow")
+                    .contains("belongs to a layer the new code cannot")
+                    .contains("PR description explains why the framework");
         }
 
         @Test
@@ -257,6 +276,7 @@ class LocalReviewRulesTest {
                     .extracting(Rule::name)
                     .containsExactly(
                             "helper-reuse",
+                            "parallel-abstraction",
                             "telemetry-default-semantics",
                             "ambiguous-delimiter",
                             "unbounded-fanout",
@@ -270,6 +290,7 @@ class LocalReviewRulesTest {
                     .extracting(Rule::name)
                     .containsExactly(
                             "helper-reuse",
+                            "parallel-abstraction",
                             "telemetry-default-semantics",
                             "ambiguous-delimiter",
                             "unbounded-fanout",
@@ -295,13 +316,14 @@ class LocalReviewRulesTest {
             assertThat(loaded)
                     .extracting(Rule::name)
                     .containsExactly(
+                            "parallel-abstraction",
                             "telemetry-default-semantics",
                             "ambiguous-delimiter",
                             "unbounded-fanout",
                             "state-published-before-yield",
                             "helper-reuse");
-            assertThat(loaded.get(4).source()).isEqualTo("mine.yaml");
-            assertThat(loaded.get(4).trigger()).isEqualTo("my trigger");
+            assertThat(loaded.get(5).source()).isEqualTo("mine.yaml");
+            assertThat(loaded.get(5).trigger()).isEqualTo("my trigger");
         }
 
         @Test
@@ -312,6 +334,7 @@ class LocalReviewRulesTest {
                     .extracting(Rule::name)
                     .containsExactly(
                             "helper-reuse",
+                            "parallel-abstraction",
                             "ambiguous-delimiter",
                             "unbounded-fanout",
                             "state-published-before-yield");
@@ -325,6 +348,7 @@ class LocalReviewRulesTest {
                     .extracting(Rule::name)
                     .containsExactly(
                             "helper-reuse",
+                            "parallel-abstraction",
                             "telemetry-default-semantics",
                             "ambiguous-delimiter",
                             "unbounded-fanout",

@@ -96,7 +96,8 @@ always runs. Each selected rule is applied by its own read-only agent (at most 2
 its findings are labeled `(rule: <name>)`.
 
 PR Pilot also ships built-in rules, such as reusing an existing helper instead of duplicating it,
-not hiding a missing telemetry value behind a default, not joining values with a delimiter that
+using the repository's existing framework for filtering, sorting, or paging instead of adding a
+parallel one, not hiding a missing telemetry value behind a default, not joining values with a delimiter that
 can appear inside them, and not fanning out per-element work that can overrun a fixed budget such
 as a deadline or workflow history limit, and not publishing "done" state before an await that
 lets a concurrent caller act on it. They run the same way. Turn them off with
