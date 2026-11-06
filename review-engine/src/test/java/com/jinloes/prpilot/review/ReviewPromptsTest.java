@@ -23,7 +23,7 @@ class ReviewPromptsTest {
                                     + "-protobuf-schema-delta-data-anomalies-scoped-ids"
                                     + "-inconsistent-acceptance-consumers-wall-clock-tests"
                                     + "-stated-constraints-doc-status-hygiene"
-                                    + "-host-code-intelligence");
+                                    + "-host-code-intelligence-overstated-doc-comments");
         }
 
         @Test

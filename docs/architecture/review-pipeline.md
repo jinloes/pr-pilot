@@ -168,8 +168,11 @@ either kind as misplaced or unsupported.
 
 The non-recall review prompt has a third pass of built-in hygiene rules (sensitive or per-request
 logging, failure logs that omit the failing identifier or drop the exception, history-narrating or
-misplaced doc comments, comments or Markdown docs that record the PR's pending status instead of a
+misplaced doc comments, doc comments that present a conditionally set field or behavior as always
+present, comments or Markdown docs that record the PR's pending status instead of a
 lasting contract, unreserved removed protobuf fields) with fixed type, category and severity.
+The overstated-doc-comment rule tells the model to read the referenced member's own comment, even in
+another changed file, because API-contract PRs often have no implementation code to check against.
 Comment hygiene covers documentation files as well as code comments, because a README section that
 says what is "not implemented as of <date>" or what a later change should add goes stale the same way.
 Pass A also compares each new type against the existing sibling it mirrors, because a missing
