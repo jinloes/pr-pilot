@@ -66,6 +66,9 @@ public interface ReviewEngineApi {
      * <p>{@code incrementalBaselineSha} is set when {@code diff} holds only the commits pushed
      * since the reviewer's last review at that SHA; the prompt then scopes the review to those
      * changes.
+     *
+     * <p>{@code secondReviewerEffort} is the Copilot reasoning effort for the second reviewer. When
+     * blank (older hosts), the second reviewer follows the primary's effort as before.
      */
     record GenerateReviewParams(
             String operationId,
@@ -96,10 +99,140 @@ public interface ReviewEngineApi {
             List<String> guidanceGlobs,
             String rulesDirectory,
             String incrementalBaselineSha,
-            Boolean builtInRules) {
+            Boolean builtInRules,
+            HostCodeIntelligenceParams hostCodeIntelligence,
+            String secondReviewerEffort) {
         /** Whether the bundled review rules run; an omitted value means they do. */
         public boolean builtInRulesEnabled() {
             return builtInRules == null || builtInRules;
+        }
+
+        public GenerateReviewParams(
+                String operationId,
+                String provider,
+                String projectDir,
+                String model,
+                String effort,
+                boolean inheritMcp,
+                String configDir,
+                boolean selfCritique,
+                boolean reviewSupervisorEnabled,
+                PrParams pr,
+                String diff,
+                String priorReview,
+                String existingReviews,
+                String repoGuidelines,
+                String focusAreas,
+                String customInstructions,
+                String ciStatus,
+                String commits,
+                String linkedIssue,
+                String repoProfile,
+                List<CiAnnotationParam> ciAnnotations,
+                boolean chunkedReview,
+                DeepReviewParams deepReview,
+                String baseSha,
+                String secondReviewerModel,
+                List<String> guidanceGlobs,
+                String rulesDirectory,
+                String incrementalBaselineSha,
+                Boolean builtInRules,
+                HostCodeIntelligenceParams hostCodeIntelligence) {
+            this(
+                    operationId,
+                    provider,
+                    projectDir,
+                    model,
+                    effort,
+                    inheritMcp,
+                    configDir,
+                    selfCritique,
+                    reviewSupervisorEnabled,
+                    pr,
+                    diff,
+                    priorReview,
+                    existingReviews,
+                    repoGuidelines,
+                    focusAreas,
+                    customInstructions,
+                    ciStatus,
+                    commits,
+                    linkedIssue,
+                    repoProfile,
+                    ciAnnotations,
+                    chunkedReview,
+                    deepReview,
+                    baseSha,
+                    secondReviewerModel,
+                    guidanceGlobs,
+                    rulesDirectory,
+                    incrementalBaselineSha,
+                    builtInRules,
+                    hostCodeIntelligence,
+                    null);
+        }
+
+        public GenerateReviewParams(
+                String operationId,
+                String provider,
+                String projectDir,
+                String model,
+                String effort,
+                boolean inheritMcp,
+                String configDir,
+                boolean selfCritique,
+                boolean reviewSupervisorEnabled,
+                PrParams pr,
+                String diff,
+                String priorReview,
+                String existingReviews,
+                String repoGuidelines,
+                String focusAreas,
+                String customInstructions,
+                String ciStatus,
+                String commits,
+                String linkedIssue,
+                String repoProfile,
+                List<CiAnnotationParam> ciAnnotations,
+                boolean chunkedReview,
+                DeepReviewParams deepReview,
+                String baseSha,
+                String secondReviewerModel,
+                List<String> guidanceGlobs,
+                String rulesDirectory,
+                String incrementalBaselineSha,
+                Boolean builtInRules) {
+            this(
+                    operationId,
+                    provider,
+                    projectDir,
+                    model,
+                    effort,
+                    inheritMcp,
+                    configDir,
+                    selfCritique,
+                    reviewSupervisorEnabled,
+                    pr,
+                    diff,
+                    priorReview,
+                    existingReviews,
+                    repoGuidelines,
+                    focusAreas,
+                    customInstructions,
+                    ciStatus,
+                    commits,
+                    linkedIssue,
+                    repoProfile,
+                    ciAnnotations,
+                    chunkedReview,
+                    deepReview,
+                    baseSha,
+                    secondReviewerModel,
+                    guidanceGlobs,
+                    rulesDirectory,
+                    incrementalBaselineSha,
+                    builtInRules,
+                    null);
         }
 
         public GenerateReviewParams(
@@ -449,6 +582,15 @@ public interface ReviewEngineApi {
 
     record DeepReviewParams(String retainedId, String server) {}
 
+    /**
+     * A host-run MCP server that answers code-intelligence lookups (definitions, references, type
+     * information) from the host's language services over the user's checkout. Copilot sessions
+     * attach it as an HTTP MCP server sending {@code token} as a bearer credential; Claude ignores
+     * it. The engine accepts only loopback {@code http} URLs, so a host cannot point a review at a
+     * remote endpoint.
+     */
+    record HostCodeIntelligenceParams(String url, String token) {}
+
     record PrepareDeepReviewParams(
             String operationId,
             String gitRoot,
@@ -493,7 +635,33 @@ public interface ReviewEngineApi {
             String prContext,
             List<ChatMessageParam> history,
             String userMessage,
-            String rawPrompt) {}
+            String rawPrompt,
+            HostCodeIntelligenceParams hostCodeIntelligence) {
+        public ChatParams(
+                String operationId,
+                String provider,
+                String projectDir,
+                String effort,
+                boolean inheritMcp,
+                String configDir,
+                String prContext,
+                List<ChatMessageParam> history,
+                String userMessage,
+                String rawPrompt) {
+            this(
+                    operationId,
+                    provider,
+                    projectDir,
+                    effort,
+                    inheritMcp,
+                    configDir,
+                    prContext,
+                    history,
+                    userMessage,
+                    rawPrompt,
+                    null);
+        }
+    }
 
     /** Result of {@link #chat}: the complete assistant response text. */
     record ChatResult(String content) {}

@@ -10,6 +10,7 @@ import {
   type SidecarSpawn,
 } from '../src/sidecar';
 import { createSidecarHarness, fakeJar, initializeResult, NO_RESPONSE, tempRoot } from './sidecarHarness';
+import { setLogSink } from '../src/log';
 
 const extensionRoot = path.resolve('/workspace/pr-pilot/vscode-extension');
 
@@ -135,15 +136,43 @@ test('SidecarClient throws when a capability returns a malformed result', async 
 test('SidecarClient keeps the transport available after a request timeout', async () => {
   const harness = createSidecarHarness((method) => method === 'initialize' ? initializeResult : NO_RESPONSE);
   const client = new SidecarClient(fakeJar, 'java', harness.spawnSidecar, 5);
+  const logged: string[] = [];
+  const previousSink = setLogSink((line) => logged.push(line));
 
-  await assert.rejects(
-    client.checkGitHubAuth('https://github.com'),
-    /request "github\/checkAuth" timed out.*Try the request again/,
-  );
+  try {
+    await assert.rejects(
+      client.checkGitHubAuth('https://github.com'),
+      /request "github\/checkAuth" timed out.*Try the request again/,
+    );
+  } finally {
+    setLogSink(previousSink);
+  }
+  assert.deepEqual(logged, ['[sidecar] request "github/checkAuth" timed out after 5 ms']);
   assert.equal(harness.killCount.value, 0);
   await assert.rejects(client.checkGitHubAuth('https://github.com'), /timed out/);
   assert.equal(harness.commands.length, 1);
   client.dispose();
+});
+
+test('SidecarClient streams sidecar stderr to the log line by line', async () => {
+  const harness = createSidecarHarness((method) => method === 'initialize' ? initializeResult : NO_RESPONSE);
+  const client = new SidecarClient(fakeJar, 'java', harness.spawnSidecar);
+  const logged: string[] = [];
+  const previousSink = setLogSink((line) => logged.push(line));
+  try {
+    await client.initialize();
+    const stderr = harness.children[0].stderr as unknown as PassThrough;
+    stderr.write('WARN GitWorktreeService - git fetch timed ');
+    stderr.write('out after 60s\nINFO next\n');
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    setLogSink(previousSink);
+    client.dispose();
+  }
+  assert.deepEqual(logged, [
+    '[sidecar] WARN GitWorktreeService - git fetch timed out after 60s',
+    '[sidecar] INFO next',
+  ]);
 });
 
 test('SidecarClient accepts another request after a timed-out request', async () => {

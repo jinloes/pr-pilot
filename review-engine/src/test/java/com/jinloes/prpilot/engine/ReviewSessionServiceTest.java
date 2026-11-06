@@ -246,6 +246,25 @@ class ReviewSessionServiceTest {
         }
 
         @Test
+        void aConfiguredSecondReviewerEffortOverridesThePrimarysForEitherProvider() {
+            Map<String, Object> copilot = params();
+            copilot.put("provider", "copilot");
+            copilot.put("effort", "xhigh");
+            copilot.put("secondReviewerEffort", " medium ");
+            Map<String, Object> claude = params();
+            claude.put("secondReviewerEffort", "low");
+            Map<String, Object> blank = params();
+            blank.put("provider", "copilot");
+            blank.put("effort", "high");
+            blank.put("secondReviewerEffort", "  ");
+
+            assertThat(ReviewSessionService.secondReviewerEffort(decode(copilot)))
+                    .isEqualTo("medium");
+            assertThat(ReviewSessionService.secondReviewerEffort(decode(claude))).isEqualTo("low");
+            assertThat(ReviewSessionService.secondReviewerEffort(decode(blank))).isEqualTo("high");
+        }
+
+        @Test
         void aBlankSecondReviewerModelLeavesThePipelineUnchanged() {
             ReviewPipelineService pipeline =
                     ReviewPipelineService.forClaude(new ClaudeService(""), "");

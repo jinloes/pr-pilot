@@ -107,6 +107,7 @@ interface ReviewProviderExecutor {
                     allowMcp && inheritMcp,
                     configDir,
                     allowReadTools,
+                    allowMcp,
                     timeoutMillis,
                     onStatus);
         }

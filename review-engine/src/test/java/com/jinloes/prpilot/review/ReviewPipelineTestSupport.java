@@ -117,6 +117,7 @@ final class ReviewPipelineTestSupport {
                                     boolean inherit,
                                     String config,
                                     boolean reads,
+                                    boolean hostCodeIntelligence,
                                     long timeout,
                                     Consumer<String> status)
                                     throws IOException {

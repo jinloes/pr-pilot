@@ -163,6 +163,20 @@ class PluginSettingsTest {
     }
 
     @Test
+    void reviewSecondReviewerEffortDefaultsToMediumAndRoundTripsTrimmed() {
+        PluginSettings settings = new PluginSettings();
+
+        assertThat(settings.getReviewSecondReviewerEffort()).isEqualTo("medium");
+        settings.setReviewSecondReviewerEffort("  low  ");
+        assertThat(settings.getReviewSecondReviewerEffort()).isEqualTo("low");
+        assertThat(settings.getState().reviewSecondReviewerEffort).isEqualTo("low");
+        settings.setReviewSecondReviewerEffort("   ");
+        assertThat(settings.getReviewSecondReviewerEffort()).isEqualTo("medium");
+        settings.setReviewSecondReviewerEffort(null);
+        assertThat(settings.getReviewSecondReviewerEffort()).isEqualTo("medium");
+    }
+
+    @Test
     void experimentalIntellijAssistedReviewDefaultsToFalseAndRoundTrips() {
         PluginSettings settings = new PluginSettings();
 

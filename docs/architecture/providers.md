@@ -54,27 +54,71 @@ setting maps to `configDir`/`setConfigDirectory` and also scopes which trusted c
 Never enable config discovery against the worktree and never replace the explicit permission handler
 with blanket approval.
 
+### Host code intelligence over MCP
+`GenerateReviewParams.hostCodeIntelligence` and `ChatParams.hostCodeIntelligence` carry an optional
+`{url, token}` for a host-run MCP server that answers definition, reference, implementation, type,
+and symbol-search lookups from the host's language services. Only VS Code sends it, behind
+`experimentalVsCodeCodeIntelligence`. Its server lives in `vscode-extension/src/codeIntelligence*.ts`.
+The constraints:
+
+- **The engine trusts nothing but loopback.** `HostCodeIntelligence.of` accepts only `http` URLs on
+  `127.0.0.1`, `localhost`, or `[::1]` with an explicit port and no credentials, query, or fragment,
+  and a 32–256 character `[A-Za-z0-9_-]` token. Anything else is dropped, and the review runs
+  without the server.
+- **Copilot only, and only where MCP is allowed.** `CopilotSdkRuntime.mcpServers` registers the
+  server as `pr-pilot-code-intelligence`, which replaces any inherited server with that name, and
+  sends the token as a bearer header. Attaching it approves `mcp` permission requests even when
+  `copilotInheritMcp` is off. The server attaches to the primary pass, the critique, and chat. It
+  never attaches to passes that run with MCP disabled (supervisor follow-ups, hygiene, rules) or to
+  tool-free sessions, because `CopilotExecutor.complete` forwards each pass's `allowMcp`. Claude
+  keeps its strict empty MCP config, so a Claude review ignores the field. Deep review and the
+  second reviewer also never attach it.
+- **It reads the checkout, never the worktree.** The server resolves paths against the user's
+  checkout (`ViewState.gitRoot`). It is started only when that checkout is the PR's repository.
+  Language servers index only the open workspace: an IntelliJ-backed Java server queried on a file
+  in the review worktree answered from the workspace's copy and returned stale, mismatched
+  positions. The checkout can be at a different commit, so every result says so, and the prompt
+  section `ReviewInstructions.HOST_CODE_INTELLIGENCE` tells the model to confirm cited lines with
+  Read in the worktree.
+- **The tools take untrusted input.** The model chooses arguments while it reads pull-request text.
+  Paths must be repository-relative. `..` escapes and symbolic links that resolve outside the
+  checkout are rejected. Locations outside the checkout are counted, not listed. Inputs, result
+  counts, snippets, and lookup time are bounded. Language-server error text is not echoed back.
+- **The server lives for one request.** `withCodeIntelligenceServer` starts it with a fresh token
+  for each review or chat request and closes it in `finally`. It refuses any request carrying an
+  `Origin` header, which browsers always send. If it cannot start, the request runs without it.
+
+IntelliJ does not send the field yet. That is a host lag, not a platform gap: an IntelliJ backend
+could answer the same tools from PSI over the open project.
+
 ### Reasoning effort normalization
 Persisted values are `none|low|medium|high|xhigh|max`; SDK accepts `low|medium|high|xhigh`.
 Normalize before session creation: `none -> low`, `max -> xhigh`, blank/unknown -> `medium`.
 
 ### Copilot model discovery
-Both hosts discover the account's Copilot models from the runtime's live `models.list` RPC (Copilot
-SDK `listModels()`), not from `copilot help config`: the help output is a list baked into the
-installed CLI binary, so it misses newly rolled-out models and ignores account policy. Settings
+Both hosts discover the account's Copilot models from the runtime's live session model catalog:
+they open a short-lived, tool-free SDK session, call its `model.list` RPC, and delete the session
+without sending a prompt. That is the catalog the CLI's own `/model` picker shows. The global
+`models.list` RPC (SDK `listModels()`) is only the fallback when the session route fails or
+returns nothing, because it omits models the session catalog includes (newly enabled Gemini models
+were missing from it while selectable in sessions). Neither host uses `copilot help config` as a
+primary source: the help output is a list baked into the installed CLI binary, so it misses newly
+rolled-out models and ignores account policy. Settings
 render the last successful list immediately and re-probe every time they open
 (stale-while-revalidate); a failed probe never replaces a previous good list, and failures are not
 cached, so the next open or **Refresh** retries. Only when nothing has ever loaded do hosts fall
 back to a short hardcoded suggestion list.
 
-- **IntelliJ**: `CopilotModelDiscovery.refresh()` boots a headless SDK client and calls
-  `listModels()`; if that fails it falls back to parsing the `` `model`: `` section of `copilot help
+- **IntelliJ**: `CopilotModelDiscovery.refresh()` boots a headless SDK client and reads the session
+  catalog (`accountModels`, then `listModels()`); if both fail it falls back to parsing the
+  `` `model`: `` section of `copilot help
   config` (reported to the user as possibly stale). Concurrent refreshes share one probe.
   `PluginSettingsComponent` merges the result into the (editable) model combo in Settings → Tools →
   PR Pilot, shows a **Refresh** button, and explains the result's source or failure in the hint
   below the combo.
-- **VS Code**: `copilot.ts` `listModels()` queries the SDK's `client.listModels()` directly (no CLI
-  parsing) and `filterModelIds()` drops policy-`disabled`/blank IDs. The native Settings entries use
+- **VS Code**: `copilot.ts` `listModels()` reads the session catalog, falling back to the SDK's
+  `client.listModels()` (no CLI parsing), and `filterModelIds()` drops policy-`disabled`/blank IDs.
+  The native Settings entries use
   static dropdowns for the supported Claude and Copilot fallback models. The **settings webview**
   (`settings.ts` + `settingsView.ts`) — opened via the gear in the PR Pilot view title or the
   `pr-pilot.openSettings` command — shows a live model dropdown and hides the non-active provider's

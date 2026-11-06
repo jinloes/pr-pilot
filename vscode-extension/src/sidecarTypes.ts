@@ -251,6 +251,8 @@ export interface SidecarGenerateReviewParams {
     reviewSupervisorEnabled: boolean;
     /** Optional Copilot model run as a parallel second reviewer; blank or absent disables it. */
     secondReviewerModel?: string;
+    /** Reasoning effort for the second reviewer; absent means it follows a Copilot primary's. */
+    secondReviewerEffort?: string;
     /** PR base commit; the engine reads trusted guidance and file history from it. */
     baseSha?: string;
     /** Last-reviewed commit when `diff` holds only later changes; the engine adds a scope section. */
@@ -282,6 +284,13 @@ export interface SidecarGenerateReviewParams {
      * that merely restate a CI finding instead of only asking the model not to produce them.
      */
     ciAnnotations?: Array<{ file: string; line: number; level: string; message: string }>;
+    /** Loopback MCP server answering code-intelligence lookups; Copilot attaches it, Claude ignores it. */
+    hostCodeIntelligence?: SidecarHostCodeIntelligence;
+}
+
+export interface SidecarHostCodeIntelligence {
+    url: string;
+    token: string;
 }
 
 export interface DeepReviewPreparation {
@@ -315,6 +324,7 @@ export interface SidecarChatParams {
     history?: SidecarChatMessage[];
     userMessage?: string;
     rawPrompt?: string;
+    hostCodeIntelligence?: SidecarHostCodeIntelligence;
 }
 
 /** Validates the shape returned by `reviews/generate`. */

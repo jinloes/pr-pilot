@@ -70,6 +70,19 @@ test('reviewSecondReviewerModel defaults to blank in the contribution and both r
     }
 });
 
+test('reviewSecondReviewerEffort defaults to medium in the contribution and both readers', () => {
+    const property = packageJsonDefaults()['pr-pilot.reviewSecondReviewerEffort'] as {
+        type: string; default: string; enum: string[];
+    };
+    assert.equal(property.type, 'string');
+    assert.equal(property.default, 'medium');
+    assert.deepEqual(property.enum, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+    for (const file of ['extension.ts', 'settings.ts']) {
+        const source = fs.readFileSync(path.join(extensionRoot, 'src', file), 'utf8');
+        assert.match(source, /c\.get<string>\('reviewSecondReviewerEffort', 'medium'\)\.trim\(\) \|\| 'medium'/, file);
+    }
+});
+
 test('reviewRulesDirectory defaults to blank in the contribution and both readers', () => {
     const property = packageJsonDefaults()['pr-pilot.reviewRulesDirectory'] as { type: string; default: string };
     assert.equal(property.type, 'string');
@@ -104,6 +117,18 @@ test('experimentalIntellijAssistedReview defaults to off and matches the reader 
     assert.match(property.description, /Experimental/);
     assert.match(property.description, /IntelliJ IDEA 262\+/);
     assert.match(property.description, /semantic-review\.json/);
+});
+
+test('experimentalVsCodeCodeIntelligence defaults to off in the contribution and both readers', () => {
+    const property = packageJsonDefaults()['pr-pilot.experimentalVsCodeCodeIntelligence'] as {
+        type: string; default: boolean; description: string;
+    };
+    assert.equal(property.type, 'boolean');
+    assert.equal(property.default, false);
+    assert.equal(readerFallback('experimentalVsCodeCodeIntelligence'), String(property.default));
+    const handlers = fs.readFileSync(path.join(extensionRoot, 'src', 'reviewHandlers.ts'), 'utf8');
+    assert.match(handlers, /c\.get<boolean>\('experimentalVsCodeCodeIntelligence', false\)/);
+    assert.match(property.description, /Copilot only/);
 });
 
 test('review-guidance profile settings default to the built-in profile', () => {

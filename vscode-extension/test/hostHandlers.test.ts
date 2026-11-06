@@ -163,8 +163,9 @@ async function generate(options: {
     incremental?: boolean;
     incrementalResult?: Record<string, unknown>;
     validationFails?: boolean;
+    settings?: Record<string, unknown>;
 }) {
-    const h = host();
+    const h = host(options.settings ?? {});
     const incrementalCalls: unknown[][] = [];
     const generateCalls: Record<string, unknown>[] = [];
     h.api.setClient({
@@ -255,4 +256,19 @@ test('ordinary generation never asks for the incremental diff or sends a scope',
     assert.equal(run.generateCalls[0].diff, 'pr-diff');
     assert.equal(run.generateCalls[0].incrementalBaselineSha, undefined);
     assert.equal(run.result !== undefined && 'reviewScope' in run.result, false);
+});
+
+test('generation sends the second reviewer its own effort, defaulting to medium', async () => {
+    const defaulted = await generate({ settings: { reviewProvider: 'copilot', reviewEffort: 'xhigh',
+        reviewSecondReviewerModel: 'gemini-4-argon' } });
+    const configured = await generate({ settings: { reviewSecondReviewerModel: 'gpt-6.1-sol',
+        reviewSecondReviewerEffort: 'low' } });
+    const off = await generate({ settings: { reviewSecondReviewerEffort: 'low' } });
+
+    assert.equal(defaulted.generateCalls[0].effort, 'xhigh');
+    assert.equal(defaulted.generateCalls[0].secondReviewerModel, 'gemini-4-argon');
+    assert.equal(defaulted.generateCalls[0].secondReviewerEffort, 'medium');
+    assert.equal(configured.generateCalls[0].secondReviewerEffort, 'low');
+    assert.equal(off.generateCalls[0].secondReviewerModel, undefined);
+    assert.equal(off.generateCalls[0].secondReviewerEffort, undefined);
 });

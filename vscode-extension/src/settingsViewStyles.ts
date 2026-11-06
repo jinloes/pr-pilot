@@ -51,18 +51,9 @@ export const SETTINGS_VIEW_STYLES = `  body { font-family: var(--vscode-font-fam
   }
   .modal-content h2 { margin: 0 0 10px; font-size: 15px; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-  details.advanced {
-    margin: 0 0 8px;
+  fieldset.group {
+    margin: 4px 0 14px; padding: 8px 12px 0; min-width: 0;
     border: 1px solid var(--vscode-panel-border, var(--vscode-input-border, transparent));
     border-radius: 4px;
-    padding: 8px 10px;
   }
-  details.advanced > summary {
-    cursor: pointer;
-    font-weight: 600;
-    margin-bottom: 8px;
-  }
-  details.advanced > summary::marker {
-    color: var(--vscode-descriptionForeground);
-  }
-  .advanced-fields { margin-top: 8px; }`;
+  fieldset.group > legend { font-weight: 600; padding: 0 4px; }`;

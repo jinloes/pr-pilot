@@ -36,10 +36,14 @@ guidance.
   including compatibility findings, plus the critique's optional dropped-finding reasons. Tests:
   `ReviewResultParserTest`, `ReviewResultParserDroppedReasonsTest`.
 - `review/CopilotService.java` - Copilot SDK execution with the same review API. Tests:
-  `CopilotServiceTest` and `CopilotServiceCancellationTest`, sharing `CopilotServiceTestSupport`.
+  `CopilotServiceTest`, `CopilotServiceCancellationTest`, and
+  `CopilotServiceHostCodeIntelligenceTest`, sharing `CopilotServiceTestSupport`.
 - `review/CopilotSdkRuntime.java` - Seam over the official Copilot Java SDK: client and session
-  requests, the runtime interfaces tests fake, and the deny-by-default permission handler. Tests:
-  `CopilotSdkRuntimeTest`.
+  requests, the runtime interfaces tests fake, per-session MCP servers, and the deny-by-default
+  permission handler. Tests: `CopilotSdkRuntimeTest`.
+- `review/HostCodeIntelligence.java` - Validated loopback endpoint of a host's code-intelligence
+  MCP server and its Copilot MCP config. Tests: `HostCodeIntelligenceTest`; request plumbing in
+  `engine/ReviewSessionServiceHostCodeIntelligenceTest`.
 - `review/PromptCompleter.java` - One-shot provider-neutral prompt completion used by development
   tools such as the recall benchmark.
 - `review/ChunkedReviewService.java` - Shared diff batching, contract-index generation, and
@@ -128,8 +132,9 @@ guidance.
   version enforcement, classloader-resource digest verification and owned worker extraction.
   `SemanticRuntimeTest` exercises open/close, forked settings, unsupported macOS JDK21,
   ordinary JAR and physically nested resource streams; actual installed Boot loading is separate.
-- `review/CopilotModelDiscovery.java` - Copilot model discovery from the live account catalog
-  (help-config fallback), cached with refresh-on-open.
+- `review/CopilotModelDiscovery.java` - Copilot model discovery from the live session model
+  catalog (global `models.list`, then help-config fallbacks), cached with refresh-on-open. Tests:
+  `CopilotModelDiscoveryTest`, `CopilotModelDiscoverySessionCatalogTest`.
 - `review/GitWorktreeService.java` - Temporary PR-head worktree lifecycle.
 - `review/RepoGuidelinesReader.java` - Bounded repository-guidance discovery.
 - `review/BinaryLocator.java` - Provider binary-path probing.

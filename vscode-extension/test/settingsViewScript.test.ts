@@ -19,7 +19,8 @@ interface FakeElement {
     style: Record<string, string>;
     attributes: Map<string, string>;
     listeners: Map<string, Array<(event: Record<string, unknown>) => void>>;
-    classList: { toggle: () => void; add: () => void; remove: () => void };
+    classList: { toggle: (name: string, force?: boolean) => void; add: () => void; remove: () => void };
+    hiddenClass: boolean;
     setAttribute(name: string, value: string): void;
     removeAttribute(name: string): void;
     getAttribute(name: string): string | null;
@@ -34,8 +35,14 @@ interface FakeElement {
 function fakeElement(id: string): FakeElement {
     const element: FakeElement = {
         id, value: '', checked: false, disabled: false, hidden: false, textContent: '', innerHTML: '', className: '',
-        style: {}, attributes: new Map(), listeners: new Map(),
-        classList: { toggle: () => undefined, add: () => undefined, remove: () => undefined },
+        style: {}, attributes: new Map(), listeners: new Map(), hiddenClass: false,
+        classList: {
+            toggle: (name: string, force?: boolean) => {
+                if (name === 'hidden') element.hiddenClass = force ?? !element.hiddenClass;
+            },
+            add: () => undefined,
+            remove: () => undefined,
+        },
         setAttribute(name, value) { this.attributes.set(name, value); },
         removeAttribute(name) { this.attributes.delete(name); },
         getAttribute(name) { return this.attributes.get(name) ?? null; },
@@ -157,9 +164,11 @@ function initState(repositoryReviewInstructions: Record<string, string>): Record
         githubBaseUrl: 'https://github.com', copilotInheritMcp: false, copilotAutoEnableMcpOnReview: false,
         copilotConfigDir: '', reviewFocusAreas: '', reviewCustomInstructions: '', reviewGuidanceGlobs: [],
         reviewGuidanceProfiles: [], activeReviewGuidanceProfileId: '', repositoryReviewInstructions,
-        reviewSelfCritique: true, reviewSupervisorEnabled: true, reviewSecondReviewerModel: '', reviewRulesDirectory: '',
+        reviewSelfCritique: true, reviewSupervisorEnabled: true, reviewSecondReviewerModel: '',
+        reviewSecondReviewerEffort: 'medium', reviewRulesDirectory: '',
         reviewBuiltInRules: true,
         experimentalIntellijAssistedReview: false,
+        experimentalVsCodeCodeIntelligence: false,
         notificationsEnabled: false, notifyReviewRequested: true, notifyStarredRepos: false,
         notificationPollMinutes: 5, notificationHealth: EMPTY_NOTIFICATION_HEALTH,
     };
@@ -169,6 +178,65 @@ function postedUpdates(posted: Array<Record<string, unknown>>) {
     return JSON.parse(JSON.stringify(posted.filter((message) => message.type === 'update'
         && message.key === 'repositoryReviewInstructions').map((message) => message.value))) as unknown[];
 }
+
+test('the second reviewer effort row hides while the second reviewer is Off', () => {
+    const { element, posted, deliver } = runSettingsScript();
+    deliver({ type: 'init', state: { ...initState({}), reviewSecondReviewerModel: 'gemini-4-argon' } });
+    const effortRow = element('secondReviewerEffortField');
+    assert.equal(effortRow.hiddenClass, false);
+
+    const model = element('reviewSecondReviewerModel');
+    model.value = '__cli_default__';
+    model.dispatch('change');
+    assert.equal(effortRow.hiddenClass, true);
+    const saved = posted.filter((message) => message.type === 'update' && message.key === 'reviewSecondReviewerModel');
+    assert.equal(JSON.stringify(saved.map((message) => message.value)), JSON.stringify(['']));
+
+    model.value = 'gpt-6.1-sol';
+    model.dispatch('change');
+    assert.equal(effortRow.hiddenClass, false);
+});
+
+test('Copilot-only rows follow the provider', () => {
+    const { element, deliver } = runSettingsScript();
+    deliver({ type: 'init', state: { ...initState({}), provider: 'claude' } });
+    assert.equal(element('effortField').hiddenClass, true);
+    assert.equal(element('copilotToolsSection').hiddenClass, true);
+    assert.equal(element('claudeModelField').hiddenClass, false);
+
+    deliver({ type: 'init', state: { ...initState({}), provider: 'copilot' } });
+    assert.equal(element('effortField').hiddenClass, false);
+    assert.equal(element('copilotToolsSection').hiddenClass, false);
+    assert.equal(element('claudeModelField').hiddenClass, true);
+});
+
+test('the second reviewer effort loads from state, defaults to medium, and saves its setting', () => {
+    const { element, posted, deliver } = runSettingsScript();
+    deliver({ type: 'init', state: { ...initState({}), reviewSecondReviewerEffort: 'low' } });
+    const select = element('reviewSecondReviewerEffort');
+    assert.equal(select.value, 'low');
+
+    deliver({ type: 'init', state: { ...initState({}), reviewSecondReviewerEffort: '' } });
+    assert.equal(select.value, 'medium');
+
+    select.value = 'high';
+    select.dispatch('change');
+    const updates = posted.filter((message) => message.type === 'update' && message.key === 'reviewSecondReviewerEffort');
+    assert.equal(JSON.stringify(updates.map((message) => message.value)), JSON.stringify(['high']));
+});
+
+test('the VS Code code-intelligence toggle loads from state and saves its setting', () => {
+    const { element, posted, deliver } = runSettingsScript();
+    deliver({ type: 'init', state: { ...initState({}), experimentalVsCodeCodeIntelligence: true } });
+    const toggle = element('vscodeCodeIntelligence');
+    assert.equal(toggle.checked, true);
+
+    toggle.checked = false;
+    toggle.dispatch('change');
+
+    const updates = posted.filter((message) => message.type === 'update' && message.key === 'experimentalVsCodeCodeIntelligence');
+    assert.equal(JSON.stringify(updates.map((message) => message.value)), JSON.stringify([false]));
+});
 
 test('the guidance files field loads and saves the default glob list one entry per line', () => {
     const { element, posted, deliver } = runSettingsScript();

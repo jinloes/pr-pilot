@@ -116,7 +116,7 @@ The response preserves unsupported/ambiguous/skipped/capped PSI evidence in
 #### Opt-in IntelliJ-assisted reviews
 
 Ordinary reviews remain the default on both hosts. The mode is experimental and off by default:
-first enable **Enable IntelliJ-assisted review (experimental)** under **Advanced review options** in
+first enable **Enable IntelliJ-assisted review (experimental)** under **Experimental** in
 PR Pilot settings (IntelliJ IDEA: **Settings/Preferences > Tools > PR Pilot**; VS Code:
 `pr-pilot.experimentalIntellijAssistedReview`). Users who relied on the checkbox before it was
 gated must enable this setting once. While it is off, the controls below are hidden and a host

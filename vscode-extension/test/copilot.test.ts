@@ -112,3 +112,14 @@ test('filterModelIds de-dupes while preserving order', () => {
 test('filterModelIds returns empty for empty input', () => {
   assert.deepEqual(filterModelIds([]), []);
 });
+
+test('filterModelIds accepts session catalog entries and skips non-object values', () => {
+  const ids = filterModelIds([
+    'gpt-loose-string',
+    null,
+    ['nested'],
+    { id: ' gemini-4-argon ', policy: { state: 'enabled', terms: 'Enable access' }, model_picker_enabled: true },
+    { id: 'gemini-off', policy: { state: 'disabled' } },
+  ]);
+  assert.deepEqual(ids, ['gemini-4-argon']);
+});

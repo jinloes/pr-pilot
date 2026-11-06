@@ -62,6 +62,8 @@ public class CopilotService {
 
     private final CancellationToken cancellationToken;
 
+    private volatile HostCodeIntelligence hostCodeIntelligence;
+
     public CopilotService() {
         this(null, new CancellationToken());
     }
@@ -77,6 +79,16 @@ public class CopilotService {
                         ? this.projectDir
                         : new File(System.getProperty("user.home", "/"));
         this.cancellationToken = Objects.requireNonNull(cancellationToken);
+    }
+
+    /**
+     * Attaches the host's code-intelligence MCP server to the primary, critique and chat sessions
+     * this service starts, and tells the model it exists. Passes that run with MCP disabled never
+     * get it. Null detaches it.
+     */
+    public CopilotService withHostCodeIntelligence(HostCodeIntelligence hostCodeIntelligence) {
+        this.hostCodeIntelligence = hostCodeIntelligence;
+        return this;
     }
 
     CopilotService(String projectDir, RuntimeFactory runtimeFactory) {
@@ -159,6 +171,7 @@ public class CopilotService {
                         inheritMcp,
                         configDir,
                         true,
+                        true,
                         REQUEST_TIMEOUT_MS,
                         onStatus,
                         onChunk);
@@ -185,6 +198,33 @@ public class CopilotService {
             long timeoutMillis,
             Consumer<String> onStatus)
             throws IOException, InterruptedException {
+        return completeReviewPrompt(
+                prompt,
+                model,
+                effort,
+                inheritMcp,
+                configDir,
+                allowReadTools,
+                false,
+                timeoutMillis,
+                onStatus);
+    }
+
+    /**
+     * @param allowHostCodeIntelligence whether this pass may use the host's code-intelligence
+     *     server; passes that run with MCP disabled must not.
+     */
+    String completeReviewPrompt(
+            String prompt,
+            String model,
+            String effort,
+            boolean inheritMcp,
+            String configDir,
+            boolean allowReadTools,
+            boolean allowHostCodeIntelligence,
+            long timeoutMillis,
+            Consumer<String> onStatus)
+            throws IOException, InterruptedException {
         return runSession(
                 prompt,
                 model,
@@ -192,6 +232,7 @@ public class CopilotService {
                 inheritMcp,
                 configDir,
                 allowReadTools,
+                allowHostCodeIntelligence,
                 timeoutMillis,
                 onStatus,
                 null);
@@ -242,6 +283,7 @@ public class CopilotService {
                         inheritMcp,
                         configDir,
                         true,
+                        true,
                         REQUEST_TIMEOUT_MS,
                         onStatus,
                         onChunk);
@@ -273,6 +315,7 @@ public class CopilotService {
                 effort,
                 inheritMcp,
                 configDir,
+                true,
                 true,
                 REQUEST_TIMEOUT_MS,
                 ignored -> {},
@@ -309,6 +352,7 @@ public class CopilotService {
                 inheritMcp,
                 configDir,
                 true,
+                true,
                 REQUEST_TIMEOUT_MS,
                 ignored -> {},
                 (kind, chunk) -> onChunk.accept(chunk));
@@ -332,6 +376,7 @@ public class CopilotService {
             boolean inheritMcp,
             String configDir,
             boolean allowReadTools,
+            boolean allowHostCodeIntelligence,
             long timeoutMillis,
             Consumer<String> onStatus,
             BiConsumer<String, String> onChunk)
@@ -351,12 +396,20 @@ public class CopilotService {
 
             client.start();
             cancellationToken.throwIfCancelled();
-            RuntimeSession session =
-                    client.createSession(
-                            buildSessionRequest(
-                                    model, effort, inheritMcp, configDir, allowReadTools));
+            SessionRequest sessionRequest =
+                    buildSessionRequest(
+                            model,
+                            effort,
+                            inheritMcp,
+                            configDir,
+                            allowReadTools,
+                            allowHostCodeIntelligence);
+            RuntimeSession session = client.createSession(sessionRequest);
             currentRun.attachSession(session);
             cancellationToken.throwIfCancelled();
+            if (sessionRequest.attachesHostCodeIntelligence()) {
+                prompt = prompt + "\n\n" + ReviewInstructions.HOST_CODE_INTELLIGENCE;
+            }
 
             StringBuilder deltaBuffer = new StringBuilder();
             AtomicReference<String> finalMessage = new AtomicReference<>();
@@ -439,7 +492,8 @@ public class CopilotService {
             String effort,
             boolean inheritMcp,
             String configDir,
-            boolean allowReadTools) {
+            boolean allowReadTools,
+            boolean allowHostCodeIntelligence) {
         String trimmedConfigDir = configDir != null ? configDir.trim() : null;
         return new SessionRequest(
                 model,
@@ -447,7 +501,8 @@ public class CopilotService {
                 workingDir,
                 inheritMcp,
                 StringUtils.isNotEmpty(trimmedConfigDir) ? trimmedConfigDir : null,
-                allowReadTools);
+                allowReadTools,
+                allowHostCodeIntelligence ? hostCodeIntelligence : null);
     }
 
     private IOException asIOException(Exception ex) {

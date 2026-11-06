@@ -17,6 +17,10 @@
       "request": "launch",
       "args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode-extension"],
       "outFiles": ["${workspaceFolder}/vscode-extension/dist/**/*.js"],
+      // The debugger otherwise hooks every Node child process and worker that other installed
+      // extensions start; the dev host's extension host has been seen aborting on startup with
+      // it on. PR Pilot's own child process (the sidecar) is Java, so nothing is lost.
+      "autoAttachChildProcesses": false,
       "preLaunchTask": "Build PR Pilot extension"
     },
     {
@@ -28,6 +32,10 @@
         "PR_PILOT_TARGET_REPO": "${input:targetRepoPath}"
       },
       "outFiles": ["${workspaceFolder}/vscode-extension/dist/**/*.js"],
+      // The debugger otherwise hooks every Node child process and worker that other installed
+      // extensions start; the dev host's extension host has been seen aborting on startup with
+      // it on. PR Pilot's own child process (the sidecar) is Java, so nothing is lost.
+      "autoAttachChildProcesses": false,
       "preLaunchTask": "Build PR Pilot extension"
     }
   ],

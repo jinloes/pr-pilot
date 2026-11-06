@@ -74,7 +74,12 @@ export function buildSettingsScriptHelpers(baseUrlError: string, profileNameErro
     const isCopilot = provider === 'copilot';
     $('claudeModelField').classList.toggle('hidden', isCopilot);
     $('copilotModelField').classList.toggle('hidden', !isCopilot);
-    $('advancedCopilot').classList.toggle('hidden', !isCopilot);
+    $('effortField').classList.toggle('hidden', !isCopilot);
+    $('copilotToolsSection').classList.toggle('hidden', !isCopilot);
+  }
+
+  function applySecondReviewerVisibility() {
+    $('secondReviewerEffortField').classList.toggle('hidden', secondReviewerValue() === '');
   }
 
   function applyNotificationVisibility(enabled) {
@@ -121,6 +126,7 @@ export function buildSettingsScriptHelpers(baseUrlError: string, profileNameErro
   function renderCopilotModels(models, current, secondReviewer) {
     renderModelSelect($('copilotModel'), models, current, 'CLI default (unset)');
     renderModelSelect($('reviewSecondReviewerModel'), models, secondReviewer, 'Off');
+    applySecondReviewerVisibility();
   }
 
   function secondReviewerValue() {

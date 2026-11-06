@@ -196,7 +196,13 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         // the extension only supplies raw PR/diff/context fields.
         let result: ReviewResult | null;
         try {
-            result = await deps.client().generateReview(
+            // The server reads the reviewer's checkout (gitRoot), never the PR worktree, because the
+            // IDE's language servers index only the open workspace. Deep reviews bring their own
+            // IntelliJ evidence and keep MCP disabled engine-side.
+            result = await deps.withCodeIntelligence(
+                settings.vscodeCodeIntelligence && !deep,
+                state.gitRoot,
+                (hostCodeIntelligence) => deps.client().generateReview(
                 {
                 operationId,
                 deepReview: deep ? { retainedId: deep.pending.preparation.retainedId, server: deep.server } : undefined,
@@ -209,6 +215,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 selfCritique: settings.selfCritique,
                 reviewSupervisorEnabled: settings.supervisorEnabled,
                 secondReviewerModel: settings.secondReviewerModel || undefined,
+                secondReviewerEffort: settings.secondReviewerModel ? settings.secondReviewerEffort : undefined,
                 baseSha: revisions.baseSha || undefined,
                 incrementalBaselineSha,
                 chunkedReview: msg.chunkedReview === true && !incrementalBaselineSha,
@@ -248,6 +255,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                     level: a.level,
                     message: a.message,
                 })),
+                hostCodeIntelligence,
                 },
                 (status) => {
                     if (isCurrentGeneration()) deps.push(state, { type: 'reviewGenerating', prKey: key, message: status });
@@ -255,6 +263,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 (kind, chunk) => {
                     if (isCurrentGeneration()) deps.push(state, { type: 'reviewChunk', prKey: key, kind, chunk });
                 },
+            ),
             );
         } finally {
             if (state.activeProviderOperation === providerOperation) state.activeProviderOperation = null;
@@ -541,7 +550,12 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
         if (!isCurrentChat()) return;
         let response: string;
         try {
-            response = await deps.client().chatReview(
+            response = await deps.withCodeIntelligence(
+                selectedProvider === 'copilot'
+                    && c.get<boolean>('experimentalVsCodeCodeIntelligence', false) === true
+                    && activePr !== null,
+                state.gitRoot,
+                (hostCodeIntelligence) => deps.client().chatReview(
                 {
                 operationId,
                 provider: selectedProvider,
@@ -549,6 +563,7 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
                 effort,
                 inheritMcp,
                 configDir,
+                hostCodeIntelligence,
                 ...(focused
                     ? { rawPrompt }
                     : { prContext, history, userMessage: question }),
@@ -556,6 +571,7 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
                 (chunk) => {
                     if (isCurrentChat()) deps.push(state, { type: 'chatChunk', prKey: key ?? undefined, chunk });
                 },
+            ),
             );
         } finally {
             if (state.activeProviderOperation === providerOperation) state.activeProviderOperation = null;

@@ -106,6 +106,7 @@ line here.
 - [Provider toggle and prompt sharing](docs/architecture/providers.md#provider-toggle-and-prompt-sharing)
 - [Copilot SDK runtime](docs/architecture/providers.md#copilot-sdk-runtime)
 - [Provider capability isolation](docs/architecture/providers.md#provider-capability-isolation)
+- [Host code intelligence over MCP](docs/architecture/providers.md#host-code-intelligence-over-mcp)
 - [Reasoning effort normalization](docs/architecture/providers.md#reasoning-effort-normalization)
 - [Copilot model discovery](docs/architecture/providers.md#copilot-model-discovery)
 - [Binary resolution](docs/architecture/providers.md#binary-resolution)
@@ -123,6 +124,7 @@ line here.
 - [Pinned IntelliJ SDK versus local sandbox](docs/architecture/hosts-and-sidecar.md#pinned-intellij-sdk-versus-local-sandbox)
 - [VS Code extension development target repo](docs/architecture/hosts-and-sidecar.md#vs-code-extension-development-target-repo)
 - [No silent review drops](docs/architecture/hosts-and-sidecar.md#no-silent-review-drops)
+- [Diagnostics keep the cause behind a user-facing error](docs/architecture/hosts-and-sidecar.md#diagnostics-keep-the-cause-behind-a-user-facing-error)
 
 **Sidecar capabilities** ([sidecar-capabilities.md](docs/architecture/sidecar-capabilities.md))
 
@@ -227,7 +229,9 @@ or tokens are written to disk.
 | `reviewRulesDirectory` | `""` | Local folder of the reviewer's own rules |
 | `reviewBuiltInRules` | `true` | Runs the review rules bundled with PR Pilot |
 | `reviewSecondReviewerModel` | `""` | Parallel Copilot second reviewer; blank disables it |
+| `reviewSecondReviewerEffort` | `"medium"` | Second reviewer's Copilot reasoning effort |
 | `experimentalIntellijAssistedReview` | `false` | IntelliJ-assisted review opt-in |
+| `experimentalVsCodeCodeIntelligence` | `false` | VS Code language-server lookups for Copilot; VS Code only |
 | `reviewGuidanceGlobs` | `[]` | Base-commit guidance globs; VS Code settings view only |
 
 ## Local data files

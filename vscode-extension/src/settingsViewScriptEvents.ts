@@ -11,6 +11,7 @@ export function buildSettingsScriptEvents(): string {
   $('inheritMcp').addEventListener('change', () => save('copilotInheritMcp', $('inheritMcp').checked));
   $('reviewAutoEnableMcp').addEventListener('change', () => save('copilotAutoEnableMcpOnReview', $('reviewAutoEnableMcp').checked));
   $('copilotConfigDir').addEventListener('change', () => save('copilotConfigDir', $('copilotConfigDir').value.trim()));
+  $('vscodeCodeIntelligence').addEventListener('change', () => save('experimentalVsCodeCodeIntelligence', $('vscodeCodeIntelligence').checked));
   $('reviewRulesDirectory').addEventListener('change', () => save('reviewRulesDirectory', $('reviewRulesDirectory').value.trim()));
   $('baseUrl').addEventListener('change', () => save('githubBaseUrl', $('baseUrl').value.trim()));
   $('baseUrl').addEventListener('input', clearBaseUrlError);
@@ -96,7 +97,11 @@ export function buildSettingsScriptEvents(): string {
   $('reviewSelfCritique').addEventListener('change', () => save('reviewSelfCritique', $('reviewSelfCritique').checked));
   $('reviewSupervisorEnabled').addEventListener('change', () => save('reviewSupervisorEnabled', $('reviewSupervisorEnabled').checked));
   $('reviewBuiltInRules').addEventListener('change', () => save('reviewBuiltInRules', $('reviewBuiltInRules').checked));
-  $('reviewSecondReviewerModel').addEventListener('change', () => save('reviewSecondReviewerModel', secondReviewerValue()));
+  $('reviewSecondReviewerModel').addEventListener('change', () => {
+    applySecondReviewerVisibility();
+    save('reviewSecondReviewerModel', secondReviewerValue());
+  });
+  $('reviewSecondReviewerEffort').addEventListener('change', () => save('reviewSecondReviewerEffort', $('reviewSecondReviewerEffort').value));
   $('experimentalIntellijAssistedReview').addEventListener('change', () => save('experimentalIntellijAssistedReview', $('experimentalIntellijAssistedReview').checked));
   $('notificationsEnabled').addEventListener('change', () => {
     state.notificationsEnabled = $('notificationsEnabled').checked;
@@ -147,10 +152,12 @@ export function buildSettingsScriptEvents(): string {
       $('provider').value = state.provider;
       $('claudeModel').value = state.reviewModel;
       $('effort').value = state.reviewEffort;
+      $('reviewSecondReviewerEffort').value = state.reviewSecondReviewerEffort || 'medium';
       $('baseUrl').value = state.githubBaseUrl;
       $('inheritMcp').checked = state.copilotInheritMcp === true;
       $('reviewAutoEnableMcp').checked = state.copilotAutoEnableMcpOnReview === true;
       $('copilotConfigDir').value = state.copilotConfigDir || '';
+      $('vscodeCodeIntelligence').checked = state.experimentalVsCodeCodeIntelligence === true;
       $('reviewRulesDirectory').value = state.reviewRulesDirectory || '';
       guidanceProfiles = Array.isArray(state.reviewGuidanceProfiles) ? state.reviewGuidanceProfiles : [];
       activeGuidanceProfileId = state.activeReviewGuidanceProfileId || '';

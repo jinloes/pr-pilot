@@ -23,6 +23,11 @@ VS Code host integration. All GitHub and review generation routes through the Ja
 - `src/models.ts` - Host-neutral PR/review view models.
 - `src/claude.ts` - Claude preflight and remaining mirrored prompt helpers.
 - `src/copilot.ts` - Copilot model discovery and binary preflight.
+- `src/codeIntelligence.ts` - Host-neutral read-only lookup tools (path confinement, symbol
+  location, bounded formatting) over a `CodeIntelligenceBackend`. `codeIntelligenceServer.ts`
+  serves them as a per-request loopback MCP server (`withCodeIntelligenceServer`), and
+  `codeIntelligenceVscode.ts` answers them through VS Code's language-service commands. Tests:
+  `codeIntelligence.test.ts`, `codeIntelligenceServer.test.ts`.
 - `src/providerSetup.ts` - Conservative Claude authentication probe classification for onboarding.
 - `src/settings.ts` and `settingsView.ts` - Settings controller, and the settings state, model
   options, and pure normalization/validation helpers. `settingsViewHtml.ts` renders the webview
@@ -37,7 +42,10 @@ VS Code host integration. All GitHub and review generation routes through the Ja
 - `src/operationCorrelation.ts` - Async selection/generation/chat invalidation.
 - `src/notifications.ts` - Notification labeling, deduplication, and merge rules.
 - `src/hostTheme.ts` - Theme classification.
-- `src/userFacingError.ts` - User-actionable error mapping.
+- `src/userFacingError.ts` - User-actionable error mapping, including step-specific timeouts; logs each
+  raw cause.
+- `src/log.ts` - Redacting log sink behind the "PR Pilot" output channel; sidecar stderr and raw
+  error causes. Tests: `log.test.ts`.
 - `src/workspace.ts` - Workspace and development-target resolution.
 - `src/webviewAssets.ts` - Packaged assets with development fallback.
 - `shared/user-facing-errors.yaml` - Shared host error templates.

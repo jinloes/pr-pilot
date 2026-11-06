@@ -578,7 +578,7 @@ class PluginSettingsComponentTest {
         List<Integer> sectionOrder =
                 List.of(
                                 "GitHub connection",
-                                "Review provider",
+                                "Reviewer",
                                 "Review guidance",
                                 "Review validation",
                                 "Notifications")
@@ -592,7 +592,7 @@ class PluginSettingsComponentTest {
         JComponent secondReviewer = (JComponent) label(panel, "Second reviewer:").getLabelFor();
         assertThat(secondReviewer).isInstanceOf(JComboBox.class);
         assertThat(indexContaining(texts, "Second reviewer:"))
-                .isGreaterThan(indexContaining(texts, "Review provider"))
+                .isGreaterThan(indexContaining(texts, "Reviewer"))
                 .isLessThan(indexContaining(texts, "Review guidance"));
         JLabel secondReviewerHint = hintContaining(panel, "Runs a second Copilot model");
         assertFieldWithHint(secondReviewer, secondReviewerHint);
@@ -605,6 +605,38 @@ class PluginSettingsComponentTest {
         assertThat(component.getReviewSecondReviewerModel()).isEqualTo("gpt-5.4");
         component.setReviewSecondReviewerModel(null);
         assertThat(component.getReviewSecondReviewerModel()).isEmpty();
+
+        JComponent secondReviewerEffort =
+                (JComponent) label(panel, "Second reviewer effort:").getLabelFor();
+        assertThat(secondReviewerEffort).isInstanceOf(JComboBox.class);
+        assertFieldWithHint(
+                secondReviewerEffort, hintContaining(panel, "Separate from the primary's"));
+        assertThat(component.getReviewSecondReviewerEffort()).isEqualTo("medium");
+        component.setReviewSecondReviewerEffort("low");
+        assertThat(((JComboBox<?>) secondReviewerEffort).getSelectedItem()).isEqualTo("low");
+        assertThat(component.getReviewSecondReviewerEffort()).isEqualTo("low");
+        component.setReviewSecondReviewerEffort(" ");
+        assertThat(component.getReviewSecondReviewerEffort()).isEqualTo("medium");
+        component.setReviewSecondReviewerModel("");
+        assertThat(secondReviewerEffort.isEnabled()).isFalse();
+        component.setReviewSecondReviewerModel("gemini-4-argon");
+        assertThat(secondReviewerEffort.isEnabled()).isTrue();
+        component.setReviewSecondReviewerModel(null);
+        assertThat(secondReviewerEffort.isEnabled()).isFalse();
+
+        AbstractButton inheritMcpBox =
+                button(panel, "Allow Copilot to use MCP tools from your trusted Copilot config");
+        JLabel effortLabel = label(panel, "Reasoning effort:");
+        component.setReviewProvider(ReviewProvider.CLAUDE);
+        assertThat(visibleWithin(effortLabel, panel)).isFalse();
+        assertThat(visibleWithin(inheritMcpBox, panel)).isFalse();
+        component.setReviewProvider(ReviewProvider.COPILOT);
+        assertThat(visibleWithin(effortLabel, panel)).isTrue();
+        assertThat(visibleWithin(inheritMcpBox, panel)).isTrue();
+        assertThat(indexContaining(texts, "Reasoning effort:"))
+                .isGreaterThan(indexContaining(texts, "Reviewer"))
+                .isLessThan(indexContaining(texts, "Second reviewer:"));
+        component.setReviewProvider(ReviewProvider.CLAUDE);
 
         AbstractButton validation = button(panel, "Validate findings with a second pass");
         JLabel validationHint = hintContaining(panel, "roughly doubles review time");
@@ -622,8 +654,6 @@ class PluginSettingsComponentTest {
         JComponent focusAreas = (JComponent) label(panel, "Focus areas:").getLabelFor();
         assertFieldWithHint(focusAreas, hintContaining(panel, "Comma-separated areas"));
 
-        AbstractButton advanced = button(panel, "Show advanced Copilot options");
-        assertFieldWithHint(advanced, hintContaining(panel, "Optional controls"));
         assertFieldWithHint(validation, validationHint);
 
         component.setReviewProvider(ReviewProvider.COPILOT);
@@ -634,7 +664,7 @@ class PluginSettingsComponentTest {
         assertThat(copilotModel.getParent().getComponents()).contains(button(panel, "Refreshing…"));
 
         JComponent effort = (JComponent) label(panel, "Reasoning effort:").getLabelFor();
-        assertFieldWithHint(effort, hintContaining(panel, "Higher effort"));
+        assertFieldWithHint(effort, hintContaining(panel, "Higher is deeper but slower."));
         AbstractButton inheritMcp =
                 button(panel, "Allow Copilot to use MCP tools from your trusted Copilot config");
         assertFieldWithHint(
@@ -655,10 +685,11 @@ class PluginSettingsComponentTest {
         assertThat(
                         List.of(
                                         "GitHub connection",
-                                        "Review provider",
+                                        "Reviewer",
+                                        "Copilot tools",
                                         "Review guidance",
                                         "Review validation",
-                                        "Advanced review options",
+                                        "Experimental",
                                         "Notifications")
                                 .stream()
                                 .map(section -> indexContaining(texts, section))
@@ -705,8 +736,7 @@ class PluginSettingsComponentTest {
                         .toList();
 
         assertThat(
-                        List.of("Review validation", "Advanced review options", "Notifications")
-                                .stream()
+                        List.of("Review validation", "Experimental", "Notifications").stream()
                                 .map(section -> indexContaining(texts, section))
                                 .toList())
                 .isSorted();
@@ -895,6 +925,15 @@ class PluginSettingsComponentTest {
         List<Component> components = new ArrayList<>();
         collect(root, components);
         return components;
+    }
+
+    /** Whether {@code component} and every ancestor up to {@code root} are visible. */
+    private static boolean visibleWithin(Component component, Component root) {
+        for (Component c = component; c != null; c = c.getParent()) {
+            if (!c.isVisible()) return false;
+            if (c == root) return true;
+        }
+        return false;
     }
 
     private static void collect(Component component, List<Component> components) {

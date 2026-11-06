@@ -19,6 +19,9 @@ import org.jetbrains.annotations.Nullable;
 @State(name = "ClaudeReviewSettings", storages = @Storage("claudeReviews.xml"))
 public class PluginSettings implements PersistentStateComponent<PluginSettings.State> {
 
+    /** Second reviewers default below the primary's effort so they finish closer together. */
+    public static final String DEFAULT_SECOND_REVIEWER_EFFORT = "medium";
+
     public static class ReviewGuidanceProfile {
         public String id = "";
         public String name = "";
@@ -187,6 +190,12 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
          * Its candidates are merged and cross-validated with the primary's. Blank disables it.
          */
         public String reviewSecondReviewerModel = "";
+
+        /**
+         * Copilot reasoning effort for the second reviewer, independent of the primary's so a
+         * slower model does not hold up the review.
+         */
+        public String reviewSecondReviewerEffort = DEFAULT_SECOND_REVIEWER_EFFORT;
 
         /**
          * Experimental: shows the IntelliJ-assisted review controls in the webview and lets the
@@ -518,6 +527,18 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
     public void setReviewSecondReviewerModel(String value) {
         myState.reviewSecondReviewerModel = StringUtils.defaultString(value).trim();
+    }
+
+    public String getReviewSecondReviewerEffort() {
+        return StringUtils.defaultIfBlank(
+                StringUtils.trimToEmpty(myState.reviewSecondReviewerEffort),
+                DEFAULT_SECOND_REVIEWER_EFFORT);
+    }
+
+    public void setReviewSecondReviewerEffort(String value) {
+        myState.reviewSecondReviewerEffort =
+                StringUtils.defaultIfBlank(
+                        StringUtils.trimToEmpty(value), DEFAULT_SECOND_REVIEWER_EFFORT);
     }
 
     public boolean isExperimentalIntellijAssistedReview() {

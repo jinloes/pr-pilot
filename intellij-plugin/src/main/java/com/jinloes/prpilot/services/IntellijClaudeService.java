@@ -45,6 +45,7 @@ public class IntellijClaudeService {
         private final boolean selfCritique;
         private final boolean supervisorEnabled;
         private final String secondReviewerModel;
+        private final String secondReviewerEffort;
 
         private ReviewRuntimeSettings(
                 ReviewProvider provider,
@@ -55,7 +56,8 @@ public class IntellijClaudeService {
                 String configDir,
                 boolean selfCritique,
                 boolean supervisorEnabled,
-                String secondReviewerModel) {
+                String secondReviewerModel,
+                String secondReviewerEffort) {
             this.provider = provider;
             this.model = model;
             this.effort = effort;
@@ -65,6 +67,7 @@ public class IntellijClaudeService {
             this.selfCritique = selfCritique;
             this.supervisorEnabled = supervisorEnabled;
             this.secondReviewerModel = StringUtils.defaultString(secondReviewerModel);
+            this.secondReviewerEffort = StringUtils.trimToEmpty(secondReviewerEffort);
         }
 
         public ReviewProvider provider() {
@@ -83,14 +86,9 @@ public class IntellijClaudeService {
             return secondReviewerModel;
         }
 
-        /**
-         * Reasoning effort for the second Copilot reviewer: the configured effort only applies when
-         * the primary is Copilot, since Claude efforts are not Copilot values.
-         */
+        /** Reasoning effort for the second Copilot reviewer, independent of the primary's. */
         String secondReviewerEffort() {
-            return provider == ReviewProvider.COPILOT
-                    ? effort
-                    : CopilotService.DEFAULT_REASONING_EFFORT;
+            return secondReviewerEffort;
         }
 
         public Object identity() {
@@ -103,7 +101,8 @@ public class IntellijClaudeService {
                     configDir,
                     selfCritique,
                     supervisorEnabled,
-                    secondReviewerModel);
+                    secondReviewerModel,
+                    secondReviewerEffort);
         }
     }
 
@@ -451,7 +450,8 @@ public class IntellijClaudeService {
                 settings.getCopilotConfigDir(),
                 settings.isReviewSelfCritique(),
                 settings.isReviewSupervisorEnabled(),
-                settings.getReviewSecondReviewerModel());
+                settings.getReviewSecondReviewerModel(),
+                settings.getReviewSecondReviewerEffort());
     }
 
     private static <T> void runOnPooledThread(

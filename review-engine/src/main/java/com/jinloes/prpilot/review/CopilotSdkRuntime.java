@@ -16,6 +16,7 @@ import com.github.copilot.rpc.SessionConfig;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -31,7 +32,7 @@ import org.apache.commons.lang3.StringUtils;
  * interfaces tests fake, and their implementations over the official Copilot Java SDK (which still
  * launches the local {@code copilot} CLI). Permissions are deny-by-default: {@code read} tools are
  * approved unless the session is tool-free, {@code mcp} tools only when trusted MCP servers are
- * inherited, and everything else is rejected.
+ * inherited or the host's code-intelligence server is attached, and everything else is rejected.
  */
 final class CopilotSdkRuntime {
 
@@ -47,7 +48,27 @@ final class CopilotSdkRuntime {
             File workingDir,
             boolean inheritMcp,
             String configDir,
-            boolean allowReadTools) {}
+            boolean allowReadTools,
+            HostCodeIntelligence hostCodeIntelligence) {
+        SessionRequest(
+                String model,
+                String effort,
+                File workingDir,
+                boolean inheritMcp,
+                String configDir,
+                boolean allowReadTools) {
+            this(model, effort, workingDir, inheritMcp, configDir, allowReadTools, null);
+        }
+
+        /** Host code intelligence is a tool, so tool-free sessions never attach it. */
+        boolean attachesHostCodeIntelligence() {
+            return allowReadTools && hostCodeIntelligence != null;
+        }
+
+        boolean allowsMcp() {
+            return inheritMcp || attachesHostCodeIntelligence();
+        }
+    }
 
     interface RuntimeFactory {
         RuntimeClient createClient(ClientRequest request);
@@ -116,7 +137,7 @@ final class CopilotSdkRuntime {
                             CompletableFuture.completedFuture(
                                     permissionDecision(
                                             permissionRequest.getKind(),
-                                            sessionRequest.inheritMcp(),
+                                            sessionRequest.allowsMcp(),
                                             sessionRequest.allowReadTools()));
             SessionConfig config =
                     new SessionConfig()
@@ -133,12 +154,9 @@ final class CopilotSdkRuntime {
             if (!sessionRequest.allowReadTools()) {
                 config.setAvailableTools(List.of());
             }
-            if (sessionRequest.inheritMcp()) {
-                Map<String, McpServerConfig> trusted =
-                        CopilotMcpConfig.loadTrustedServers(sessionRequest.configDir());
-                if (!trusted.isEmpty()) {
-                    config.setMcpServers(trusted);
-                }
+            Map<String, McpServerConfig> mcpServers = mcpServers(sessionRequest);
+            if (!mcpServers.isEmpty()) {
+                config.setMcpServers(mcpServers);
             }
             if (StringUtils.isNotBlank(sessionRequest.model())) {
                 config.setModel(sessionRequest.model());
@@ -223,6 +241,23 @@ final class CopilotSdkRuntime {
         public void close() {
             session.close();
         }
+    }
+
+    /**
+     * MCP servers for one session: the user's trusted servers when inherited, plus the host's
+     * code-intelligence server, which replaces any trusted entry of the same name.
+     */
+    static Map<String, McpServerConfig> mcpServers(SessionRequest sessionRequest) {
+        Map<String, McpServerConfig> servers = new LinkedHashMap<>();
+        if (sessionRequest.inheritMcp()) {
+            servers.putAll(CopilotMcpConfig.loadTrustedServers(sessionRequest.configDir()));
+        }
+        if (sessionRequest.attachesHostCodeIntelligence()) {
+            servers.put(
+                    HostCodeIntelligence.SERVER_NAME,
+                    sessionRequest.hostCodeIntelligence().toMcpServerConfig());
+        }
+        return servers;
     }
 
     static PermissionRequestResult permissionDecision(String kind, boolean allowMcp) {

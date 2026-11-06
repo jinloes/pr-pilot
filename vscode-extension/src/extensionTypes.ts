@@ -3,6 +3,7 @@ import type { ChatMessage } from './claude';
 import type { PreparedDeepReview } from './deepReview';
 import type { DraftRecoveryStore } from './draftRecovery';
 import type { SidecarClient, SidecarPrDetailResult } from './sidecar';
+import type { SidecarHostCodeIntelligence } from './sidecarTypes';
 import type { ResolvedReviewGuidance } from './reviewGuidanceProfiles';
 import type { DeepReviewFlow } from './deepReview';
 import type { PRSearchScope, ReviewResult } from './models';
@@ -35,10 +36,13 @@ export interface ReviewGenerationSettings {
     selfCritique: boolean;
     supervisorEnabled: boolean;
     secondReviewerModel: string;
+    secondReviewerEffort: string;
     rulesDirectory: string;
     builtInRules: boolean;
     githubBaseUrl: string;
     guidance: ResolvedReviewGuidance;
+    /** Copilot only: serve VS Code language-server lookups to the review over MCP. */
+    vscodeCodeIntelligence: boolean;
 }
 
 export interface ViewState {
@@ -97,6 +101,15 @@ export interface HandlerDependencies {
         bridgePrKey?: string,
     ) => Promise<string>;
     cancelActiveProvider: (operationId: string) => Promise<void>;
+    /**
+     * Runs a provider call with a code-intelligence MCP server over the local checkout `root`
+     * when `enabled`; `run` receives its endpoint, or undefined when none is running.
+     */
+    withCodeIntelligence: <T>(
+        enabled: boolean,
+        root: string | null,
+        run: (endpoint: SidecarHostCodeIntelligence | undefined) => Promise<T>,
+    ) => Promise<T>;
     freshDeepPr: (
         number: number,
         owner: string,

@@ -139,25 +139,49 @@ interface ModelInfoLike {
 }
 
 /**
- * Extracts usable model IDs from `client.listModels()` output: drops policy-`disabled` models and
- * blank IDs, then de-dupes while preserving the SDK's ordering. Pure (no I/O) so it can be tested
- * without spawning the CLI — mirrors the role of CopilotModelDiscovery.parseModelsFromHelp.
+ * Extracts usable model IDs from a model catalog (`session.rpc.model.list()` entries or
+ * `client.listModels()` output): drops non-object entries, policy-`disabled` models and blank IDs,
+ * then de-dupes while preserving catalog order. Pure (no I/O) so it can be tested without spawning
+ * the CLI. Mirrors CopilotModelDiscovery.filterModelIds.
  */
-export function filterModelIds(models: ModelInfoLike[]): string[] {
+export function filterModelIds(models: readonly unknown[]): string[] {
     const ids = models
+        .filter((m): m is ModelInfoLike => m !== null && typeof m === 'object' && !Array.isArray(m))
         .filter((m) => m.policy?.state !== 'disabled')
-        .map((m) => m.id)
-        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+        .map((m) => (typeof m.id === 'string' ? m.id.trim() : ''))
+        .filter((id) => id.length > 0);
     return Array.from(new Set(ids));
 }
 
 /**
- * Returns the Copilot model IDs available to the current account via the SDK's
- * `client.listModels()` (the live account catalog). Only models whose policy is not `disabled` are
- * returned. Serves the cached list unless `forceRefresh` is set. On failure returns an empty array
- * and keeps any previously cached list, so callers can fall back without losing a good result.
+ * Lists the models a session can select, as the CLI's own `/model` picker does. The global
+ * `models.list` RPC omits models the session catalog includes (for example newly enabled Gemini
+ * models), so a short-lived, tool-free session is opened, queried, and deleted. No prompt is sent,
+ * so this uses no model quota.
+ */
+async function listSessionModels(client: CopilotClient): Promise<unknown[]> {
+    const session = await withTimeout(client.createSession({
+        workingDirectory: os.homedir(),
+        availableTools: [],
+        enableConfigDiscovery: false,
+        onPermissionRequest: () => ({ kind: 'reject' }),
+    }), SDK_BOOT_TIMEOUT_MS, 'session creation');
+    try {
+        const result = await withTimeout(session.rpc.model.list({}), SDK_BOOT_TIMEOUT_MS, 'model discovery');
+        return Array.isArray(result?.list) ? result.list : [];
+    } finally {
+        await client.deleteSession(session.sessionId).catch(() => undefined);
+    }
+}
+
+/**
+ * Returns the Copilot model IDs the current account can select: the session model catalog, falling
+ * back to the global `client.listModels()` catalog when the session route fails or returns
+ * nothing. Only models whose policy is not `disabled` are returned. Serves the cached list unless
+ * `forceRefresh` is set. On failure returns an empty array and keeps any previously cached list, so
+ * callers can fall back without losing a good result.
  *
- * Mirrors CopilotModelDiscovery.refresh (IntelliJ), which uses the same live catalog.
+ * Mirrors CopilotModelDiscovery.refresh (IntelliJ), which uses the same catalogs.
  */
 export async function listModels(forceRefresh = false): Promise<string[]> {
     if (!forceRefresh && modelCache !== null) return modelCache;
@@ -170,8 +194,16 @@ export async function listModels(forceRefresh = false): Promise<string[]> {
     });
     try {
         await withTimeout(client.start(), SDK_BOOT_TIMEOUT_MS, 'runtime startup');
-        const models = await withTimeout(client.listModels(), SDK_BOOT_TIMEOUT_MS, 'model discovery');
-        const ids = filterModelIds(models);
+        let ids: string[] = [];
+        try {
+            ids = filterModelIds(await listSessionModels(client));
+        } catch (err) {
+            console.warn('[pr-pilot] Session model catalog unavailable; using models.list:',
+                err instanceof Error ? err.message : String(err));
+        }
+        if (ids.length === 0) {
+            ids = filterModelIds(await withTimeout(client.listModels(), SDK_BOOT_TIMEOUT_MS, 'model discovery'));
+        }
         if (ids.length > 0) modelCache = ids;
         return ids;
     } catch (err) {

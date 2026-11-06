@@ -77,7 +77,7 @@ ${SETTINGS_VIEW_STYLES}
   </div>
 
   <div class="section">
-    <div class="section-title">Review provider</div>
+    <div class="section-title">Reviewer</div>
 
     <div class="field">
       <label for="provider">Provider</label>
@@ -103,33 +103,51 @@ ${SETTINGS_VIEW_STYLES}
       <div class="hint">Pick a discovered model. Choose "CLI default" to use the Copilot CLI's own routing.</div>
     </div>
 
-    <div class="field">
-      <label for="reviewSecondReviewerModel">Second reviewer</label>
-      <select id="reviewSecondReviewerModel" aria-describedby="reviewSecondReviewerModelHint"></select>
-      <div class="hint" id="reviewSecondReviewerModelHint">Optional. Runs a second Copilot model in parallel with either provider; findings are cross-validated. Choose Off to disable.</div>
+    <div class="field hidden" id="effortField">
+      <label for="effort">Reasoning effort</label>
+      <select id="effort" aria-describedby="effortHint">${effortOptions}</select>
+      <div class="hint" id="effortHint">Higher is deeper but slower.</div>
     </div>
 
-    <details id="advancedCopilot" class="advanced hidden">
-      <summary>Advanced Copilot options</summary>
-      <div class="hint">Optional controls for reasoning depth, MCP access, and Copilot config discovery.</div>
-      <div class="advanced-fields">
-        <div class="field" id="effortField">
-          <label for="effort">Reasoning effort</label>
-          <select id="effort">${effortOptions}</select>
-          <div class="hint">Higher = deeper review, slower. Applies only to GitHub Copilot.</div>
-        </div>
-
-        <div class="field" id="mcpField">
-          <label><input type="checkbox" id="inheritMcp" style="width:auto;margin-right:6px;">Allow Copilot to use MCP tools from your trusted Copilot config</label>
-          <div class="hint">Applies while reviewing untrusted pull request content. Servers load only from your own Copilot config (<code>~/.copilot/mcp-config.json</code>); a pull request's <code>.mcp.json</code> is never loaded.</div>
-          <label style="margin-top:8px;"><input type="checkbox" id="reviewAutoEnableMcp" style="width:auto;margin-right:6px;">Always enable MCP for Copilot reviews</label>
-          <div class="hint">Review-only override. Chat still follows the general MCP toggle above.</div>
-          <label for="copilotConfigDir" style="margin-top:8px;">Copilot config directory</label>
-          <input type="text" id="copilotConfigDir" aria-describedby="copilotConfigDirHint" placeholder="Empty uses ~/.copilot">
-          <div class="hint" id="copilotConfigDirHint">Optional override of the Copilot config directory the trusted MCP servers are loaded from.</div>
-        </div>
+    <fieldset class="group" id="secondReviewerGroup">
+      <legend>Second reviewer</legend>
+      <div class="field">
+        <label for="reviewSecondReviewerModel">Model</label>
+        <select id="reviewSecondReviewerModel" aria-describedby="reviewSecondReviewerModelHint"></select>
+        <div class="hint" id="reviewSecondReviewerModelHint">Optional. Runs a second Copilot model in parallel with either provider; findings are cross-validated. Choose Off to disable.</div>
       </div>
-    </details>
+
+      <div class="field hidden" id="secondReviewerEffortField">
+        <label for="reviewSecondReviewerEffort">Reasoning effort</label>
+        <select id="reviewSecondReviewerEffort" aria-describedby="reviewSecondReviewerEffortHint">${effortOptions}</select>
+        <div class="hint" id="reviewSecondReviewerEffortHint">Separate from the primary's. The review waits for both reviewers, so lower effort finishes sooner.</div>
+      </div>
+    </fieldset>
+  </div>
+
+  <div class="section hidden" id="copilotToolsSection">
+    <div class="section-title">Copilot tools</div>
+
+    <div class="field" id="mcpField">
+      <label><input type="checkbox" id="inheritMcp" style="width:auto;margin-right:6px;">Allow Copilot to use MCP tools from your trusted Copilot config</label>
+      <div class="hint">Applies while reviewing untrusted pull request content. Servers load only from your own Copilot config (<code>~/.copilot/mcp-config.json</code>); a pull request's <code>.mcp.json</code> is never loaded.</div>
+    </div>
+
+    <div class="field">
+      <label><input type="checkbox" id="reviewAutoEnableMcp" style="width:auto;margin-right:6px;">Always enable MCP for Copilot reviews</label>
+      <div class="hint">Review-only override. Chat still follows the MCP setting above.</div>
+    </div>
+
+    <div class="field">
+      <label for="copilotConfigDir">Copilot config directory</label>
+      <input type="text" id="copilotConfigDir" aria-describedby="copilotConfigDirHint" placeholder="Empty uses ~/.copilot">
+      <div class="hint" id="copilotConfigDirHint">Optional override of the Copilot config directory the trusted MCP servers are loaded from.</div>
+    </div>
+
+    <div class="field">
+      <label><input type="checkbox" id="vscodeCodeIntelligence" style="width:auto;margin-right:6px;">Let Copilot use VS Code language servers (experimental)</label>
+      <div class="hint">Serves definition, reference, implementation, and type lookups from your open checkout to reviews and chat through a loopback MCP server. Results can be from a different commit than the pull request.</div>
+    </div>
   </div>
 
   <div class="section">
@@ -201,7 +219,7 @@ ${SETTINGS_VIEW_STYLES}
   </div>
 
   <div class="section">
-    <div class="section-title">Advanced review options</div>
+    <div class="section-title">Experimental</div>
 
     <div class="field">
       <label><input type="checkbox" id="experimentalIntellijAssistedReview" style="width:auto;margin-right:6px;">Enable IntelliJ-assisted review (experimental)</label>

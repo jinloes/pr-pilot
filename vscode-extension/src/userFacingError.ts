@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { parse as parseYaml } from 'yaml';
+import { log } from './log';
 import type { SidecarPrDiffResult } from './sidecar';
 
 type ErrorContext =
@@ -19,10 +20,16 @@ type TemplateKey =
     | 'provider_binary_missing'
     | 'provider_not_installed'
     | 'request_timed_out'
+    | 'git_timed_out'
+    | 'provider_start_timed_out'
+    | 'step_timed_out'
     | 'invalid_review_format'
     | 'network_error'
     | 'tls_certificate_untrusted'
     | 'generic_failure';
+
+/** Appended where the summary hides the cause, so the user can find the raw error. */
+export const OUTPUT_PANEL_HINT = ' Details are in the PR Pilot output panel.';
 
 const TEMPLATES = loadTemplates();
 
@@ -91,7 +98,31 @@ export function providerNotInstalledMessage(provider: 'claude' | 'copilot'): str
         : template('provider_not_installed', { binary: 'claude', provider_cli: 'Claude Code CLI' });
 }
 
+/**
+ * Names the step behind a timeout: a git command, Copilot runtime or session startup, or one
+ * sidecar request. Anything else is the provider's own run, which keeps the generic advice.
+ * Mirrors UserFacingErrors.timedOut (IntelliJ), minus the sidecar case IntelliJ cannot hit.
+ */
+function timeoutMessage(msg: string, raw: string, context: ErrorContext): string {
+    const git = /\bgit ([a-z-]+) timed out/.exec(msg);
+    if (git) return template('git_timed_out', { command: git[1], operation: context });
+    if (/\bcopilot (runtime startup|session creation) timed out/.test(msg)) {
+        return template('provider_start_timed_out', { operation: context });
+    }
+    const step = /sidecar request "([^"]+)" timed out/i.exec(raw);
+    if (step) return template('step_timed_out', { step: step[1], operation: context });
+    return template('request_timed_out', { operation: context });
+}
+
 export function toUserFacingError(err: unknown, context: ErrorContext): string {
+    log(`[error] Couldn't ${context}: ${err instanceof Error ? err.message : String(err)}`);
+    const message = mapError(err, context);
+    return message.includes('timed out') || message === template('generic_failure', { operation: context })
+        ? message + OUTPUT_PANEL_HINT
+        : message;
+}
+
+function mapError(err: unknown, context: ErrorContext): string {
     const msg = messageOf(err);
 
     if (err instanceof GitHubOperationError && err.status === 'not_found_or_inaccessible') {
@@ -118,7 +149,7 @@ export function toUserFacingError(err: unknown, context: ErrorContext): string {
         }
     }
     if (includesAny(msg, ['timed out', 'timeout'])) {
-        return template('request_timed_out', { operation: context });
+        return timeoutMessage(msg, err instanceof Error ? err.message : String(err), context);
     }
     if (includesAny(msg, ['failed to parse review json', 'unexpected token', 'produced no output'])) {
         return template('invalid_review_format', {});

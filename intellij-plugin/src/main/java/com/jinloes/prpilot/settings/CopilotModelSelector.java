@@ -2,7 +2,6 @@ package com.jinloes.prpilot.settings;
 
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
-import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.review.CopilotModelDiscovery;
@@ -18,7 +17,7 @@ import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
-import javax.swing.JLabel;
+import javax.swing.JComponent;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import org.apache.commons.lang3.StringUtils;
@@ -57,14 +56,16 @@ final class CopilotModelSelector {
     private final JBTextField copilotConfigDirField = new JBTextField();
     private final JComboBox<String> secondReviewerModelCombo =
             new JComboBox<>(COPILOT_MODEL_SUGGESTIONS);
+    private final JComboBox<String> secondReviewerEffortCombo = new JComboBox<>(COPILOT_EFFORTS);
     private final JComboBox<ReviewProvider> providerCombo =
             new JComboBox<>(ReviewProvider.values());
     private final JBLabel modelLabel = new JBLabel("Model:");
     private final JPanel modelComboPanel = new JPanel(new java.awt.CardLayout());
     private final JPanel copilotModelCard = new JPanel();
-    private final JCheckBox showAdvancedCopilotBox = new JCheckBox("Show advanced Copilot options");
-    private final JPanel advancedCopilotSection = new JPanel();
-    private final JPanel advancedCopilotPanel = new JPanel();
+
+    /** Rows that only apply when Copilot is the primary provider, shown and hidden together. */
+    private final List<JComponent> copilotOnly = new ArrayList<>();
+
     private final PluginSettingsComponent.CopilotModelCatalog catalog;
     private final Consumer<Runnable> backgroundExecutor;
     private final Consumer<Runnable> uiExecutor;
@@ -81,7 +82,7 @@ final class CopilotModelSelector {
 
         configureControls();
         configureModelCards();
-        configureAdvancedOptions();
+        updateActiveModelCombo();
 
         CopilotModelDiscovery.Result cachedModels = catalog.cached();
         if (cachedModels != null) {
@@ -115,6 +116,7 @@ final class CopilotModelSelector {
         SettingsUi.boundContentWidth(copilotModelCombo);
         SettingsUi.boundContentWidth(claudeModelCombo);
         secondReviewerModelCombo.setEditable(true);
+        secondReviewerModelCombo.addActionListener(e -> updateSecondReviewerEffortEnabled());
         secondReviewerModelCombo.setRenderer(
                 new DefaultListCellRenderer() {
                     @Override
@@ -133,6 +135,9 @@ final class CopilotModelSelector {
                     }
                 });
         SettingsUi.boundContentWidth(secondReviewerModelCombo);
+        secondReviewerEffortCombo.setSelectedItem(PluginSettings.DEFAULT_SECOND_REVIEWER_EFFORT);
+        SettingsUi.boundContentWidth(secondReviewerEffortCombo);
+        updateSecondReviewerEffortEnabled();
         copilotModelHint.setAlignmentX(Component.LEFT_ALIGNMENT);
         refreshModelsButton.setToolTipText("Reload the models available to your Copilot account");
         refreshModelsButton.addActionListener(e -> refreshCopilotModels());
@@ -164,73 +169,30 @@ final class CopilotModelSelector {
         providerCombo.addActionListener(e -> updateActiveModelCombo());
     }
 
-    private void configureAdvancedOptions() {
-        JLabel effortHint =
-                SettingsUi.hintLabel(
-                        "<html><small>Higher effort = deeper review, slower."
-                                + " Applies only to GitHub Copilot.</small></html>");
-        JPanel effortField = SettingsUi.fieldWithHint(copilotEffortCombo, effortHint);
-
-        JLabel mcpHint =
-                SettingsUi.hintLabel(
-                        "<html><small>Applies while reviewing untrusted pull request content."
-                                + " Servers load only from your own Copilot config"
-                                + " (<code>~/.copilot/mcp-config.json</code>); a pull request's"
-                                + " <code>.mcp.json</code> is never loaded.</small></html>");
-        JLabel advancedHint =
-                SettingsUi.hintLabel(
-                        "<html><small>Optional controls for reasoning depth, MCP access, and"
-                                + " Copilot config discovery.</small></html>");
-        advancedHint.setAlignmentX(Component.LEFT_ALIGNMENT);
-        showAdvancedCopilotBox.setAlignmentX(Component.LEFT_ALIGNMENT);
-        showAdvancedCopilotBox.addActionListener(e -> updateAdvancedCopilotOptionsVisibility());
-
-        JPanel advancedFormPanel =
-                FormBuilder.createFormBuilder()
-                        .addLabeledComponent(
-                                SettingsUi.fieldLabel("Reasoning effort:", copilotEffortCombo),
-                                effortField,
-                                1,
-                                false)
-                        .addComponentToRightColumn(
-                                SettingsUi.fieldWithHint(copilotInheritMcpBox, mcpHint), 1)
-                        .addComponentToRightColumn(copilotAutoEnableMcpOnReviewBox, 1)
-                        .addLabeledComponent(
-                                SettingsUi.fieldLabel("Copilot config dir:", copilotConfigDirField),
-                                copilotConfigDirField,
-                                1,
-                                false)
-                        .getPanel();
-        advancedFormPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        advancedCopilotPanel.setLayout(new BoxLayout(advancedCopilotPanel, BoxLayout.Y_AXIS));
-        advancedCopilotPanel.setBorder(JBUI.Borders.emptyTop(6));
-        advancedCopilotPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        advancedCopilotPanel.add(advancedFormPanel);
-
-        advancedCopilotSection.setLayout(new BoxLayout(advancedCopilotSection, BoxLayout.Y_AXIS));
-        advancedCopilotSection.add(SettingsUi.fieldWithHint(showAdvancedCopilotBox, advancedHint));
-        advancedCopilotSection.add(advancedCopilotPanel);
-        updateActiveModelCombo();
-    }
-
     private void updateActiveModelCombo() {
         ReviewProvider active = getReviewProvider();
         ((java.awt.CardLayout) modelComboPanel.getLayout()).show(modelComboPanel, active.getId());
         modelLabel.setLabelFor(
                 active == ReviewProvider.COPILOT ? copilotModelCombo : claudeModelCombo);
-        updateAdvancedCopilotOptionsVisibility();
+        updateCopilotOnlyVisibility();
     }
 
-    private void updateAdvancedCopilotOptionsVisibility() {
+    private void updateCopilotOnlyVisibility() {
         boolean copilotProvider = getReviewProvider() == ReviewProvider.COPILOT;
-        boolean showAdvanced = showAdvancedCopilotBox.isSelected();
-        advancedCopilotSection.setVisible(copilotProvider);
-        advancedCopilotPanel.setVisible(copilotProvider && showAdvanced);
-        copilotEffortCombo.setEnabled(copilotProvider);
-        copilotInheritMcpBox.setEnabled(copilotProvider);
-        copilotAutoEnableMcpOnReviewBox.setEnabled(copilotProvider);
-        copilotConfigDirField.setEnabled(copilotProvider);
+        for (JComponent component : copilotOnly) component.setVisible(copilotProvider);
+    }
+
+    /**
+     * Registers settings rows that apply only to a Copilot primary, such as its reasoning effort
+     * and the Copilot tools section, so they follow the provider selection.
+     */
+    void showOnlyForCopilot(JComponent... components) {
+        copilotOnly.addAll(List.of(components));
+        updateCopilotOnlyVisibility();
+    }
+
+    private void updateSecondReviewerEffortEnabled() {
+        secondReviewerEffortCombo.setEnabled(!getReviewSecondReviewerModel().isEmpty());
     }
 
     private void refreshCopilotModels() {
@@ -341,8 +303,20 @@ final class CopilotModelSelector {
         return modelComboPanel;
     }
 
-    JPanel advancedSection() {
-        return advancedCopilotSection;
+    JComboBox<String> effortCombo() {
+        return copilotEffortCombo;
+    }
+
+    JCheckBox inheritMcpBox() {
+        return copilotInheritMcpBox;
+    }
+
+    JCheckBox autoEnableMcpOnReviewBox() {
+        return copilotAutoEnableMcpOnReviewBox;
+    }
+
+    JBTextField configDirField() {
+        return copilotConfigDirField;
     }
 
     JComboBox<String> secondReviewerModelCombo() {
@@ -421,10 +395,29 @@ final class CopilotModelSelector {
         String id = StringUtils.trimToEmpty(value);
         secondReviewerModelCombo.setSelectedItem(id);
         secondReviewerModelCombo.getEditor().setItem(id);
+        updateSecondReviewerEffortEnabled();
     }
 
     List<String> getCopilotModelOptions() {
         return comboItems(copilotModelCombo);
+    }
+
+    JComboBox<String> secondReviewerEffortCombo() {
+        return secondReviewerEffortCombo;
+    }
+
+    String getReviewSecondReviewerEffort() {
+        Object selected = secondReviewerEffortCombo.getSelectedItem();
+        return selected instanceof String s && !s.isBlank()
+                ? s
+                : PluginSettings.DEFAULT_SECOND_REVIEWER_EFFORT;
+    }
+
+    void setReviewSecondReviewerEffort(String effort) {
+        secondReviewerEffortCombo.setSelectedItem(
+                StringUtils.defaultIfBlank(
+                        StringUtils.trimToEmpty(effort),
+                        PluginSettings.DEFAULT_SECOND_REVIEWER_EFFORT));
     }
 
     List<String> getSecondReviewerModelOptions() {

@@ -10,6 +10,7 @@ import com.jinloes.prpilot.review.CancellationToken;
 import com.jinloes.prpilot.review.ClaudeService;
 import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.GitWorktreeService;
+import com.jinloes.prpilot.review.HostCodeIntelligence;
 import com.jinloes.prpilot.review.RepoGuidelinesReader;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
 import com.jinloes.prpilot.review.ReviewPipelineService;
@@ -86,7 +87,10 @@ public class ReviewSessionService implements ReviewEngineApi {
         if (params.deepReview() != null) return generateDeep(params, request, onStatus, onChunk);
         if (copilot) {
             CancellationToken cancellationToken = new CancellationToken();
-            CopilotService service = new CopilotService(params.projectDir(), cancellationToken);
+            CopilotService service =
+                    new CopilotService(params.projectDir(), cancellationToken)
+                            .withHostCodeIntelligence(
+                                    hostCodeIntelligence(params.hostCodeIntelligence()));
             ActiveOperation operation =
                     startOperation(
                             params.operationId(), cancellationToken, service::cancelCurrentRequest);
@@ -151,8 +155,8 @@ public class ReviewSessionService implements ReviewEngineApi {
     }
 
     /**
-     * Attaches the opt-in second Copilot reviewer for ordinary reviews. The reasoning effort is
-     * only meaningful for Copilot, so a Claude primary's effort is not forwarded.
+     * Attaches the opt-in second Copilot reviewer for ordinary reviews, at its own reasoning effort
+     * (see {@link #secondReviewerEffort}).
      */
     static ReviewPipelineService withSecondReviewer(
             ReviewPipelineService pipeline, GenerateReviewParams params) {
@@ -163,7 +167,15 @@ public class ReviewSessionService implements ReviewEngineApi {
                 params.secondReviewerModel(), secondReviewerEffort(params), params.configDir());
     }
 
+    /**
+     * The configured second-reviewer effort. When a host does not send one, the second reviewer
+     * follows a Copilot primary's effort, and a Claude primary's effort is not forwarded because it
+     * is not a Copilot value.
+     */
     static String secondReviewerEffort(GenerateReviewParams params) {
+        if (StringUtils.isNotBlank(params.secondReviewerEffort())) {
+            return params.secondReviewerEffort().trim();
+        }
         return "copilot".equals(params.provider())
                 ? params.effort()
                 : CopilotService.DEFAULT_REASONING_EFFORT;
@@ -300,7 +312,10 @@ public class ReviewSessionService implements ReviewEngineApi {
                                 .toList();
         if ("copilot".equals(params.provider())) {
             CancellationToken cancellationToken = new CancellationToken();
-            CopilotService service = new CopilotService(params.projectDir(), cancellationToken);
+            CopilotService service =
+                    new CopilotService(params.projectDir(), cancellationToken)
+                            .withHostCodeIntelligence(
+                                    hostCodeIntelligence(params.hostCodeIntelligence()));
             ActiveOperation operation =
                     startOperation(
                             params.operationId(), cancellationToken, service::cancelCurrentRequest);
@@ -413,6 +428,10 @@ public class ReviewSessionService implements ReviewEngineApi {
         void finish(ActiveOperation operation) {
             operations.remove(operation.operationId(), operation);
         }
+    }
+
+    static HostCodeIntelligence hostCodeIntelligence(HostCodeIntelligenceParams params) {
+        return params == null ? null : HostCodeIntelligence.of(params.url(), params.token());
     }
 
     private static void requireValidGenerateParams(GenerateReviewParams params) {

@@ -1,10 +1,14 @@
 package com.jinloes.prpilot.review;
 
 import com.github.copilot.CopilotClient;
+import com.github.copilot.CopilotSession;
+import com.github.copilot.generated.rpc.SessionModelListResult;
 import com.github.copilot.rpc.CopilotClientMode;
 import com.github.copilot.rpc.CopilotClientOptions;
 import com.github.copilot.rpc.ModelInfo;
 import com.github.copilot.rpc.ModelPolicy;
+import com.github.copilot.rpc.PermissionRequestResult;
+import com.github.copilot.rpc.SessionConfig;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -26,10 +30,12 @@ import org.slf4j.LoggerFactory;
 /**
  * Discovers the Copilot model IDs available to the signed-in account.
  *
- * <p>The primary source is the CLI runtime's live {@code models.list} RPC (via the Copilot SDK),
- * which reflects the account's actual, policy-filtered catalog. {@code copilot help config} is only
- * a fallback: its model list is baked into the installed CLI binary, so it lags newly rolled-out
- * models and ignores account policy.
+ * <p>The primary source is the CLI runtime's live session model catalog (via the Copilot SDK),
+ * which is what the CLI's own {@code /model} picker shows, with the global {@code models.list} RPC
+ * as a fallback. Both reflect the account's policy, but {@code models.list} omits some models the
+ * session catalog includes. {@code copilot help config} is only the last fallback: its model list
+ * is baked into the installed CLI binary, so it lags newly rolled-out models and ignores account
+ * policy.
  *
  * <p>Results are cached in memory so a settings page can render the last known list instantly;
  * {@link #refresh()} re-probes (callers do this every time the page opens). A failed refresh never
@@ -175,6 +181,24 @@ public final class CopilotModelDiscovery {
         return List.copyOf(ids);
     }
 
+    /**
+     * Same filter for session {@code model.list} entries, which the SDK leaves as untyped JSON
+     * maps. Non-object entries are skipped.
+     */
+    static List<String> filterCatalogEntries(List<?> entries) {
+        if (entries == null) return List.of();
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        for (Object entry : entries) {
+            if (!(entry instanceof Map<?, ?> model)) continue;
+            if (!(model.get("id") instanceof String id) || StringUtils.isBlank(id)) continue;
+            if (model.get("policy") instanceof Map<?, ?> policy
+                    && policy.get("state") instanceof String state
+                    && "disabled".equalsIgnoreCase(state)) continue;
+            ids.add(id.trim());
+        }
+        return List.copyOf(ids);
+    }
+
     private static List<String> fetchAccountModels() throws Exception {
         String userHome = System.getProperty("user.home", "/");
         Map<String, String> env = new LinkedHashMap<>(System.getenv());
@@ -189,7 +213,63 @@ public final class CopilotModelDiscovery {
                                 .setMode(CopilotClientMode.COPILOT_CLI)
                                 .setAutoStart(false))) {
             client.start().get(LIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            return filterModelIds(client.listModels().get(LIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+            return accountModels(
+                    () -> fetchSessionModels(client, userHome),
+                    () ->
+                            filterModelIds(
+                                    client.listModels()
+                                            .get(LIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)));
+        }
+    }
+
+    /**
+     * Prefers the session catalog, which is what the CLI's {@code /model} picker shows: the global
+     * {@code models.list} omits models it includes, such as newly enabled Gemini models. Falls back
+     * to the global catalog when the session route fails or returns nothing.
+     */
+    static List<String> accountModels(LiveCatalog sessionCatalog, LiveCatalog globalCatalog)
+            throws Exception {
+        try {
+            List<String> models = sessionCatalog.fetch();
+            if (!models.isEmpty()) return models;
+        } catch (InterruptedException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Session model catalog unavailable; using models.list: {}", rootMessage(e));
+        }
+        return globalCatalog.fetch();
+    }
+
+    /**
+     * Opens a short-lived, tool-free session, lists its selectable models, and deletes it. No
+     * prompt is sent, so this uses no model quota.
+     */
+    private static List<String> fetchSessionModels(CopilotClient client, String workingDirectory)
+            throws Exception {
+        SessionConfig config =
+                new SessionConfig()
+                        .setOnPermissionRequest(
+                                (request, ctx) ->
+                                        CompletableFuture.completedFuture(
+                                                PermissionRequestResult.reject(
+                                                        "Model discovery runs no tools.")))
+                        .setWorkingDirectory(workingDirectory)
+                        .setAvailableTools(List.of())
+                        .setEnableConfigDiscovery(false);
+        CopilotSession session =
+                client.createSession(config).get(LIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        try {
+            SessionModelListResult result =
+                    session.getRpc().model.list().get(LIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return filterCatalogEntries(result != null ? result.list() : null);
+        } finally {
+            try {
+                client.deleteSession(session.getSessionId())
+                        .get(LIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                log.debug("Could not delete the model discovery session", e);
+            }
+            session.close();
         }
     }
 

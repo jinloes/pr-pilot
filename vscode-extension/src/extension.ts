@@ -22,9 +22,13 @@ import { normalizeRepositoryInstructions, repositoryKey } from './repositoryInst
 import { normalizeReviewGuidanceGlobs, resolveReviewGuidance } from './reviewGuidanceProfiles';
 import { PRNotificationPoller } from './notificationPoller';
 import { createWorktreeOperations } from './worktree';
+import { setLogSink } from './log';
 import { createPrHandlers, type PrHandlerApi } from './prHandlers';
 import { createReviewHandlers, type ReviewHandlerApi } from './reviewHandlers';
 import { selectCopilotModel } from './copilotModel';
+import { createCodeIntelligenceTools } from './codeIntelligence';
+import { withCodeIntelligenceServer } from './codeIntelligenceServer';
+import { createVscodeCodeIntelligenceBackend } from './codeIntelligenceVscode';
 import type { ActivePR, HandlerDependencies, Provider, ProviderReadiness, ReviewGenerationSettings, ViewState } from './extensionTypes';
 
 // Process-wide, lazily-started Java engine host. GitHub operations are never performed in the
@@ -45,6 +49,15 @@ function newOperationId(): string {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+    // A log channel is timestamped and also persisted with VS Code's own logs, so a failure can
+    // still be diagnosed after the window that showed it is gone.
+    const output = vscode.window.createOutputChannel('PR Pilot', { log: true });
+    context.subscriptions.push(output);
+    const previousSink = setLogSink((line) => {
+        if (line.startsWith('[error]')) output.error(line);
+        else output.info(line);
+    });
+    context.subscriptions.push({ dispose: () => { setLogSink(previousSink); } });
     let retryPromptVisible = false;
     const showSidecarRetry = (failure: Error): void => {
         if (retryPromptVisible) return;
@@ -424,10 +437,13 @@ function snapshotReviewGenerationSettings(): ReviewGenerationSettings {
         selfCritique: c.get<boolean>('reviewSelfCritique', true),
         supervisorEnabled: c.get<boolean>('reviewSupervisorEnabled', true),
         secondReviewerModel: c.get<string>('reviewSecondReviewerModel', '').trim(),
+        secondReviewerEffort: c.get<string>('reviewSecondReviewerEffort', 'medium').trim() || 'medium',
         rulesDirectory: c.get<string>('reviewRulesDirectory', '').trim(),
         builtInRules: c.get<boolean>('reviewBuiltInRules', true),
         githubBaseUrl: c.get<string>('githubBaseUrl', 'https://github.com'),
         guidance,
+        vscodeCodeIntelligence: selectedProvider === 'copilot'
+            && c.get<boolean>('experimentalVsCodeCodeIntelligence', false) === true,
     };
 }
 
@@ -478,6 +494,12 @@ const handlerDependencies: HandlerDependencies = {
     clearWorktree: worktreeOperations.clearWorktree,
     resolveWorkingDir: worktreeOperations.resolveWorkingDir,
     cancelActiveProvider,
+    withCodeIntelligence: (enabled, root, run) => withCodeIntelligenceServer(
+        enabled,
+        root,
+        (checkout) => createCodeIntelligenceTools(checkout, createVscodeCodeIntelligenceBackend(checkout)),
+        run,
+    ),
     freshDeepPr: (...args) => prHandlers.freshDeepPr(...args),
     handleGenerateReview: (...args) => reviewHandlers.handleGenerateReview(...args),
 };

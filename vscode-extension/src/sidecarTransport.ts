@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import * as fs from 'fs';
 import { encodeFrame, extractFrames } from './sidecarFraming';
+import { createLineLogger, log } from './log';
 import { REQUIRED_CAPABILITIES, parseInitializeResult } from './sidecarProtocol';
 import type { SidecarSpawn } from './sidecarTypes';
 
@@ -155,14 +156,18 @@ export class SidecarTransport {
                 if (failure instanceof StickySidecarFailure) this.markStartupFailure(failure, child);
                 else this.markRuntimeFailure(failure, child);
             });
+            const stderrLog = createLineLogger('[sidecar] ');
             child.stdout.on('data', (chunk: Buffer) => {
                 if (this.child === child) this.onData(chunk, child);
             });
             child.stderr.on('data', (chunk: Buffer) => {
+                const text = chunk.toString('utf8');
+                stderrLog.write(text);
                 if (this.child === child) {
-                    this.stderr = (this.stderr + chunk.toString('utf8')).slice(-4_096);
+                    this.stderr = (this.stderr + text).slice(-4_096);
                 }
             });
+            child.stderr.on('end', () => stderrLog.flush());
             this.child = child;
         } catch (err) {
             const failure = (err as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
@@ -320,6 +325,7 @@ export class SidecarTransport {
                 const failure = new Error(
                     `PR Pilot Java sidecar request "${method}" timed out. Try the request again.`,
                 );
+                log(`[sidecar] request "${method}" timed out after ${timeoutMs} ms`);
                 this.failPending(id, failure);
             }, timeoutMs);
             this.pending.set(id, {

@@ -185,6 +185,43 @@ public class PluginSettingsComponent {
                 (ChangeEvent e) -> updateNotificationSubOptions());
         updateNotificationSubOptions();
 
+        JBLabel effortLabel = SettingsUi.fieldLabel("Reasoning effort:", copilot.effortCombo());
+        JPanel effortField =
+                SettingsUi.fieldWithHint(
+                        copilot.effortCombo(),
+                        SettingsUi.hintLabel(
+                                "<html><small>Higher is deeper but slower.</small></html>"));
+        JPanel copilotTools =
+                FormBuilder.createFormBuilder()
+                        .addSeparator(8)
+                        .addComponent(sectionTitle("Copilot tools"), 1)
+                        .addComponentToRightColumn(
+                                SettingsUi.fieldWithHint(
+                                        copilot.inheritMcpBox(),
+                                        SettingsUi.hintLabel(
+                                                "<html><small>Applies while reviewing untrusted pull"
+                                                        + " request content. Servers load only from your"
+                                                        + " own Copilot config"
+                                                        + " (<code>~/.copilot/mcp-config.json</code>); a"
+                                                        + " pull request's <code>.mcp.json</code> is never"
+                                                        + " loaded.</small></html>")),
+                                1)
+                        .addComponentToRightColumn(
+                                SettingsUi.fieldWithHint(
+                                        copilot.autoEnableMcpOnReviewBox(),
+                                        SettingsUi.hintLabel(
+                                                "<html><small>Review-only override. Chat still follows"
+                                                        + " the MCP setting above.</small></html>")),
+                                1)
+                        .addLabeledComponent(
+                                SettingsUi.fieldLabel(
+                                        "Copilot config dir:", copilot.configDirField()),
+                                copilot.configDirField(),
+                                1,
+                                false)
+                        .getPanel();
+        copilot.showOnlyForCopilot(effortLabel, effortField, copilotTools);
+
         JPanel main =
                 FormBuilder.createFormBuilder()
                         .addComponent(sectionTitle("GitHub connection"), 1)
@@ -195,7 +232,7 @@ public class PluginSettingsComponent {
                                 false)
                         .addComponent(statusPanel, 1)
                         .addSeparator(8)
-                        .addComponent(sectionTitle("Review provider"), 1)
+                        .addComponent(sectionTitle("Reviewer"), 1)
                         .addLabeledComponent(
                                 SettingsUi.fieldLabel("Provider:", copilot.providerCombo()),
                                 SettingsUi.contentField(copilot.providerCombo()),
@@ -203,6 +240,7 @@ public class PluginSettingsComponent {
                                 false)
                         .addLabeledComponent(
                                 copilot.modelLabel(), copilot.modelComboPanel(), 1, false)
+                        .addLabeledComponent(effortLabel, effortField, 1, false)
                         .addLabeledComponent(
                                 SettingsUi.fieldLabel(
                                         "Second reviewer:", copilot.secondReviewerModelCombo()),
@@ -214,7 +252,19 @@ public class PluginSettingsComponent {
                                                         + " Choose Off to disable.</small></html>")),
                                 1,
                                 false)
-                        .addComponentToRightColumn(copilot.advancedSection(), 1)
+                        .addLabeledComponent(
+                                SettingsUi.fieldLabel(
+                                        "Second reviewer effort:",
+                                        copilot.secondReviewerEffortCombo()),
+                                SettingsUi.fieldWithHint(
+                                        copilot.secondReviewerEffortCombo(),
+                                        SettingsUi.hintLabel(
+                                                "<html><small>Separate from the primary's. The review"
+                                                        + " waits for both reviewers, so lower effort"
+                                                        + " finishes sooner.</small></html>")),
+                                1,
+                                false)
+                        .addComponent(copilotTools, 1)
                         .addSeparator(8)
                         .addComponent(sectionTitle("Review guidance"), 1)
                         .addLabeledComponent(
@@ -301,7 +351,7 @@ public class PluginSettingsComponent {
                                                         + " gap.</small></html>")),
                                 1)
                         .addSeparator(8)
-                        .addComponent(sectionTitle("Advanced review options"), 1)
+                        .addComponent(sectionTitle("Experimental"), 1)
                         .addComponentToRightColumn(
                                 SettingsUi.fieldWithHint(
                                         experimentalIntellijAssistedBox,
@@ -529,6 +579,14 @@ public class PluginSettingsComponent {
 
     public void setReviewSecondReviewerModel(String value) {
         copilot.setReviewSecondReviewerModel(value);
+    }
+
+    public String getReviewSecondReviewerEffort() {
+        return copilot.getReviewSecondReviewerEffort();
+    }
+
+    public void setReviewSecondReviewerEffort(String value) {
+        copilot.setReviewSecondReviewerEffort(value);
     }
 
     public boolean isReviewBuiltInRules() {

@@ -10,6 +10,8 @@ import java.io.InputStream;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringUtils;
 
 /** Maps low-level runtime/network exceptions to user-actionable copy suitable for UI surfaces. */
@@ -23,6 +25,11 @@ public final class UserFacingErrors {
     private static final String TEMPLATE_PROVIDER_BINARY_MISSING = "provider_binary_missing";
     private static final String TEMPLATE_PROVIDER_NOT_INSTALLED = "provider_not_installed";
     private static final String TEMPLATE_REQUEST_TIMED_OUT = "request_timed_out";
+    private static final String TEMPLATE_GIT_TIMED_OUT = "git_timed_out";
+    private static final String TEMPLATE_PROVIDER_START_TIMED_OUT = "provider_start_timed_out";
+    private static final Pattern GIT_TIMEOUT = Pattern.compile("\\bgit ([a-z-]+) timed out");
+    private static final Pattern PROVIDER_START_TIMEOUT =
+            Pattern.compile("\\bcopilot (runtime startup|session creation) timed out");
     private static final String TEMPLATE_INVALID_REVIEW_FORMAT = "invalid_review_format";
     private static final String TEMPLATE_NETWORK_ERROR = "network_error";
     private static final String TEMPLATE_TLS_CERTIFICATE_UNTRUSTED = "tls_certificate_untrusted";
@@ -58,7 +65,7 @@ public final class UserFacingErrors {
                     Map.of("binary", binary, "provider_cli", provider.getDisplayName() + " CLI"));
         }
         if (containsAny(msg, "timed out", "timeout")) {
-            return template(TEMPLATE_REQUEST_TIMED_OUT, Map.of("operation", op));
+            return timedOut(msg, op);
         }
         if (containsAny(
                 msg, "failed to parse review json", "unexpected token", "produced no output")) {
@@ -98,7 +105,7 @@ public final class UserFacingErrors {
             return template(TEMPLATE_GITHUB_AUTH_FAILED, Map.of("auth_command", "gh auth login"));
         }
         if (containsAny(msg, "timed out", "timeout")) {
-            return template(TEMPLATE_REQUEST_TIMED_OUT, Map.of("operation", op));
+            return timedOut(msg, op);
         }
         if (containsAny(msg, "tls certificate", "pkix path")) {
             return template(TEMPLATE_TLS_CERTIFICATE_UNTRUSTED, Map.of("operation", op));
@@ -113,6 +120,24 @@ public final class UserFacingErrors {
             return template(TEMPLATE_NETWORK_ERROR, Map.of("operation", op));
         }
         return template(TEMPLATE_GENERIC_FAILURE, Map.of("operation", op));
+    }
+
+    /**
+     * Names the step behind a timeout (a git command, or Copilot runtime or session startup) so the
+     * advice fits it; the provider's own run keeps the generic advice. Mirrors {@code
+     * timeoutMessage} in {@code userFacingError.ts}, which also handles sidecar request timeouts.
+     */
+    static String timedOut(String normalizedMessage, String operation) {
+        Matcher git = GIT_TIMEOUT.matcher(normalizedMessage);
+        if (git.find()) {
+            return template(
+                    TEMPLATE_GIT_TIMED_OUT,
+                    Map.of("command", git.group(1), "operation", operation));
+        }
+        if (PROVIDER_START_TIMEOUT.matcher(normalizedMessage).find()) {
+            return template(TEMPLATE_PROVIDER_START_TIMED_OUT, Map.of("operation", operation));
+        }
+        return template(TEMPLATE_REQUEST_TIMED_OUT, Map.of("operation", operation));
     }
 
     static String normalize(Exception e) {

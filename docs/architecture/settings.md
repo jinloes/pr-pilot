@@ -77,9 +77,15 @@ Full semantics of the persisted settings summarized in
   `PRReviewRequest.builtInRules`.
 - `reviewSecondReviewerModel` (default `""`; VS Code `pr-pilot.reviewSecondReviewerModel`) —
   optional Copilot model run in parallel as a second reviewer whose findings are merged and
-  cross-validated. Blank disables it. Uses the primary's effort when the primary is Copilot,
-  otherwise Copilot's default effort. Sent to the engine as `secondReviewerModel`; ignored for
-  IntelliJ-assisted deep review. Shared by both hosts.
+  cross-validated. Blank disables it. Runs at `reviewSecondReviewerEffort`. Sent to the engine as
+  `secondReviewerModel`; ignored for IntelliJ-assisted deep review. Shared by both hosts.
+- `reviewSecondReviewerEffort` (default `"medium"`; VS Code `pr-pilot.reviewSecondReviewerEffort`,
+  values `none|low|medium|high|xhigh|max`) — Copilot reasoning effort for the second reviewer,
+  independent of `reviewEffort` and of the primary provider. The pipeline waits for both reviewers
+  before merging, so the default sits below `reviewEffort`'s `high` to keep a slower second model
+  from holding up the review. Sent as `secondReviewerEffort` only when a second reviewer is set.
+  When a host omits it, the engine keeps the earlier rule: a Copilot primary's effort, otherwise
+  Copilot's default. Shared by both hosts.
 - `experimentalIntellijAssistedReview` (default `false`; VS Code
   `pr-pilot.experimentalIntellijAssistedReview`) — experimental opt-in for IntelliJ-assisted review.
   Each host sends it to the webview as `intellijAssistedEnabled` on every `draftLoaded` and
@@ -90,6 +96,14 @@ Full semantics of the persisted settings summarized in
   therefore removable again only after the setting is turned back on, which both hosts' setting
   hints state. While off, a `generateReview` request with `intellijAssisted: true` is rejected with
   a `reviewError` and never downgraded to an ordinary review. Shared by both hosts.
+- `experimentalVsCodeCodeIntelligence` (default `false`; VS Code
+  `pr-pilot.experimentalVsCodeCodeIntelligence`, also in the settings view's Copilot tools section) —
+  experimental, Copilot-only. For each review and chat request, VS Code starts a loopback MCP server
+  that answers definition, reference, implementation, type, and symbol lookups through VS Code's
+  language services over the user's checkout, and sends it to the engine as `hostCodeIntelligence`.
+  Read only when the request starts. Ignored for Claude and IntelliJ-assisted deep review. **VS
+  Code only:** IntelliJ has no equivalent setting yet. See
+  [providers.md](providers.md#host-code-intelligence-over-mcp).
 - `reviewGuidanceGlobs` (default `[]`; VS Code `pr-pilot.reviewGuidanceGlobs`, at most 100 entries
   of 500 characters) — extra guidance paths or globs, for repositories whose review rules live
   outside the built-in locations (for example `.review/ai-agent/*.md`). The resolved value (the

@@ -153,3 +153,21 @@ Keep each hand-off loud:
   results) which comment's enum fields failed, never bodies or paths. A rejected `reviewResult` or
   `reviewError` is replaced by a `reviewError` telling the user to reload. The usual cause is a UI
   older than its host, which is why the launch task restages `webview-dist`.
+
+### Diagnostics keep the cause behind a user-facing error
+User-facing errors are short summaries (`vscode-extension/shared/user-facing-errors.yaml`, shared
+with IntelliJ's `UserFacingErrors`), so the raw cause must be kept somewhere a user can find it.
+
+- **VS Code** writes to a "PR Pilot" log output channel (`src/log.ts`): sidecar stderr line by
+  line, each sidecar request that hits its client timeout, and the raw message behind every
+  `toUserFacingError` call. A log channel also persists with VS Code's own logs, so a failure can
+  be diagnosed after its window is gone. Lines pass through `redact`, which masks GitHub tokens and
+  bearer credentials; keep anything that can carry a credential out of log lines regardless.
+  Timeout and generic-failure messages end with a pointer to that panel. IntelliJ runs the engine
+  in-process, so the same causes already land in `idea.log`.
+- **Timeouts name their step.** Both hosts map `git <command> timed out` (worktree fetch and add)
+  and `copilot runtime startup` / `session creation timed out` (which includes MCP server startup)
+  to step-specific advice; VS Code also names the sidecar request that hit its 60-second client
+  timeout. Only an unrecognized timeout, in practice the provider's own run, keeps the "smaller
+  diff / lower reasoning effort" advice. Keep the engine's timeout messages in these shapes, or
+  update both mappers with them.

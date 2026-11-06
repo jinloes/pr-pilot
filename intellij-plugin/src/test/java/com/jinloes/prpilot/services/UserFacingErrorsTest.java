@@ -30,6 +30,19 @@ class UserFacingErrorsTest {
         }
 
         @Test
+        void gitTimeoutsNameTheCommandAndPointAtGitAccess() {
+            String msg =
+                    UserFacingErrors.forGitHub(
+                            new IOException("git fetch timed out after 60s"), "generate review");
+            assertThat(msg)
+                    .isEqualTo(
+                            "'git fetch' timed out while trying to generate review. Check your VPN"
+                                    + " and your git access to the repository (SSH key or"
+                                    + " credentials), then retry.")
+                    .doesNotContain("smaller diff");
+        }
+
+        @Test
         void certificateFailuresMapToTruststoreGuidance() {
             String msg =
                     UserFacingErrors.forGitHub(
@@ -110,6 +123,44 @@ class UserFacingErrorsTest {
 
     @Nested
     class ForProvider {
+
+        @Test
+        void copilotStartupTimeoutsPointAtTheRuntimeNotTheDiff() {
+            for (String cause :
+                    new String[] {
+                        "copilot runtime startup timed out after 60s",
+                        "copilot session creation timed out after 60s"
+                    }) {
+                String msg =
+                        UserFacingErrors.forProvider(
+                                ReviewProvider.COPILOT, new IOException(cause), "generate review");
+                assertThat(msg)
+                        .startsWith("GitHub Copilot did not start in time while trying to generate")
+                        .contains("MCP servers")
+                        .doesNotContain("smaller diff");
+            }
+        }
+
+        @Test
+        void aProviderRunTimeoutKeepsTheDiffAndEffortAdvice() {
+            String msg =
+                    UserFacingErrors.forProvider(
+                            ReviewProvider.COPILOT,
+                            new IOException(
+                                    "Review timed out — provider pass exceeded its time limit."),
+                            "generate review");
+            assertThat(msg).contains("smaller diff / lower reasoning effort");
+        }
+
+        @Test
+        void gitTimeoutsDuringReviewNameTheCommand() {
+            String msg =
+                    UserFacingErrors.forProvider(
+                            ReviewProvider.CLAUDE,
+                            new IOException("git worktree timed out after 30s"),
+                            "generate review");
+            assertThat(msg).startsWith("'git worktree' timed out while trying to generate review.");
+        }
 
         @Test
         void missingBinaryMentionsInstallAction() {

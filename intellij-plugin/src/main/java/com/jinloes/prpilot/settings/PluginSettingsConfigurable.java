@@ -56,6 +56,9 @@ public class PluginSettingsConfigurable implements Configurable {
                 || !component
                         .getReviewSecondReviewerModel()
                         .equals(s.getReviewSecondReviewerModel())
+                || !component
+                        .getReviewSecondReviewerEffort()
+                        .equals(s.getReviewSecondReviewerEffort())
                 || component.isExperimentalIntellijAssistedReview()
                         != s.isExperimentalIntellijAssistedReview();
     }
@@ -107,6 +110,7 @@ public class PluginSettingsConfigurable implements Configurable {
         s.setReviewSelfCritique(component.isReviewSelfCritique());
         s.setReviewSupervisorEnabled(component.isReviewSupervisorEnabled());
         s.setReviewSecondReviewerModel(component.getReviewSecondReviewerModel());
+        s.setReviewSecondReviewerEffort(component.getReviewSecondReviewerEffort());
         s.setExperimentalIntellijAssistedReview(component.isExperimentalIntellijAssistedReview());
 
         // Restart/stop polling to reflect the new settings immediately
@@ -144,6 +148,7 @@ public class PluginSettingsConfigurable implements Configurable {
         component.setReviewSelfCritique(s.isReviewSelfCritique());
         component.setReviewSupervisorEnabled(s.isReviewSupervisorEnabled());
         component.setReviewSecondReviewerModel(s.getReviewSecondReviewerModel());
+        component.setReviewSecondReviewerEffort(s.getReviewSecondReviewerEffort());
         component.setExperimentalIntellijAssistedReview(s.isExperimentalIntellijAssistedReview());
         loadGithubBaseUrlAndRefresh(
                 s.getGithubBaseUrl(), component::setGithubBaseUrl, component::refreshAuthStatus);

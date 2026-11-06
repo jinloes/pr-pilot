@@ -127,14 +127,17 @@ test('buildSettingsHtml restricts default-src and includes the cspSource for sty
 
 test('buildSettingsHtml renders both provider-specific model fields and the effort field', () => {
     const html = buildSettingsHtml('csp', 'n');
-    assert.match(html, /Review provider/);
+    assert.match(html, /section-title">Reviewer</);
     assert.match(html, /GitHub connection/);
     assert.match(html, /Review guidance/);
     assert.match(html, /Notifications/);
     assert.match(html, /id="claudeModelField"/);
     assert.match(html, /id="copilotModelField"/);
-    assert.match(html, /Advanced Copilot options/);
+    assert.doesNotMatch(html, /Advanced Copilot options/);
     assert.match(html, /id="effortField"/);
+    assert.ok(html.indexOf('id="effortField"') > html.indexOf('id="copilotModelField"')
+        && html.indexOf('id="effortField"') < html.indexOf('id="secondReviewerGroup"'),
+        'the primary effort sits under the primary model, before the second reviewer');
     assert.match(html, /id="status"/);
     assert.match(html, /id="testConnection"/);
 });
@@ -148,11 +151,25 @@ test('buildSettingsHtml renders the Copilot MCP inheritance controls', () => {
     assert.match(html, /save\('copilotInheritMcp', \$\('inheritMcp'\)\.checked\)/);
     assert.match(html, /save\('copilotAutoEnableMcpOnReview', \$\('reviewAutoEnableMcp'\)\.checked\)/);
     assert.match(html, /save\('copilotConfigDir'/);
+    assert.match(html, /id="copilotToolsSection"[\s\S]*id="mcpField"[\s\S]*id="vscodeCodeIntelligence"/);
+    assert.match(html, /\$\('copilotToolsSection'\)\.classList\.toggle\('hidden', !isCopilot\)/);
+    assert.match(html, /\$\('effortField'\)\.classList\.toggle\('hidden', !isCopilot\)/);
+    assert.match(html, /save\('experimentalVsCodeCodeIntelligence', \$\('vscodeCodeIntelligence'\)\.checked\)/);
 });
 
-test('buildSettingsHtml renders the experimental IntelliJ-assisted toggle under Advanced review options', () => {
+test('buildSettingsHtml renders the second reviewer effort select with every effort level', () => {
     const html = buildSettingsHtml('csp', 'n');
-    assert.match(html, /section-title">Advanced review options<\/div>[\s\S]*id="experimentalIntellijAssistedReview"/);
+    assert.match(html, /<fieldset class="group" id="secondReviewerGroup">\s*<legend>Second reviewer<\/legend>[\s\S]*id="reviewSecondReviewerModel"[\s\S]*<select id="reviewSecondReviewerEffort"[\s\S]*<\/fieldset>/);
+    assert.match(html, /<div class="field hidden" id="secondReviewerEffortField">/);
+    const select = /<select id="reviewSecondReviewerEffort"[^>]*>([\s\S]*?)<\/select>/.exec(html)?.[1] ?? '';
+    assert.deepEqual([...select.matchAll(/value="([^"]+)"/g)].map((m) => m[1]),
+        ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+    assert.match(html, /Separate from the primary's/);
+});
+
+test('buildSettingsHtml renders the experimental IntelliJ-assisted toggle under Experimental', () => {
+    const html = buildSettingsHtml('csp', 'n');
+    assert.match(html, /section-title">Experimental<\/div>[\s\S]*id="experimentalIntellijAssistedReview"/);
     assert.match(html, /Turning this off also hides retained-worktree maintenance; turn it back on to remove retained worktrees\./);
     assert.match(html, /Enable IntelliJ-assisted review \(experimental\)/);
     assert.match(html, /save\('experimentalIntellijAssistedReview', \$\('experimentalIntellijAssistedReview'\)\.checked\)/);
@@ -172,12 +189,12 @@ test('buildSettingsHtml renders reusable review-guidance profile controls', () =
     assert.match(html, /id="reviewBuiltInRules"/);
     assert.match(html, /save\('reviewBuiltInRules'/);
     assert.match(html, /Re-inspect coverage gaps/);
-    assert.match(html, /<label for="reviewSecondReviewerModel">Second reviewer<\/label>/);
+    assert.match(html, /<label for="reviewSecondReviewerModel">Model<\/label>/);
     assert.match(html, /<select id="reviewSecondReviewerModel" aria-describedby="reviewSecondReviewerModelHint"><\/select>/);
     assert.ok(
         html.indexOf('id="reviewSecondReviewerModel"') > html.indexOf('id="copilotModelField"')
             && html.indexOf('id="reviewSecondReviewerModel"') < html.indexOf('Review guidance</div>'),
-        'second reviewer sits in the Review provider section, after the model selector',
+        'second reviewer sits in the Reviewer section, after the model selector',
     );
     assert.match(html, /renderModelSelect\(\$\('reviewSecondReviewerModel'\), models, secondReviewer, 'Off'\)/);
     assert.match(html, /save\('reviewSecondReviewerModel', secondReviewerValue\(\)\)/);
@@ -257,10 +274,11 @@ test('buildSettingsHtml uses the shared section order', () => {
     const titles = [...html.matchAll(/<div class="section-title">([^<]+)<\/div>/g)].map((match) => match[1]);
     assert.deepEqual(titles, [
         'GitHub connection',
-        'Review provider',
+        'Reviewer',
+        'Copilot tools',
         'Review guidance',
         'Review validation',
-        'Advanced review options',
+        'Experimental',
         'Notifications',
     ]);
 });

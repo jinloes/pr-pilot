@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { GitHubOperationError, toUserFacingError } from '../src/userFacingError';
+import { GitHubOperationError, OUTPUT_PANEL_HINT, toUserFacingError } from '../src/userFacingError';
+import { setLogSink } from '../src/log';
 
 test('maps GitHub auth failures to gh auth guidance', () => {
   const msg = toUserFacingError(new Error('401 Unauthorized: bad credentials'), 'save draft review');
@@ -25,7 +26,7 @@ test('does not classify an ambiguous GitHub 404 from untyped prose', () => {
     new Error('Pull request not found or inaccessible to the active gh account.'),
     'load PR details',
   );
-  assert.equal(msg, "Couldn't load PR details. Please retry.");
+  assert.equal(msg, "Couldn't load PR details. Please retry." + OUTPUT_PANEL_HINT);
 });
 
 test('maps an oversized GitHub diff to the size-limit copy instead of retry guidance', () => {
@@ -45,7 +46,7 @@ test('maps an oversized GitHub diff to the size-limit copy instead of retry guid
 
 test('keeps generic retry copy for an api_failed GitHub result', () => {
   const msg = toUserFacingError(new GitHubOperationError('api_failed', 'GitHub API request failed.'), 'load PR details');
-  assert.equal(msg, "Couldn't load PR details. Please retry.");
+  assert.equal(msg, "Couldn't load PR details. Please retry." + OUTPUT_PANEL_HINT);
 });
 
 test('maps provider binary missing errors to install guidance', () => {
@@ -81,5 +82,50 @@ test('maps an unreachable GitHub to network guidance', () => {
 
 test('falls back to context-specific generic message', () => {
   const msg = toUserFacingError(new Error('some weird low-level failure'), 'delete draft review');
-  assert.equal(msg, "Couldn't delete draft review. Please retry.");
+  assert.equal(msg, "Couldn't delete draft review. Please retry." + OUTPUT_PANEL_HINT);
+});
+
+test('names a git command timeout and drops the diff-size advice', () => {
+  const msg = toUserFacingError(new Error('git fetch timed out after 60s'), 'generate review');
+  assert.equal(msg, "'git fetch' timed out while trying to generate review. Check your VPN and your git access to"
+    + ' the repository (SSH key or credentials), then retry.' + OUTPUT_PANEL_HINT);
+});
+
+test('names Copilot startup timeouts, including MCP server startup', () => {
+  for (const cause of ['copilot runtime startup timed out after 60s', 'copilot session creation timed out after 60s']) {
+    const msg = toUserFacingError(new Error(cause), 'generate review');
+    assert.match(msg, /^GitHub Copilot did not start in time while trying to generate review\./);
+    assert.match(msg, /MCP servers/);
+    assert.doesNotMatch(msg, /smaller diff/);
+  }
+});
+
+test('names the sidecar request that hit its timeout', () => {
+  const msg = toUserFacingError(
+    new Error('PR Pilot Java sidecar request "prs/getCheckStatus" timed out. Try the request again.'),
+    'generate review',
+  );
+  assert.match(msg, /^The 'prs\/getCheckStatus' request timed out while trying to generate review\. Check your connection to GitHub/);
+});
+
+test('keeps the diff and effort advice for a provider run timeout and points at the output panel', () => {
+  const msg = toUserFacingError(new Error('Review timed out — provider pass exceeded its time limit.'), 'generate review');
+  assert.match(msg, /smaller diff \/ lower reasoning effort/);
+  assert.ok(msg.endsWith(OUTPUT_PANEL_HINT));
+});
+
+test('does not point at the output panel when the message already explains the fix', () => {
+  const msg = toUserFacingError(new Error('401 Unauthorized: bad credentials'), 'save draft review');
+  assert.ok(!msg.includes(OUTPUT_PANEL_HINT));
+});
+
+test('logs the raw cause behind every user-facing error', () => {
+  const lines: string[] = [];
+  const previous = setLogSink((line) => lines.push(line));
+  try {
+    toUserFacingError(new Error('git fetch timed out after 60s'), 'generate review');
+  } finally {
+    setLogSink(previous);
+  }
+  assert.deepEqual(lines, ["[error] Couldn't generate review: git fetch timed out after 60s"]);
 });

@@ -3,7 +3,6 @@ package com.jinloes.prpilot.services;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jinloes.prpilot.model.ReviewProvider;
-import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.settings.PluginSettings;
 import java.io.IOException;
 import org.junit.jupiter.api.Nested;
@@ -48,20 +47,49 @@ class IntellijClaudeServiceTest {
         }
 
         @Test
-        void secondReviewerEffortOnlyFollowsACopilotPrimary() {
+        void secondReviewerEffortDefaultsToMediumForEitherProvider() {
             PluginSettings settings = new PluginSettings();
             settings.setReviewProvider(ReviewProvider.CLAUDE);
             assertThat(
                             IntellijClaudeService.snapshotReviewRuntimeSettings(settings)
                                     .secondReviewerEffort())
-                    .isEqualTo(CopilotService.DEFAULT_REASONING_EFFORT);
+                    .isEqualTo(PluginSettings.DEFAULT_SECOND_REVIEWER_EFFORT);
 
             PluginSettings.State copilot = new PluginSettings.State();
             copilot.reviewProvider = "copilot";
+            copilot.reviewEffort = "xhigh";
             settings.loadState(copilot);
-            IntellijClaudeService.ReviewRuntimeSettings snapshot =
+            assertThat(
+                            IntellijClaudeService.snapshotReviewRuntimeSettings(settings)
+                                    .secondReviewerEffort())
+                    .isEqualTo("medium");
+        }
+
+        @Test
+        void aConfiguredSecondReviewerEffortIsUsedAndChangesTheIdentity() {
+            PluginSettings settings = new PluginSettings();
+            Object before =
+                    IntellijClaudeService.snapshotReviewRuntimeSettings(settings).identity();
+
+            settings.setReviewSecondReviewerEffort("low");
+            IntellijClaudeService.ReviewRuntimeSettings after =
                     IntellijClaudeService.snapshotReviewRuntimeSettings(settings);
-            assertThat(snapshot.secondReviewerEffort()).isEqualTo(settings.getReviewEffort());
+
+            assertThat(after.secondReviewerEffort()).isEqualTo("low");
+            assertThat(after.identity()).isNotEqualTo(before);
+        }
+
+        @Test
+        void aStoredBlankSecondReviewerEffortFallsBackToMedium() {
+            PluginSettings.State stored = new PluginSettings.State();
+            stored.reviewSecondReviewerEffort = null;
+            PluginSettings settings = new PluginSettings();
+            settings.loadState(stored);
+
+            assertThat(
+                            IntellijClaudeService.snapshotReviewRuntimeSettings(settings)
+                                    .secondReviewerEffort())
+                    .isEqualTo("medium");
         }
     }
 

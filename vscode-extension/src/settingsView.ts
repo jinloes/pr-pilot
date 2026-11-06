@@ -56,7 +56,9 @@ export interface SettingsState {
     reviewRulesDirectory: string;
     reviewBuiltInRules: boolean;
     reviewSecondReviewerModel: string;
+    reviewSecondReviewerEffort: string;
     experimentalIntellijAssistedReview: boolean;
+    experimentalVsCodeCodeIntelligence: boolean;
     notificationsEnabled: boolean;
     notifyReviewRequested: boolean;
     notifyStarredRepos: boolean;

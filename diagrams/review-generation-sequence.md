@@ -80,11 +80,14 @@ sequenceDiagram
     alt IntelliJ
         Host->>Pipeline: review(request, options) in-process
     else VS Code
-        Host->>Sidecar: reviews/generate JSON-RPC request
+        opt Copilot with experimentalVsCodeCodeIntelligence (non-deep)
+            Host->>Host: Start loopback MCP server over the user's checkout (fresh bearer token)
+        end
+        Host->>Sidecar: reviews/generate JSON-RPC request (with hostCodeIntelligence endpoint when started)
         Sidecar->>ReviewEngine: generate(params)
         ReviewEngine->>Pipeline: review(request, options)
     end
-    Note over Host,Pipeline: PRReviewRequest strips any trailer into DiffCoverage, so pr_diff never contains it.<br/>Incomplete coverage adds an escaped omitted_files section to review and critique prompts.
+    Note over Host,Pipeline: PRReviewRequest strips any trailer into DiffCoverage, so pr_diff never contains it.<br/>Incomplete coverage adds an escaped omitted_files section to review and critique prompts.<br/>The engine accepts only a loopback endpoint and attaches it to tool-enabled Copilot sessions.
 
     Pipeline->>Pipeline: GeneratedProtoCode leaves regenerated protobuf code out of the reviewed diff (coverage kept) and lists generated files in generated_code
 

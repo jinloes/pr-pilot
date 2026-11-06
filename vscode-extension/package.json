@@ -268,10 +268,28 @@
           "default": "",
           "description": "Optional Copilot model that reviews the same PR in parallel with the primary reviewer; its findings are cross-validated and merged. Leave blank to disable. Requires GitHub Copilot CLI and adds cost."
         },
+        "pr-pilot.reviewSecondReviewerEffort": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "default": "medium",
+          "description": "Reasoning effort for the second reviewer, separate from `pr-pilot.reviewEffort`. The review waits for both reviewers, so a lower effort keeps a slower second model from holding it up. Applies to either primary provider."
+        },
         "pr-pilot.experimentalIntellijAssistedReview": {
           "type": "boolean",
           "default": false,
           "description": "Experimental: show the IntelliJ-assisted review option in Advanced review options. Requires a separate IntelliJ IDEA 262+ installation, a hand-written ~/.pr-pilot/semantic-review.json, and manually importing a retained worktree per review. Off by default; ordinary reviews are unaffected. Turning this off also hides retained-worktree maintenance; turn it back on to remove retained worktrees."
+        },
+        "pr-pilot.experimentalVsCodeCodeIntelligence": {
+          "type": "boolean",
+          "default": false,
+          "description": "Experimental, Copilot only: let reviews and chat look up definitions, references, implementations, and types through VS Code's language servers (for example a Java or IntelliJ language server extension). PR Pilot runs a loopback MCP server for the length of each request that answers from your open checkout of the pull request's repository. That checkout may be at a different commit than the pull request, so the model treats results as candidates and confirms them in the review worktree. Off by default; Claude reviews are unaffected."
         }
       }
     }
