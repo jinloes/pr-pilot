@@ -23,7 +23,8 @@ class ReviewPromptsTest {
                                     + "-protobuf-schema-delta-data-anomalies-scoped-ids"
                                     + "-inconsistent-acceptance-consumers-wall-clock-tests"
                                     + "-stated-constraints-doc-status-hygiene"
-                                    + "-host-code-intelligence-overstated-doc-comments");
+                                    + "-host-code-intelligence-overstated-doc-comments"
+                                    + "-error-channel-bypass");
         }
 
         @Test
@@ -66,6 +67,10 @@ class ReviewPromptsTest {
                     .contains("- Fail-open decisions:")
                     .contains("must deny on error")
                     .contains("- Partial failure:")
+                    .contains("- Error-channel bypass:")
+                    .contains("a failed future")
+                    .contains("CompletionException")
+                    .contains("return the error value instead")
                     .contains("- Internal input limits:")
                     .contains("exponential backoff with jitter and a cap")
                     .contains("- Stale decisions:")
