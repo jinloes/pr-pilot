@@ -61,7 +61,8 @@ final class LocalReviewRules {
                     "telemetry-default-semantics.yaml",
                     "ambiguous-delimiter.yaml",
                     "unbounded-fanout.yaml",
-                    "state-published-before-yield.yaml");
+                    "state-published-before-yield.yaml",
+                    "typed-identifier.yaml");
 
     static final String BUILT_IN_SOURCE_PREFIX = "built-in/";
 

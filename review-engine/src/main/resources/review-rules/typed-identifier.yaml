@@ -1,0 +1,50 @@
+name: typed-identifier
+description: >-
+  Flags a new or changed method signature that takes or returns an entity reference as a raw
+  number or string when the repository already identifies that entity with a typed identifier,
+  such as a URN, a resource name, or an ID wrapper type.
+trigger: >-
+  The PR adds or changes a method on an interface, client, service, repository, or other shared
+  API whose parameters or return type include a raw `long`, `int`, `String`, or similar primitive
+  that names an entity, such as a parameter called `...Id`, `...Key`, or `...Name`.
+prompt: |
+  Find new API signatures that pass an entity reference as a raw primitive when the codebase
+  already has a typed identifier for that entity.
+
+  1. In <pr_diff>, list every added or changed method declaration on an interface, client,
+     service, repository, handler, or other type other modules call, whose parameters or return
+     type carry an entity reference as a raw `long`, `int`, `Long`, `String`, or similar
+     primitive. Typical names end in `Id`, `Ids`, `Key`, or `Name`, such as `accountId` or
+     `List<Long> orderIds`. Skip private methods, locals, and values that are not references to
+     an entity (counts, offsets, versions, timestamps).
+  2. Evaluate every item on its own. For each entity, search for a typed identifier before
+     concluding that none exists:
+     a. Read the rest of the changed type and its sibling types in the same package. Note
+        whether other methods already take a typed identifier (for example `Urn`, `<Entity>Urn`,
+        a resource name, or an `<Entity>Id` value type) for this entity or for others. A method
+        in the same type that takes a typed identifier while the new one takes a raw value is
+        the strongest evidence.
+     b. Grep for types named after the entity with an identifier suffix, such as
+        `<Entity>Urn`, `<Entity>Id`, `<Entity>Key`, or `<Entity>Name`, including generated
+        types from schema or interface definitions (`.proto`, `.avsc`, `.graphql`, OpenAPI).
+     c. Read the downstream call the new method makes, and the request or response type it
+        builds. When that request field or downstream signature already takes the typed
+        identifier, the raw value is converted at this boundary and the typed form should be
+        passed through instead.
+     d. Read the callers of the new method in the diff. Note whether they already hold the
+        typed identifier and unwrap it only to call the new method.
+  3. Report a finding when a typed identifier exists for the entity and at least one of these
+     holds: another method on the same or a sibling type takes the typed form, the downstream
+     call or request type takes it, or a caller unwraps it to make the call. Do not report when
+     no typed identifier exists for that entity, when the raw value is the stored primary key
+     and the surrounding layer consistently uses raw keys, when the method implements an
+     external interface or generated stub whose signature the author cannot change, or when the
+     PR description explains the choice. When the same type mixes raw and typed identifiers for
+     different entities, report only the entities that have a typed form.
+
+  Anchor each finding on the line of the raw parameter or return type. Use type "suggestion",
+  category "maintainability", severity "minor". In the body, name the typed identifier to use,
+  the evidence that the codebase already uses it (the sibling method, downstream request field,
+  or unwrapping caller), and what changes for callers. In "rationale", cite the paths of the
+  typed identifier and of the evidence you actually read. Do not report a parameter when your
+  searches found no typed identifier for its entity, and do not report naming or style issues.

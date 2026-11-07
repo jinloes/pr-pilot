@@ -226,7 +226,8 @@ class LocalReviewRulesTest {
                             "telemetry-default-semantics",
                             "ambiguous-delimiter",
                             "unbounded-fanout",
-                            "state-published-before-yield");
+                            "state-published-before-yield",
+                            "typed-identifier");
             assertThat(builtIn).allSatisfy(rule -> assertThat(rule.structured()).isTrue());
             assertThat(builtIn)
                     .extracting(Rule::source)
@@ -236,7 +237,8 @@ class LocalReviewRulesTest {
                             "built-in/telemetry-default-semantics.yaml",
                             "built-in/ambiguous-delimiter.yaml",
                             "built-in/unbounded-fanout.yaml",
-                            "built-in/state-published-before-yield.yaml");
+                            "built-in/state-published-before-yield.yaml",
+                            "built-in/typed-identifier.yaml");
         }
 
         @Test
@@ -254,6 +256,23 @@ class LocalReviewRulesTest {
                     .contains("one existing adopter to follow")
                     .contains("belongs to a layer the new code cannot")
                     .contains("PR description explains why the framework");
+        }
+
+        @Test
+        void typedIdentifierRuleRequiresEvidenceThatATypedFormIsAlreadyUsed() {
+            Rule rule =
+                    LocalReviewRules.builtIn().stream()
+                            .filter(candidate -> candidate.name().equals("typed-identifier"))
+                            .findFirst()
+                            .orElseThrow();
+
+            assertThat(rule.trigger()).contains("raw `long`").contains("...Id");
+            assertThat(rule.prompt())
+                    .contains("<Entity>Urn")
+                    .contains("request type takes it")
+                    .contains("caller unwraps it")
+                    .contains("external interface or generated stub")
+                    .contains("found no typed identifier");
         }
 
         @Test
@@ -281,6 +300,7 @@ class LocalReviewRulesTest {
                             "ambiguous-delimiter",
                             "unbounded-fanout",
                             "state-published-before-yield",
+                            "typed-identifier",
                             "team");
         }
 
@@ -294,7 +314,8 @@ class LocalReviewRulesTest {
                             "telemetry-default-semantics",
                             "ambiguous-delimiter",
                             "unbounded-fanout",
-                            "state-published-before-yield");
+                            "state-published-before-yield",
+                            "typed-identifier");
         }
 
         @Test
@@ -321,9 +342,10 @@ class LocalReviewRulesTest {
                             "ambiguous-delimiter",
                             "unbounded-fanout",
                             "state-published-before-yield",
+                            "typed-identifier",
                             "helper-reuse");
-            assertThat(loaded.get(5).source()).isEqualTo("mine.yaml");
-            assertThat(loaded.get(5).trigger()).isEqualTo("my trigger");
+            assertThat(loaded.get(6).source()).isEqualTo("mine.yaml");
+            assertThat(loaded.get(6).trigger()).isEqualTo("my trigger");
         }
 
         @Test
@@ -337,7 +359,8 @@ class LocalReviewRulesTest {
                             "parallel-abstraction",
                             "ambiguous-delimiter",
                             "unbounded-fanout",
-                            "state-published-before-yield");
+                            "state-published-before-yield",
+                            "typed-identifier");
         }
 
         @Test
@@ -353,6 +376,7 @@ class LocalReviewRulesTest {
                             "ambiguous-delimiter",
                             "unbounded-fanout",
                             "state-published-before-yield",
+                            "typed-identifier",
                             "helper-reuse.md");
         }
     }

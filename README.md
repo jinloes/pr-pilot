@@ -100,7 +100,8 @@ using the repository's existing framework for filtering, sorting, or paging inst
 parallel one, not hiding a missing telemetry value behind a default, not joining values with a delimiter that
 can appear inside them, and not fanning out per-element work that can overrun a fixed budget such
 as a deadline or workflow history limit, and not publishing "done" state before an await that
-lets a concurrent caller act on it. They run the same way. Turn them off with
+lets a concurrent caller act on it, and not passing an entity as a raw ID in a new API when the
+codebase already has a typed identifier such as a URN for it. They run the same way. Turn them off with
 **Use PR Pilot's built-in review rules**, or put a rule with the same `name` in your folder to
 replace one (or turn it off with `enabled: false`).
 
