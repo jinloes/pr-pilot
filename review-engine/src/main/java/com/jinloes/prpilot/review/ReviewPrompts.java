@@ -68,7 +68,7 @@ public final class ReviewPrompts {
                     + "-security-reliability-test-integrity-claims-gated-checklists"
                     + "-protobuf-schema-delta-data-anomalies-scoped-ids-inconsistent-acceptance-consumers-wall-clock-tests-stated-constraints"
                     + "-doc-status-hygiene-host-code-intelligence-overstated-doc-comments"
-                    + "-error-channel-bypass";
+                    + "-error-channel-bypass-short-page-end";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");

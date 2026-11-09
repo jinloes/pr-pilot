@@ -24,7 +24,7 @@ class ReviewPromptsTest {
                                     + "-inconsistent-acceptance-consumers-wall-clock-tests"
                                     + "-stated-constraints-doc-status-hygiene"
                                     + "-host-code-intelligence-overstated-doc-comments"
-                                    + "-error-channel-bypass");
+                                    + "-error-channel-bypass-short-page-end");
         }
 
         @Test
@@ -38,6 +38,8 @@ class ReviewPromptsTest {
                     .contains("reached by")
                     .contains("Unstable pagination")
                     .contains("unique tie-breaker")
+                    .contains("- Short page as end of data:")
+                    .contains("mark the result incomplete")
                     .contains("Silently discarded records")
                     .contains("one aggregated WARN")
                     .contains("- Stated data anomalies:")
