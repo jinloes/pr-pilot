@@ -153,6 +153,8 @@ class ReviewPromptsRecallAndHistoryTest {
                     .contains("Failure log without its subject")
                     .contains("Exception not attached")
                     .contains("Comment hygiene")
+                    .contains("cites a label defined nowhere a later reader can follow")
+                    .contains("not a ticket key or link")
                     .contains("Overstated doc comment")
                     .contains("Schema evolution")
                     .contains("inventory every changed log statement")

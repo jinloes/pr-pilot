@@ -343,6 +343,17 @@ class TriggeredChecklistsTest {
                     .contains("\nProtobuf and gRPC code:\n");
         }
 
+        @Test
+        void protobufCodeChecklistCoversUnrecognizedEnumsPassedToSetters() {
+            assertThat(
+                            sectionFor(
+                                    fileDiff(
+                                            "src/app/Service.java",
+                                            "+if (state != State.UNRECOGNIZED) {")))
+                    .contains("the setter throws IllegalArgumentException on UNRECOGNIZED")
+                    .contains("copy the number with the Value setter");
+        }
+
         @ParameterizedTest
         @ValueSource(
                 strings = {

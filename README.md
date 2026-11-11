@@ -232,6 +232,8 @@ For local IDE development:
 ./gradlew :intellij-plugin:runIdeLocal
 ```
 
+In IntelliJ, the shared `Run IntelliJ Plugin (runIdeLocal)` run configuration launches the same task.
+
 An absolute `ideaLocalPath` override takes precedence, for example:
 
 ```bash

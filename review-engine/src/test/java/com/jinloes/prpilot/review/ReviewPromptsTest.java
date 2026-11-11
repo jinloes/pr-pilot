@@ -24,7 +24,9 @@ class ReviewPromptsTest {
                                     + "-inconsistent-acceptance-consumers-wall-clock-tests"
                                     + "-stated-constraints-doc-status-hygiene"
                                     + "-host-code-intelligence-overstated-doc-comments"
-                                    + "-error-channel-bypass-short-page-end");
+                                    + "-error-channel-bypass-short-page-end-empty-page-unproven-deferred-authz-offset-drift-undefined-comment-labels"
+                                    + "-inconsistent-classification-abandoned-blocking-work"
+                                    + "-unrecognized-enum-setter");
         }
 
         @Test
@@ -40,6 +42,13 @@ class ReviewPromptsTest {
                     .contains("unique tie-breaker")
                     .contains("- Short page as end of data:")
                     .contains("mark the result incomplete")
+                    .contains("an empty page is no more proof of the end")
+                    .doesNotContain("stop only on an empty page")
+                    .contains("- Offset paging over a changing set:")
+                    .contains("check what the downstream API supports")
+                    .contains("Recommend cursor or keyset paging only when the API supports it")
+                    .contains("  - Deferred authorization:")
+                    .contains("A tracked deferral does not make it safe to ship")
                     .contains("Silently discarded records")
                     .contains("one aggregated WARN")
                     .contains("- Stated data anomalies:")
@@ -50,7 +59,11 @@ class ReviewPromptsTest {
                     .contains("Compare what each one accepts")
                     .contains("what its consumers can parse is what it must let through")
                     .contains("convert the value to that form in the check")
-                    .contains("does not show it is intended");
+                    .contains("does not show it is intended")
+                    .contains("- Inconsistent classification:")
+                    .contains("other tests of the same field that decide the same concept")
+                    .contains("reuse the shared set or predicate")
+                    .contains("deliberately distinguish states");
             assertThat(prompt)
                     .contains("A deleted ('-') line is in scope when removing it creates the")
                     .contains("the removed code in \"rationale\"");
@@ -69,6 +82,9 @@ class ReviewPromptsTest {
                     .contains("- Fail-open decisions:")
                     .contains("must deny on error")
                     .contains("- Partial failure:")
+                    .contains("- Abandoned blocking work:")
+                    .contains("the timeout does not cancel or interrupt")
+                    .contains("a separate executor")
                     .contains("- Error-channel bypass:")
                     .contains("a failed future")
                     .contains("CompletionException")
