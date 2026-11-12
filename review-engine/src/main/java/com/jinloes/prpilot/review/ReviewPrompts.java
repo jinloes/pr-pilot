@@ -70,7 +70,8 @@ public final class ReviewPrompts {
                     + "-doc-status-hygiene-host-code-intelligence-overstated-doc-comments"
                     + "-error-channel-bypass-short-page-end-empty-page-unproven-deferred-authz-offset-drift-undefined-comment-labels"
                     + "-inconsistent-classification-abandoned-blocking-work-unrecognized-enum-setter"
-                    + "-closed-world-state-sets-prompt-rule-contradictions-python-exc-info";
+                    + "-closed-world-state-sets-prompt-rule-contradictions-python-exc-info"
+                    + "-incomplete-fail-closed-validation";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");

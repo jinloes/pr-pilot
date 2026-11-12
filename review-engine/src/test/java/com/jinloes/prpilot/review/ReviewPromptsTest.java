@@ -27,7 +27,8 @@ class ReviewPromptsTest {
                                     + "-error-channel-bypass-short-page-end-empty-page-unproven-deferred-authz-offset-drift-undefined-comment-labels"
                                     + "-inconsistent-classification-abandoned-blocking-work"
                                     + "-unrecognized-enum-setter-closed-world-state-sets"
-                                    + "-prompt-rule-contradictions-python-exc-info");
+                                    + "-prompt-rule-contradictions-python-exc-info"
+                                    + "-incomplete-fail-closed-validation");
         }
 
         @Test
@@ -93,6 +94,9 @@ class ReviewPromptsTest {
                     .contains("a failed future")
                     .contains("CompletionException")
                     .contains("return the error value instead")
+                    .contains("- Incomplete fail-closed validation:")
+                    .contains("iterating a truthy non-list behind \"x or []\"")
+                    .contains("return the same error value")
                     .contains("- Internal input limits:")
                     .contains("exponential backoff with jitter and a cap")
                     .contains("- Stale decisions:")
