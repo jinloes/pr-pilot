@@ -69,6 +69,8 @@ class ReviewPromptsRecallAndHistoryTest {
                     .contains("Failure log without its subject")
                     .contains("Exception not attached")
                     .contains("pass the exception as the final logger argument")
+                    .contains("has no exc_info=True")
+                    .contains("or exc_info=True in Python")
                     .contains("Comment hygiene")
                     .contains("Misplaced doc comment")
                     .contains("name the member it actually")

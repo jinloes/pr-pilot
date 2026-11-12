@@ -259,7 +259,9 @@ class TriggeredChecklistsTest {
                     "String systemPrompt = load();",
                     "for (var call : message.toolCalls()) {",
                     "const llmClient = createClient();",
-                    "completion = client.chat.completions.create(**args)"
+                    "completion = client.chat.completions.create(**args)",
+                    "from app.agents.subprompt.billing import BILLING_RULES",
+                    "AGENT_INSTRUCTIONS = load_rules()"
                 })
         void triggersTheLlmChecklistForModelCallsOnAddedLines(String addedLine) {
             assertThat(sectionFor(fileDiff("src/app/Service.java", "+" + addedLine)))
@@ -272,16 +274,38 @@ class TriggeredChecklistsTest {
                     "String coherentState = \"x\";",
                     "// the bedrock of this design",
                     "boolean fullMatch = matcher.matches();",
-                    "chatRoom.send(message);"
+                    "chatRoom.send(message);",
+                    "String subPromptly = \"x\";"
                 })
         void doesNotTriggerTheLlmChecklistOnLookAlikeWords(String addedLine) {
             assertThat(sectionFor(fileDiff("src/app/Service.java", "+" + addedLine))).isEmpty();
         }
 
         @ParameterizedTest
-        @ValueSource(strings = {"prompts/review.txt", "src/review.prompt.md", "agent.prompty"})
+        @ValueSource(
+                strings = {
+                    "prompts/review.txt",
+                    "src/review.prompt.md",
+                    "agent.prompty",
+                    "src/app/subprompt/billing.py",
+                    "src/app/agents/definitions/billing_definition.py"
+                })
         void triggersTheLlmChecklistForPromptFiles(String path) {
             assertThat(changed(path)).contains("\nLLM integrations:\n");
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"src/app/agents/billing.py", "src/useragents/definitions/a.py"})
+        void doesNotTriggerTheLlmChecklistForOtherAgentPaths(String path) {
+            assertThat(changed(path)).doesNotContain("\nLLM integrations:\n");
+        }
+
+        @Test
+        void asksWhetherAPromptRuleContradictsToolGuidance() {
+            assertThat(changed("prompts/review.txt"))
+                    .contains("A changed prompt rule that contradicts another")
+                    .contains("Check the empty,")
+                    .contains("unchanged ones too");
         }
 
         @Test

@@ -90,7 +90,9 @@ final class TriggeredChecklists {
                             + "|truncate\\s+table)\\b");
 
     private static final Pattern PROMPT_PATH =
-            Pattern.compile("(?i)(?:^|/)prompts?/|\\.prompty?$|\\.prompt\\.[a-z0-9]+$");
+            Pattern.compile(
+                    "(?i)(?:^|/)(?:sub_?)?prompts?/|(?:^|/)agents?/(?:definitions?|instructions?)/"
+                            + "|\\.prompty?$|\\.prompt\\.[a-z0-9]+$");
 
     private static final Pattern PROTO_PATH = Pattern.compile("(?i)\\.proto$");
 
@@ -125,6 +127,7 @@ final class TriggeredChecklists {
                             + "|mistralai|huggingface|vertexai|genai|semantic_?kernel|cohere\\b"
                             + "|bedrock-?(?:runtime|agent)|springframework\\.ai\\b"
                             + "|generate_?content\\b|messages\\.create\\b|system_?prompt"
+                            + "|\\bsub_?prompts?\\b|agent_?instructions?\\b"
                             + "|tool_?calls?\\b|chatlanguagemodel|llms?\\b|llm(?-i:[A-Z_])"
                             + "|gpt-[0-9o]|claude-(?:[0-9]|opus|sonnet|haiku)|gemini-[0-9])"
                             + "|chat\\.?completions?");
@@ -407,7 +410,18 @@ final class TriggeredChecklists {
                                     + "- No limit on output tokens, agent or tool-call"
                                     + " iterations, retries, input size, or per-user cost.\n"
                                     + "- A model response parsed without handling malformed,"
-                                    + " truncated, or refused output.\n"),
+                                    + " truncated, or refused output.\n"
+                                    + "- A changed prompt rule that contradicts another"
+                                    + " instruction the model receives: a shared rule set it is"
+                                    + " combined with, or guidance a tool or projection returns"
+                                    + " (a next step, a flag that says when to offer an action,"
+                                    + " a note on what never to claim). Check the empty,"
+                                    + " not-found, and unavailable cases on their own: \"if it"
+                                    + " returns nothing, say nothing failed\" contradicts a tool"
+                                    + " that returns an empty list with a note not to say"
+                                    + " nothing failed. Search the other prompts that include"
+                                    + " the same shared rules, unchanged ones too, for the same"
+                                    + " conflicting line and name each one.\n"),
                     new Checklist(
                             "Test changes",
                             TEST_PATH,

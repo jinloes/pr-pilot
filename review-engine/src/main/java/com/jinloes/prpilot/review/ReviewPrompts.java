@@ -69,7 +69,8 @@ public final class ReviewPrompts {
                     + "-protobuf-schema-delta-data-anomalies-scoped-ids-inconsistent-acceptance-consumers-wall-clock-tests-stated-constraints"
                     + "-doc-status-hygiene-host-code-intelligence-overstated-doc-comments"
                     + "-error-channel-bypass-short-page-end-empty-page-unproven-deferred-authz-offset-drift-undefined-comment-labels"
-                    + "-inconsistent-classification-abandoned-blocking-work-unrecognized-enum-setter";
+                    + "-inconsistent-classification-abandoned-blocking-work-unrecognized-enum-setter"
+                    + "-closed-world-state-sets-prompt-rule-contradictions-python-exc-info";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");

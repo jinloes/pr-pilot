@@ -26,7 +26,8 @@ class ReviewPromptsTest {
                                     + "-host-code-intelligence-overstated-doc-comments"
                                     + "-error-channel-bypass-short-page-end-empty-page-unproven-deferred-authz-offset-drift-undefined-comment-labels"
                                     + "-inconsistent-classification-abandoned-blocking-work"
-                                    + "-unrecognized-enum-setter");
+                                    + "-unrecognized-enum-setter-closed-world-state-sets"
+                                    + "-prompt-rule-contradictions-python-exc-info");
         }
 
         @Test
@@ -63,7 +64,10 @@ class ReviewPromptsTest {
                     .contains("- Inconsistent classification:")
                     .contains("other tests of the same field that decide the same concept")
                     .contains("reuse the shared set or predicate")
-                    .contains("deliberately distinguish states");
+                    .contains("deliberately distinguish states")
+                    .contains("- Closed-world state sets:")
+                    .contains("list the known resolved states instead")
+                    .contains("not display grouping");
             assertThat(prompt)
                     .contains("A deleted ('-') line is in scope when removing it creates the")
                     .contains("the removed code in \"rationale\"");
