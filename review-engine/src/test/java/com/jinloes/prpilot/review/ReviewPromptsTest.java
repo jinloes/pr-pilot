@@ -28,7 +28,8 @@ class ReviewPromptsTest {
                                     + "-inconsistent-classification-abandoned-blocking-work"
                                     + "-unrecognized-enum-setter-closed-world-state-sets"
                                     + "-prompt-rule-contradictions-python-exc-info"
-                                    + "-incomplete-fail-closed-validation");
+                                    + "-incomplete-fail-closed-validation"
+                                    + "-message-text-error-classification-fail-closed-discards");
         }
 
         @Test
@@ -52,6 +53,10 @@ class ReviewPromptsTest {
                     .contains("  - Deferred authorization:")
                     .contains("A tracked deferral does not make it safe to ship")
                     .contains("Silently discarded records")
+                    .contains("counting is not enough")
+                    .contains("fail closed on a malformed entry")
+                    .contains("- Errors classified by message text:")
+                    .contains("match only the")
                     .contains("one aggregated WARN")
                     .contains("- Stated data anomalies:")
                     .contains("use the later of the two")

@@ -71,7 +71,8 @@ public final class ReviewPrompts {
                     + "-error-channel-bypass-short-page-end-empty-page-unproven-deferred-authz-offset-drift-undefined-comment-labels"
                     + "-inconsistent-classification-abandoned-blocking-work-unrecognized-enum-setter"
                     + "-closed-world-state-sets-prompt-rule-contradictions-python-exc-info"
-                    + "-incomplete-fail-closed-validation";
+                    + "-incomplete-fail-closed-validation"
+                    + "-message-text-error-classification-fail-closed-discards";
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
