@@ -20,7 +20,7 @@ dependencies {
     // core: shared review request/result/PR models (plain Java 21 module, no Kotlin).
     api project(':core')
 
-    implementation 'com.github:copilot-sdk-java:1.0.26'
+    implementation 'com.github:copilot-sdk-java:1.0.28'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.22.4'
     implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.22.4'
     implementation 'org.apache.commons:commons-lang3:3.21.0'
