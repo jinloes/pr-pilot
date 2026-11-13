@@ -149,16 +149,25 @@ serializes bridge comments through strict MapStruct DTO mapping and omits absent
 rather than emitting invalid empty enum values.
 
 ### PR chat scope
-Chat is available after PR selection, before and after review generation. Hosts build chat context
-from the active PR title/body, the bounded 250 KB review diff, and the generated review when one
-exists; both hosts send the same diff so chat answers do not diverge by host. The engine then keeps
-a 12,000-character head-and-tail excerpt of that PR context (`MAX_CHAT_CONTEXT_CHARS` in
-`ClaudeService` and `vscode-extension/src/claude.ts`), so chat never sees a whole large diff. The
-webview displays which context buckets are attached, labels the diff bucket "diff excerpt" when the
-review diff omits files, and adds selected text when the user right-clicks or verifies a comment.
-Chat reuses the PR worktree when available. The VS Code host sources the active PR's title/body from
-`getPRDetail` on select (the webview `selectPR` message carries only number/owner/repo), so the
-review prompt and chat context always include the real PR description.
+Chat is available after PR selection, before and after review generation. Hosts send a structured
+`ChatContext` (core): PR title, author, and description, the bounded 250 KB review diff, and the
+generated review's verdict, summary, and line comments. Neither host builds prompt text; the engine
+(`ReviewChatPrompts`) owns every budget so chat answers do not diverge by host.
+
+The engine lists every changed file with its line counts and whether its diff is shown, truncated,
+or left out (including files the fetched diff omitted), then fills a 60,000-character diff budget
+per file: the attached file first, then files the review commented on, then diff order. The provider
+always runs in the PR-head worktree (both hosts fail closed without one), and the prompt tells it to
+read files it has not seen and cite `path:line`, so a large PR is answered from the code rather
+than from a truncated excerpt.
+
+Text the reviewer selects, or a draft comment they verify or ask for a fix on, travels as an
+attachment with its file and line range (`contextLocation` on `askClaude`; diff rows carry
+`data-line`/`data-line-side` for this). An attachment adds to the PR context and history rather than
+replacing them, and the recorded history turn names its location so follow-ups still resolve. The
+webview lists the attached context buckets, labeling the diff "diff excerpt" when the review diff
+omits files. The VS Code host sources title/body from `getPRDetail` on select and the author from
+the `selectPR` message.
 
 ### DTO mapping in IntelliJ webview bridge
 `WebviewPanel` model-to-DTO conversion uses MapStruct (`ReviewMapper`) instead of hand-rolled

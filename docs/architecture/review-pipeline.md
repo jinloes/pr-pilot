@@ -212,8 +212,8 @@ When wrapping untrusted payloads in XML-like tags, escape matching closing tags 
 prevent tag breakout. Repository guidelines, PR metadata, descriptions, diffs, prior reviews, and
 chat context remain untrusted reference data even when tag escaping is applied; the latest
 `<user_message>` is the authorized request but cannot override persona or confidentiality
-constraints. Chat builders retain only ten history turns and bound each turn, PR context, focused
-context, and current request before provider execution. Provider capability isolation is the primary
+constraints. The chat builder retains only ten history turns and bounds each turn, the PR
+description, review comments, diff, attachment, and current request before provider execution. Provider capability isolation is the primary
 security boundary.
 
 Review prompts permit only evidence supplied in the prompt and require a fixed JSON contract. Both

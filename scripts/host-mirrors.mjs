@@ -11,10 +11,6 @@ const VSCODE = 'vscode-extension/src'
  */
 export const MIRRORS = [
   {
-    what: 'chat persona and focused-chat prompt (CHAT_PERSONA, buildFocusedChatPrompt)',
-    sides: [[`review-engine/${JAVA}/review/ReviewChatPrompts.java`], [`${VSCODE}/claude.ts`]],
-  },
-  {
     what: 'worktree lifecycle (which dir belongs to the active PR, when to tear it down)',
     sides: [
       [

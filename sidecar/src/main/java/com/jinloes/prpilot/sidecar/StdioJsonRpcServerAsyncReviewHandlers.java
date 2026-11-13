@@ -116,7 +116,7 @@ final class StdioJsonRpcServerAsyncReviewHandlers {
                 || params.provider() == null) {
             return support.error(id, -32602, "Invalid params");
         }
-        if ((params.rawPrompt() == null) == (params.userMessage() == null)) {
+        if (params.userMessage() == null || params.userMessage().isBlank()) {
             return support.error(id, -32602, "Invalid params");
         }
         if (!scheduler.submit(

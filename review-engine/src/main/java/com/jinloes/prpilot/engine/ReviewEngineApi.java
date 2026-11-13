@@ -1,5 +1,6 @@
 package com.jinloes.prpilot.engine;
 
+import com.jinloes.prpilot.model.ChatContext;
 import com.jinloes.prpilot.model.ReviewResult;
 import java.io.IOException;
 import java.util.List;
@@ -622,8 +623,8 @@ public interface ReviewEngineApi {
     record ChatMessageParam(String role, String content) {}
 
     /**
-     * Chat request. Exactly one of {@code rawPrompt} (focused question, already fully built) or
-     * {@code userMessage} (ordinary chat, wrapped with persona and context) is expected.
+     * Chat request. {@code context} describes the pull request, diff, generated review, and any
+     * attached text; the engine decides how much of it fits in the prompt.
      */
     record ChatParams(
             String operationId,
@@ -632,10 +633,9 @@ public interface ReviewEngineApi {
             String effort,
             boolean inheritMcp,
             String configDir,
-            String prContext,
+            ChatContext context,
             List<ChatMessageParam> history,
             String userMessage,
-            String rawPrompt,
             HostCodeIntelligenceParams hostCodeIntelligence) {
         public ChatParams(
                 String operationId,
@@ -644,10 +644,9 @@ public interface ReviewEngineApi {
                 String effort,
                 boolean inheritMcp,
                 String configDir,
-                String prContext,
+                ChatContext context,
                 List<ChatMessageParam> history,
-                String userMessage,
-                String rawPrompt) {
+                String userMessage) {
             this(
                     operationId,
                     provider,
@@ -655,16 +654,21 @@ public interface ReviewEngineApi {
                     effort,
                     inheritMcp,
                     configDir,
-                    prContext,
+                    context,
                     history,
                     userMessage,
-                    rawPrompt,
                     null);
         }
     }
 
-    /** Result of {@link #chat}: the complete assistant response text. */
-    record ChatResult(String content) {}
+    /**
+     * Result of {@link #chat}.
+     *
+     * @param content the complete assistant response text
+     * @param historyQuestion the user turn to record in history: the question, prefixed with where
+     *     its attachment came from when it had one
+     */
+    record ChatResult(String content, String historyQuestion) {}
 
     /** Request to cancel one specific review or chat operation. */
     record CancelParams(String operationId) {}

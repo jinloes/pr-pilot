@@ -47,6 +47,8 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
 - `src/lib/attachPatch.ts` - Appends, replaces, and splits the collapsed "Suggested patch" block
   that a Suggest fix result adds to a draft comment body.
 - `src/lib/validateComments.ts` - Inline-comment validation.
+- `src/lib/selectionLocation.ts` - Maps a review-pane selection to its diff file and line range for
+  chat, and formats that location.
 - `src/lib/keyboard.ts`, `layout.ts`, `motion.ts` - Shared interaction/layout policies.
 - `src/components/DiffViewer/fileNavigation.ts`, `findingNavigation.ts` - Changed-file and
   severity-sorted review-finding navigation.

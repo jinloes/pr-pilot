@@ -275,7 +275,11 @@ function HunkRows({
         }
         return (
           <Fragment key={i}>
-            <tr className={cn(`diff-line diff-line--${change.type}`, searchQuery && change.content.toLowerCase().includes(searchQuery.toLowerCase()) && 'diff-line--search-match')}>
+            <tr
+              className={cn(`diff-line diff-line--${change.type}`, searchQuery && change.content.toLowerCase().includes(searchQuery.toLowerCase()) && 'diff-line--search-match')}
+              data-line={clickableLine}
+              data-line-side={newLine !== undefined ? 'new' : 'old'}
+            >
               <td
                 className={cn('diff-gutter', canAddOldLineComment && 'diff-gutter--clickable')}
               >
@@ -431,6 +435,8 @@ function InlineCommentRow({
     <tr
       id={`diff-comment-${globalIdx}`}
       className={cn('diff-comment-row', focused && 'diff-comment-row--focused')}
+      data-line={comment.line > 0 ? comment.line : undefined}
+      data-line-side="new"
     >
       <td colSpan={3} className={`diff-comment-cell diff-comment-cell--${comment.type}`}>
         <div className="diff-comment">

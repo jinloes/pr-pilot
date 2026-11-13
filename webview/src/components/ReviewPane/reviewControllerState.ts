@@ -1,5 +1,6 @@
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
 import type {
+  ChatContextLocation,
   DeepReviewPreparedMessage,
   LineComment,
   PR,
@@ -7,6 +8,7 @@ import type {
   ReviewResult,
 } from '../../bridge/types'
 import { coverageGain, type DiffCoverage } from '@/lib/diffCoverage'
+import { formatLocation } from '@/lib/selectionLocation'
 import type { ReviewQualityAction, ReviewQualityReport } from '@/lib/reviewQuality'
 import type { ExampleFixResult, VerifyResult } from '../ChatPane/structuredResult'
 import type { PaneState, Verdict } from './reviewState'
@@ -23,9 +25,17 @@ export interface ChunkRecommendation {
   reason: string
 }
 
+/** Text the reviewer selected in the review pane, and where in the diff it came from. */
+export interface ChatSelection {
+  text: string
+  location?: ChatContextLocation
+}
+
 export interface PendingChatMessage {
   q: string
   ctx: string
+  /** Where `ctx` came from in the diff, when known. */
+  location?: ChatContextLocation
   id: number
   token?: string
   contextSummary?: string[]
@@ -77,6 +87,7 @@ export interface ReviewViewModel {
   showChat: boolean
   chatVisible: boolean
   selectedContext: string
+  selectedContextLocation?: ChatContextLocation
   pendingChatMessage: PendingChatMessage | null
   chatHeight: number
   chatAvailableHeight: number
@@ -258,13 +269,22 @@ export function chatContextSummary(
   reviewCoverage: DiffCoverage | null,
   result: ReviewResult | null,
   selectedContext: string,
+  selectedContextLocation?: ChatContextLocation,
 ): string[] {
   if (!pr) return []
   const items = ['PR title/body']
   if (diff) items.push(reviewCoverage ? 'diff excerpt' : 'diff')
   if (result) items.push('generated review')
-  if (selectedContext) items.push('selected text')
+  if (selectedContext) {
+    items.push(selectedContextLocation ? `selected text (${formatLocation(selectedContextLocation)})` : 'selected text')
+  }
   return items
+}
+
+/** The diff location a review comment is anchored to. */
+export function commentLocation(comment: Pick<LineComment, 'file' | 'line'>): ChatContextLocation | undefined {
+  if (!comment.file) return undefined
+  return comment.line > 0 ? { file: comment.file, startLine: comment.line, endLine: comment.line } : { file: comment.file }
 }
 
 export function clearWatchdog(ref: WatchdogRef) {

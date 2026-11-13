@@ -297,6 +297,8 @@ export interface SelectPRRequest {
   number: number
   owner: string
   repo: string
+  /** PR author login, so the host can name it in chat context. */
+  author?: string
 }
 
 export interface RefreshPRsRequest {
@@ -328,10 +330,22 @@ export interface GenerateReviewRequest {
   customInstructions?: string
 }
 
+/** Where text attached to a chat question came from in the diff. Lines are 1-based. */
+export interface ChatContextLocation {
+  file: string
+  startLine?: number
+  endLine?: number
+  /** True when the lines are pre-change line numbers (deleted lines). */
+  oldSide?: boolean
+}
+
 export interface AskClaudeRequest {
   type: 'askClaude'
   operationId: string
+  /** Text attached to this question: a selection or a draft comment; empty when none. */
   context: string
+  /** Where `context` came from, when it came from one place in the diff. */
+  contextLocation?: ChatContextLocation
   question: string
 }
 

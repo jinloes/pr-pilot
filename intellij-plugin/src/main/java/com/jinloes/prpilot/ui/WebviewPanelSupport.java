@@ -1,6 +1,7 @@
 package com.jinloes.prpilot.ui;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.jinloes.prpilot.model.ChatContext;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
@@ -11,10 +12,10 @@ import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.services.UserFacingErrors;
 import com.jinloes.prpilot.settings.PluginSettings;
 import java.awt.BorderLayout;
+import java.util.List;
 import java.util.function.BooleanSupplier;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
-import org.apache.commons.lang3.StringUtils;
 
 /** Small stateless helpers shared by the webview panel and its collaborators. */
 final class WebviewPanelSupport {
@@ -114,28 +115,25 @@ final class WebviewPanelSupport {
                 setup.authCommand());
     }
 
-    static String buildPrContext(WebviewPanel panel, PullRequest pr) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("PR #").append(pr.getNumber()).append(": ").append(pr.getTitle()).append("\n");
-        sb.append("Author: @").append(pr.getAuthor()).append("\n");
-        sb.append("Repo: ").append(pr.getOwner()).append("/").append(pr.getRepo()).append("\n");
-
-        String body = pr.getBody();
-        if (StringUtils.isNotBlank(body)) {
-            sb.append("\nPR Description:\n").append(body).append("\n");
-        }
-
+    static ChatContext buildChatContext(WebviewPanel panel, PullRequest pr) {
         ReviewResult result = panel.lastResult;
-        if (result != null) {
-            sb.append("\nReview verdict: ").append(result.getVerdict()).append("\n");
-            sb.append("Review summary: ").append(result.getSummary()).append("\n");
-        }
-
-        String diff = panel.prefetchedDiff;
-        if (StringUtils.isNotBlank(diff)) {
-            sb.append("\nDiff:\n").append(diff);
-        }
-
-        return sb.toString();
+        List<ChatContext.ReviewComment> comments =
+                result == null || result.getLineComments() == null
+                        ? List.of()
+                        : result.getLineComments().stream()
+                                .map(ChatContext.ReviewComment::of)
+                                .toList();
+        return new ChatContext(
+                pr.getOwner(),
+                pr.getRepo(),
+                pr.getNumber(),
+                pr.getTitle(),
+                pr.getAuthor(),
+                pr.getBody(),
+                panel.prefetchedDiff,
+                result == null ? null : result.getVerdict(),
+                result == null ? null : result.getSummary(),
+                comments,
+                null);
     }
 }

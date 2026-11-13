@@ -1,5 +1,6 @@
 import type { LineComment, ReviewResult } from './models';
 import type {
+    SidecarChatResult,
     SidecarDraftReviewMutationResult,
     SidecarDraftReviewResult,
     SidecarExistingReviewsResult,
@@ -81,10 +82,14 @@ export function parseReviewResult(value: unknown): ReviewResult | null {
 }
 
 /** Validates the shape returned by `reviews/chat`. */
-export function parseChatResult(value: unknown): string | null {
+export function parseChatResult(value: unknown): SidecarChatResult | null {
     if (!value || typeof value !== 'object') return null;
     const result = value as Record<string, unknown>;
-    return typeof result.content === 'string' ? result.content : null;
+    if (typeof result.content !== 'string') return null;
+    return {
+        content: result.content,
+        historyQuestion: typeof result.historyQuestion === 'string' ? result.historyQuestion : '',
+    };
 }
 
 const AUTH_STATUSES = new Set<SidecarGitHubAuthResult['status']>([

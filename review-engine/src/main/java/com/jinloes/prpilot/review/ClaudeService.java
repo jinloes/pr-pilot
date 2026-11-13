@@ -1,5 +1,6 @@
 package com.jinloes.prpilot.review;
 
+import com.jinloes.prpilot.model.ChatContext;
 import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewResult;
@@ -421,27 +422,26 @@ public class ClaudeService {
     /**
      * Sends a chat message to Claude. Runs synchronously on the calling thread.
      *
-     * @param prContext formatted PR + review background (may be empty)
+     * @param context the pull request and review the question is about (may be null)
      * @param history prior turns in this conversation
      * @param userMessage the user's latest message
      * @param onChunk called with each new text chunk as it arrives
      * @return the complete response text
      */
     public String chat(
-            String prContext,
+            ChatContext context,
             List<ChatMessage> history,
             String userMessage,
             Consumer<String> onChunk)
             throws IOException, InterruptedException {
-        String prompt = ReviewChatPrompts.buildChatPrompt(prContext, history, userMessage);
+        String prompt = ReviewChatPrompts.buildChatPrompt(context, history, userMessage);
         return runChat(prompt, onChunk);
     }
 
     /**
      * Sends a pre-built prompt directly to Claude without wrapping it in {@link
      * ReviewChatPrompts#buildChatPrompt}. Use this when the caller has already assembled the full
-     * prompt (e.g. via {@link ReviewChatPrompts#buildFocusedChatPrompt}) and does not want any
-     * additional wrapping.
+     * prompt and does not want any additional wrapping.
      */
     public String chatWithPrompt(String rawPrompt, Consumer<String> onChunk)
             throws IOException, InterruptedException {

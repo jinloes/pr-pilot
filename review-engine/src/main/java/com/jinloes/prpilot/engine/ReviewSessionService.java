@@ -12,6 +12,7 @@ import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.HostCodeIntelligence;
 import com.jinloes.prpilot.review.RepoGuidelinesReader;
+import com.jinloes.prpilot.review.ReviewChatPrompts;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
 import com.jinloes.prpilot.review.ReviewPipelineService;
 import com.jinloes.prpilot.review.ReviewPrompts;
@@ -297,7 +298,6 @@ public class ReviewSessionService implements ReviewEngineApi {
             throws IOException, InterruptedException {
         throwIfInterrupted();
         requireValidChatParams(params);
-        boolean focused = params.rawPrompt() != null;
         List<ChatMessage> history =
                 params.history() == null
                         ? List.of()
@@ -321,22 +321,17 @@ public class ReviewSessionService implements ReviewEngineApi {
                             params.operationId(), cancellationToken, service::cancelCurrentRequest);
             try {
                 String content =
-                        focused
-                                ? service.chatWithPrompt(
-                                        params.rawPrompt(),
-                                        params.effort(),
-                                        onChunk,
-                                        params.inheritMcp(),
-                                        params.configDir())
-                                : service.chat(
-                                        params.prContext(),
-                                        history,
-                                        params.userMessage(),
-                                        params.effort(),
-                                        onChunk,
-                                        params.inheritMcp(),
-                                        params.configDir());
-                return new ChatResult(content);
+                        service.chat(
+                                params.context(),
+                                history,
+                                params.userMessage(),
+                                params.effort(),
+                                onChunk,
+                                params.inheritMcp(),
+                                params.configDir());
+                return new ChatResult(
+                        content,
+                        ReviewChatPrompts.historyQuestion(params.context(), params.userMessage()));
             } finally {
                 activeOperations.finish(operation);
             }
@@ -347,12 +342,10 @@ public class ReviewSessionService implements ReviewEngineApi {
                 startOperation(
                         params.operationId(), cancellationToken, service::cancelCurrentRequest);
         try {
-            String content =
-                    focused
-                            ? service.chatWithPrompt(params.rawPrompt(), onChunk)
-                            : service.chat(
-                                    params.prContext(), history, params.userMessage(), onChunk);
-            return new ChatResult(content);
+            String content = service.chat(params.context(), history, params.userMessage(), onChunk);
+            return new ChatResult(
+                    content,
+                    ReviewChatPrompts.historyQuestion(params.context(), params.userMessage()));
         } finally {
             activeOperations.finish(operation);
         }
@@ -448,7 +441,7 @@ public class ReviewSessionService implements ReviewEngineApi {
         if (params == null
                 || !validOperationId(params.operationId())
                 || params.provider() == null
-                || (params.rawPrompt() == null) == (params.userMessage() == null)) {
+                || StringUtils.isBlank(params.userMessage())) {
             throw new IllegalArgumentException("Invalid chat parameters.");
         }
     }

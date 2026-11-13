@@ -46,6 +46,57 @@ describe('ChatPane', () => {
     expect(onPendingMessageSent).toHaveBeenCalledTimes(1)
   })
 
+  it('sends a pending message with its attachment location', async () => {
+    const cefQuery = vi.fn()
+    Object.assign(window, { cefQuery })
+    const location = { file: 'src/A.ts', startLine: 7, endLine: 7 }
+
+    render(
+      <ChatPane
+        pr={pr}
+        pendingMessage={{ q: 'Verify', ctx: '<draft_comment>x</draft_comment>', location, id: 321 }}
+      />,
+    )
+
+    await waitFor(() => expect(cefQuery).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(cefQuery.mock.calls[0][0].request)).toMatchObject({
+      type: 'askClaude',
+      context: '<draft_comment>x</draft_comment>',
+      contextLocation: location,
+      question: 'Verify',
+    })
+  })
+
+  it('sends the selected text with its location and shows where it came from', async () => {
+    const user = userEvent.setup()
+    const cefQuery = vi.fn()
+    Object.assign(window, { cefQuery })
+    const location = { file: 'src/A.ts', startLine: 3, endLine: 5 }
+
+    render(<ChatPane pr={pr} selectedContext="const x = 1" selectedContextLocation={location} />)
+
+    expect(screen.getByText('src/A.ts:3-5')).toBeVisible()
+    await user.type(screen.getByRole('textbox', { name: 'Ask about this pull request' }), 'Why?{Enter}')
+
+    expect(JSON.parse(cefQuery.mock.calls[0][0].request)).toMatchObject({
+      type: 'askClaude',
+      context: 'const x = 1',
+      contextLocation: location,
+      question: 'Why?',
+    })
+  })
+
+  it('omits the location when nothing is selected', async () => {
+    const user = userEvent.setup()
+    const cefQuery = vi.fn()
+    Object.assign(window, { cefQuery })
+
+    render(<ChatPane pr={pr} selectedContextLocation={{ file: 'src/A.ts' }} />)
+    await user.type(screen.getByRole('textbox', { name: 'Ask about this pull request' }), 'Why?{Enter}')
+
+    expect(JSON.parse(cefQuery.mock.calls[0][0].request)).not.toHaveProperty('contextLocation')
+  })
+
   it('sends each pending verification message only once', async () => {
     const cefQuery = vi.fn()
     Object.assign(window, { cefQuery })

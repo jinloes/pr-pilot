@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jinloes.prpilot.engine.GitHubEngine;
 import com.jinloes.prpilot.engine.ReviewEngineApi;
 import com.jinloes.prpilot.engine.ReviewSessionService;
+import com.jinloes.prpilot.model.ChatContext;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
 import com.jinloes.prpilot.review.SemanticReviewService;
@@ -373,13 +374,15 @@ class StdioJsonRpcServerReviewsTest extends StdioJsonRpcServerTestBase {
     @Test
     void reviewsChatStreamsChatChunkNotificationsBeforeItsResult() throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
+        AtomicReference<ReviewEngineApi.ChatParams> received = new AtomicReference<>();
         ReviewSessionService fakeReview =
                 new ReviewSessionService() {
                     @Override
                     public ReviewEngineApi.ChatResult chat(
                             ReviewEngineApi.ChatParams params, Consumer<String> onChunk) {
+                        received.set(params);
                         onChunk.accept("Hel");
-                        return new ReviewEngineApi.ChatResult("Hello");
+                        return new ReviewEngineApi.ChatResult("Hello", "recorded question");
                     }
                 };
         server =
@@ -392,10 +395,27 @@ class StdioJsonRpcServerReviewsTest extends StdioJsonRpcServerTestBase {
                         reviewExecutor);
         server.run(new ByteArrayInputStream(new byte[0]), output);
         ObjectNode request = rpcRequest(44, "reviews/chat");
-        request.putObject("params")
-                .put("operationId", "chat-1")
-                .put("provider", "claude")
-                .put("userMessage", "question");
+        ObjectNode params =
+                request.putObject("params")
+                        .put("operationId", "chat-1")
+                        .put("provider", "claude")
+                        .put("userMessage", "question");
+        ObjectNode context =
+                params.putObject("context")
+                        .put("owner", "acme")
+                        .put("repo", "widgets")
+                        .put("number", 7)
+                        .put("diff", "diff --git a/A b/A\n");
+        context.putArray("reviewComments")
+                .addObject()
+                .put("file", "A")
+                .put("line", 3)
+                .put("body", "b");
+        context.putObject("attachment")
+                .put("text", "x")
+                .put("file", "A")
+                .put("startLine", 2)
+                .put("endLine", 4);
 
         assertThat(server.handle(objectMapper.writeValueAsBytes(request))).isNull();
         reviewExecutor.submit(() -> {}).get(1, TimeUnit.SECONDS);
@@ -408,6 +428,13 @@ class StdioJsonRpcServerReviewsTest extends StdioJsonRpcServerTestBase {
                 .isEqualTo(objectMapper.createObjectNode().put("requestId", 44).put("text", "Hel"));
         assertThat(frames.get(1).path("id").asInt()).isEqualTo(44);
         assertThat(frames.get(1).path("result").path("content").asText()).isEqualTo("Hello");
+        assertThat(frames.get(1).path("result").path("historyQuestion").asText())
+                .isEqualTo("recorded question");
+        assertThat(received.get().context().number()).isEqualTo(7);
+        assertThat(received.get().context().reviewComments())
+                .containsExactly(new ChatContext.ReviewComment("A", 3, null, null, "b"));
+        assertThat(received.get().context().attachment())
+                .isEqualTo(new ChatContext.Attachment("x", "A", 2, 4, false));
     }
 
     @Test
@@ -445,13 +472,12 @@ class StdioJsonRpcServerReviewsTest extends StdioJsonRpcServerTestBase {
     }
 
     @Test
-    void reviewsChatRejectsBothPromptForms() throws IOException {
+    void reviewsChatRejectsABlankQuestion() throws IOException {
         ObjectNode request = rpcRequest(2, "reviews/chat");
         request.putObject("params")
                 .put("operationId", "chat-1")
                 .put("provider", "claude")
-                .put("userMessage", "question")
-                .put("rawPrompt", "prompt");
+                .put("userMessage", "  ");
         JsonNode response = server.handle(objectMapper.writeValueAsBytes(request));
 
         assertThat(response.path("error").path("code").asInt()).isEqualTo(-32602);

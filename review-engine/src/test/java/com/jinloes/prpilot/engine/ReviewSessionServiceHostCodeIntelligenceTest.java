@@ -67,7 +67,7 @@ class ReviewSessionServiceHostCodeIntelligenceTest {
             ObjectNode params = JSON.createObjectNode();
             params.put("operationId", "op-1");
             params.put("provider", "copilot");
-            params.put("rawPrompt", "q");
+            params.put("userMessage", "q");
             params.putObject("hostCodeIntelligence").put("url", URL).put("token", TOKEN);
 
             ChatParams decoded = JSON.treeToValue(params, ChatParams.class);
@@ -80,7 +80,7 @@ class ReviewSessionServiceHostCodeIntelligenceTest {
         void legacyConstructorsLeaveTheEndpointUnset() {
             ChatParams chat =
                     new ChatParams(
-                            "op", "copilot", null, "high", false, null, "", List.of(), "q", null);
+                            "op", "copilot", null, "high", false, null, null, List.of(), "q");
 
             assertThat(chat.hostCodeIntelligence()).isNull();
         }

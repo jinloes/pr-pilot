@@ -10,6 +10,7 @@ import {
 import type { LineComment, ReviewResult } from './models';
 import type { OutcomeComment } from './sidecar';
 import type { HandlerDependencies, Provider, ViewState } from './extensionTypes';
+import type { SidecarChatAttachment, SidecarChatContext, SidecarChatResult } from './sidecarTypes';
 import type { PreparedDeepReview } from './deepReview';
 
 export interface ReviewHandlerApi {
@@ -497,7 +498,6 @@ async function handleCancelChat(state: ViewState, msg: Record<string, unknown>):
 }
 
 async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): Promise<void> {
-    const context = msg.context as string ?? '';
     const question = msg.question as string ?? '';
     if (!question.trim()) return;
 
@@ -506,7 +506,7 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
     const selectionRevision = state.selectionRevision;
     const chatRevision = ++state.chatRevision;
     const history = key ? [...(state.chatHistory.get(key) ?? [])] : [];
-    const prContext = buildPrContext(state);
+    const context = buildChatContext(state, chatAttachment(msg));
     const c = deps.config();
     const selectedProvider: Provider = c.get<string>('reviewProvider', 'claude') === 'copilot'
         ? 'copilot'
@@ -532,12 +532,6 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
     };
     state.activeProviderOperation = providerOperation;
 
-    // Focused chat builds its (small) prompt client-side, matching IntelliJ's
-    // IntellijClaudeService.chatFocused; regular chat sends raw context/history and lets the
-    // shared review-engine service build the full prompt server-side.
-    const focused = context.trim().length > 0;
-    const rawPrompt = focused ? claude.buildFocusedChatPrompt(context, question) : undefined;
-
     try {
         if (previousOperationId && previousOperationId !== operationId) {
             await deps.cancelActiveProvider(previousOperationId);
@@ -548,9 +542,9 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
             ? await deps.resolveWorkingDir(state, activePr, false)
             : deps.workingDir();
         if (!isCurrentChat()) return;
-        let response: string;
+        let result: SidecarChatResult;
         try {
-            response = await deps.withCodeIntelligence(
+            result = await deps.withCodeIntelligence(
                 selectedProvider === 'copilot'
                     && c.get<boolean>('experimentalVsCodeCodeIntelligence', false) === true
                     && activePr !== null,
@@ -564,9 +558,9 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
                 inheritMcp,
                 configDir,
                 hostCodeIntelligence,
-                ...(focused
-                    ? { rawPrompt }
-                    : { prContext, history, userMessage: question }),
+                context,
+                history,
+                userMessage: question,
                 },
                 (chunk) => {
                     if (isCurrentChat()) deps.push(state, { type: 'chatChunk', prKey: key ?? undefined, chunk });
@@ -577,10 +571,11 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
             if (state.activeProviderOperation === providerOperation) state.activeProviderOperation = null;
         }
         if (!isCurrentChat()) return;
+        const response = result.content;
         if (key) {
             state.chatHistory.set(key, [
                 ...history,
-                { role: 'USER', content: question },
+                { role: 'USER', content: result.historyQuestion || question },
                 { role: 'ASSISTANT', content: response },
             ]);
         }
@@ -592,26 +587,6 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
-
-function buildPrContext(state: ViewState): string {
-    if (!state.activePR) return '';
-    const pr = state.activePR;
-    const lines = [
-        `PR #${pr.number}: ${pr.title}`,
-        `Repo: ${pr.owner}/${pr.repo}`,
-    ];
-    if (state.activeReviewResult) {
-        const r = state.activeReviewResult;
-        lines.push('', `Review verdict: ${r.verdict}`);
-        if (r.summary) lines.push(`Summary: ${r.summary}`);
-    }
-    if (state.activeDiff) {
-        // Pass the full diff (already capped at 250 KB by getPRDiff) for parity with the IntelliJ
-        // host, which also sends the complete diff as chat context.
-        lines.push('', 'Diff:', state.activeDiff);
-    }
-    return lines.join('\n');
-}
 
 function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -627,5 +602,48 @@ function isCancellationError(err: unknown): boolean {
         handleDeleteDraft,
         handleCancelChat,
         handleAskClaude,
+    };
+}
+
+/** The pull request, diff, and generated review a chat question is asked about. */
+export function buildChatContext(state: ViewState, attachment?: SidecarChatAttachment): SidecarChatContext | undefined {
+    const pr = state.activePR;
+    if (!pr) return undefined;
+    const review = state.activeReviewResult;
+    return {
+        owner: pr.owner,
+        repo: pr.repo,
+        number: pr.number,
+        title: pr.title,
+        author: pr.author,
+        body: pr.body,
+        diff: state.activeDiff || undefined,
+        reviewVerdict: review?.verdict,
+        reviewSummary: review?.summary,
+        reviewComments: (review?.lineComments ?? []).map((c) => ({
+            file: c.file,
+            line: c.line,
+            type: c.type,
+            severity: c.severity,
+            body: c.body,
+        })),
+        attachment,
+    };
+}
+
+/** The attached text of an askClaude message and where it came from, or undefined when absent. */
+export function chatAttachment(msg: Record<string, unknown>): SidecarChatAttachment | undefined {
+    const text = typeof msg.context === 'string' ? msg.context : '';
+    if (!text.trim()) return undefined;
+    const location = msg.contextLocation;
+    if (!location || typeof location !== 'object') return { text };
+    const loc = location as Record<string, unknown>;
+    const line = (value: unknown) => (typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined);
+    return {
+        text,
+        file: typeof loc.file === 'string' && loc.file.trim() ? loc.file : undefined,
+        startLine: line(loc.startLine),
+        endLine: line(loc.endLine),
+        oldSide: loc.oldSide === true,
     };
 }

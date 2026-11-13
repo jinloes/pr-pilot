@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewResult;
+import com.jinloes.prpilot.review.DiffFiles.DiffFile;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -22,7 +23,6 @@ public final class ChunkedReviewService {
     private static final int MAX_CHANGED_LINES_PER_FILE = 80;
     private static final String CONTRACT_INDEX_TRUNCATED =
             "\n[contract index truncated at engine limit]\n";
-    private static final Pattern FILE_START = Pattern.compile("(?m)^diff --git ");
     private static final Pattern HUNK_HEADER =
             Pattern.compile("^@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@");
     private final ObjectMapper mapper;
@@ -176,7 +176,7 @@ public final class ChunkedReviewService {
     }
 
     static List<DiffBatch> buildBatches(String diff) {
-        List<DiffFile> files = parseFiles(diff == null ? "" : diff);
+        List<DiffFile> files = new ArrayList<>(DiffFiles.parse(diff));
         files.sort(Comparator.comparingInt(DiffFile::changedLines).reversed());
         List<DiffBatch> batches = new ArrayList<>();
         List<DiffFile> pending = new ArrayList<>();
@@ -196,40 +196,6 @@ public final class ChunkedReviewService {
         return batches;
     }
 
-    private static List<DiffFile> parseFiles(String diff) {
-        Matcher matcher = FILE_START.matcher(diff);
-        List<Integer> starts = new ArrayList<>();
-        while (matcher.find()) starts.add(matcher.start());
-        if (starts.isEmpty()) return List.of();
-        List<DiffFile> files = new ArrayList<>();
-        for (int index = 0; index < starts.size(); index++) {
-            String section =
-                    diff.substring(
-                            starts.get(index),
-                            index + 1 < starts.size() ? starts.get(index + 1) : diff.length());
-            String path = "";
-            int changedLines = 0;
-            boolean inHunk = false;
-            for (String line : section.split("\\R")) {
-                if (line.startsWith("@@")) {
-                    inHunk = true;
-                    continue;
-                }
-                if (!inHunk && line.startsWith("+++ b/")) path = line.substring(6).trim();
-                if (inHunk && (line.startsWith("+") || line.startsWith("-"))) {
-                    changedLines++;
-                }
-            }
-            if (path.isBlank()) {
-                String header = section.lines().findFirst().orElse("");
-                int destination = header.indexOf(" b/");
-                if (destination >= 0) path = header.substring(destination + 3).trim();
-            }
-            if (!path.isBlank()) files.add(new DiffFile(path, changedLines, section));
-        }
-        return files;
-    }
-
     private static DiffBatch toBatch(List<DiffFile> files) {
         return new DiffBatch(
                 files.stream().map(DiffFile::path).toList(),
@@ -243,7 +209,7 @@ public final class ChunkedReviewService {
                                 + "NEW n is a current-file line that may anchor a comment; OLD n "
                                 + "exists only before the change.\n");
         for (DiffBatch batch : batches) {
-            for (DiffFile file : parseFiles(batch.diff())) {
+            for (DiffFile file : DiffFiles.parse(batch.diff())) {
                 if (!appendIndex(index, "\nFILE " + file.path() + "\n")) {
                     return truncatedIndex(index);
                 }
@@ -315,6 +281,4 @@ public final class ChunkedReviewService {
     }
 
     record DiffBatch(List<String> files, String diff) {}
-
-    private record DiffFile(String path, int changedLines, String diff) {}
 }

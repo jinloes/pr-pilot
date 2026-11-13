@@ -126,6 +126,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
     const selectionRevision = ++state.selectionRevision;
     const title = typeof msg.title === 'string' ? msg.title : '';
     const body = typeof msg.body === 'string' ? msg.body : '';
+    const author = typeof msg.author === 'string' && msg.author ? msg.author : undefined;
 
     state.generationRevision++;
     state.chatRevision++;
@@ -136,7 +137,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         operationId ? () => deps.cancelActiveProvider(operationId) : () => Promise.resolve(),
     )) return;
     deps.clearWorktree(state);
-    state.activePR = { number, owner, repo, title, body };
+    state.activePR = { number, owner, repo, title, body, author };
     state.activeDiff = '';
     state.activeValidationDiff = '';
     state.activeReviewResult = null;
@@ -183,6 +184,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
             repo,
             title: detail.title ?? title,
             body: detail.body ?? body,
+            author,
         };
         state.activeDiff = diff;
         state.activeValidationDiff = validationDiff;

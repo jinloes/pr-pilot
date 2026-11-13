@@ -16,6 +16,7 @@ import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
 import com.intellij.util.Alarm;
+import com.jinloes.prpilot.model.ChatContext;
 import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
@@ -665,8 +666,8 @@ public class WebviewPanel implements Disposable {
         return WebviewWorktreeManager.serviceForWorktree(directory);
     }
 
-    String buildPrContext(PullRequest pr) {
-        return WebviewPanelSupport.buildPrContext(this, pr);
+    ChatContext buildChatContext(PullRequest pr) {
+        return WebviewPanelSupport.buildChatContext(this, pr);
     }
 
     // --- Helpers ---

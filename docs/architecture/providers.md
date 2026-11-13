@@ -7,11 +7,9 @@ active constraint future code must respect.
 Copilot and Claude share prompt builders/parsing (`ReviewPrompts` and its per-stage siblings such
 as `ReviewChatPrompts`, plus `ReviewResultParser`; static helpers in `review-engine`). Do not fork
 prompt constants by provider unless absolutely required.
-Full-review and regular-chat prompts are built server-side (inside `ClaudeService`/`CopilotService`)
-from raw PR/diff/context fields; only the small focused-chat prompt (`buildFocusedChatPrompt`) is
-still built by the caller (`IntellijClaudeService.chatFocused` on IntelliJ, `extension.ts`'s
-`handleAskClaude` using `claude.ts`'s copy on VS Code) before being sent as a raw prompt, matching
-how a focused question carries no PR metadata or history.
+Full-review and chat prompts are built in the engine (inside `ClaudeService`/`CopilotService`) from
+structured fields. Chat hosts send a `ChatContext` (PR metadata, diff, generated review, and any
+attached text with its file and lines) and never assemble prompt text themselves.
 
 ### Copilot SDK runtime
 Both the IntelliJ plugin and the sidecar use the official Java Copilot SDK

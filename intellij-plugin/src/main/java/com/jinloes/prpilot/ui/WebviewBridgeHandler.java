@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intellij.ide.BrowserUtil;
 import com.intellij.openapi.options.ShowSettingsUtil;
+import com.jinloes.prpilot.model.ChatContext;
 import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.settings.PluginSettings;
@@ -136,11 +137,11 @@ final class WebviewBridgeHandler {
                                         node.path("instructions").asText("")));
                 case "askClaude" -> {
                     String question = node.path("question").asText();
-                    String context = node.path("context").asText("");
+                    ChatContext.Attachment attachment = chatAttachment(node);
                     String operationId = node.path("operationId").asText();
                     getApplication()
                             .executeOnPooledThread(
-                                    () -> panel.chats.ask(question, context, operationId));
+                                    () -> panel.chats.ask(question, attachment, operationId));
                 }
                 default -> log.warn("Unknown bridge message type: {}", type);
             }
@@ -197,5 +198,19 @@ final class WebviewBridgeHandler {
     static boolean isIncrementalRequest(JsonNode node) {
         JsonNode incremental = node.get("incremental");
         return incremental != null && incremental.isBoolean() && incremental.booleanValue();
+    }
+
+    /** The attached text of an askClaude message and where it came from, or null when absent. */
+    static ChatContext.Attachment chatAttachment(JsonNode node) {
+        String text = node.path("context").asText("");
+        if (StringUtils.isBlank(text)) return null;
+        JsonNode location = node.path("contextLocation");
+        if (!location.isObject()) return new ChatContext.Attachment(text, null, 0, 0, false);
+        return new ChatContext.Attachment(
+                text,
+                StringUtils.trimToNull(location.path("file").asText("")),
+                location.path("startLine").asInt(0),
+                location.path("endLine").asInt(0),
+                location.path("oldSide").asBoolean(false));
     }
 }

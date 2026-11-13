@@ -1,13 +1,13 @@
 package com.jinloes.prpilot.services;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.jinloes.prpilot.model.ChatContext;
 import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.review.ClaudeService;
 import com.jinloes.prpilot.review.CopilotService;
-import com.jinloes.prpilot.review.ReviewChatPrompts;
 import com.jinloes.prpilot.review.ReviewPipelineService;
 import com.jinloes.prpilot.review.SemanticReviewService;
 import com.jinloes.prpilot.settings.PluginSettings;
@@ -305,14 +305,14 @@ public class IntellijClaudeService {
     }
 
     public void chat(
-            String prContext,
+            ChatContext context,
             List<ChatMessage> history,
             String userMessage,
             Consumer<String> onChunk,
             Consumer<String> onDone,
             Consumer<String> onError) {
         chat(
-                prContext,
+                context,
                 history,
                 userMessage,
                 snapshotReviewRuntimeSettings(),
@@ -322,7 +322,7 @@ public class IntellijClaudeService {
     }
 
     public void chat(
-            String prContext,
+            ChatContext context,
             List<ChatMessage> history,
             String userMessage,
             ReviewRuntimeSettings settings,
@@ -338,60 +338,14 @@ public class IntellijClaudeService {
                 () ->
                         settings.provider == ReviewProvider.COPILOT
                                 ? copilot.chat(
-                                        prContext,
+                                        context,
                                         history,
                                         userMessage,
                                         settings.effort,
                                         wrappedChunk,
                                         settings.inheritMcp,
                                         settings.configDir)
-                                : claude.chat(prContext, history, userMessage, wrappedChunk),
-                onDone);
-    }
-
-    /**
-     * Sends a focused question about a specific code snippet. Builds the prompt with {@link
-     * ReviewChatPrompts#buildFocusedChatPrompt} so the model receives only the code context and
-     * question — no PR metadata or conversation history — matching VS Code's focused-chat path.
-     */
-    public void chatFocused(
-            String focusedContext,
-            String question,
-            Consumer<String> onChunk,
-            Consumer<String> onDone,
-            Consumer<String> onError) {
-        chatFocused(
-                focusedContext,
-                question,
-                snapshotReviewRuntimeSettings(),
-                onChunk,
-                onDone,
-                onError);
-    }
-
-    public void chatFocused(
-            String focusedContext,
-            String question,
-            ReviewRuntimeSettings settings,
-            Consumer<String> onChunk,
-            Consumer<String> onDone,
-            Consumer<String> onError) {
-        String rawPrompt = ReviewChatPrompts.buildFocusedChatPrompt(focusedContext, question);
-        Consumer<String> wrappedChunk = wrapCallback(onChunk);
-        runOnPooledThread(
-                settings.provider,
-                "answer chat question",
-                "Chat interrupted.",
-                onError,
-                () ->
-                        settings.provider == ReviewProvider.COPILOT
-                                ? copilot.chatWithPrompt(
-                                        rawPrompt,
-                                        settings.effort,
-                                        wrappedChunk,
-                                        settings.inheritMcp,
-                                        settings.configDir)
-                                : claude.chatWithPrompt(rawPrompt, wrappedChunk),
+                                : claude.chat(context, history, userMessage, wrappedChunk),
                 onDone);
     }
 

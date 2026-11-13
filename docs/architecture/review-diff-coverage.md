@@ -55,8 +55,8 @@ normal validation path.
 GitHub answers HTTP 406 when a diff exceeds its own size limits. The engine attempts that request
 once and returns `diff_too_large`, which both hosts render as non-retryable "Pull request diff is
 too large" copy rather than a generic retry. There is no files-API or local `git diff` fallback.
-Chat keeps its 12,000-character excerpt, and the display keeps the 250 KB review diff; the banner
-and chat label describe those limits instead of claiming a full diff.
+Chat lists the omitted files and reads them from the PR worktree, and the display keeps the 250 KB
+review diff; the banner and chat label describe those limits instead of claiming a full diff.
 
 ### Large diff visibility
 The review diff is bounded to 250 KB by whole files (see "Complete review diff coverage"). When its

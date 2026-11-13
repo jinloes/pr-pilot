@@ -1,5 +1,6 @@
 package com.jinloes.prpilot.ui;
 
+import com.jinloes.prpilot.model.ChatContext;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 
@@ -32,8 +33,8 @@ final class WebviewChatHost implements PrChatController.Host {
     }
 
     @Override
-    public String buildPrContext(PullRequest pr) {
-        return panel.buildPrContext(pr);
+    public ChatContext buildChatContext(PullRequest pr) {
+        return panel.buildChatContext(pr);
     }
 
     @Override

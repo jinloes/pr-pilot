@@ -16,6 +16,7 @@ export interface ActivePR {
     repo: string;
     title: string;
     body: string;
+    author?: string;
 }
 
 export interface ProviderReadiness {

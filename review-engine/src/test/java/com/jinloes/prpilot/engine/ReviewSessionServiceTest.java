@@ -100,22 +100,13 @@ class ReviewSessionServiceTest {
         }
 
         @Test
-        void requiresExactlyOneChatPromptFormBeforeStartingAProvider() {
-            ReviewEngineApi.ChatParams bothForms =
+        void requiresAQuestionBeforeStartingAProvider() {
+            ReviewEngineApi.ChatParams blank =
                     new ReviewEngineApi.ChatParams(
-                            "chat-1",
-                            "claude",
-                            "",
-                            "",
-                            false,
-                            "",
-                            "",
-                            List.of(),
-                            "question",
-                            "prompt");
+                            "chat-1", "claude", "", "", false, "", null, List.of(), "  ");
 
             assertThatIllegalArgumentException()
-                    .isThrownBy(() -> service.chat(bothForms, ignored -> {}));
+                    .isThrownBy(() -> service.chat(blank, ignored -> {}));
         }
     }
 

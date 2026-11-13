@@ -12,6 +12,9 @@ Plain Java 21 shared models with no host dependencies.
 - `model/ReviewResult.java` - Review summary, verdict, and line comments.
 - `model/LineComment.java` - Inline comment anchor and quality metadata.
 - `model/ChatMessage.java` - Immutable chat role and content.
+- `model/ChatContext.java` - What a chat question is about: PR metadata, diff, generated review
+  comments, and an optional attachment with its file and lines. Hosts fill it; the engine budgets
+  it.
 - `model/PRReviewRequest.java` - Immutable review-generation parameter object; its builder strips a
   diff-coverage trailer from the diff into a never-null `diffCoverage`, which
   `withGeneratedCodeOmitted` keeps when it swaps in a diff without regenerated protobuf code.

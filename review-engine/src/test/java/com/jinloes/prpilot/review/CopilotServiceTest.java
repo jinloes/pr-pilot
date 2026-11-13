@@ -393,7 +393,7 @@ class CopilotServiceTest {
                             });
             CopilotService svc = new CopilotService(null, factory);
             StringBuilder collected = new StringBuilder();
-            String result = svc.chat("", List.of(), "hi", "medium", collected::append);
+            String result = svc.chat(null, List.of(), "hi", "medium", collected::append);
             assertThat(result).isEqualTo("Hello there.");
             assertThat(collected.toString()).isEqualTo("Hello there");
         }
@@ -414,7 +414,7 @@ class CopilotServiceTest {
             CopilotService svc = new CopilotService(null, factory);
             StringBuilder collected = new StringBuilder();
 
-            String result = svc.chat("", List.of(), "q", "medium", collected::append);
+            String result = svc.chat(null, List.of(), "q", "medium", collected::append);
 
             assertThat(result).isEqualTo("Hello again");
             assertThat(collected.toString()).isEqualTo("Hello again");
@@ -431,7 +431,7 @@ class CopilotServiceTest {
                             });
             CopilotService svc = new CopilotService(null, factory);
 
-            assertThatThrownBy(() -> svc.chat("", List.of(), "q", "medium", ignored -> {}))
+            assertThatThrownBy(() -> svc.chat(null, List.of(), "q", "medium", ignored -> {}))
                     .isInstanceOf(IOException.class)
                     .hasMessage("tool sandbox startup failed");
         }

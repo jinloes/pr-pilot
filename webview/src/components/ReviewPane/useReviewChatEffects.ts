@@ -8,7 +8,9 @@ import {
 import {
   isSelectionInFormField,
   SELECTION_CAPTURE_DEBOUNCE_MS,
+  type ChatSelection,
 } from './reviewControllerState'
+import { selectionLocation } from '@/lib/selectionLocation'
 
 type Ref<T> = { current: T }
 
@@ -23,7 +25,7 @@ interface UseReviewChatEffectsOptions {
   chatHeightRef: Ref<number>
   setChatAvailableHeight: Dispatch<React.SetStateAction<number>>
   setChatHeightState: Dispatch<React.SetStateAction<number>>
-  setSelectedContext: Dispatch<React.SetStateAction<string>>
+  setSelection: Dispatch<React.SetStateAction<ChatSelection | null>>
 }
 
 export function useReviewChatEffects({
@@ -37,7 +39,7 @@ export function useReviewChatEffects({
   chatHeightRef,
   setChatAvailableHeight,
   setChatHeightState,
-  setSelectedContext,
+  setSelection,
 }: UseReviewChatEffectsOptions) {
   useEffect(() => {
     if (showChat && chatVisible) {
@@ -72,14 +74,15 @@ export function useReviewChatEffects({
 
   useEffect(() => {
     if (!pr) {
-      setSelectedContext('')
+      setSelection(null)
       return
     }
 
     function handleMouseUp(event: MouseEvent) {
       if ((event.target as HTMLElement).closest?.('.chat-pane__input')) return
-      const text = window.getSelection()?.toString().trim() ?? ''
-      if (text) setSelectedContext(text)
+      const selection = window.getSelection()
+      const text = selection?.toString().trim() ?? ''
+      if (text) setSelection({ text, location: selectionLocation(selection) })
     }
 
     // Keyboard selections fire no mouseup; capture them once the selection settles.
@@ -89,7 +92,7 @@ export function useReviewChatEffects({
       const selection = window.getSelection()
       if (isSelectionInFormField(selection)) return
       const text = selection?.toString().trim() ?? ''
-      if (text) setSelectedContext(text)
+      if (text) setSelection({ text, location: selectionLocation(selection) })
     }
     function handleSelectionChange() {
       if (selectionTimer !== null) clearTimeout(selectionTimer)

@@ -320,11 +320,48 @@ export interface SidecarChatParams {
     effort: string;
     inheritMcp: boolean;
     configDir?: string;
-    prContext?: string;
+    context?: SidecarChatContext;
     history?: SidecarChatMessage[];
-    userMessage?: string;
-    rawPrompt?: string;
+    userMessage: string;
     hostCodeIntelligence?: SidecarHostCodeIntelligence;
+}
+
+/** Mirrors core's ChatContext: what a chat question is asked about. The engine budgets it. */
+export interface SidecarChatContext {
+    owner: string;
+    repo: string;
+    number: number;
+    title?: string;
+    author?: string;
+    body?: string;
+    diff?: string;
+    reviewVerdict?: string;
+    reviewSummary?: string;
+    reviewComments?: SidecarChatReviewComment[];
+    attachment?: SidecarChatAttachment;
+}
+
+export interface SidecarChatReviewComment {
+    file: string;
+    line: number;
+    type?: string;
+    severity?: string;
+    body: string;
+}
+
+/** Text attached to one question, with where it came from when known. */
+export interface SidecarChatAttachment {
+    text: string;
+    file?: string;
+    startLine?: number;
+    endLine?: number;
+    oldSide?: boolean;
+}
+
+/** Result of `reviews/chat`: the answer and the user turn to record in history. */
+export interface SidecarChatResult {
+    content: string;
+    historyQuestion: string;
 }
 
 /** Validates the shape returned by `reviews/generate`. */

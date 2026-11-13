@@ -1,5 +1,6 @@
 package com.jinloes.prpilot.review;
 
+import com.jinloes.prpilot.model.ChatContext;
 import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewResult;
@@ -300,7 +301,7 @@ public class CopilotService {
     }
 
     public String chat(
-            String prContext,
+            ChatContext context,
             List<ChatMessage> history,
             String userMessage,
             String effort,
@@ -308,7 +309,7 @@ public class CopilotService {
             boolean inheritMcp,
             String configDir)
             throws IOException, InterruptedException {
-        String prompt = ReviewChatPrompts.buildChatPrompt(prContext, history, userMessage);
+        String prompt = ReviewChatPrompts.buildChatPrompt(context, history, userMessage);
         return runSession(
                 prompt,
                 "",
@@ -323,20 +324,19 @@ public class CopilotService {
     }
 
     public String chat(
-            String prContext,
+            ChatContext context,
             List<ChatMessage> history,
             String userMessage,
             String effort,
             Consumer<String> onChunk)
             throws IOException, InterruptedException {
-        return chat(prContext, history, userMessage, effort, onChunk, false, null);
+        return chat(context, history, userMessage, effort, onChunk, false, null);
     }
 
     /**
      * Sends a pre-built prompt directly to Copilot without wrapping it in {@link
      * ReviewChatPrompts#buildChatPrompt}. Use this when the caller has already assembled the full
-     * prompt (e.g. via {@link ReviewChatPrompts#buildFocusedChatPrompt}) and does not want any
-     * additional wrapping.
+     * prompt and does not want any additional wrapping.
      */
     public String chatWithPrompt(
             String rawPrompt,

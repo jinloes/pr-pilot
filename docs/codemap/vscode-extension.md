@@ -21,7 +21,7 @@ VS Code host integration. All GitHub and review generation routes through the Ja
 - `src/sidecarProtocol.ts`, `sidecarTypes.ts`, `sidecarFraming.ts`, `sidecarJar.ts` - Capability
   declarations and parsers, DTOs, framing, and JAR resolution.
 - `src/models.ts` - Host-neutral PR/review view models.
-- `src/claude.ts` - Claude preflight and remaining mirrored prompt helpers.
+- `src/claude.ts` - Claude binary discovery and preflight.
 - `src/copilot.ts` - Copilot model discovery and binary preflight.
 - `src/codeIntelligence.ts` - Host-neutral read-only lookup tools (path confinement, symbol
   location, bounded formatting) over a `CodeIntelligenceBackend`. `codeIntelligenceServer.ts`

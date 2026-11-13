@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { PR, ReviewResult } from '../../bridge/types'
 import {
   chatContextSummary,
+  commentLocation,
   chunkRecommendation,
   summarizeDiffPreflight,
 } from './reviewControllerState'
@@ -59,6 +60,15 @@ describe('reviewControllerState helpers', () => {
   it('summarizes the context available to chat', () => {
     expect(chatContextSummary(pr, 'diff', null, review, 'selected'))
       .toEqual(['PR title/body', 'diff', 'generated review', 'selected text'])
+    expect(chatContextSummary(pr, 'diff', null, review, 'selected', { file: 'src/A.ts', startLine: 3, endLine: 5 }))
+      .toContain('selected text (src/A.ts:3-5)')
+    expect(chatContextSummary(pr, '', null, null, '')).toEqual(['PR title/body'])
     expect(chatContextSummary(null, 'diff', null, review, 'selected')).toEqual([])
+  })
+
+  it('locates a review comment for chat', () => {
+    expect(commentLocation({ file: 'src/A.ts', line: 7 })).toEqual({ file: 'src/A.ts', startLine: 7, endLine: 7 })
+    expect(commentLocation({ file: 'src/A.ts', line: 0 })).toEqual({ file: 'src/A.ts' })
+    expect(commentLocation({ file: '', line: 7 })).toBeUndefined()
   })
 })

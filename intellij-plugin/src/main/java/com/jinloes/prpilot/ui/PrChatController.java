@@ -2,9 +2,11 @@ package com.jinloes.prpilot.ui;
 
 import static com.jinloes.prpilot.ui.WebviewPrSupport.bridgePrKey;
 
+import com.jinloes.prpilot.model.ChatContext;
 import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
+import com.jinloes.prpilot.review.ReviewChatPrompts;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ChatChunkMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ChatResponseMsg;
@@ -35,7 +37,8 @@ final class PrChatController {
 
         IntellijClaudeService resolvePrClaudeService(PullRequest pr);
 
-        String buildPrContext(PullRequest pr);
+        /** The pull request, diff, and generated review that chat questions are asked about. */
+        ChatContext buildChatContext(PullRequest pr);
 
         void pushMessage(Object payload);
     }
@@ -71,7 +74,7 @@ final class PrChatController {
         return new ChatReset(chatService, chatProvider, chatOperationId);
     }
 
-    void ask(String question, String context, String operationId) {
+    void ask(String question, ChatContext.Attachment attachment, String operationId) {
         if (StringUtils.isBlank(question)) {
             return;
         }
@@ -138,57 +141,13 @@ final class PrChatController {
             activeChatService = chatService;
         }
 
-        // When the user has selected a code snippet, use a focused prompt (no history, no PR
-        // context) — matching VS Code's buildFocusedChatPrompt path. Responses for focused
-        // questions are not stored in chatHistory since they are context-specific.
-        if (StringUtils.isNotBlank(context)) {
-            chatService.chatFocused(
-                    context,
-                    question,
-                    runtimeSettings,
-                    chunk ->
-                            publishIfCurrentChat(
-                                    key,
-                                    selectionRevisionSnapshot,
-                                    chatId,
-                                    new ChatChunkMsg("chatChunk", key, chunk)),
-                    response -> {
-                        synchronized (hostLock) {
-                            if (!isCurrentChatLocked(key, selectionRevisionSnapshot, chatId)) {
-                                return;
-                            }
-                            activeChatService = host.defaultService();
-                            activeChatProvider = ReviewProvider.CLAUDE;
-                            activeChatOperationId = null;
-                        }
-                        publishIfCurrentChat(
-                                key,
-                                selectionRevisionSnapshot,
-                                chatId,
-                                new ChatResponseMsg("chatResponse", key, response));
-                    },
-                    err -> {
-                        synchronized (hostLock) {
-                            if (!isCurrentChatLocked(key, selectionRevisionSnapshot, chatId)) {
-                                return;
-                            }
-                            activeChatService = host.defaultService();
-                            activeChatProvider = ReviewProvider.CLAUDE;
-                            activeChatOperationId = null;
-                        }
-                        publishIfCurrentChat(
-                                key,
-                                selectionRevisionSnapshot,
-                                chatId,
-                                new ErrorMsg("chatError", key, err));
-                    });
-            return;
-        }
-
-        String prContext = host.buildPrContext(pr);
+        // Attached text rides along with the full PR context and history, so a question about a
+        // selection still knows which pull request, files, and earlier turns it belongs to.
+        ChatContext context = host.buildChatContext(pr).withAttachment(attachment);
+        String recordedQuestion = ReviewChatPrompts.historyQuestion(context, question);
 
         chatService.chat(
-                prContext,
+                context,
                 history,
                 question,
                 runtimeSettings,
@@ -204,7 +163,7 @@ final class PrChatController {
                             return;
                         }
                         List<ChatMessage> updated = new ArrayList<>(history);
-                        updated.add(new ChatMessage(ChatMessage.Role.USER, question));
+                        updated.add(new ChatMessage(ChatMessage.Role.USER, recordedQuestion));
                         updated.add(new ChatMessage(ChatMessage.Role.ASSISTANT, response));
                         chatHistory = List.copyOf(updated);
                         activeChatService = host.defaultService();

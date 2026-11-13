@@ -6,6 +6,7 @@ import type {
     DeepReviewPreparation,
     RetainedDeepReview,
     SidecarChatParams,
+    SidecarChatResult,
     SidecarGenerateReviewParams,
     SidecarGitHubAuthResult,
     SidecarPrListResult,
@@ -46,7 +47,7 @@ export class SidecarReviewClient extends SidecarGitHubClient {
      * sidecar. `onChunk` is driven by `reviews/chatChunk` notifications correlated to this
      * request's id.
      */
-    async chatReview(params: SidecarChatParams, onChunk: (text: string) => void): Promise<string> {
+    async chatReview(params: SidecarChatParams, onChunk: (text: string) => void): Promise<SidecarChatResult> {
         await this.initialize();
         const value = await this.requestRaw('reviews/chat', params, {
             timeoutMs: REVIEW_REQUEST_TIMEOUT_MS,

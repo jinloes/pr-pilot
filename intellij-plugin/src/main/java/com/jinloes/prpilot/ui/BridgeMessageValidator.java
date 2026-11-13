@@ -67,7 +67,8 @@ final class BridgeMessageValidator {
             case "askClaude" ->
                     validOperationId(node.get("operationId"))
                             && boundedText(node.get("question"), MAX_TEXT)
-                            && optionalText(node.get("context"), MAX_TEXT);
+                            && optionalText(node.get("context"), MAX_TEXT)
+                            && validOptionalContextLocation(node.get("contextLocation"));
             case "selectPR", "deleteDraft" -> hasValidPrIdentity(node);
             case "generateReview" ->
                     validOperationId(node.get("operationId"))
@@ -175,6 +176,22 @@ final class BridgeMessageValidator {
                 && optionalEnum(node.get("confidence"), Set.of("low", "medium", "high"))
                 && optionalText(node.get("rationale"), MAX_TEXT)
                 && optionalText(node.get("suggestedChange"), MAX_SUGGESTED_CHANGE);
+    }
+
+    /** Where attached chat text came from: a repository path and optional line range. */
+    private static boolean validOptionalContextLocation(JsonNode node) {
+        if (node == null || node.isNull()) return true;
+        return node.isObject()
+                && boundedText(node.get("file"), 4_096)
+                && optionalLine(node.get("startLine"))
+                && optionalLine(node.get("endLine"))
+                && optionalBoolean(node.get("oldSide"));
+    }
+
+    private static boolean optionalLine(JsonNode node) {
+        return node == null
+                || node.isNull()
+                || (node.isInt() && node.intValue() >= 0 && node.intValue() <= 10_000_000);
     }
 
     private static boolean boundedText(JsonNode node, int maxLength) {

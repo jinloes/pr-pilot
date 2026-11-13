@@ -40,6 +40,19 @@ function hasValidPrIdentity(msg: AnyMessage): boolean {
     && msg.repo.length <= 256;
 }
 
+/** Where attached chat text came from: a repository path and optional line range. */
+function isValidOptionalContextLocation(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== 'object' || Array.isArray(value)) return false;
+  const location = value as Record<string, unknown>;
+  const isLine = (line: unknown) => line === undefined || line === null
+    || (typeof line === 'number' && Number.isInteger(line) && line >= 0 && line <= 10_000_000);
+  return isBoundedString(location.file, 4_096)
+    && isLine(location.startLine)
+    && isLine(location.endLine)
+    && (location.oldSide === undefined || typeof location.oldSide === 'boolean');
+}
+
 function isBoundedString(value: unknown, maxLength = MAX_TEXT): value is string {
   return typeof value === 'string' && value.length <= maxLength;
 }
@@ -106,7 +119,8 @@ export function isValidBridgeRequest(msg: AnyMessage | null | undefined): msg is
     case 'askClaude':
       return isOperationId(msg.operationId)
         && isBoundedString(msg.question)
-        && (msg.context === undefined || isBoundedString(msg.context));
+        && (msg.context === undefined || isBoundedString(msg.context))
+        && isValidOptionalContextLocation(msg.contextLocation);
     case 'selectPR':
       return hasValidPrIdentity(msg);
     case 'generateReview':

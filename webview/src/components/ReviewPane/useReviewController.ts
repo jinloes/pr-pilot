@@ -19,9 +19,11 @@ import {
   clearWatchdog,
   chatContextSummary,
   chunkRecommendation,
+  commentLocation,
   newOperationId,
   prKey,
   summarizeDiffPreflight,
+  type ChatSelection,
   type PendingChatMessage,
   type InFlightSave,
   type PendingAutosave,
@@ -66,7 +68,9 @@ export function useReviewController({
   const [focusedCommentIdx, setFocusedCommentIdx] = useState(0)
   const [commentFocusRequestId, setCommentFocusRequestId] = useState(0)
   const [chatVisible, setChatVisible] = useState(false)
-  const [selectedContext, setSelectedContext] = useState('')
+  const [selection, setSelection] = useState<ChatSelection | null>(null)
+  const selectedContext = selection?.text ?? ''
+  const selectedContextLocation = selection?.location
   const [chatCommentDraft, setChatCommentDraft] = useState<string | null>(null)
   const [pendingChatMessage, setPendingChatMessage] = useState<PendingChatMessage | null>(null)
   const [chunkedMode, setChunkedMode] = useState(false)
@@ -143,7 +147,7 @@ export function useReviewController({
     setCommentFocusRequestId(0)
     commentNavigatedRef.current = false
     setChatVisible(false)
-    setSelectedContext('')
+    setSelection(null)
     setChatCommentDraft(null)
     setPendingChatMessage(null)
     setQualityExpanded(false)
@@ -217,7 +221,7 @@ export function useReviewController({
     chatHeightRef,
     setChatAvailableHeight,
     setChatHeightState,
-    setSelectedContext,
+    setSelection,
   })
 
   const handleChatResizeMove = useCallback((event: PointerEvent) => {
@@ -482,6 +486,7 @@ export function useReviewController({
     setPendingChatMessage({
       q: question,
       ctx: context,
+      location: commentLocation(comment),
       id,
       token,
       contextSummary: ['draft comment', 'diff excerpt', 'PR worktree (read-only)'],
@@ -520,6 +525,7 @@ export function useReviewController({
     setPendingChatMessage({
       q: question,
       ctx: context,
+      location: commentLocation(comment),
       id,
       token,
       contextSummary: ['draft comment', 'diff excerpt', 'PR worktree (read-only)'],
@@ -571,7 +577,7 @@ export function useReviewController({
     && state.kind !== 'merged'
     && state.kind !== 'authError'
     && state.kind !== 'submitted'
-  const contextSummary = chatContextSummary(pr, diff, reviewCoverage, result, selectedContext)
+  const contextSummary = chatContextSummary(pr, diff, reviewCoverage, result, selectedContext, selectedContextLocation)
   const statusMessage = state.kind === 'draftLoading'
     ? 'Checking for a saved review draft'
     : state.kind === 'generating'
@@ -626,6 +632,7 @@ export function useReviewController({
       showChat,
       chatVisible,
       selectedContext,
+      selectedContextLocation,
       pendingChatMessage,
       chatHeight,
       chatAvailableHeight,
@@ -699,10 +706,10 @@ export function useReviewController({
       },
       toggleChat: () => setChatVisible((visible) => !visible),
       openChat: () => setChatVisible(true),
-      clearSelectedContext: () => setSelectedContext(''),
+      clearSelectedContext: () => setSelection(null),
       askAboutSelection: (question) => {
         if (!chatVisible) setChatVisible(true)
-        setPendingChatMessage({ q: question, ctx: selectedContext, id: Date.now() })
+        setPendingChatMessage({ q: question, ctx: selectedContext, location: selectedContextLocation, id: Date.now() })
       },
       pendingMessageSent: () => setPendingChatMessage(null),
       placeChatReply: (body: string) => {

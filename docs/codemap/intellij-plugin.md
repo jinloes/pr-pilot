@@ -60,7 +60,8 @@ IntelliJ host integration. Depends directly on `core`, `github-engine`, and `rev
 - `ui/WebviewThemeController.java` - Theme publication.
 - `ui/WebviewPanelSupport.java` - Shared panel helpers and provider readiness.
 - `ui/WebviewBridgeMessages.java` - Java records for bridge message payloads.
-- `ui/PrChatController.java` - PR chat state, ask/clear/cancel, and chat reset.
+- `ui/PrChatController.java` - PR chat state, ask/clear/cancel, and chat reset; sends a
+  `ChatContext` built by `WebviewPanelSupport.buildChatContext` plus the question's attachment.
 - `ui/DeepReviewController.java` - IntelliJ-assisted review setup, continuation, maintenance, and
   generation-failure restore.
 - `ui/WorktreeCoordinator.java` - Active-PR worktree ownership and leases.

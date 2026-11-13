@@ -359,6 +359,7 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
             <ChatPane
               pr={pr}
               selectedContext={model.selectedContext}
+              selectedContextLocation={model.selectedContextLocation}
               onContextUsed={actions.clearSelectedContext}
               pendingMessage={model.pendingChatMessage ?? undefined}
               onPendingMessageSent={actions.pendingMessageSent}

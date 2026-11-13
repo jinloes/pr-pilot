@@ -121,6 +121,21 @@ test('requires bounded operation IDs for cancellable requests', () => {
   assert.equal(isValidBridgeRequest({ ...version, type: 'askClaude', operationId: 'chat-1', question: 'x' }), true);
 });
 
+test('validates the optional askClaude context location', () => {
+  const ask = { ...version, type: 'askClaude', operationId: 'chat-1', question: 'q', context: 'x' };
+  assert.equal(isValidBridgeRequest({ ...ask, contextLocation: { file: 'src/A.ts' } }), true);
+  assert.equal(isValidBridgeRequest({
+    ...ask, contextLocation: { file: 'src/A.ts', startLine: 3, endLine: 5, oldSide: true },
+  }), true);
+  assert.equal(isValidBridgeRequest({ ...ask, contextLocation: null }), true);
+  assert.equal(isValidBridgeRequest({ ...ask, contextLocation: { startLine: 3 } }), false);
+  assert.equal(isValidBridgeRequest({ ...ask, contextLocation: { file: 'A', startLine: -1 } }), false);
+  assert.equal(isValidBridgeRequest({ ...ask, contextLocation: { file: 'A', endLine: 1.5 } }), false);
+  assert.equal(isValidBridgeRequest({ ...ask, contextLocation: { file: 'A', oldSide: 'yes' } }), false);
+  assert.equal(isValidBridgeRequest({ ...ask, contextLocation: 'src/A.ts' }), false);
+  assert.equal(isValidBridgeRequest({ ...ask, contextLocation: [] }), false);
+});
+
 test('rejects invalid rich comment metadata', () => {
   const base = { ...version, type: 'saveDraft', number: 42, owner: 'acme', repo: 'platform', saveId: 1 };
   assert.equal(isValidBridgeRequest({

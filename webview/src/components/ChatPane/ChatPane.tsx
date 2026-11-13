@@ -3,7 +3,8 @@ import { AlertTriangle, Check, MessageSquarePlus, Send, Square, X, XCircle } fro
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { onHostMessage, sendToHost, type PR } from '@/bridge/types'
+import { onHostMessage, sendToHost, type ChatContextLocation, type PR } from '@/bridge/types'
+import { formatLocation } from '@/lib/selectionLocation'
 import { LiveStatus } from '../a11y/LiveStatus'
 import { MarkdownContent } from '../MarkdownContent/MarkdownContent'
 import { useI18n } from '@/i18n/I18nProvider'
@@ -28,10 +29,13 @@ interface Message {
 interface Props {
   pr: PR
   selectedContext?: string
+  /** Where `selectedContext` came from in the diff, when known. */
+  selectedContextLocation?: ChatContextLocation
   onContextUsed?: () => void
   pendingMessage?: {
     q: string
     ctx: string
+    location?: ChatContextLocation
     id: number
     token?: string
     contextSummary?: string[]
@@ -58,6 +62,7 @@ function newOperationId(): string {
 export function ChatPane({
   pr,
   selectedContext,
+  selectedContextLocation,
   onContextUsed,
   pendingMessage,
   onPendingMessageSent,
@@ -154,7 +159,7 @@ export function ChatPane({
 
   useEffect(() => {
     if (!pendingMessage || busy || sentPendingMessageIdRef.current === pendingMessage.id) return
-    const { q, ctx, id, token } = pendingMessage
+    const { q, ctx, location, id, token } = pendingMessage
     const requestContextSummary = pendingMessage.contextSummary ?? contextSummary
     sentPendingMessageIdRef.current = id
     pendingTokenRef.current = token
@@ -170,7 +175,7 @@ export function ChatPane({
     const operationId = newOperationId()
     stoppedTurnRef.current = false
     activeOperationIdRef.current = operationId
-    sendToHost({ type: 'askClaude', operationId, context: ctx, question: q })
+    sendToHost({ type: 'askClaude', operationId, context: ctx, ...(ctx && location ? { contextLocation: location } : {}), question: q })
   }, [pendingMessage, busy, onPendingMessageSent, contextSummary])
 
   function handleApplyVerifyAction(result: VerifyResult, token: string) {
@@ -221,6 +226,7 @@ export function ChatPane({
     const q = input.trim()
     if (!q || busy) return
     const ctx = selectedContext ?? ''
+    const location = ctx ? selectedContextLocation : undefined
     pendingContextSummaryRef.current = [...contextSummary]
     setActiveContextSummary(contextSummary)
     setMessages((prev) => [...prev, { role: 'user', content: q, contextSummary }])
@@ -230,7 +236,7 @@ export function ChatPane({
     const operationId = newOperationId()
     stoppedTurnRef.current = false
     activeOperationIdRef.current = operationId
-    sendToHost({ type: 'askClaude', operationId, context: ctx, question: q })
+    sendToHost({ type: 'askClaude', operationId, context: ctx, ...(location ? { contextLocation: location } : {}), question: q })
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -394,7 +400,10 @@ export function ChatPane({
       {/* Selected context badge */}
       {selectedContext && (
         <div className="mx-3 mb-1 flex items-center gap-2 rounded border border-border bg-muted/50 px-2 py-1">
-          <span className="flex-1 truncate text-xs text-muted-foreground">{selectedContext}</span>
+          <span className="flex-1 truncate text-xs text-muted-foreground">
+            {selectedContextLocation && <span className="mr-1 font-mono">{formatLocation(selectedContextLocation)}</span>}
+            {selectedContext}
+          </span>
           <Button
             variant="ghost"
             size="sm"

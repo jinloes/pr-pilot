@@ -27,9 +27,10 @@ guidance.
   reviewer corroboration, and opt-in drop reasons) prompts. Tests: `ReviewRulePromptsTest`,
   `ReviewCritiquePromptsTest`, `ReviewCritiquePromptsDropReasonsTest`;
   hygiene coverage lives in `ReviewPromptsRecallAndHistoryTest`.
-- `review/ReviewChatPrompts.java` - PR chat and focused-chat prompts; `CHAT_PERSONA` and
-  `buildFocusedChatPrompt` are mirrored in `vscode-extension/src/claude.ts`. Tests:
-  `ReviewChatPromptsTest`.
+- `review/ReviewChatPrompts.java` - PR chat prompt from a `ChatContext`: section budgets, diff file
+  priority, workspace guidance, and the recorded history question. Tests: `ReviewChatPromptsTest`.
+- `review/DiffFiles.java` - Splits a unified diff into per-file sections with line counts; shared by
+  chat and chunked review. Tests: `DiffFilesTest`.
 - `review/DiffLineAnnotator.java` - New-side line-number annotation of unified diffs for prompts.
   Tests: `DiffLineAnnotatorTest`.
 - `review/ReviewResultParser.java` - Review JSON parsing, comment repair, and category validation

@@ -222,10 +222,10 @@ test('SidecarClient times out one request without aborting a pending review', as
   stdout.write(encodeFrame(JSON.stringify({
     jsonrpc: '2.0',
     id: reviewRequest.id,
-    result: { content: 'completed' },
+    result: { content: 'completed', historyQuestion: 'Review this change' },
   })));
 
-  assert.equal(await review, 'completed');
+  assert.deepEqual(await review, { content: 'completed', historyQuestion: 'Review this change' });
   assert.deepEqual(chunks, ['still running']);
   assert.equal(harness.killCount.value, 0);
   client.dispose();

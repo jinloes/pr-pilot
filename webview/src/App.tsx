@@ -170,7 +170,7 @@ export default function App() {
     selectedPrRef.current = nextPr
     setSelectedPR(nextPr)
     if (window.innerWidth < 640) setActivePane('review')
-    sendToHost({ type: 'selectPR', number: nextPr.number, owner: nextPr.owner, repo: nextPr.repo })
+    sendToHost({ type: 'selectPR', number: nextPr.number, owner: nextPr.owner, repo: nextPr.repo, author: nextPr.author })
     return true
   }, [pendingPrSelection])
 
@@ -218,7 +218,7 @@ export default function App() {
       selectedPrRef.current = nextPr
       setSelectedPR(nextPr)
       if (window.innerWidth < 640) setActivePane('review')
-      sendToHost({ type: 'selectPR', number: nextPr.number, owner: nextPr.owner, repo: nextPr.repo })
+      sendToHost({ type: 'selectPR', number: nextPr.number, owner: nextPr.owner, repo: nextPr.repo, author: nextPr.author })
     })
   }, [nextPrSelectionAllowed])
 
