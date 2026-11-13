@@ -29,7 +29,8 @@ class ReviewPromptsTest {
                                     + "-unrecognized-enum-setter-closed-world-state-sets"
                                     + "-prompt-rule-contradictions-python-exc-info"
                                     + "-incomplete-fail-closed-validation"
-                                    + "-message-text-error-classification-fail-closed-discards");
+                                    + "-message-text-error-classification-fail-closed-discards"
+                                    + "-nondeterministic-pick-broken-doc-passages-placeholder-sort-keys");
         }
 
         @Test
@@ -57,6 +58,11 @@ class ReviewPromptsTest {
                     .contains("fail closed on a malformed entry")
                     .contains("- Errors classified by message text:")
                     .contains("match only the")
+                    .contains("- Nondeterministic pick:")
+                    .contains("shared placeholder (\"missing\", \"unknown\", 0)")
+                    .contains("Paging queries written in documentation or runbooks count too.")
+                    .contains("arbitrary() or any_value()")
+                    .contains("end the ordering with a unique tie-breaker")
                     .contains("one aggregated WARN")
                     .contains("- Stated data anomalies:")
                     .contains("use the later of the two")
