@@ -39,8 +39,9 @@ guidance.
 - `review/ReviewResultParser.java` - Review JSON parsing, comment repair, and category validation
   including compatibility findings, plus the critique's optional dropped-finding reasons. Tests:
   `ReviewResultParserTest`, `ReviewResultParserDroppedReasonsTest`.
-- `review/CopilotService.java` - Copilot SDK execution with the same review API. Tests:
-  `CopilotServiceTest`, `CopilotServiceCancellationTest`, and
+- `review/CopilotService.java` - Copilot SDK execution with the same review API and scoped
+  `RuntimeClient` reuse across multi-stage reviews. Tests: `CopilotServiceTest`,
+  `CopilotServiceClientScopeTest`, `CopilotServiceCancellationTest`, and
   `CopilotServiceHostCodeIntelligenceTest`, sharing `CopilotServiceTestSupport`.
 - `review/CopilotSdkRuntime.java` - Seam over the official Copilot Java SDK: client and session
   requests, the runtime interfaces tests fake, per-session MCP servers, and the deny-by-default
@@ -59,8 +60,8 @@ guidance.
   cancellation checkpoints, fallback behavior, final CI suppression, and the final comment cap.
   Tests: `ReviewPipelineServiceTest`, `ReviewPipelineRecallTest`,
   `ReviewPipelineSecondReviewerTest`, `ReviewPipelineRulesAndHygieneTest`,
-  `ReviewPipelineBaseCommitTest`, and `ReviewPipelineAuthorityTest`, sharing
-  `ReviewPipelineTestSupport`.
+  `ReviewPipelineConcurrencyTest`, `ReviewPipelineBaseCommitTest`, and
+  `ReviewPipelineAuthorityTest`, sharing `ReviewPipelineTestSupport`.
 - `review/ReviewProviderExecutor.java` - Provider seam that the pipeline and `ReviewRulesPass`
   drive (first pass, later-stage prompt completions, cooperative cancellation), with Claude and
   Copilot adapters.

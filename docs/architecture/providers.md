@@ -15,10 +15,14 @@ attached text with its file and lines) and never assemble prompt text themselves
 Both the IntelliJ plugin and the sidecar use the official Java Copilot SDK
 (`com.github:copilot-sdk-java`, wrapped by `review-engine`'s `CopilotService`) to control local
 `copilot`. Stream `assistant.message_delta` to text chunks, surface `tool.execution_start` names as
-status, and parse final `assistant.message` JSON with delta fallback. VS Code's `copilot.ts`
-additionally uses the TypeScript SDK (`@github/copilot-sdk`) directly, but only for model discovery
-(`listModels`) — there is no sidecar RPC endpoint for model discovery yet, so that one path still
-spawns the CLI in the extension process.
+status, and parse final `assistant.message` JSON with delta fallback. During a multi-stage
+`ReviewPipelineService` run, `CopilotService.openClientScope()` keeps one started `RuntimeClient`
+alive across the primary pass, chunked batches, supervisor, rule selection/agents, hygiene pass, and
+self-critique (closing each `RuntimeSession` after its call and invalidating the shared client if
+`createSession` fails), while standalone calls keep per-call client lifecycles. VS Code's
+`copilot.ts` additionally uses the TypeScript SDK (`@github/copilot-sdk`) directly, but only for
+model discovery (`listModels`) — there is no sidecar RPC endpoint for model discovery yet, so that
+one path still spawns the CLI in the extension process.
 
 ### Provider capability isolation
 Claude review/chat processes are granted a **read-only tool allowlist** (`--tools "Read Grep Glob"`,

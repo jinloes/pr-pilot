@@ -73,6 +73,14 @@ export interface ViewState {
     worktreeKey: string | null;
     worktreeEpoch: number;
     worktreeCreation: { key: string; promise: Promise<string> } | null;
+    prefetchedPrContext?: {
+        key: string;
+        headSha: string;
+        baseSha: string;
+        existingReviewsPromise: Promise<string>;
+        commitsPromise: Promise<{ summary: string; closingIssueNumbers: number[] }>;
+        linkedIssuesPromise: Promise<string>;
+    } | null;
     disposed: boolean;
     deepReview: DeepReviewFlow;
     draftRecoveryStore: DraftRecoveryStore;

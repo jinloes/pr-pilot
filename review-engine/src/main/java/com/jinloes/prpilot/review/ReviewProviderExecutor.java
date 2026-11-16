@@ -1,6 +1,7 @@
 package com.jinloes.prpilot.review;
 
 import com.jinloes.prpilot.model.PRReviewRequest;
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.function.BiConsumer;
@@ -35,6 +36,14 @@ interface ReviewProviderExecutor {
     /** The model name shown in review progress, or blank when unknown. */
     default String displayModel() {
         return "";
+    }
+
+    /**
+     * Opens a multi-call review scope so providers that spawn a daemon (Copilot SDK) can reuse one
+     * started client across every stage and rule call of the review.
+     */
+    default Closeable openSessionScope() {
+        return () -> {};
     }
 
     record ClaudeExecutor(ClaudeService service, String model) implements ReviewProviderExecutor {
@@ -125,6 +134,11 @@ interface ReviewProviderExecutor {
         @Override
         public String displayModel() {
             return StringUtils.defaultIfBlank(model, "Copilot default");
+        }
+
+        @Override
+        public Closeable openSessionScope() {
+            return service.openClientScope();
         }
     }
 }

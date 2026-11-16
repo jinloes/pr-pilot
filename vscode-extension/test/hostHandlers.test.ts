@@ -49,7 +49,7 @@ function host(settings: Record<string, unknown> = {}) {
             return require(name);
         };
         const expose = path.basename(file) === 'extension.js'
-            ? '\nexports.testHost = {refresh: handleRefreshPRs, cancelChat: handleCancelChat, generate: handleGenerateReview, '
+            ? '\nexports.testHost = {refresh: handleRefreshPRs, select: handleSelectPR, cancelChat: handleCancelChat, generate: handleGenerateReview, '
                 + 'saveRepositoryInstructions: handleSaveRepositoryInstructions, setClient: c => {sidecarClient=c}};'
             : '';
         runInNewContext(readFileSync(file, 'utf8') + expose, { module, exports: module.exports,
@@ -58,7 +58,7 @@ function host(settings: Record<string, unknown> = {}) {
         return module.exports;
     }
     const api = load(require.resolve('../src/extension')).testHost as {
-        refresh: Handler; cancelChat: Handler; generate: Handler; setClient: (value: object) => void;
+        refresh: Handler; select: Handler; cancelChat: Handler; generate: Handler; setClient: (value: object) => void;
         saveRepositoryInstructions: (state: Record<string, unknown>, msg: Record<string, unknown>,
             push: (message: Record<string, unknown>) => void) => Promise<void>;
     };
@@ -68,6 +68,8 @@ function host(settings: Record<string, unknown> = {}) {
         prStateFilter: 'open', searchScope: 'currentRepo', activePR: null, pendingReviewId: null,
         refreshRevision: 0, selectionRevision: 1, generationRevision: 1, chatRevision: 1,
         activeProviderOperation: null, chatHistory: new Map(), disposed: false,
+        worktreeDir: null, gitRoot: null, worktreeKey: null, worktreeEpoch: 0, worktreeCreation: null,
+        prefetchedPrContext: null,
     };
     return { api, state, messages, cancelled, updates, settings };
 }
@@ -256,6 +258,66 @@ test('ordinary generation never asks for the incremental diff or sends a scope',
     assert.equal(run.generateCalls[0].diff, 'pr-diff');
     assert.equal(run.generateCalls[0].incrementalBaselineSha, undefined);
     assert.equal(run.result !== undefined && 'reviewScope' in run.result, false);
+});
+
+test('selectPR prefetches commits and linked issues and generateReview reuses them while headSha matches', async () => {
+    const h = host({});
+    let commitCalls = 0;
+    let issueCalls = 0;
+    let currentHead = '1'.repeat(40);
+    const generateCalls: Record<string, unknown>[] = [];
+    h.api.setClient({
+        cancelReview: async () => {},
+        findGitRoot: async () => '/fixture',
+        detectRepo: async () => 'acme/widget',
+        createWorktree: async () => ({ status: 'created', worktreeDir: '/fixture/wt', message: '' }),
+        removeWorktree: async () => {},
+        getDraftReview: async () => ({ status: 'none' }),
+        getPullRequestDiff: async () => ({ status: 'ok', message: 'ok', diff: 'pr-diff', truncated: false, limitBytes: 250000 }),
+        getExistingReviews: async () => ({ status: 'ok', summary: 'Prior reviewer note' }),
+        getPullRequestDetail: async () => ({
+            status: 'ok',
+            detail: {
+                title: 'Fast PR',
+                body: 'Closes #9',
+                merged: false,
+                baseSha: '0'.repeat(40),
+                baseRepoFullName: 'acme/widget',
+                head: { ref: 'feat', sha: currentHead, repoFullName: 'acme/widget' },
+            },
+        }),
+        getCommits: async () => {
+            commitCalls += 1;
+            return { summary: `commit-${commitCalls}`, closingIssueNumbers: [9] };
+        },
+        getLinkedIssues: async () => {
+            issueCalls += 1;
+            return `issue-${issueCalls}`;
+        },
+        getCheckStatus: async () => ({ summary: 'checks-ok', annotations: [] }),
+        getRepoProfile: async () => 'Java',
+        generateReview: async (params: Record<string, unknown>) => {
+            generateCalls.push(params);
+            return { summary: 'Done.', verdict: 'COMMENT', lineComments: [] };
+        },
+    });
+    Object.assign(h.state, {
+        generatedReviews: new Map(),
+        draftRecoveryStore: { get: () => null, clear: async () => {} },
+    });
+
+    await h.api.select(h.state, { number: 42, owner: 'acme', repo: 'widget', title: 'Fast PR', body: 'Closes #9' });
+    await h.api.generate(h.state, { type: 'generateReview', operationId: 'op-1', number: 42, owner: 'acme', repo: 'widget' });
+
+    assert.equal(commitCalls, 1, 'generateReview should reuse selectPR commit prefetch when headSha matches');
+    assert.equal(issueCalls, 1, 'generateReview should reuse selectPR linked-issue prefetch when headSha matches');
+    assert.equal(generateCalls[0].commits, 'commit-1');
+    assert.equal(generateCalls[0].linkedIssue, 'issue-1');
+
+    currentHead = '2'.repeat(40);
+    await h.api.generate(h.state, { type: 'generateReview', operationId: 'op-2', number: 42, owner: 'acme', repo: 'widget' });
+    assert.equal(commitCalls, 2, 'generateReview should refetch commits when headSha advances');
+    assert.equal(generateCalls[1].commits, 'commit-2');
 });
 
 test('generation sends the second reviewer its own effort, defaulting to medium', async () => {

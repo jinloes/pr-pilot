@@ -62,8 +62,10 @@ rule declares the same name, either as a valid structured rule (which replaces i
 override one. Built-ins do not count toward the 50-file folder cap, but they do count toward the
 25-rule agent cap. Their sources start with `built-in/`.
 
-`ReviewRulesPass` runs after the candidate is built and after the attribution snapshot, and before
-the hygiene pass. When structured rules exist, one tool-free selection call (90 s) sees the PR
+`ReviewRulesPass` runs in parallel with the primary/supervisor passes for ordinary reviews (and
+sequentially after supervision in deep semantic reviews so authority checks remain stage-ordered),
+merging its findings after the attribution snapshot and before self-critique. When structured rules
+exist, one tool-free selection call (90 s) sees the PR
 metadata, description, changed paths with added/removed counts, and each rule's name, description
 and trigger, and returns `{"triggered":[...]}`. Unknown names are ignored. Any failure or
 unparseable output fails open to every structured rule, because a missed rule is worse than an extra

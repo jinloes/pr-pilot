@@ -11,6 +11,10 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -18,6 +22,7 @@ import java.util.regex.Pattern;
 /** Engine-owned batching and final cross-file reconciliation for large pull requests. */
 public final class ChunkedReviewService {
     static final int MAX_FILES_PER_BATCH = 6;
+    static final int BATCH_CONCURRENCY = 3;
     static final int MAX_DIFF_CHARS_PER_BATCH = 220_000;
     static final int MAX_RECONCILIATION_INDEX_CHARS = 120_000;
     private static final int MAX_CHANGED_LINES_PER_FILE = 80;
@@ -62,19 +67,10 @@ public final class ChunkedReviewService {
         List<DiffBatch> batches = buildBatches(request.getDiff());
         if (batches.size() <= 1) return providerCall.review(request);
 
-        List<ReviewPassResult> passes = new ArrayList<>();
-        for (int index = 0; index < batches.size(); index++) {
-            DiffBatch batch = batches.get(index);
-            onStatus.accept("Reviewing batch " + (index + 1) + " of " + batches.size() + "…");
-            passes.add(
-                    providerCall.review(
-                            copyRequest(
-                                    request,
-                                    batch.diff(),
-                                    joinInstructions(
-                                            request.getCustomInstructions(),
-                                            batchInstructions(batch, index, batches.size())))));
-        }
+        List<ReviewPassResult> passes =
+                request.getSemanticContext() != null
+                        ? runBatchesSequentially(request, batches, onStatus, providerCall)
+                        : runBatchesConcurrently(request, batches, onStatus, providerCall);
         List<ReviewResult> results = passes.stream().map(ReviewPassResult::review).toList();
 
         onStatus.accept("Reconciling cross-file contracts and batch findings…");
@@ -143,6 +139,81 @@ public final class ChunkedReviewService {
     private static PRReviewRequest copyRequest(
             PRReviewRequest source, String diff, String customInstructions) {
         return source.toBuilder(diff).customInstructions(customInstructions).build();
+    }
+
+    private static List<ReviewPassResult> runBatchesSequentially(
+            PRReviewRequest request,
+            List<DiffBatch> batches,
+            Consumer<String> onStatus,
+            PassProviderCall providerCall)
+            throws IOException, InterruptedException {
+        List<ReviewPassResult> passes = new ArrayList<>(batches.size());
+        for (int index = 0; index < batches.size(); index++) {
+            DiffBatch batch = batches.get(index);
+            onStatus.accept("Reviewing batch " + (index + 1) + " of " + batches.size() + "…");
+            passes.add(
+                    providerCall.review(
+                            copyRequest(
+                                    request,
+                                    batch.diff(),
+                                    joinInstructions(
+                                            request.getCustomInstructions(),
+                                            batchInstructions(batch, index, batches.size())))));
+        }
+        return passes;
+    }
+
+    private static List<ReviewPassResult> runBatchesConcurrently(
+            PRReviewRequest request,
+            List<DiffBatch> batches,
+            Consumer<String> onStatus,
+            PassProviderCall providerCall)
+            throws IOException, InterruptedException {
+        int poolSize = Math.min(BATCH_CONCURRENCY, batches.size());
+        ExecutorService executor =
+                Executors.newFixedThreadPool(
+                        poolSize,
+                        runnable -> {
+                            Thread thread = new Thread(runnable, "pr-pilot-chunked-batch");
+                            thread.setDaemon(true);
+                            return thread;
+                        });
+        List<Future<ReviewPassResult>> futures = new ArrayList<>(batches.size());
+        boolean succeeded = false;
+        try {
+            for (int index = 0; index < batches.size(); index++) {
+                DiffBatch batch = batches.get(index);
+                onStatus.accept("Reviewing batch " + (index + 1) + " of " + batches.size() + "…");
+                PRReviewRequest batchRequest =
+                        copyRequest(
+                                request,
+                                batch.diff(),
+                                joinInstructions(
+                                        request.getCustomInstructions(),
+                                        batchInstructions(batch, index, batches.size())));
+                futures.add(executor.submit(() -> providerCall.review(batchRequest)));
+            }
+            List<ReviewPassResult> passes = new ArrayList<>(batches.size());
+            for (Future<ReviewPassResult> future : futures) {
+                try {
+                    passes.add(future.get());
+                } catch (ExecutionException failed) {
+                    Throwable cause = failed.getCause();
+                    if (cause instanceof IOException ioException) throw ioException;
+                    if (cause instanceof InterruptedException interrupted) throw interrupted;
+                    if (cause instanceof RuntimeException runtime) throw runtime;
+                    if (cause instanceof Error error) throw error;
+                    throw new IOException("Chunked batch review failed", cause);
+                }
+            }
+            succeeded = true;
+            return passes;
+        } finally {
+            if (!succeeded) {
+                futures.forEach(future -> future.cancel(true));
+            }
+            executor.shutdownNow();
+        }
     }
 
     static ReviewResult mergeFallback(List<ReviewResult> results) {

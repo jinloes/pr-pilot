@@ -214,6 +214,7 @@ class ClaudeReviewsViewProvider {
             worktreeKey: null,
             worktreeEpoch: 0,
             worktreeCreation: null,
+            prefetchedPrContext: null,
             disposed: false,
             deepReview: new DeepReviewFlow(),
             draftRecoveryStore: this.draftRecoveryStore,

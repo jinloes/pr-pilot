@@ -41,6 +41,7 @@ final class WebviewPanelLifecycle {
         panel.prefetchedDiff = null;
         panel.prefetchedValidationDiff = null;
         panel.prefetchedExistingReviews = null;
+        panel.prefetchedPrContext = null;
         return new WebviewPanel.LifecycleTransition(
                 ++panel.selectionRevision,
                 reviewService,

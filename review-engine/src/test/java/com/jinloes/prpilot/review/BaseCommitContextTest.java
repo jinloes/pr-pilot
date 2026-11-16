@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import org.apache.commons.io.FileUtils;
@@ -709,7 +710,7 @@ class BaseCommitContextTest {
         void runsNoSchemaCommandsWhenNoSchemaChanged() throws Exception {
             write("src/App.java", "class App {}\n");
             String base = commit("base");
-            List<List<String>> commands = new ArrayList<>();
+            List<List<String>> commands = new CopyOnWriteArrayList<>();
             BaseCommitContext recording =
                     new BaseCommitContext(
                             new BoundedProcessRunner(

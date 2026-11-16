@@ -8,8 +8,10 @@ import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewResult;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -120,7 +122,7 @@ class ChunkedReviewServiceTest {
     @Test
     void reconcilesCrossFileContractAfterReviewingAllBatches() throws Exception {
         ChunkedReviewService service = new ChunkedReviewService();
-        List<PRReviewRequest> requests = new ArrayList<>();
+        List<PRReviewRequest> requests = new CopyOnWriteArrayList<>();
         PRReviewRequest request = PRReviewRequest.builder(pr(), sevenFileSignatureDiff()).build();
         AtomicInteger calls = new AtomicInteger();
 
@@ -178,6 +180,42 @@ class ChunkedReviewServiceTest {
         assertThat(result.getSummary().length()).isGreaterThan(1_200);
     }
 
+    @Test
+    void reviewsBatchesConcurrentlyAndPreservesBatchOrderInReconciliation() throws Exception {
+        ChunkedReviewService service = new ChunkedReviewService();
+        CountDownLatch bothStarted = new CountDownLatch(2);
+        List<PRReviewRequest> reconciliationRequests = new CopyOnWriteArrayList<>();
+
+        ReviewResult result =
+                service.review(
+                        PRReviewRequest.builder(pr(), sevenFileSignatureDiff()).build(),
+                        ignored -> {},
+                        current -> {
+                            String instructions = current.getCustomInstructions();
+                            if (instructions != null
+                                    && instructions.contains("mandatory final reconciliation")) {
+                                reconciliationRequests.add(current);
+                                return new ReviewResult("reconciled", "APPROVE", List.of());
+                            }
+                            bothStarted.countDown();
+                            assertThat(bothStarted.await(5, TimeUnit.SECONDS)).isTrue();
+                            boolean first =
+                                    instructions != null
+                                            && instructions.contains("Chunked review batch 1/2.");
+                            if (first) Thread.sleep(30);
+                            return new ReviewResult(
+                                    first ? "first-batch-summary" : "second-batch-summary",
+                                    "APPROVE",
+                                    List.of());
+                        });
+
+        assertThat(result.getSummary()).isEqualTo("reconciled");
+        String reconciliationPrompt = reconciliationRequests.get(0).getCustomInstructions();
+        assertThat(reconciliationPrompt.indexOf("first-batch-summary"))
+                .isPositive()
+                .isLessThan(reconciliationPrompt.indexOf("second-batch-summary"));
+    }
+
     @Nested
     class FinalValidationRequest {
 
@@ -221,7 +259,7 @@ class ChunkedReviewServiceTest {
             PRReviewRequest request =
                     PRReviewRequest.builder(pr(), sevenFileSignatureDiff() + omitted.trailer())
                             .build();
-            List<PRReviewRequest> requests = new ArrayList<>();
+            List<PRReviewRequest> requests = new CopyOnWriteArrayList<>();
 
             new ChunkedReviewService()
                     .review(
@@ -280,7 +318,7 @@ class ChunkedReviewServiceTest {
 
         @Test
         void completeCoverageAddsNoSectionToAnyBatch() throws Exception {
-            List<PRReviewRequest> requests = new ArrayList<>();
+            List<PRReviewRequest> requests = new CopyOnWriteArrayList<>();
 
             new ChunkedReviewService()
                     .review(
@@ -316,7 +354,7 @@ class ChunkedReviewServiceTest {
 
         @Test
         void batchAndReconciliationRequestsKeepRecallHistoryAndBaseSha() throws Exception {
-            List<PRReviewRequest> requests = new ArrayList<>();
+            List<PRReviewRequest> requests = new CopyOnWriteArrayList<>();
 
             new ChunkedReviewService()
                     .review(
@@ -350,7 +388,7 @@ class ChunkedReviewServiceTest {
 
         @Test
         void defaultRequestsKeepRecallOffAndContextBlank() throws Exception {
-            List<PRReviewRequest> requests = new ArrayList<>();
+            List<PRReviewRequest> requests = new CopyOnWriteArrayList<>();
 
             new ChunkedReviewService()
                     .review(

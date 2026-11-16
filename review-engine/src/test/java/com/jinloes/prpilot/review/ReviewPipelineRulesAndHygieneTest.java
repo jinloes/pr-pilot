@@ -46,7 +46,9 @@ class ReviewPipelineRulesAndHygieneTest {
             pipeline(provider)
                     .review(request(oneRiskyHunk()), false, true, false, statuses::add, null);
 
-            assertThat(provider.callOrder).containsExactly("review", "hygiene", "critique");
+            assertThat(provider.callOrder)
+                    .containsExactlyInAnyOrder("review", "hygiene", "critique")
+                    .endsWith("critique");
             assertThat(provider.hygieneCalls)
                     .singleElement()
                     .satisfies(
@@ -157,7 +159,11 @@ class ReviewPipelineRulesAndHygieneTest {
                             null);
 
             assertThat(provider.callOrder)
-                    .containsExactly("review", "rule-selection", "rule", "hygiene", "critique");
+                    .containsExactlyInAnyOrder(
+                            "review", "rule-selection", "rule", "hygiene", "critique")
+                    .endsWith("critique");
+            assertThat(provider.callOrder.indexOf("rule-selection"))
+                    .isLessThan(provider.callOrder.indexOf("rule"));
             assertThat(provider.completeCalls.get(0).prompt())
                     .contains("<draft_review>", "Bug.", "Rule bug.", "(rule: gated)");
             assertThat(statuses)
@@ -372,7 +378,9 @@ class ReviewPipelineRulesAndHygieneTest {
                                     statuses::add,
                                     null);
 
-            assertThat(provider.callOrder).containsExactly("review", "hygiene", "critique");
+            assertThat(provider.callOrder)
+                    .containsExactlyInAnyOrder("review", "hygiene", "critique")
+                    .endsWith("critique");
             assertThat(statuses)
                     .containsSubsequence(
                             ReviewPipelineService.STATUS_HYGIENE_FAILED,

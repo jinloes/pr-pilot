@@ -22,9 +22,9 @@ sequenceDiagram
     GitHubEngine->>GitHubEngine: Bound each diff by whole files (review 250 KB, validation 1 MB, 250 KB per file)
     GitHubEngine-->>Host: Token-free results, with a DiffCoverage trailer appended only when a diff omits files or its scan is incomplete
     Note over GitHubEngine,Host: A complete diff is returned byte-identical with no trailer.<br/>The trailer declares omitted/listed counts, the budget, scan completeness, and up to 200 omitted paths.<br/>HTTP 406 from GitHub becomes diff_too_large with non-retryable size-limit copy.
-    Host->>Worktree: Find repository root and create PR-head worktree
+    Host->>Worktree: Find repository root and warm PR-head worktree (plus commits and linked-issue prefetch keyed by headSha)
     Worktree-->>Host: Exact or failed worktree result
-    Note over Host,Worktree: IntelliJ calls in-process while VS Code routes these calls through the sidecar.
+    Note over Host,Worktree: IntelliJ calls in-process while VS Code routes these calls through the sidecar.<br/>Immutable per-SHA commits and linked issues are prefetched in the background after draftLoaded.
 
     Reviewer->>UI: Generate review with per-review overrides
     UI->>Host: generateReview(prKey, options)
@@ -92,21 +92,29 @@ sequenceDiagram
     Pipeline->>Pipeline: GeneratedProtoCode leaves regenerated protobuf code out of the reviewed diff (coverage kept) and lists generated files in generated_code
 
     opt baseSha supplied
-        Pipeline->>Pipeline: BaseCommitContext reads guidance (configured guidance globs first, then built-in defaults) and changed-file history from base-commit git objects only (fetch by SHA if missing, fail-open)
-        Pipeline->>Pipeline: For changed .proto files, compares each schema with the old side of the diff (incremental baseline or merge base) into proto_schema_changes, noting committed generated code left stale (own sub-budget)
-        Pipeline->>Pipeline: Finds call sites of changed symbols, including generated-code names of changed .proto elements (last, own sub-budget)
+        Pipeline->>Pipeline: Verify work tree and base commit (fetch by SHA if missing, fail-open)
+        par Resolve base-commit context concurrently
+            Pipeline->>Pipeline: Read guidance (configured guidance globs first, then built-in defaults) from base-commit git objects
+        and
+            Pipeline->>Pipeline: Read changed-file history from base-commit git objects
+        and
+            Pipeline->>Pipeline: For changed .proto files, compare each schema with the old side of the diff into proto_schema_changes (own sub-budget)
+        and
+            Pipeline->>Pipeline: Find call sites of changed symbols, including generated-code names of changed .proto elements (own sub-budget)
+        end
     end
 
     opt builtInRules on or reviewRulesDirectory configured
         Pipeline->>Pipeline: LocalReviewRules loads built-in rules, then bounded local rule files that override them by name (fail-open)
     end
 
+    Note over Pipeline,Provider: Copilot reviews open one shared RuntimeClient scope across every stage and rule session.<br/>Ordinary reviews overlap ReviewRulesPass and recall hygiene with primary/supervision (deep reviews stay stage-ordered).
     alt Direct review
         Pipeline->>Provider: Primary review with read-only worktree tools, of the 250 KB review diff for single-pass or the 1 MB validation diff for IntelliJ-assisted deep review
         Provider-->>Pipeline: Review JSON and inspection ledger
     else Chunked review
-        Note over Pipeline,Provider: Chunked review uses the 1 MB validation diff, and every batch copy keeps its coverage.
-        loop Each bounded file batch
+        Note over Pipeline,Provider: Chunked review uses the 1 MB validation diff (up to 3 batches in parallel for ordinary reviews; sequential for deep reviews).
+        loop Bounded file batches (concurrent up to 3)
             Pipeline->>Provider: Review batch and record contract signals
             Provider-->>Pipeline: Batch review and inspection ledger
         end

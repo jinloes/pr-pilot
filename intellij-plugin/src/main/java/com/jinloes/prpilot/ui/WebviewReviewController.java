@@ -31,6 +31,8 @@ import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewResultMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewScopeDto;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.SimpleMsg;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -188,6 +190,7 @@ final class WebviewReviewController {
                             String snapshotDiff;
                             String snapshotValidationDiff;
                             String snapshotReviews;
+                            WebviewPanel.PrefetchedPrContext snapshotContext;
                             PullRequest promptPr;
                             synchronized (panel) {
                                 if (!panel.isCurrentGenerationLocked(
@@ -198,6 +201,7 @@ final class WebviewReviewController {
                                 snapshotDiff = panel.prefetchedDiff;
                                 snapshotValidationDiff = panel.prefetchedValidationDiff;
                                 snapshotReviews = panel.prefetchedExistingReviews;
+                                snapshotContext = panel.prefetchedPrContext;
                             }
 
                             // Reuse prefetched diff; fall back to live fetch only if stale.
@@ -269,76 +273,135 @@ final class WebviewReviewController {
                                 return;
                             }
 
-                            // Reuse prefetched existing reviews; fall back to live fetch only if
-                            // stale.
-                            String existingReviews;
-                            if (snapshotReviews != null) {
-                                existingReviews = snapshotReviews;
-                            } else {
-                                try {
-                                    existingReviews =
-                                            panel.ghSvc.getExistingReviewsSummary(
-                                                    owner, repo, number);
-                                } catch (Exception e) {
-                                    log.warn(
-                                            "getExistingReviewsSummary failed: {}", e.getMessage());
-                                    existingReviews = "";
-                                }
-                            }
-
-                            // Prompt context. Each of these is additive: a failure degrades the
-                            // prompt by one section and must never fail the review, so unlike the
-                            // diff none of them abort the flow.
-                            String ciStatus = "";
-                            List<CiAnnotation> ciAnnotations = List.of();
-                            String baseSha = "";
-                            try {
-                                IntellijGitHubService.PRRevisions revisions =
-                                        panel.ghSvc.getPRRevisions(owner, repo, number);
-                                baseSha = revisions.baseSha();
-                                String headSha = revisions.headSha();
-                                if (StringUtils.isNotBlank(headSha)) {
-                                    IntellijGitHubService.CheckContext checks =
-                                            panel.ghSvc.getCheckContext(owner, repo, headSha);
-                                    ciStatus = checks.summary();
-                                    ciAnnotations = checks.annotations();
-                                }
-                            } catch (Exception e) {
-                                log.warn("getCheckContext failed: {}", e.getMessage());
-                            }
-                            IntellijGitHubService.CommitContext commitContext =
-                                    new IntellijGitHubService.CommitContext("", List.of());
-                            try {
-                                commitContext = panel.ghSvc.getCommitContext(owner, repo, number);
-                            } catch (Exception e) {
-                                log.warn("getCommitContext failed: {}", e.getMessage());
-                            }
-                            String linkedIssue = "";
-                            try {
-                                linkedIssue =
-                                        panel.ghSvc.getLinkedIssueSummary(
-                                                owner,
-                                                repo,
-                                                promptPr.getBody(),
-                                                commitContext.closingIssueNumbers());
-                            } catch (Exception e) {
-                                log.warn("getLinkedIssueSummary failed: {}", e.getMessage());
-                            }
-
+                            // Run additive GitHub context and worktree resolution concurrently.
+                            // CI status is always fetched fresh for the current headSha so checks
+                            // that finished after selectPR are never missed, while immutable
+                            // commits/linked-issue text for the same headSha reuses the prefetch.
                             panel.publishIfCurrentGeneration(
                                     key,
                                     reviewRevision,
                                     generationId,
                                     new ReviewGeneratingMsg(
                                             "reviewGenerating", key, "Preparing PR branch…"));
+
+                            CompletableFuture<IntellijClaudeService> worktreeFuture =
+                                    CompletableFuture.supplyAsync(
+                                            () -> {
+                                                try {
+                                                    return deep == null
+                                                            ? panel.resolvePrClaudeService(promptPr)
+                                                            : new IntellijClaudeService(
+                                                                    deep.pending()
+                                                                            .preparation()
+                                                                            .worktree());
+                                                } catch (Exception e) {
+                                                    throw new CompletionException(e);
+                                                }
+                                            });
+
+                            CompletableFuture<String> existingReviewsFuture =
+                                    snapshotReviews != null
+                                            ? CompletableFuture.completedFuture(snapshotReviews)
+                                            : CompletableFuture.supplyAsync(
+                                                    () -> {
+                                                        try {
+                                                            return panel.ghSvc
+                                                                    .getExistingReviewsSummary(
+                                                                            owner, repo, number);
+                                                        } catch (Exception e) {
+                                                            log.warn(
+                                                                    "getExistingReviewsSummary"
+                                                                            + " failed: {}",
+                                                                    e.getMessage());
+                                                            return "";
+                                                        }
+                                                    });
+
+                            CompletableFuture<IntellijGitHubService.PRRevisions> revisionsFuture =
+                                    CompletableFuture.supplyAsync(
+                                            () -> {
+                                                try {
+                                                    return panel.ghSvc.getPRRevisions(
+                                                            owner, repo, number);
+                                                } catch (Exception e) {
+                                                    log.warn(
+                                                            "getPRRevisions failed: {}",
+                                                            e.getMessage());
+                                                    return new IntellijGitHubService.PRRevisions(
+                                                            "", "");
+                                                }
+                                            });
+
+                            CompletableFuture<IntellijGitHubService.CheckContext> checksFuture =
+                                    revisionsFuture.thenApplyAsync(
+                                            revisions -> {
+                                                if (StringUtils.isBlank(revisions.headSha())) {
+                                                    return new IntellijGitHubService.CheckContext(
+                                                            "", List.of());
+                                                }
+                                                try {
+                                                    return panel.ghSvc.getCheckContext(
+                                                            owner, repo, revisions.headSha());
+                                                } catch (Exception e) {
+                                                    log.warn(
+                                                            "getCheckContext failed: {}",
+                                                            e.getMessage());
+                                                    return new IntellijGitHubService.CheckContext(
+                                                            "", List.of());
+                                                }
+                                            });
+
+                            record CommitsAndIssue(String commits, String linkedIssue) {}
+                            CompletableFuture<CommitsAndIssue> commitsAndIssueFuture =
+                                    revisionsFuture.thenApplyAsync(
+                                            revisions -> {
+                                                if (snapshotContext != null
+                                                        && StringUtils.isNotBlank(
+                                                                revisions.headSha())
+                                                        && revisions
+                                                                .headSha()
+                                                                .equals(
+                                                                        snapshotContext
+                                                                                .headSha())) {
+                                                    return new CommitsAndIssue(
+                                                            snapshotContext.commits(),
+                                                            snapshotContext.linkedIssue());
+                                                }
+                                                IntellijGitHubService.CommitContext commits =
+                                                        new IntellijGitHubService.CommitContext(
+                                                                "", List.of());
+                                                try {
+                                                    commits =
+                                                            panel.ghSvc.getCommitContext(
+                                                                    owner, repo, number);
+                                                } catch (Exception e) {
+                                                    log.warn(
+                                                            "getCommitContext failed: {}",
+                                                            e.getMessage());
+                                                }
+                                                String issue = "";
+                                                try {
+                                                    issue =
+                                                            panel.ghSvc.getLinkedIssueSummary(
+                                                                    owner,
+                                                                    repo,
+                                                                    promptPr.getBody(),
+                                                                    commits.closingIssueNumbers());
+                                                } catch (Exception e) {
+                                                    log.warn(
+                                                            "getLinkedIssueSummary failed: {}",
+                                                            e.getMessage());
+                                                }
+                                                return new CommitsAndIssue(
+                                                        commits.summary(), issue);
+                                            });
+
                             IntellijClaudeService reviewService;
                             try {
-                                reviewService =
-                                        deep == null
-                                                ? panel.resolvePrClaudeService(promptPr)
-                                                : new IntellijClaudeService(
-                                                        deep.pending().preparation().worktree());
-                            } catch (Exception e) {
+                                reviewService = worktreeFuture.join();
+                            } catch (CompletionException wrapped) {
+                                Throwable e =
+                                        wrapped.getCause() != null ? wrapped.getCause() : wrapped;
                                 log.warn(
                                         "Worktree resolution for PR #{} failed: {}",
                                         number,
@@ -362,6 +425,17 @@ final class WebviewReviewController {
                                                         + " Open the PR repository and try again."));
                                 return;
                             }
+
+                            String existingReviews = existingReviewsFuture.join();
+                            String baseSha = revisionsFuture.join().baseSha();
+                            IntellijGitHubService.CheckContext checks = checksFuture.join();
+                            String ciStatus = checks.summary();
+                            List<CiAnnotation> ciAnnotations = checks.annotations();
+                            CommitsAndIssue commitsAndIssue = commitsAndIssueFuture.join();
+                            IntellijGitHubService.CommitContext commitContext =
+                                    new IntellijGitHubService.CommitContext(
+                                            commitsAndIssue.commits(), List.of());
+                            String linkedIssue = commitsAndIssue.linkedIssue();
 
                             final IntellijClaudeService finalReviewService = reviewService;
 

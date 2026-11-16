@@ -61,6 +61,10 @@ public class CopilotService {
     /** Runs in flight; several run at once during the rules pass. */
     private final Set<ActiveRun> activeRuns = ConcurrentHashMap.newKeySet();
 
+    private final Object sharedClientLock = new Object();
+    private int clientScopeDepth = 0;
+    private RuntimeClient sharedClient;
+
     private final CancellationToken cancellationToken;
 
     private volatile HostCodeIntelligence hostCodeIntelligence;
@@ -364,10 +368,85 @@ public class CopilotService {
     }
 
     /**
-     * Starts a fresh Copilot SDK client + session, forwards text deltas to {@code onChunk} (as
-     * {@code "text"} chunks, matching ClaudeService's protocol) and tool names to {@code onStatus},
-     * then returns the final assistant message content. If the SDK never delivers a consolidated
-     * assistant message, we fall back to the accumulated deltas.
+     * Reuses a single started {@link RuntimeClient} across every {@link #runSession} inside the
+     * returned scope, closing individual sessions per call and tearing down the client when the
+     * outermost scope closes. Calls outside a scope keep per-call client lifecycles.
+     */
+    Closeable openClientScope() {
+        synchronized (sharedClientLock) {
+            clientScopeDepth++;
+        }
+        AtomicBoolean closed = new AtomicBoolean();
+        return () -> {
+            if (!closed.compareAndSet(false, true)) return;
+            RuntimeClient toClose = null;
+            synchronized (sharedClientLock) {
+                if (--clientScopeDepth <= 0) {
+                    clientScopeDepth = 0;
+                    toClose = sharedClient;
+                    sharedClient = null;
+                }
+            }
+            closeQuietly(toClose);
+        };
+    }
+
+    private boolean isClientScoped() {
+        synchronized (sharedClientLock) {
+            return clientScopeDepth > 0;
+        }
+    }
+
+    private RuntimeClient acquireSharedClient() throws Exception {
+        synchronized (sharedClientLock) {
+            cancellationToken.throwIfCancelled();
+            if (sharedClient != null) return sharedClient;
+            RuntimeClient client = runtimeFactory.createClient(buildClientRequest());
+            try {
+                client.start();
+                cancellationToken.throwIfCancelled();
+                if (clientScopeDepth <= 0) {
+                    closeQuietly(client);
+                    return null;
+                }
+                sharedClient = client;
+                return client;
+            } catch (Exception failure) {
+                try {
+                    client.forceStop();
+                } catch (Exception ignored) {
+                    // Best effort cleanup.
+                }
+                closeQuietly(client);
+                throw failure;
+            }
+        }
+    }
+
+    private void invalidateSharedClient(RuntimeClient failed) {
+        boolean shouldClose = false;
+        synchronized (sharedClientLock) {
+            if (sharedClient == failed) {
+                sharedClient = null;
+                shouldClose = true;
+            }
+        }
+        if (shouldClose) {
+            try {
+                failed.forceStop();
+            } catch (Exception ignored) {
+                // Best effort cleanup.
+            }
+            closeQuietly(failed);
+        }
+    }
+
+    /**
+     * Starts a fresh Copilot SDK session (reusing the scoped client when {@link #openClientScope()}
+     * is active), forwards text deltas to {@code onChunk} (as {@code "text"} chunks, matching
+     * ClaudeService's protocol) and tool names to {@code onStatus}, then returns the final
+     * assistant message content. If the SDK never delivers a consolidated assistant message, we
+     * fall back to the accumulated deltas.
      */
     private String runSession(
             String prompt,
@@ -385,8 +464,17 @@ public class CopilotService {
         ActiveRun currentRun = null;
         List<Closeable> subscriptions = new ArrayList<>();
         try {
-            RuntimeClient client = runtimeFactory.createClient(buildClientRequest());
-            currentRun = new ActiveRun(client);
+            boolean scoped = isClientScoped();
+            RuntimeClient client =
+                    scoped
+                            ? acquireSharedClient()
+                            : runtimeFactory.createClient(buildClientRequest());
+            boolean ownsClient = !scoped;
+            if (client == null) {
+                client = runtimeFactory.createClient(buildClientRequest());
+                ownsClient = true;
+            }
+            currentRun = new ActiveRun(client, ownsClient);
             cancellationToken.throwIfCancelled();
             this.activeRuns.add(currentRun);
             if (cancellationToken.isCancelled()) {
@@ -394,8 +482,10 @@ public class CopilotService {
                 cancellationToken.throwIfCancelled();
             }
 
-            client.start();
-            cancellationToken.throwIfCancelled();
+            if (ownsClient) {
+                client.start();
+                cancellationToken.throwIfCancelled();
+            }
             SessionRequest sessionRequest =
                     buildSessionRequest(
                             model,
@@ -404,7 +494,15 @@ public class CopilotService {
                             configDir,
                             allowReadTools,
                             allowHostCodeIntelligence);
-            RuntimeSession session = client.createSession(sessionRequest);
+            RuntimeSession session;
+            try {
+                session = client.createSession(sessionRequest);
+            } catch (Exception sessionFailure) {
+                if (!ownsClient && !cancellationToken.isCancelled()) {
+                    invalidateSharedClient(client);
+                }
+                throw sessionFailure;
+            }
             currentRun.attachSession(session);
             cancellationToken.throwIfCancelled();
             if (sessionRequest.attachesHostCodeIntelligence()) {
@@ -476,6 +574,19 @@ public class CopilotService {
         for (ActiveRun run : activeRuns) {
             if (activeRuns.remove(run)) run.cancel();
         }
+        RuntimeClient sharedToStop;
+        synchronized (sharedClientLock) {
+            sharedToStop = sharedClient;
+            sharedClient = null;
+        }
+        if (sharedToStop != null) {
+            try {
+                sharedToStop.forceStop();
+            } catch (Exception ignored) {
+                // Best effort only.
+            }
+            closeQuietly(sharedToStop);
+        }
     }
 
     private ClientRequest buildClientRequest() {
@@ -531,11 +642,13 @@ public class CopilotService {
 
     private static final class ActiveRun implements AutoCloseable {
         private final RuntimeClient client;
+        private final boolean ownsClient;
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
         private final AtomicReference<RuntimeSession> sessionRef = new AtomicReference<>();
 
-        private ActiveRun(RuntimeClient client) {
+        private ActiveRun(RuntimeClient client, boolean ownsClient) {
             this.client = client;
+            this.ownsClient = ownsClient;
         }
 
         void attachSession(RuntimeSession session) {
@@ -557,10 +670,12 @@ public class CopilotService {
             } catch (Exception e) {
                 // Best effort only.
             }
-            try {
-                client.forceStop();
-            } catch (Exception e) {
-                // Best effort only.
+            if (ownsClient) {
+                try {
+                    client.forceStop();
+                } catch (Exception e) {
+                    // Best effort only.
+                }
             }
         }
 
@@ -570,7 +685,7 @@ public class CopilotService {
                 RuntimeSession session = sessionRef.getAndSet(null);
                 if (session != null) session.close();
             } finally {
-                client.close();
+                if (ownsClient) client.close();
             }
         }
     }

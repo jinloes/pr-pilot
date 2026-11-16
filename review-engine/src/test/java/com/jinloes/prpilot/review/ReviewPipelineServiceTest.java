@@ -79,7 +79,9 @@ class ReviewPipelineServiceTest {
                                                             + LocalReviewRules.BUILT_IN_RULE_FILES
                                                                     .size()
                                                             + " loaded"));
-            assertThat(provider.callOrder).startsWith("review", "rule-selection");
+            assertThat(provider.callOrder).contains("review", "rule-selection", "rule");
+            assertThat(provider.callOrder.indexOf("rule-selection"))
+                    .isLessThan(provider.callOrder.indexOf("rule"));
         }
 
         @Test
@@ -111,7 +113,7 @@ class ReviewPipelineServiceTest {
                         .singleElement()
                         .extracting(PRReviewRequest::getRepoGuidelines)
                         .isEqualTo("## AGENTS.md\nrepo rule");
-                assertThat(provider.callOrder).containsExactly("review", "rule");
+                assertThat(provider.callOrder).containsExactlyInAnyOrder("review", "rule");
                 assertThat(provider.ruleCalls.get(0).prompt())
                         .contains("Prefer Optional over null.");
                 assertThat(statuses).contains("Rules: 1 loaded, 1 selected (team.md)");

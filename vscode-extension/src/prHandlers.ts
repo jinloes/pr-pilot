@@ -137,6 +137,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         operationId ? () => deps.cancelActiveProvider(operationId) : () => Promise.resolve(),
     )) return;
     deps.clearWorktree(state);
+    state.prefetchedPrContext = null;
     state.activePR = { number, owner, repo, title, body, author };
     state.activeDiff = '';
     state.activeValidationDiff = '';
@@ -221,6 +222,41 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
             deps.push(state, { type: 'draftLoaded', prKey: key, prState: 'NO_DRAFT', diff, validationDiff, providerReadiness: readiness,
                 intellijAssistedEnabled: deps.intellijAssistedEnabled(),
                 repositoryInstructions: deps.rememberedRepositoryInstructions(owner, repo) });
+        }
+
+        // Pre-warm immutable per-SHA prompt context and the PR-head worktree in the background
+        // after draftLoaded has been pushed so Generate Review avoids cold-start latency.
+        const headSha = detail.head?.sha ?? '';
+        if (!detail.merged && headSha) {
+            const hydratedBody = detail.body ?? body;
+            const existingReviewsPromise = deps.client()
+                .getExistingReviews(base, owner, repo, number)
+                .then((res) => (res?.status === 'ok' ? res.summary : ''))
+                .catch(() => '');
+            const commitsPromise = deps.client()
+                .getCommits(base, owner, repo, number)
+                .catch(() => ({ summary: '', closingIssueNumbers: [] as number[] }));
+            const linkedIssuesPromise = commitsPromise
+                .then((commitContext) =>
+                    deps.client().getLinkedIssues(
+                        base,
+                        owner,
+                        repo,
+                        hydratedBody,
+                        commitContext.closingIssueNumbers,
+                    ))
+                .catch(() => '');
+            state.prefetchedPrContext = {
+                key,
+                headSha,
+                baseSha: detail.baseSha ?? '',
+                existingReviewsPromise,
+                commitsPromise,
+                linkedIssuesPromise,
+            };
+            if (state.activePR) {
+                void deps.resolveWorkingDir(state, state.activePR, false, key).catch(() => {});
+            }
         }
 
         // Comment-position validation benefits from an untruncated diff, but it must not block the

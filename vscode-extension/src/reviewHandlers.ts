@@ -138,37 +138,44 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             }
         });
 
-        const reviewsResult = await deps.client().getExistingReviews(base, owner, repo, number).catch(() => null);
-        const existingReviews = reviewsResult?.status === 'ok' ? reviewsResult.summary : '';
-
         const title = activePr?.title ?? '';
         const body = activePr?.body ?? '';
 
-        const reviewDir = deep?.pending.preparation.worktree ?? await deps.resolveWorkingDir(
-            state,
-            { number, owner, repo, title, body },
-            true,
-            key,
-        );
+        // Resolve worktree, PR revisions, and existing reviews concurrently rather than serially.
+        const [reviewDir, revisions, existingReviews] = await Promise.all([
+            deep?.pending.preparation.worktree
+                ? Promise.resolve(deep.pending.preparation.worktree)
+                : deps.resolveWorkingDir(state, { number, owner, repo, title, body }, true, key),
+            deps.client()
+                .getPullRequestDetail(base, owner, repo, number)
+                .then((d) => (d.status === 'ok'
+                    ? { headSha: d.detail?.head?.sha ?? '', baseSha: d.detail?.baseSha ?? '' }
+                    : { headSha: '', baseSha: '' }))
+                .catch(() => ({ headSha: '', baseSha: '' })),
+            state.prefetchedPrContext?.key === key
+                ? state.prefetchedPrContext.existingReviewsPromise
+                : deps.client().getExistingReviews(base, owner, repo, number)
+                    .then((r) => (r?.status === 'ok' ? r.summary : ''))
+                    .catch(() => ''),
+        ]);
         if (!isCurrentGeneration()) return;
 
-        // Phase 1 prompt context. Fetched in parallel and best-effort: every one of these degrades
-        // to an omitted prompt section rather than failing the review, so none is awaited
-        // individually or allowed to reject. Mirrors WebviewPanel's context block.
-        const revisions = await deps.client()
-            .getPullRequestDetail(base, owner, repo, number)
-            .then((d) => (d.status === 'ok'
-                ? { headSha: d.detail?.head?.sha ?? '', baseSha: d.detail?.baseSha ?? '' }
-                : { headSha: '', baseSha: '' }))
-            .catch(() => ({ headSha: '', baseSha: '' }));
+        // Phase 1 prompt context. CI checks are always fetched fresh for the current headSha so
+        // checks finishing after selectPR are never missed; immutable commits and linked issues
+        // reuse the selectPR prefetch when headSha still matches.
         const headSha = revisions.headSha;
-        const commitsPromise = deps.client().getCommits(base, owner, repo, number);
+        const prefetched = headSha
+            && state.prefetchedPrContext?.key === key
+            && state.prefetchedPrContext.headSha === headSha
+            ? state.prefetchedPrContext
+            : null;
+        const commitsPromise = prefetched?.commitsPromise ?? deps.client().getCommits(base, owner, repo, number);
         const [checkStatus, commits, linkedIssue, repoProfile] = await Promise.all([
             headSha
                 ? deps.client().getCheckStatus(base, owner, repo, headSha)
                 : Promise.resolve({ summary: '', annotations: [] }),
             commitsPromise,
-            commitsPromise.then((commitContext) =>
+            prefetched?.linkedIssuesPromise ?? commitsPromise.then((commitContext) =>
                 deps.client().getLinkedIssues(
                     base,
                     owner,

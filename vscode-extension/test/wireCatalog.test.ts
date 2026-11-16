@@ -135,7 +135,7 @@ test('review generation reuses one commit fetch for linked-issue resolution', ()
     );
     assert.match(
         generateReview,
-        /const commitsPromise = deps\.client\(\)\.getCommits\([\s\S]*commitsPromise\.then\(\(commitContext\) =>[\s\S]*deps\.client\(\)\.getLinkedIssues\([\s\S]*commitContext\.closingIssueNumbers/,
+        /const commitsPromise = (?:prefetched\?\.commitsPromise \?\? )?deps\.client\(\)\.getCommits\([\s\S]*commitsPromise\.then\(\(commitContext\) =>[\s\S]*deps\.client\(\)\.getLinkedIssues\([\s\S]*commitContext\.closingIssueNumbers/,
     );
     assert.match(generateReview, /commits:\s*commits\.summary/);
 });

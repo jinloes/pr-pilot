@@ -272,6 +272,19 @@ final class WebviewPrSelectionController {
 
                             DraftRecoveryStore.Snapshot recovery =
                                     panel.draftRecoveryStore.get(key);
+                            String currentBaseSha =
+                                    detail != null
+                                            ? StringUtils.defaultString(detail.baseSha())
+                                            : "";
+                            startBackgroundReviewWarmup(
+                                    key,
+                                    revision,
+                                    number,
+                                    owner,
+                                    repo,
+                                    hydratedPr,
+                                    currentHeadSha,
+                                    currentBaseSha);
                             if (pending != null || recovery != null) {
                                 boolean stale =
                                         pending != null
@@ -350,6 +363,64 @@ final class WebviewPrSelectionController {
                                             providerReadiness,
                                             panel.intellijAssistedEnabled.getAsBoolean(),
                                             panel.rememberedRepositoryInstructions(owner, repo)));
+                        });
+    }
+
+    private void startBackgroundReviewWarmup(
+            String key,
+            long revision,
+            int number,
+            String owner,
+            String repo,
+            PullRequest hydratedPr,
+            String headSha,
+            String baseSha) {
+        if (StringUtils.isBlank(headSha)) return;
+        getApplication()
+                .executeOnPooledThread(
+                        () -> {
+                            if (!panel.isCurrentSelection(key, revision)) return;
+                            IntellijGitHubService.CommitContext commits =
+                                    new IntellijGitHubService.CommitContext("", List.of());
+                            try {
+                                commits = panel.ghSvc.getCommitContext(owner, repo, number);
+                            } catch (Exception e) {
+                                log.debug("Background commit prefetch failed: {}", e.getMessage());
+                            }
+                            if (!panel.isCurrentSelection(key, revision)) return;
+                            String linkedIssue = "";
+                            try {
+                                linkedIssue =
+                                        panel.ghSvc.getLinkedIssueSummary(
+                                                owner,
+                                                repo,
+                                                hydratedPr.getBody(),
+                                                commits.closingIssueNumbers());
+                            } catch (Exception e) {
+                                log.debug(
+                                        "Background linked-issue prefetch failed: {}",
+                                        e.getMessage());
+                            }
+                            synchronized (panel) {
+                                if (panel.isCurrentSelectionLocked(key, revision)) {
+                                    panel.prefetchedPrContext =
+                                            new WebviewPanel.PrefetchedPrContext(
+                                                    headSha,
+                                                    baseSha,
+                                                    commits.summary(),
+                                                    linkedIssue);
+                                }
+                            }
+                            if (panel.isCurrentSelection(key, revision)) {
+                                try {
+                                    panel.resolvePrClaudeService(hydratedPr);
+                                } catch (Exception e) {
+                                    log.debug(
+                                            "Background worktree warmup skipped for PR #{}: {}",
+                                            number,
+                                            e.getMessage());
+                                }
+                            }
                         });
     }
 }

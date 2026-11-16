@@ -14,6 +14,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
@@ -191,14 +195,60 @@ final class BaseCommitContext {
             log.warn("Could not resolve base commit {}; reviewing without guidance", baseSha, e);
             return Result.EMPTY;
         }
-        String guidelines = guidelines(repoDir, baseSha, changedPaths, configuredGlobs, deadline);
-        String fileHistory = fileHistory(repoDir, baseSha, changedPaths, deadline);
-        String protoSchemaChanges = protoSchemaChanges(repoDir, scope, changedPaths, deadline);
-        String callSites =
-                callSitesEnabled()
-                        ? callSites(repoDir, baseSha, changedPaths, manifest, deadline)
-                        : "";
-        return new Result(guidelines, fileHistory, callSites, protoSchemaChanges);
+        ExecutorService executor =
+                Executors.newFixedThreadPool(
+                        4,
+                        runnable -> {
+                            Thread thread = new Thread(runnable, "pr-pilot-base-context");
+                            thread.setDaemon(true);
+                            return thread;
+                        });
+        try {
+            Future<String> guidelinesFuture =
+                    executor.submit(
+                            () ->
+                                    guidelines(
+                                            repoDir,
+                                            baseSha,
+                                            changedPaths,
+                                            configuredGlobs,
+                                            deadline));
+            Future<String> historyFuture =
+                    executor.submit(() -> fileHistory(repoDir, baseSha, changedPaths, deadline));
+            Future<String> protoFuture =
+                    executor.submit(
+                            () -> protoSchemaChanges(repoDir, scope, changedPaths, deadline));
+            Future<String> callSitesFuture =
+                    callSitesEnabled()
+                            ? executor.submit(
+                                    () ->
+                                            callSites(
+                                                    repoDir,
+                                                    baseSha,
+                                                    changedPaths,
+                                                    manifest,
+                                                    deadline))
+                            : null;
+            return new Result(
+                    awaitContext(guidelinesFuture),
+                    awaitContext(historyFuture),
+                    callSitesFuture == null ? "" : awaitContext(callSitesFuture),
+                    awaitContext(protoFuture));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private static String awaitContext(Future<String> future) throws InterruptedException {
+        try {
+            return future.get();
+        } catch (ExecutionException failed) {
+            Throwable cause = failed.getCause();
+            if (cause instanceof InterruptedException interrupted) throw interrupted;
+            if (cause instanceof Error error) throw error;
+            log.warn("Base-commit context task failed; continuing without it", cause);
+            return "";
+        }
     }
 
     static boolean callSitesEnabled() {

@@ -171,10 +171,15 @@ public class WebviewPanel implements Disposable {
     volatile String pendingReviewId = null;
     volatile String pendingReviewKey = null;
     volatile long selectionRevision = 0;
+
+    record PrefetchedPrContext(
+            String headSha, String baseSha, String commits, String linkedIssue) {}
+
     final Object draftMutationLock = new Object();
     volatile String prefetchedDiff = null;
     volatile String prefetchedValidationDiff = null;
     volatile String prefetchedExistingReviews = null;
+    volatile PrefetchedPrContext prefetchedPrContext = null;
     final WebviewWorktreeManager worktreeManager;
     final PrChatController chats;
     final DeepReviewController assistedReviews;

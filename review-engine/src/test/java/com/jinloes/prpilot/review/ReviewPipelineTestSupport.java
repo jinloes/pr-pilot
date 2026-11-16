@@ -179,11 +179,12 @@ final class ReviewPipelineTestSupport {
     static final class FakeProvider implements ReviewProviderExecutor {
         ReviewPassResult primaryResult;
         final AtomicInteger primaryCalls = new AtomicInteger();
-        final List<String> completions = new ArrayList<>();
-        final List<PromptCall> completeCalls = new ArrayList<>();
+        final AtomicInteger completedPrimaryCalls = new AtomicInteger();
+        final List<String> completions = new CopyOnWriteArrayList<>();
+        final List<PromptCall> completeCalls = new CopyOnWriteArrayList<>();
         // Hygiene calls are tracked apart so stage-specific assertions stay readable.
-        final List<String> hygieneCompletions = new ArrayList<>();
-        final List<PromptCall> hygieneCalls = new ArrayList<>();
+        final List<String> hygieneCompletions = new CopyOnWriteArrayList<>();
+        final List<PromptCall> hygieneCalls = new CopyOnWriteArrayList<>();
         // Rule agents run on worker threads, so every list they touch is thread-safe.
         final List<String> callOrder = new CopyOnWriteArrayList<>();
         final List<String> ruleSelectionCompletions = new CopyOnWriteArrayList<>();
@@ -196,9 +197,10 @@ final class ReviewPipelineTestSupport {
         final AtomicInteger peakInFlightRules = new AtomicInteger();
         volatile boolean cancelled;
         IOException hygieneFailure;
+        volatile RuleScript hygieneScript;
         IOException completionFailure;
         boolean cancelAfterPrimary;
-        final List<PRReviewRequest> primaryRequests = new ArrayList<>();
+        final List<PRReviewRequest> primaryRequests = new CopyOnWriteArrayList<>();
         File projectDir;
         PrimaryHook beforePrimary = () -> {};
         String displayModel = "claude-opus";
@@ -217,8 +219,12 @@ final class ReviewPipelineTestSupport {
             primaryCalls.incrementAndGet();
             primaryRequests.add(request);
             callOrder.add("review");
-            beforePrimary.run();
-            return primaryResult;
+            try {
+                beforePrimary.run();
+                return primaryResult;
+            } finally {
+                completedPrimaryCalls.incrementAndGet();
+            }
         }
 
         @Override
@@ -259,17 +265,23 @@ final class ReviewPipelineTestSupport {
             if (prompt.contains("hygiene problems only")) {
                 hygieneCalls.add(call);
                 callOrder.add("hygiene");
+                if (hygieneScript != null) return hygieneScript.run(prompt);
                 if (hygieneFailure != null) throw hygieneFailure;
-                return hygieneCompletions.isEmpty()
-                        ? emptyReviewJson()
-                        : hygieneCompletions.remove(0);
+                synchronized (hygieneCompletions) {
+                    return hygieneCompletions.isEmpty()
+                            ? emptyReviewJson()
+                            : hygieneCompletions.remove(0);
+                }
             }
             completeCalls.add(call);
             callOrder.add(prompt.contains("<draft_review>") ? "critique" : "supervisor");
             if (completionFailure != null) {
                 throw completionFailure;
             }
-            String next = completions.remove(0);
+            String next;
+            synchronized (completions) {
+                next = completions.remove(0);
+            }
             if (FAIL.equals(next)) throw new IOException("scripted completion failure");
             return next;
         }
@@ -277,7 +289,7 @@ final class ReviewPipelineTestSupport {
         @Override
         public void checkCancelled() throws InterruptedException {
             if (cancelled) throw new InterruptedException("cancelled");
-            if (cancelAfterPrimary && primaryCalls.get() > 0) {
+            if (cancelAfterPrimary && completedPrimaryCalls.get() > 0) {
                 throw new InterruptedException("cancelled");
             }
         }

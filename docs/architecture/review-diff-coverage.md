@@ -87,9 +87,11 @@ checkbox whenever unresolved trust risks remain.
 For larger PRs, reviewers can explicitly enable chunked mode in per-review overrides. The webview
 sends the loaded validation diff (1 MB whole-file budget, or the review diff while the validation
 diff has not loaded) once with `chunkedReview: true`; `ChunkedReviewService` in the shared review
-engine owns file batching, invokes the selected provider for every bounded batch, then performs a
-mandatory final provider reconciliation over every batch result plus a bounded changed-file/contract
-index. Every batch and reconciliation request copies the source `DiffCoverage`, so each prompt names
+engine owns file batching, invokes the selected provider across bounded batches concurrently (up to
+3 in parallel for ordinary reviews; sequential for deep semantic reviews so authority checks stay
+stage-ordered), preserves batch order, then performs a mandatory final provider reconciliation over
+every batch result plus a bounded changed-file/contract index. Every batch and reconciliation
+request copies the source `DiffCoverage`, so each prompt names
 the files that even the validation diff omitted. Both IDE hosts therefore use the same
 global-synthesis behavior. A reconciliation I/O failure returns complete, visibly marked degraded
 batch summaries rather than silently presenting a locally sliced merge as globally synthesized

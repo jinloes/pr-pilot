@@ -2,12 +2,14 @@ package com.jinloes.prpilot.review;
 
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewResult;
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -222,103 +224,175 @@ public final class ReviewPipelineService {
                 LocalReviewRules.load(request.getRulesDirectory(), request.isBuiltInRules());
         boolean recall = selfCritique || secondary != null;
         PRReviewRequest reviewRequest = request.withCandidateRecall(recall);
-        Passes passes = reviewPasses(reviewRequest, chunked, onStatus, onChunk);
-        ReviewPassResult primary = passes.result();
-        provider.checkCancelled();
 
-        if (supervisorEnabled) {
-            primary =
-                    new ReviewPassResult(
-                            ReviewAnchorValidator.validate(primary.review(), manifest),
-                            primary.ledger());
-        }
-        ReviewResult candidate = primary.review();
-        if (supervisorEnabled) {
-            candidate = supervise(reviewRequest, manifest, primary, onStatus);
-        }
-        provider.checkCancelled();
-        List<ReviewerAttribution.Evidence> attributed =
-                ReviewerAttribution.Evidence.snapshot(candidate.getLineComments());
-        ReviewResult ruleFindings = ruleFindings(rules, request, chunked, manifest, onStatus);
-        List<ReviewPipelineFindings.RuleSite> ruleSites =
-                ReviewPipelineFindings.RuleSite.of(ruleFindings.getLineComments());
-        if (!ruleFindings.getLineComments().isEmpty()) {
-            candidate = ReviewResultMerger.merge(candidate, ruleFindings, MERGED_CANDIDATE_CAP);
-        }
-        provider.checkCancelled();
+        boolean runAuxiliaryInParallel = execution == null && (!rules.isEmpty() || recall);
+        ExecutorService auxiliaryExecutor =
+                runAuxiliaryInParallel
+                        ? Executors.newFixedThreadPool(
+                                2,
+                                runnable -> {
+                                    Thread thread =
+                                            new Thread(runnable, "pr-pilot-pipeline-auxiliary");
+                                    thread.setDaemon(true);
+                                    return thread;
+                                })
+                        : null;
+        Future<ReviewResult> rulesFuture = null;
+        Future<ReviewResult> hygieneFuture = null;
+        List<String> bufferedRuleStatuses = new CopyOnWriteArrayList<>();
+        List<String> bufferedHygieneStatuses = new CopyOnWriteArrayList<>();
+        boolean auxiliaryJoined = false;
 
-        if (recall) {
-            ReviewResult hygiene = hygieneFindings(request, chunked, manifest, onStatus);
-            candidate = ReviewResultMerger.merge(candidate, hygiene, MERGED_CANDIDATE_CAP);
+        try (Closeable primaryScope = provider.openSessionScope();
+                Closeable secondaryScope =
+                        secondary != null ? secondary.openSessionScope() : () -> {}) {
+            final PRReviewRequest stageRequest = request;
+            if (auxiliaryExecutor != null) {
+                if (!rules.isEmpty()) {
+                    rulesFuture =
+                            auxiliaryExecutor.submit(
+                                    () ->
+                                            ruleFindings(
+                                                    rules,
+                                                    stageRequest,
+                                                    chunked,
+                                                    manifest,
+                                                    bufferedRuleStatuses::add));
+                }
+                if (recall) {
+                    hygieneFuture =
+                            auxiliaryExecutor.submit(
+                                    () ->
+                                            hygieneFindings(
+                                                    stageRequest,
+                                                    chunked,
+                                                    manifest,
+                                                    bufferedHygieneStatuses::add));
+                }
+            }
+
+            Passes passes = reviewPasses(reviewRequest, chunked, onStatus, onChunk);
+            ReviewPassResult primary = passes.result();
             provider.checkCancelled();
-            ReviewResult draft = candidate;
-            int draftCount = candidate.getLineComments().size();
-            onStatus.accept(draftStatus(draftCount));
-            onStatus.accept(ClaudeService.STATUS_REFINING);
+
+            if (supervisorEnabled) {
+                primary =
+                        new ReviewPassResult(
+                                ReviewAnchorValidator.validate(primary.review(), manifest),
+                                primary.ledger());
+            }
+            ReviewResult candidate = primary.review();
+            if (supervisorEnabled) {
+                candidate = supervise(reviewRequest, manifest, primary, onStatus);
+            }
+            provider.checkCancelled();
+            List<ReviewerAttribution.Evidence> attributed =
+                    ReviewerAttribution.Evidence.snapshot(candidate.getLineComments());
+            ReviewResult ruleFindings;
+            if (rulesFuture != null) {
+                ruleFindings = awaitStage(rulesFuture);
+                bufferedRuleStatuses.forEach(onStatus);
+            } else {
+                ruleFindings = ruleFindings(rules, request, chunked, manifest, onStatus);
+            }
+            List<ReviewPipelineFindings.RuleSite> ruleSites =
+                    ReviewPipelineFindings.RuleSite.of(ruleFindings.getLineComments());
+            if (!ruleFindings.getLineComments().isEmpty()) {
+                candidate = ReviewResultMerger.merge(candidate, ruleFindings, MERGED_CANDIDATE_CAP);
+            }
+            provider.checkCancelled();
+
+            if (recall) {
+                ReviewResult hygiene;
+                if (hygieneFuture != null) {
+                    hygiene = awaitStage(hygieneFuture);
+                    bufferedHygieneStatuses.forEach(onStatus);
+                } else {
+                    hygiene = hygieneFindings(request, chunked, manifest, onStatus);
+                }
+                auxiliaryJoined = true;
+                candidate = ReviewResultMerger.merge(candidate, hygiene, MERGED_CANDIDATE_CAP);
+                provider.checkCancelled();
+                ReviewResult draft = candidate;
+                int draftCount = candidate.getLineComments().size();
+                onStatus.accept(draftStatus(draftCount));
+                onStatus.accept(ClaudeService.STATUS_REFINING);
+                validateAuthority();
+                boolean reportDropped = Boolean.getBoolean(REPORT_DROPPED_PROPERTY);
+                String critiqueRaw = null;
+                ReviewResult critiqued = null;
+                try {
+                    PRReviewRequest critiqueRequest =
+                            chunkedReviewService.finalValidationRequest(request);
+                    String raw =
+                            provider.complete(
+                                    ReviewCritiquePrompts.buildCritiquePrompt(
+                                            critiqueRequest, candidate, reportDropped),
+                                    CRITIQUE_TIMEOUT_MS,
+                                    true,
+                                    true,
+                                    onStatus);
+                    candidate = ReviewResultParser.parseReview(raw);
+                    critiqueRaw = raw;
+                    critiqued = candidate;
+                } catch (InterruptedException interrupted) {
+                    throw interrupted;
+                } catch (IOException | IllegalArgumentException exception) {
+                    log.warn(
+                            "Final self-critique failed; keeping the best pre-critique review",
+                            exception);
+                }
+                // Unconfirmed recall candidates never reach the user, even if validation failed.
+                candidate = ReviewResultMerger.withoutLowConfidence(candidate);
+                int validatedCount = candidate.getLineComments().size();
+                candidate =
+                        ReviewPipelineFindings.restoreHygieneFindings(candidate, hygiene, manifest);
+                int restored = candidate.getLineComments().size() - validatedCount;
+                if (restored > 0) {
+                    onStatus.accept("Kept " + findings(restored) + " from the hygiene pass");
+                }
+                int beforeRules = candidate.getLineComments().size();
+                candidate =
+                        ReviewPipelineFindings.restoreHygieneFindings(
+                                candidate, ruleFindings, manifest);
+                int restoredRules = candidate.getLineComments().size() - beforeRules;
+                if (restoredRules > 0) {
+                    onStatus.accept("Kept " + findings(restoredRules) + " from review rules");
+                }
+                if (reportDropped) {
+                    ReviewPipelineFindings.droppedStatuses(
+                                    draft,
+                                    candidate,
+                                    ReviewPipelineFindings.dropReasons(
+                                            draft, critiqueRaw, critiqued))
+                            .forEach(onStatus);
+                }
+                onStatus.accept(validatedStatus(candidate.getLineComments().size(), draftCount));
+            } else {
+                auxiliaryJoined = true;
+            }
+            if (passes.labels() != null) {
+                candidate =
+                        ReviewerAttribution.reattach(
+                                candidate, attributed, passes.labels().primary());
+                ReviewPipelineFindings.unattributeUnmatchedRuleFindings(
+                        candidate, attributed, ruleSites, rules);
+            }
+            provider.checkCancelled();
+            if (supervisorEnabled) {
+                candidate = ReviewAnchorValidator.validate(candidate, manifest);
+            }
+            candidate = ReviewResultMerger.capFinal(candidate);
             validateAuthority();
-            boolean reportDropped = Boolean.getBoolean(REPORT_DROPPED_PROPERTY);
-            String critiqueRaw = null;
-            ReviewResult critiqued = null;
-            try {
-                PRReviewRequest critiqueRequest =
-                        chunkedReviewService.finalValidationRequest(request);
-                String raw =
-                        provider.complete(
-                                ReviewCritiquePrompts.buildCritiquePrompt(
-                                        critiqueRequest, candidate, reportDropped),
-                                CRITIQUE_TIMEOUT_MS,
-                                true,
-                                true,
-                                onStatus);
-                candidate = ReviewResultParser.parseReview(raw);
-                critiqueRaw = raw;
-                critiqued = candidate;
-            } catch (InterruptedException interrupted) {
-                throw interrupted;
-            } catch (IOException | IllegalArgumentException exception) {
-                log.warn(
-                        "Final self-critique failed; keeping the best pre-critique review",
-                        exception);
+            return ReviewSuggestionGuard.apply(
+                    CiFindingSuppressor.suppress(candidate, request.getCiAnnotations()), manifest);
+        } finally {
+            if (!auxiliaryJoined) {
+                if (rulesFuture != null) rulesFuture.cancel(true);
+                if (hygieneFuture != null) hygieneFuture.cancel(true);
             }
-            // Unconfirmed recall candidates never reach the user, even if validation failed.
-            candidate = ReviewResultMerger.withoutLowConfidence(candidate);
-            int validatedCount = candidate.getLineComments().size();
-            candidate = ReviewPipelineFindings.restoreHygieneFindings(candidate, hygiene, manifest);
-            int restored = candidate.getLineComments().size() - validatedCount;
-            if (restored > 0) {
-                onStatus.accept("Kept " + findings(restored) + " from the hygiene pass");
-            }
-            int beforeRules = candidate.getLineComments().size();
-            candidate =
-                    ReviewPipelineFindings.restoreHygieneFindings(
-                            candidate, ruleFindings, manifest);
-            int restoredRules = candidate.getLineComments().size() - beforeRules;
-            if (restoredRules > 0) {
-                onStatus.accept("Kept " + findings(restoredRules) + " from review rules");
-            }
-            if (reportDropped) {
-                ReviewPipelineFindings.droppedStatuses(
-                                draft,
-                                candidate,
-                                ReviewPipelineFindings.dropReasons(draft, critiqueRaw, critiqued))
-                        .forEach(onStatus);
-            }
-            onStatus.accept(validatedStatus(candidate.getLineComments().size(), draftCount));
+            if (auxiliaryExecutor != null) auxiliaryExecutor.shutdownNow();
         }
-        if (passes.labels() != null) {
-            candidate =
-                    ReviewerAttribution.reattach(candidate, attributed, passes.labels().primary());
-            ReviewPipelineFindings.unattributeUnmatchedRuleFindings(
-                    candidate, attributed, ruleSites, rules);
-        }
-        provider.checkCancelled();
-        if (supervisorEnabled) {
-            candidate = ReviewAnchorValidator.validate(candidate, manifest);
-        }
-        candidate = ReviewResultMerger.capFinal(candidate);
-        validateAuthority();
-        return ReviewSuggestionGuard.apply(
-                CiFindingSuppressor.suppress(candidate, request.getCiAnnotations()), manifest);
     }
 
     /**
@@ -526,10 +600,45 @@ public final class ReviewPipelineService {
             Consumer<String> onStatus,
             BiConsumer<String, String> onChunk)
             throws IOException, InterruptedException {
-        return chunked
-                ? chunkedReviewService.reviewPass(
-                        request, onStatus, passRequest -> primary(passRequest, onStatus, onChunk))
-                : primary(request, onStatus, onChunk);
+        if (!chunked) return primary(request, onStatus, onChunk);
+        Object callbackLock = new Object();
+        Consumer<String> safeStatus =
+                message -> {
+                    synchronized (callbackLock) {
+                        onStatus.accept(message);
+                    }
+                };
+        BiConsumer<String, String> safeChunk =
+                onChunk == null
+                        ? null
+                        : (kind, text) -> {
+                            synchronized (callbackLock) {
+                                onChunk.accept(kind, text);
+                            }
+                        };
+        return chunkedReviewService.reviewPass(
+                request, safeStatus, passRequest -> primary(passRequest, safeStatus, safeChunk));
+    }
+
+    private ReviewResult awaitStage(Future<ReviewResult> future)
+            throws IOException, InterruptedException {
+        try {
+            while (true) {
+                provider.checkCancelled();
+                try {
+                    return future.get(SECONDARY_POLL_MS, TimeUnit.MILLISECONDS);
+                } catch (TimeoutException stillRunning) {
+                    // Poll again so cancellation stops waiting promptly.
+                }
+            }
+        } catch (ExecutionException failed) {
+            Throwable cause = failed.getCause();
+            if (cause instanceof IOException ioException) throw ioException;
+            if (cause instanceof InterruptedException interrupted) throw interrupted;
+            if (cause instanceof RuntimeException runtime) throw runtime;
+            if (cause instanceof Error error) throw error;
+            throw new IOException("Auxiliary review stage failed", cause);
+        }
     }
 
     private ReviewPassResult runSecondary(PRReviewRequest request, boolean chunked)
