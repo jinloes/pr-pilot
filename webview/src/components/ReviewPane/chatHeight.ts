@@ -1,4 +1,5 @@
 export const CHAT_HEIGHT_KEY = 'claude-reviews:chat-height'
+export const EMPTY_CHAT_HEIGHT = 104
 export const MIN_CHAT_HEIGHT = 200
 export const MAX_CHAT_HEIGHT = 600
 export const DEFAULT_CHAT_HEIGHT = 240

@@ -1,23 +1,5 @@
-import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { ReviewQualityAction, ReviewQualityReport } from '@/lib/reviewQuality'
-
-export function QualityCheckBadge({ count, onReview }: { count: number; onReview: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onReview}
-      className="flex w-full items-center gap-2 rounded border border-status-issue/50 bg-status-issue/10 px-3 py-2 text-left text-xs transition-colors hover:bg-status-issue/20"
-    >
-      <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-status-issue" />
-      <span className="font-semibold text-foreground">
-        {count} trust {count === 1 ? 'risk' : 'risks'} detected
-      </span>
-      <span className="text-muted-foreground">— scanned automatically</span>
-      <span className="ml-auto font-medium text-foreground">Review</span>
-    </button>
-  )
-}
 
 export function ReviewQualityCheckCard({
   report,

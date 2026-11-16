@@ -29,6 +29,8 @@ interface ReviewOverridesProps {
   intellijAssisted?: boolean
   onIntellijAssistedChange?: (value: boolean) => void
   onShowRetained?: () => void
+  /** Omits outer horizontal/top padding when rendered inside a dialog. */
+  embedded?: boolean
 }
 
 export function ReviewOverrides({
@@ -53,6 +55,7 @@ export function ReviewOverrides({
   intellijAssisted = false,
   onIntellijAssistedChange,
   onShowRetained,
+  embedded = false,
 }: ReviewOverridesProps) {
   const overrideCount = Number(focusAreas.trim().length > 0) + Number(customInstructions.trim().length > 0)
   const hasOverrides = overrideCount > 0
@@ -63,7 +66,7 @@ export function ReviewOverrides({
   const repositoryDirty = draftTrimmed !== rememberedTrimmed
   const forgetting = repositoryDirty && draftTrimmed.length === 0
   return (
-    <div className="px-4 pt-3">
+    <div className={embedded ? '' : 'px-4 pt-3'}>
       <details
         data-testid="review-overrides-disclosure"
         className="rounded border border-border bg-muted/20 px-3 py-2.5"

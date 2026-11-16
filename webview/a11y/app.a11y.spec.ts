@@ -457,7 +457,7 @@ test('the suggested verdict is changed with the keyboard in the publish dialog',
     result: { summary: 'Ready to submit', verdict: 'APPROVE', lineComments: [] },
   })
 
-  await expect(page.getByTestId('review-scroll-body').getByText('Suggested: Approve')).toBeVisible()
+  await expect(page.getByTestId('review-pane-content').getByText('Suggested: Approve')).toBeVisible()
   await page.getByRole('button', { name: 'Submit review…' }).click()
   const dialog = page.getByRole('alertdialog')
   await expect(dialog.getByRole('heading', { name: 'Publish review' })).toBeVisible()

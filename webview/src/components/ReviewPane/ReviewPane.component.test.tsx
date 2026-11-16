@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ReviewFooter } from './ReviewFooter'
@@ -221,7 +221,7 @@ describe('coverage banner remedy', () => {
 })
 
 describe('regeneration options placement', () => {
-  it('moves instructions after the diff as Regeneration options and keeps values', async () => {
+  it('co-locates Regeneration options inside the Regenerate confirmation dialog and keeps values', async () => {
     const user = userEvent.setup()
     installHost()
     render(<ReviewPane pr={pr} />)
@@ -241,21 +241,27 @@ describe('regeneration options placement', () => {
       })
     })
 
-    const options = screen.getByText('Regeneration options').closest('details')!
-    const summary = screen.getByText('Saved review.')
-    const navigation = screen.getByRole('navigation', { name: 'Review navigation' })
-    expect(summary.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
-    expect(navigation.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
     expect(screen.queryByText('Review instructions (optional)')).not.toBeInTheDocument()
-    expect(screen.getByText('1 override applied')).toBeInTheDocument()
-    expect(screen.getByLabelText('Focus areas')).toHaveValue('security')
+    expect(screen.queryByTestId('review-overrides-disclosure')).not.toBeInTheDocument()
+    const regenerate = screen.getByRole('button', { name: 'Regenerate' })
+    expect(regenerate).toHaveTextContent('· 1')
+
+    await user.click(regenerate)
+    const dialog = screen.getByRole('alertdialog')
+    expect(within(dialog).getByText('Regeneration options')).toBeInTheDocument()
+    expect(within(dialog).getByText('1 override applied')).toBeInTheDocument()
+    await user.click(within(dialog).getByText('Regeneration options'))
+    expect(within(dialog).getByLabelText('Focus areas')).toHaveValue('security')
   })
 
-  it('omits the instructions in the submitted and authentication-error states', () => {
+  it('omits the instructions in the submitted and authentication-error states', async () => {
+    const user = userEvent.setup()
     installHost()
     render(<ReviewPane pr={pr} />)
     loadDraftPresent({ summary: 'Saved review.', verdict: 'COMMENT', lineComments: [] })
+    await user.click(screen.getByRole('button', { name: 'Regenerate' }))
     expect(screen.getByText('Regeneration options')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Keep draft' }))
 
     act(() => hostMessage({ type: 'reviewSubmitted', prKey: 'acme/widget#42' }))
     expect(screen.getByText('Review submitted.')).toBeVisible()
@@ -272,6 +278,22 @@ describe('regeneration options placement', () => {
     })
     expect(screen.getByText('GitHub authentication failed. Run gh auth login.')).toBeVisible()
     expect(screen.queryByTestId('review-overrides-disclosure')).not.toBeInTheDocument()
+  })
+
+  it('keeps empty chat compact and expands once a message is sent', async () => {
+    const user = userEvent.setup()
+    installHost()
+    render(<ReviewPane pr={pr} />)
+    loadDraftPresent({ summary: 'Saved review.', verdict: 'COMMENT', lineComments: [] })
+
+    await user.click(screen.getByRole('button', { name: 'Chat' }))
+    const chatPanel = screen.getByTestId('chat-panel')
+    expect(chatPanel.style.height).toBe('104px')
+    expect(screen.queryByRole('separator', { name: 'Resize chat panel' })).not.toBeInTheDocument()
+
+    await user.type(screen.getByRole('textbox', { name: 'Ask about this pull request' }), 'Explain auth{Enter}')
+    await waitFor(() => expect(Number.parseInt(chatPanel.style.height, 10)).toBeGreaterThanOrEqual(200))
+    expect(screen.getByRole('separator', { name: 'Resize chat panel' })).toBeInTheDocument()
   })
 })
 

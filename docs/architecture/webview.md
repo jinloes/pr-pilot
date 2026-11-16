@@ -16,15 +16,19 @@ token value must keep that matrix passing. Theme colors are semantic CSS variabl
 host-provided `light`, `dark`, `highContrastLight`, or `highContrastDark` bridge state; do not infer
 the IDE theme from browser media queries alone.
 
-The shared webview switches from split panes to explicit list/review navigation below 640px. Pane
-separators must remain operable by pointer and keyboard, keep ARIA values within viewport-derived
-bounds, and honor reduced-motion preferences. The application shell is pinned to the browser
-viewport with `overflow: clip`, and pane contents grow with `flex: 1` plus `min-height: 0`; do not
-replace this with a nested `height: 100%` chain because IntelliJ's JCEF Chromium can resolve a
-flex-stretched parent's percentage-height child to content height. Descendant auto-scroll must
-update its local scroll container directly rather than call `scrollIntoView`, because `overflow:
-hidden` ancestors remain programmatically scrollable and JCEF can translate the fixed shell
-off-screen.
+The shared webview switches from split panes to explicit list/review navigation below 640px, while
+`DiffViewer` sizes its side-by-side file/finding rail from its own `@container diff-viewer
+(min-width: 760px)` width (collapsing the stacked list by default below 760px until a tab is
+clicked). Pane separators must remain operable by pointer and keyboard, keep ARIA values within
+viewport-derived bounds, and honor reduced-motion preferences. Both `<main>` and the pane shells
+use `overflow: clip` (and `review-scroll-body` uses `overflow-x: clip`), and pane contents grow with
+`flex: 1` plus `min-height: 0`; do not replace this with `overflow: hidden` or a nested `height:
+100%` chain because browsers still programmatically scroll `overflow: hidden` ancestors horizontally
+on wide diff tables, and IntelliJ's JCEF Chromium can resolve a flex-stretched parent's
+percentage-height child to content height. Descendant auto-scroll must update its local scroll
+container directly rather than call `scrollIntoView`. Empty `ChatPane` collapses to a compact
+single-row composer (`EMPTY_CHAT_HEIGHT`) until messages or streaming content arrive, and draft
+regeneration overrides live inside the `Regenerate` confirmation dialog rather than below the diff.
 
 Radix menu actions that launch an alert dialog must defer opening the dialog until the menu's
 `onCloseAutoFocus` phase. Mounting the second modal directly from `DropdownMenuItem.onSelect` can

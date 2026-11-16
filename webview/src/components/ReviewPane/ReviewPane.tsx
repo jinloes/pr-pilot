@@ -22,7 +22,7 @@ import { ReviewFooter } from './ReviewFooter'
 import { ReviewOverrides } from './ReviewOverrides'
 import { DeepReviewSetup } from './DeepReviewSetup'
 import { ReviewEmptyState } from './ReviewEmptyState'
-import { QualityCheckBadge, ReviewQualityCheckCard } from './ReviewQuality'
+import { ReviewQualityCheckCard } from './ReviewQuality'
 import { useReviewController } from './useReviewController'
 
 interface Props {
@@ -83,11 +83,14 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
   const totalCount = commentCount + orphanCount
 
   const isDraftState = DRAFT_STATES.has(model.state.kind)
+  const overrideCount = Number(model.focusAreasOverride.trim().length > 0)
+    + Number(model.customInstructionsOverride.trim().length > 0)
   const reviewOverrides = model.showReviewOverrides ? (
     <ReviewOverrides
       summaryLabel={model.state.kind === 'error'
         ? 'Adjust instructions before retry'
         : isDraftState ? 'Regeneration options' : undefined}
+      embedded={isDraftState}
       focusAreas={model.focusAreasOverride}
       customInstructions={model.customInstructionsOverride}
       chunkedMode={model.chunkedMode}
@@ -261,7 +264,7 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
 
         <ContextMenu>
           <ContextMenuTrigger asChild>
-            <div ref={refs.reviewBodyRef} data-testid="review-scroll-body" className="flex-1 overflow-y-auto min-h-0">
+            <div ref={refs.reviewBodyRef} data-testid="review-scroll-body" className="flex-1 overflow-x-clip overflow-y-auto min-h-0">
               {model.state.kind === 'noDraft' && paneContent}
               {model.state.kind === 'error' && paneContent}
               {model.activity.outcome !== 'idle' && (
@@ -279,15 +282,6 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
               {model.state.kind !== 'generating'
                 && model.result
                 && model.qualityReport
-                && model.qualityRiskCount > 0
-                && !model.qualityExpanded && (
-                <div className="px-4 pt-3">
-                  <QualityCheckBadge count={model.qualityRiskCount} onReview={actions.runQualityCheck} />
-                </div>
-              )}
-              {model.state.kind !== 'generating'
-                && model.result
-                && model.qualityReport
                 && model.qualityExpanded && (
                 <div className="px-4 pt-3">
                   <ReviewQualityCheckCard
@@ -300,7 +294,6 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
               {model.state.kind !== 'noDraft'
                 && model.state.kind !== 'error'
                 && paneContent}
-              {isDraftState && reviewOverrides && <div className="pb-4">{reviewOverrides}</div>}
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
@@ -342,9 +335,9 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
           <div
             data-testid="chat-panel"
             className="flex min-h-0 shrink-0 flex-col border-t border-border overflow-hidden"
-            style={{ height: model.chatVisible ? model.chatHeight : 0 }}
+            style={{ height: model.chatVisible ? model.renderedChatHeight : 0 }}
           >
-            {model.chatVisible && (
+            {model.chatVisible && model.chatHasContent && (
               <AccessibleResizer
                 label="Resize chat panel"
                 orientation="horizontal"
@@ -367,6 +360,7 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
               onApplyVerifyAction={actions.applyVerifyAction}
               onAttachExamplePatch={actions.attachExamplePatch}
               onAddReplyToReview={model.canPlaceChatReply ? actions.placeChatReply : undefined}
+              onHasContentChange={actions.setChatHasContent}
             />
           </div>
         )}
@@ -387,6 +381,8 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
           commentsMovedToBody={model.commentsMovedToBody}
           qualityReport={model.qualityReport}
           diffUnavailable={model.diffUnavailable}
+          regenerationOptions={isDraftState ? (reviewOverrides ?? undefined) : undefined}
+          overrideCount={overrideCount}
         />
       </div>
     </TooltipProvider>

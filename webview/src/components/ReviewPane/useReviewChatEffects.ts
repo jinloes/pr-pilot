@@ -19,6 +19,7 @@ interface UseReviewChatEffectsOptions {
   showChat: boolean
   chatVisible: boolean
   chatHeight: number
+  renderedChatHeight?: number
   stateKind: string
   paneRef: RefObject<HTMLDivElement | null>
   reviewBodyRef: RefObject<HTMLDivElement | null>
@@ -33,6 +34,7 @@ export function useReviewChatEffects({
   showChat,
   chatVisible,
   chatHeight,
+  renderedChatHeight,
   stateKind,
   paneRef,
   reviewBodyRef,
@@ -41,21 +43,23 @@ export function useReviewChatEffects({
   setChatHeightState,
   setSelection,
 }: UseReviewChatEffectsOptions) {
+  const activeHeight = renderedChatHeight ?? chatHeight
+
   useEffect(() => {
     if (showChat && chatVisible) {
       sendToHost({ type: 'webviewLayoutChanged', reason: 'chat-panel' })
     }
-  }, [showChat, chatVisible, chatHeight])
+  }, [showChat, chatVisible, activeHeight])
 
   useEffect(() => {
     const pane = paneRef.current
     if (!pane) return
     const updateBounds = () => {
       const containerHeight = pane.getBoundingClientRect().height || window.innerHeight
-      const reviewBodyHeight = reviewBodyRef.current?.getBoundingClientRect().height ?? containerHeight
+      const reviewBodyHeight = reviewBodyRef.current?.getBoundingClientRect().height || containerHeight
       const availableHeight = effectiveChatAvailableHeight(
         containerHeight,
-        chatHeightRef.current,
+        renderedChatHeight ?? chatHeightRef.current,
         reviewBodyHeight,
       )
       setChatAvailableHeight(availableHeight)
@@ -70,7 +74,7 @@ export function useReviewChatEffects({
     observer.observe(pane)
     if (reviewBodyRef.current) observer.observe(reviewBodyRef.current)
     return () => observer.disconnect()
-  }, [chatVisible, showChat, stateKind])
+  }, [chatVisible, renderedChatHeight, showChat, stateKind])
 
   useEffect(() => {
     if (!pr) {

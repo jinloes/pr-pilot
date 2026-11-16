@@ -131,7 +131,11 @@ export function buildVerifyCommentPrompt(comment: LineComment, diff: string): Ve
     question:
       'Verify whether the draft review comment is supported by the pull-request evidence. ' +
       'Treat the diff excerpt as primary evidence. If it is insufficient, use read-only file tools ' +
-      WORKTREE_INSPECTION_RULES + '\n\n' +
+      WORKTREE_INSPECTION_RULES + ' ' +
+      'For a suggestion about logging, conventions, or performance, also inspect surrounding methods ' +
+      'and sibling files in the same directory: return verdict "invalid" with action "delete" when ' +
+      'the code follows an established codebase pattern without a concrete defect, or when the claim ' +
+      'relies on unverified caller speculation (such as "likely polled") with no loop or located caller.\n\n' +
       'Return only valid JSON with exactly these fields:\n' +
       '{"verdict":"valid|invalid|unclear","why":"string","evidence":["relative/path:line or symbol"],"action":"keep|revise|delete","replacementComment":"string|null"}.\n' +
       'List every inspected source as a repository-relative path with a line or symbol in "evidence"; ' +

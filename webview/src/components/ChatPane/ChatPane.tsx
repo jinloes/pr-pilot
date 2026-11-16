@@ -48,6 +48,8 @@ interface Props {
   onAttachExamplePatch?: (result: ExampleFixResult, token: string) => void
   /** Starts placing an assistant reply as an inline review comment; absent when the diff is read-only. */
   onAddReplyToReview?: (body: string) => void
+  /** Reports whether the chat transcript has messages or an active turn so the host panel can collapse empty space. */
+  onHasContentChange?: (hasContent: boolean) => void
 }
 
 function prKey(pr: Pick<PR, 'owner' | 'repo' | 'number'>): string {
@@ -70,6 +72,7 @@ export function ChatPane({
   onApplyVerifyAction,
   onAttachExamplePatch,
   onAddReplyToReview,
+  onHasContentChange,
 }: Props) {
   const t = useI18n()
   const [messages, setMessages] = useState<Message[]>([])
@@ -247,6 +250,10 @@ export function ChatPane({
   }
 
   const hasContent = messages.length > 0 || !!streaming || busy
+
+  useEffect(() => {
+    onHasContentChange?.(hasContent)
+  }, [hasContent, onHasContentChange])
   const latestMessageContext = [...messages]
     .reverse()
     .find((message) => message.contextSummary && message.contextSummary.length > 0)
@@ -285,7 +292,10 @@ export function ChatPane({
         aria-label="Chat messages"
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Scrollable chat history needs a keyboard focus target.
         tabIndex={0}
-        className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className={cn(
+          'flex-1 min-h-0 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+          hasContent ? 'p-3 space-y-3' : 'p-0',
+        )}
       >
         {hasContent && (
           <>
@@ -417,17 +427,20 @@ export function ChatPane({
       )}
 
       {/* Input */}
-      <div className="flex gap-2 p-3 pt-2 shrink-0">
+      <div className="flex gap-2 px-3 py-2 shrink-0">
         <label htmlFor="pr-chat-input" className="sr-only">{t('chat.input')}</label>
         <Textarea
           id="pr-chat-input"
-          className="min-h-[60px] resize-none text-sm bg-background border-input focus-visible:ring-ring"
+          className={cn(
+            'resize-none text-sm bg-background border-input focus-visible:ring-ring',
+            hasContent ? 'min-h-[60px]' : 'min-h-[40px] py-2',
+          )}
           placeholder="Ask about this PR…"
-          title="Enter to send · Shift+Enter for newline"
+          title="Enter to send · Shift+Enter for newline · Right-click selected diff text to ask about it"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          rows={2}
+          rows={hasContent ? 2 : 1}
         />
         {busy ? (
           <Button
@@ -453,9 +466,6 @@ export function ChatPane({
           </Button>
         )}
       </div>
-      <p className="px-3 pb-2 text-[11px] text-muted-foreground">
-        Uses the active PR context shown above · right-click selected text to ask about it
-      </p>
     </section>
   )
 }

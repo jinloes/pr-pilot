@@ -637,12 +637,12 @@ describe('ReviewPane review submission', () => {
         .filter((message) => message.type === 'submitReview')
     }
 
-    it('labels the AI verdict as a suggestion in the header and summary and uses one neutral publish button', () => {
+    it('labels the AI verdict once in the sticky header and uses one neutral publish button', () => {
       ;(window as unknown as { cefQuery?: ReturnType<typeof vi.fn> }).cefQuery = vi.fn()
       render(<ReviewPane pr={pr} />)
       loadVerdict('REQUEST_CHANGES')
 
-      expect(screen.getAllByText('Suggested: Request changes')).toHaveLength(2)
+      expect(screen.getAllByText('Suggested: Request changes')).toHaveLength(1)
       const submit = screen.getByRole('button', { name: 'Submit review…' })
       expect(submit).not.toHaveClass('bg-destructive')
       expect(screen.queryByRole('button', { name: 'More submit options' })).not.toBeInTheDocument()

@@ -6,7 +6,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import type { FileData, HunkData } from 'react-diff-view'
 import { scrollBehavior } from '@/lib/motion'
 import { useI18n } from '@/i18n/I18nProvider'
-import type { LineComment } from '@/bridge/types'
+import { sendToHost, type LineComment } from '@/bridge/types'
 import { cn } from '@/lib/utils'
 import { parseDiffSafely } from '@/lib/diffParse'
 import {
@@ -71,6 +71,7 @@ export function DiffViewer({
   const scrollParentRef = useRef<HTMLElement | null>(null)
   const [activeFilePath, setActiveFilePath] = useState('')
   const [navigationView, setNavigationView] = useState<'files' | 'findings'>('files')
+  const [compactNavOpen, setCompactNavOpen] = useState(false)
   const [pendingScrollPath, setPendingScrollPath] = useState<string | null>(null)
   const [pendingScrollCommentIdx, setPendingScrollCommentIdx] = useState<number | null>(null)
   const [rawDiffCopied, setRawDiffCopied] = useState(false)
@@ -196,9 +197,31 @@ export function DiffViewer({
     return true
   }, [])
 
+  const isCompactContainer = useCallback(() => {
+    const width = containerRef.current?.getBoundingClientRect().width ?? 0
+    return width > 0 && width < 760
+  }, [])
+
+  const handleNavTabClick = useCallback((view: 'files' | 'findings') => {
+    if (isCompactContainer()) {
+      if (!compactNavOpen) {
+        setNavigationView(view)
+        setCompactNavOpen(true)
+      } else if (navigationView === view) {
+        setCompactNavOpen(false)
+      } else {
+        setNavigationView(view)
+      }
+      sendToHost({ type: 'webviewLayoutChanged', reason: 'diff-nav-toggle' })
+      return
+    }
+    setNavigationView(view)
+  }, [compactNavOpen, isCompactContainer, navigationView])
+
   const handleSelectFile = useCallback((displayPath: string) => {
     const isVisible = visibleNavItems.some((item) => item.displayPath === displayPath)
     setActiveFilePath(displayPath)
+    setCompactNavOpen(false)
     if (!isVisible && truncating) {
       setPendingScrollPath(displayPath)
       startTransition(() => setShowAll(true))
@@ -221,11 +244,13 @@ export function DiffViewer({
 
   const handleSelectFinding = useCallback((index: number, file: string) => {
     setActiveFilePath(file)
+    setCompactNavOpen(false)
     onFocusComment?.(index)
     scrollToComment(index)
   }, [onFocusComment, scrollToComment])
 
   const handleSelectUnanchoredFinding = useCallback((index: number) => {
+    setCompactNavOpen(false)
     document.getElementById(`orphan-comment-${index}`)
       ?.scrollIntoView({ behavior: scrollBehavior(), block: 'nearest' })
   }, [])
@@ -316,13 +341,13 @@ export function DiffViewer({
     <TooltipProvider delayDuration={400}>
       <div ref={containerRef} className="diff-viewer" tabIndex={-1}>
         <div className="diff-viewer__layout">
-          <nav className="diff-file-nav" aria-label="Review navigation">
+          <nav className={cn('diff-file-nav', compactNavOpen && 'diff-file-nav--expanded')} aria-label="Review navigation">
             <div className="diff-file-nav__tabs" role="group" aria-label="Review navigation views">
               <button
                 type="button"
                 aria-pressed={navigationView === 'files'}
                 className={cn('diff-file-nav__tab', navigationView === 'files' && 'diff-file-nav__tab--active')}
-                onClick={() => setNavigationView('files')}
+                onClick={() => handleNavTabClick('files')}
               >
                 Files
                 <span className="diff-file-nav__count">{allNavItems.length}</span>
@@ -331,13 +356,13 @@ export function DiffViewer({
                 type="button"
                 aria-pressed={navigationView === 'findings'}
                 className={cn('diff-file-nav__tab', navigationView === 'findings' && 'diff-file-nav__tab--active')}
-                onClick={() => setNavigationView('findings')}
+                onClick={() => handleNavTabClick('findings')}
               >
                 Findings
                 <span className="diff-file-nav__count">{findings.length + unanchoredFindings.length}</span>
               </button>
             </div>
-            <div className="diff-file-nav__body">
+            <div className="diff-file-nav__body" data-compact-collapsed={!compactNavOpen ? 'true' : undefined}>
               {navigationView === 'files' ? (
                 <ul className="diff-file-tree">
                   {fileTree.map((node) => (

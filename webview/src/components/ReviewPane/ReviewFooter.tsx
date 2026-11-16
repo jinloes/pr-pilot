@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   Check,
   CloudUpload,
@@ -52,6 +52,8 @@ interface ReviewFooterProps {
   commentsMovedToBody: boolean
   qualityReport: ReviewQualityReport | null
   diffUnavailable: boolean
+  regenerationOptions?: ReactNode
+  overrideCount?: number
 }
 
 function useNarrowFooter(): boolean {
@@ -64,9 +66,15 @@ function useNarrowFooter(): boolean {
   return narrow
 }
 
-function RegenerateDialogContent({ onRegenerate }: { onRegenerate: () => void }) {
+function RegenerateDialogContent({
+  onRegenerate,
+  regenerationOptions,
+}: {
+  onRegenerate: () => void
+  regenerationOptions?: ReactNode
+}) {
   return (
-    <AlertDialogContent>
+    <AlertDialogContent className="max-h-[85vh] overflow-y-auto">
       <AlertDialogHeader>
         <AlertDialogTitle>Regenerate review?</AlertDialogTitle>
         <AlertDialogDescription>
@@ -74,6 +82,7 @@ function RegenerateDialogContent({ onRegenerate }: { onRegenerate: () => void })
           you edited or added. The current draft stays visible until then.
         </AlertDialogDescription>
       </AlertDialogHeader>
+      {regenerationOptions}
       <AlertDialogFooter>
         <AlertDialogCancel>Keep draft</AlertDialogCancel>
         <AlertDialogAction onClick={onRegenerate}>Regenerate</AlertDialogAction>
@@ -120,6 +129,8 @@ export function ReviewFooter({
   commentsMovedToBody,
   qualityReport,
   diffUnavailable,
+  regenerationOptions,
+  overrideCount = 0,
 }: ReviewFooterProps) {
   const t = useI18n()
   const narrow = useNarrowFooter()
@@ -195,7 +206,12 @@ export function ReviewFooter({
             <DropdownMenuContent align="start" className="w-56">
               <DropdownMenuItem className="gap-2 text-xs" onSelect={() => setMenuDialog('regenerate')}>
                 <RotateCcw className="w-3.5 h-3.5" />
-                Regenerate
+                <span>Regenerate</span>
+                {overrideCount > 0 && (
+                  <span aria-hidden="true" className="ml-auto font-mono text-[10px] text-muted-foreground">
+                    · {overrideCount}
+                  </span>
+                )}
               </DropdownMenuItem>
               <DropdownMenuItem className="gap-2 text-xs" onSelect={onRunQualityCheck}>
                 <Check className="w-3.5 h-3.5" />
@@ -218,7 +234,7 @@ export function ReviewFooter({
             open={menuDialog === 'regenerate'}
             onOpenChange={(open) => !open && setMenuDialog(null)}
           >
-            <RegenerateDialogContent onRegenerate={onRegenerate} />
+            <RegenerateDialogContent onRegenerate={onRegenerate} regenerationOptions={regenerationOptions} />
           </AlertDialog>
           <AlertDialog
             open={menuDialog === 'delete'}
@@ -270,10 +286,15 @@ export function ReviewFooter({
             <AlertDialogTrigger asChild>
               <Button variant="ghost" size="sm" disabled={busy} className="gap-1.5 text-xs">
                 <RotateCcw className="w-3.5 h-3.5" />
-                Regenerate
+                <span>Regenerate</span>
+                {overrideCount > 0 && (
+                  <span aria-hidden="true" className="font-mono text-[10px] text-muted-foreground">
+                    · {overrideCount}
+                  </span>
+                )}
               </Button>
             </AlertDialogTrigger>
-            <RegenerateDialogContent onRegenerate={onRegenerate} />
+            <RegenerateDialogContent onRegenerate={onRegenerate} regenerationOptions={regenerationOptions} />
           </AlertDialog>
 
           <Tooltip>

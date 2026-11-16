@@ -89,7 +89,9 @@ export interface ReviewViewModel {
   selectedContext: string
   selectedContextLocation?: ChatContextLocation
   pendingChatMessage: PendingChatMessage | null
+  chatHasContent: boolean
   chatHeight: number
+  renderedChatHeight: number
   chatAvailableHeight: number
   contextSummary: string[]
   qualityExpanded: boolean
@@ -149,6 +151,7 @@ export interface ReviewActions {
   /** Starts "pick a line" mode in the diff with this chat reply as the new comment's text. */
   placeChatReply: (body: string) => void
   cancelChatReplyPlacement: () => void
+  setChatHasContent: (hasContent: boolean) => void
   setChatHeight: (height: number) => void
   commitChatHeight: (height: number) => void
   startChatResize: (event: ReactPointerEvent) => void

@@ -488,4 +488,56 @@ describe('DiffViewer', () => {
 
     await waitFor(() => expect(screen.getByTestId('diff-current-file-path')).toHaveTextContent('src/ui/button.tsx'))
   })
+
+  it('exposes comment rationale behind a keyboard-accessible Why disclosure even without confidence', async () => {
+    const user = userEvent.setup()
+    render(
+      <DiffViewer
+        diff={diff}
+        comments={[
+          {
+            file: 'src/auth.ts',
+            line: 2,
+            type: 'issue',
+            body: 'Guard the empty state.',
+            rationale: 'Line 2 bypasses the check when actions is empty.',
+          },
+        ]}
+      />,
+    )
+
+    const whyButton = screen.getByRole('button', { name: 'Why' })
+    expect(whyButton).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('Line 2 bypasses the check when actions is empty.')).not.toBeInTheDocument()
+
+    whyButton.focus()
+    await user.keyboard('{Enter}')
+    expect(whyButton).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('Line 2 bypasses the check when actions is empty.')).toBeVisible()
+  })
+
+  it('toggles compact navigation open and collapses it after selecting a file', () => {
+    const { container } = render(<DiffViewer diff={diff} comments={comments} />)
+    const viewer = container.querySelector('.diff-viewer') as HTMLElement
+    vi.spyOn(viewer, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 420,
+      height: 500,
+      top: 0,
+      right: 420,
+      bottom: 500,
+      left: 0,
+      toJSON: () => ({}),
+    })
+
+    const navBody = container.querySelector('.diff-file-nav__body') as HTMLElement
+    expect(navBody).toHaveAttribute('data-compact-collapsed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: /^Files/ }))
+    expect(navBody).not.toHaveAttribute('data-compact-collapsed')
+
+    fireEvent.click(screen.getByRole('button', { name: 'src/ui/button.tsx' }))
+    expect(navBody).toHaveAttribute('data-compact-collapsed', 'true')
+  })
 })

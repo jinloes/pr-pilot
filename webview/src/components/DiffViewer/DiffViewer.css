@@ -1,7 +1,9 @@
 .diff-viewer {
+  container-type: inline-size;
+  container-name: diff-viewer;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   margin-top: 4px;
   min-width: 0;
 }
@@ -9,7 +11,7 @@
 .diff-viewer__layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
+  gap: 8px;
   align-items: start;
 }
 
@@ -312,9 +314,24 @@
   font-size: 11px;
 }
 
-@media (min-width: 1100px) {
+@container diff-viewer (max-width: 759px) {
+  .diff-file-nav__tabs {
+    border-bottom: 0;
+  }
+
+  .diff-file-nav--expanded .diff-file-nav__tabs {
+    border-bottom: 1px solid hsl(var(--border));
+  }
+
+  .diff-file-nav__body[data-compact-collapsed='true'] {
+    display: none;
+  }
+}
+
+@container diff-viewer (min-width: 760px) {
   .diff-viewer__layout {
-    grid-template-columns: clamp(280px, 18vw, 360px) minmax(0, 1fr);
+    gap: 12px;
+    grid-template-columns: clamp(280px, 24cqw, 360px) minmax(0, 1fr);
   }
 
   .diff-file-nav {
@@ -610,6 +627,44 @@
   line-height: 1.4;
 }
 
+.diff-comment__why-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.35);
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.diff-comment__why-toggle:hover,
+.diff-comment__why-toggle[aria-expanded='true'] {
+  background: hsl(var(--muted) / 0.7);
+  color: hsl(var(--foreground));
+}
+
+.diff-comment__why-toggle:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+}
+
+.diff-comment__rationale {
+  margin: 0;
+  padding: 5px 8px;
+  border-radius: 4px;
+  border-left: 2px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.35);
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.5;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
 .diff-comment__actions {
   display: flex;
   flex-shrink: 0;
@@ -628,7 +683,7 @@
   display: none;
 }
 
-@media (min-width: 1100px) {
+@container diff-viewer (min-width: 760px) {
   .diff-comment__ai-action {
     width: auto;
     padding-inline: 7px;

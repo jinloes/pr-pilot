@@ -313,12 +313,24 @@ export default function App() {
       aria-hidden={setup ? true : undefined}
     >
       {narrow && (
-        <div className="fixed left-2 top-2 z-40 flex rounded-md border border-border bg-card p-1 shadow">
-          <Button size="sm" variant={activePane === 'list' ? 'default' : 'ghost'} onClick={() => setActivePane('list')}>
-            {t('app.showPrList')}
+        <div className="fixed left-2 right-2 top-2 z-40 flex max-w-[calc(100vw-1rem)] gap-1 rounded-md border border-border bg-card p-1 shadow">
+          <Button
+            size="sm"
+            variant={activePane === 'list' ? 'default' : 'ghost'}
+            className="min-w-0 flex-1"
+            title={t('app.showPrList')}
+            onClick={() => setActivePane('list')}
+          >
+            <span className="truncate">{t('app.showPrList')}</span>
           </Button>
-          <Button size="sm" variant={activePane === 'review' ? 'default' : 'ghost'} onClick={() => setActivePane('review')}>
-            {t('app.showReview')}
+          <Button
+            size="sm"
+            variant={activePane === 'review' ? 'default' : 'ghost'}
+            className="min-w-0 flex-1"
+            title={t('app.showReview')}
+            onClick={() => setActivePane('review')}
+          >
+            <span className="truncate">{t('app.showReview')}</span>
           </Button>
         </div>
       )}
@@ -327,7 +339,7 @@ export default function App() {
         data-testid="pr-list-shell"
         aria-label={t('app.prList')}
         style={narrow ? undefined : { width: leftWidth, maxWidth: '45vw' }}
-        className={`${narrow ? (activePane === 'list' ? 'flex w-full pt-12' : 'hidden') : 'flex'} min-h-0 shrink-0 flex-col overflow-hidden`}
+        className={`${narrow ? (activePane === 'list' ? 'flex w-full pt-12' : 'hidden') : 'flex'} min-h-0 shrink-0 flex-col overflow-clip`}
       >
         <PRList
           selectedPr={selectedPR}
@@ -360,7 +372,7 @@ export default function App() {
       <section
         data-testid="review-pane-shell"
         aria-label={t('app.review')}
-        className={`${narrow ? (activePane === 'review' ? 'flex w-full pt-12' : 'hidden') : 'flex'} min-h-0 min-w-0 flex-1 flex-col overflow-hidden`}
+        className={`${narrow ? (activePane === 'review' ? 'flex w-full pt-12' : 'hidden') : 'flex'} min-h-0 min-w-0 flex-1 flex-col overflow-clip`}
       >
         <ReviewPane
           ref={reviewPaneRef}

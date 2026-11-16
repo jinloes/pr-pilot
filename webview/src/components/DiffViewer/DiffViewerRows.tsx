@@ -402,6 +402,7 @@ function InlineCommentRow({
 }: InlineCommentRowProps) {
   const [editing, setEditing] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [rationaleOpen, setRationaleOpen] = useState(false)
   const [draft, setDraft] = useState(comment.body)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -455,15 +456,18 @@ function InlineCommentRow({
                 <span className="diff-comment__metadata">
                   {comment.category}
                   {comment.category && comment.confidence && <span aria-hidden="true"> · </span>}
-                  {comment.confidence && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="cursor-help">{comment.confidence} confidence</span>
-                      </TooltipTrigger>
-                      {comment.rationale && <TooltipContent side="top" className="max-w-xs">{comment.rationale}</TooltipContent>}
-                    </Tooltip>
-                  )}
+                  {comment.confidence && <span>{comment.confidence} confidence</span>}
                 </span>
+              )}
+              {comment.rationale && (
+                <button
+                  type="button"
+                  className="diff-comment__why-toggle"
+                  aria-expanded={rationaleOpen}
+                  onClick={() => setRationaleOpen((open) => !open)}
+                >
+                  Why
+                </button>
               )}
               {comment.sources && comment.sources.length > 0 && <FindingSources sources={comment.sources} />}
             </div>
@@ -582,9 +586,14 @@ function InlineCommentRow({
               </div>
             </div>
           ) : (
-            <div className="diff-comment__body">
-              <CommentBody body={comment.body} />
-            </div>
+            <>
+              {rationaleOpen && comment.rationale && (
+                <p className="diff-comment__rationale">{comment.rationale}</p>
+              )}
+              <div className="diff-comment__body">
+                <CommentBody body={comment.body} />
+              </div>
+            </>
           )}
           {comment.suggestedChange && !editing && (
             <SuggestedChangePreview

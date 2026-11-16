@@ -8,7 +8,7 @@ import { applyReviewQualityRepairs, runReviewQualityCheck, type ReviewQualityAct
 import { validateComments, withoutSuggestion } from '@/lib/validateComments'
 import type { ExampleFixResult, VerifyResult } from '../ChatPane/structuredResult'
 import { withAttachedPatch } from '@/lib/attachPatch'
-import { CHAT_HEIGHT_KEY, clampChatHeight, loadChatHeight } from './chatHeight'
+import { CHAT_HEIGHT_KEY, clampChatHeight, EMPTY_CHAT_HEIGHT, loadChatHeight } from './chatHeight'
 import { adjacentCommentIndex, focusedIndexAfterCommentDeletion, nextCommentIndex } from './commentNavigation'
 import { diffOf, initialPaneState, resultOf, reviewReducer, validationDiffOf, type DraftPresentState, type PaneState, type Verdict } from './reviewState'
 import { emptyReviewActivity, finishReviewActivity, formatReviewActivityLabel, type ReviewActivity } from './reviewActivity'
@@ -68,6 +68,7 @@ export function useReviewController({
   const [focusedCommentIdx, setFocusedCommentIdx] = useState(0)
   const [commentFocusRequestId, setCommentFocusRequestId] = useState(0)
   const [chatVisible, setChatVisible] = useState(false)
+  const [chatHasContent, setChatHasContent] = useState(false)
   const [selection, setSelection] = useState<ChatSelection | null>(null)
   const selectedContext = selection?.text ?? ''
   const selectedContextLocation = selection?.location
@@ -147,6 +148,7 @@ export function useReviewController({
     setCommentFocusRequestId(0)
     commentNavigatedRef.current = false
     setChatVisible(false)
+    setChatHasContent(false)
     setSelection(null)
     setChatCommentDraft(null)
     setPendingChatMessage(null)
@@ -209,12 +211,14 @@ export function useReviewController({
   })
 
   const showChat = Boolean(pr)
+  const renderedChatHeight = chatHasContent ? chatHeight : Math.min(chatHeight, EMPTY_CHAT_HEIGHT)
 
   useReviewChatEffects({
     pr,
     showChat,
     chatVisible,
     chatHeight,
+    renderedChatHeight,
     stateKind: state.kind,
     paneRef,
     reviewBodyRef,
@@ -634,7 +638,9 @@ export function useReviewController({
       selectedContext,
       selectedContextLocation,
       pendingChatMessage,
+      chatHasContent,
       chatHeight,
+      renderedChatHeight,
       chatAvailableHeight,
       contextSummary,
       qualityExpanded,
@@ -686,7 +692,10 @@ export function useReviewController({
       attachExamplePatch: handleAttachExamplePatch,
       editCommentHandlers,
       orphanHandlers,
-      runQualityCheck: () => setQualityExpanded(true),
+      runQualityCheck: () => {
+        setQualityExpanded(true)
+        if (reviewBodyRef.current) reviewBodyRef.current.scrollTop = 0
+      },
       applyQualityRepair,
       collapseQualityCheck: () => setQualityExpanded(false),
       focusComment: (index) => {
@@ -717,6 +726,7 @@ export function useReviewController({
         if (trimmed) setChatCommentDraft(trimmed)
       },
       cancelChatReplyPlacement: () => setChatCommentDraft(null),
+      setChatHasContent,
       setChatHeight,
       commitChatHeight: (height) => localStorage.setItem(CHAT_HEIGHT_KEY, String(height)),
       startChatResize,
