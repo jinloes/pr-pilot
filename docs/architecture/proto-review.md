@@ -56,8 +56,8 @@ The passes split the work:
 - The "Protobuf schemas" checklist leaves unreserved removals and deleted reserved entries to the
   hygiene pass, unless a number or name is actually reused.
 
-Change the rule IDs, the impact tags and those prompt texts together, and bump
-`ReviewPrompts.PROMPT_VERSION`.
+Change the rule IDs, the impact tags and those prompt texts together (`ReviewPrompts.PROMPT_VERSION`
+updates automatically from the prompt hash).
 
 ### The schema delta compares against the diff's old side
 A delta is only correct against the commit the diff starts from, which is not always `baseSha`.

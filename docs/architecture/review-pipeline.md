@@ -153,7 +153,9 @@ is `draftReviewJson` over an already-parsed draft, so by then no low-confidence 
 the old "drop a low-confidence issue" rule could never match anything. It now requires each
 surviving low-confidence comment to be confirmed and raised, or dropped.
 
-`ReviewPrompts.PROMPT_VERSION` names the prompt revision; bump it with any prompt-text change.
+`ReviewPrompts.PROMPT_VERSION` is derived automatically by SHA-256 hashing every packaged prompt
+resource (`src/main/resources/review-prompts/`), section preface, language and triggered checklist,
+and bundled review rule, so any prompt edit segments `review-outcomes.jsonl` without manual bumps.
 Pass B appends `BUG_HUNT_CHECKLIST` (the defect classes a generic "look for bugs" instruction skips,
 including evidence-gated security classes), `LanguageChecklists` entries for only the languages the
 diff changes, and

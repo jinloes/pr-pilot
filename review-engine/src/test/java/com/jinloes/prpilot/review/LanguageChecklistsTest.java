@@ -93,4 +93,23 @@ class LanguageChecklistsTest {
                     .doesNotContain("\nC#:\n");
         }
     }
+
+    @Nested
+    class Checklists {
+        @Test
+        void exposesAnUnmodifiableViewOfEveryCoveredLanguage() {
+            assertThat(LanguageChecklists.checklists())
+                    .containsKeys(
+                            "Java",
+                            "Kotlin",
+                            "JavaScript/TypeScript",
+                            "Python",
+                            "Go",
+                            "Rust",
+                            "C#",
+                            "C/C++",
+                            "Shell")
+                    .isUnmodifiable();
+        }
+    }
 }

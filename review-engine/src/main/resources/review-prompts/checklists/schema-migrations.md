@@ -1,0 +1,5 @@
+- A column type change, a new NOT NULL or CHECK constraint, or a default computed per row (now(), random()) that rewrites or scans the whole table while holding a lock, on a table that may be large. Safer forms: add the constraint as NOT VALID and validate it separately, or backfill in batches.
+- An index created or dropped without CONCURRENTLY (PostgreSQL) or the database's online option, which blocks writes while it runs.
+- A column or table renamed or dropped while the currently deployed code, which keeps running during the rollout, still reads or writes it. Use expand and contract: add the new shape, deploy code that uses it, backfill, then remove the old one in a later release.
+- A new NOT NULL column with no default or backfill for existing rows, or a large backfill inside the same transaction as the schema change.
+- A destructive DROP, TRUNCATE, or DELETE with no down-migration, backup, or note that the data loss is intended.

@@ -1,0 +1,6 @@
+- A base image referenced by latest or another mutable tag without a digest.
+- A container that runs as root: no USER instruction, or a later USER root.
+- A secret, token, or private key copied into the image, passed as a build ARG or ENV, or deleted in a later layer (earlier layers keep it).
+- A COPY or ADD of the whole build context when no .dockerignore excludes .git, .env, and credential files.
+- ADD from a remote URL, or a download piped to a shell, without checksum verification.
+- In a compose file, a service that runs privileged, mounts the Docker socket, uses the host network or PID namespace, or holds a secret inline in its environment.

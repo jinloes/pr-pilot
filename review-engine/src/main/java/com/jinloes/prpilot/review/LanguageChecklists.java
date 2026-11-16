@@ -1,6 +1,7 @@
 package com.jinloes.prpilot.review;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -205,6 +206,10 @@ final class LanguageChecklists {
     }
 
     private LanguageChecklists() {}
+
+    static Map<String, String> checklists() {
+        return Collections.unmodifiableMap(CHECKLISTS);
+    }
 
     /** The language name for a path, or {@code null} when no checklist covers its extension. */
     static String languageFor(String path) {

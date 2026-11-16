@@ -1,0 +1,40 @@
+name: flag-off-companion-leak
+description: >-
+  Flags companion edits to shared prompts, guards, allow-lists, validators, routing rules, or
+  defaults that run unconditionally in a pull request that gates its feature behind a flag, config
+  toggle, or conditionally registered capability or tool, altering live behavior when the gate is
+  off.
+trigger: >-
+  The PR introduces, checks, or claims to gate behavior behind a feature flag, kill switch,
+  experiment or rollout gate, config toggle, or conditionally registered tool or capability, and
+  also modifies shared prompts, guards, allow-lists, validators, fallbacks, routing rules, or
+  defaults.
+prompt: |
+  Find companion edits in a flag-gated pull request that alter live behavior even when the flag is
+  off or the gated capability is not registered.
+
+  1. Identify the gate(s) in <pr_diff> and the working directory: a feature flag, rollout or
+     experiment check, config toggle, or a tool, handler, or capability registered only when that
+     gate is enabled. Note what <pr_description> and <repo_guidelines> say about flag-off behavior
+     or gating new features.
+  2. Inspect every other changed hunk across <pr_diff> — including files that do not reference the
+     flag directly — and read the enclosing function or class in the working directory:
+     a. Shared system, classifier, or reviewer prompts edited in place so every call receives the
+        new clause, including instructions that mention a tool, status field, or branch that does
+        not exist when the gate is off.
+     b. Output validators, URL or action allow-lists, policy guards, or fallback short-circuits
+        relaxed unconditionally instead of only when the gated capability is present or active.
+     c. Routing predicates, defaults, or schema fields changed for all callers rather than behind
+        the gate.
+  3. Trace a live request with the gate OFF (and any gated tool or capability absent). Do not
+     report inert helper functions, unused constants, type definitions, or code paths reachable
+     only when the gate is on. Report a finding only when an ungated edit changes live decisions,
+     prompts, validation, or outputs while the gate is off.
+
+  Anchor each finding on the ungated changed line that alters flag-off behavior. Use type "issue",
+  category "correctness", severity "major" when it weakens a guard, changes a user-visible outcome,
+  or instructs a live prompt about an absent tool or state; otherwise "minor". In the body, state
+  what runs unconditionally when the gate is off and how to gate it (for example, conditioning the
+  prompt clause or allow-list relaxation on the flag or on the tool being registered). In
+  "rationale", name the gate or conditional registration you read, trace the flag-off caller path,
+  and quote any conflicting flag-off claim in <pr_description> or gating rule in <repo_guidelines>.

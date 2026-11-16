@@ -1,0 +1,6 @@
+- A new dependency whose name resembles a popular package's (a likely typosquat), or one the change neither uses nor explains. You cannot query the registry to prove a package exists, so report this as a "note" that names the resemblance.
+- A floating version (latest, *, +, an open range, a snapshot) where the repository otherwise pins exact versions.
+- A dependency added or changed in a manifest whose lockfile exists in the working directory but is not updated in this diff.
+- A dependency resolved from a git URL, a tarball or file URL, or a new registry or repository (including a build wrapper's distribution URL); a lockfile entry whose resolved URL points to a different host than the rest of the file, or whose integrity hash changes while its version does not.
+- A new install, postinstall, or prepare script, or a build plugin that runs code at install or build time.
+- A major-version upgrade while code in the repository still uses an API the new version removed or changed; confirm the call site with Grep before reporting it.

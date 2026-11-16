@@ -62,7 +62,8 @@ final class LocalReviewRules {
                     "ambiguous-delimiter.yaml",
                     "unbounded-fanout.yaml",
                     "state-published-before-yield.yaml",
-                    "typed-identifier.yaml");
+                    "typed-identifier.yaml",
+                    "flag-off-companion-leak.yaml");
 
     static final String BUILT_IN_SOURCE_PREFIX = "built-in/";
 

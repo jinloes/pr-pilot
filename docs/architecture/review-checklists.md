@@ -69,8 +69,9 @@ and trigger, and returns `{"triggered":[...]}`. Unknown names are ignored. Any f
 unparseable output fails open to every structured rule, because a missed rule is worse than an extra
 agent. Unstructured rules are always selected. At most 25 rules run (the rest are named in a
 status), each in its own read-only agent with MCP off (10 min each, 3 concurrently on daemon
-threads). An agent sees only its rule, `OUTPUT_CONTRACT`, PR metadata and the diff (the condensed
-index for chunked reviews, as the hygiene pass does). Its findings are anchor-validated, end their
+threads). An agent sees only its rule, `OUTPUT_CONTRACT`, PR metadata, any `repo_guidelines` and
+`pr_description`, and the diff (the condensed index for chunked reviews, as the hygiene pass does).
+Its findings are anchor-validated, end their
 rationale with ` (rule: <name>)`, and are merged into the candidate only when non-empty, so a review
 without rules is unchanged. A failed agent is reported and skipped.
 
@@ -83,6 +84,13 @@ whole review. Findings already collected are kept. User cancellation cancels eve
 propagates; `ClaudeService` and `CopilotService` track concurrent runs in sets so one cancel stops
 them all. In deep review, the authority check runs before the selection call and before each agent
 submission, and both prompts carry the semantic sections.
+
+Cross-file defect patterns that span files `ChunkedReviewService` may split into separate batches
+(such as `flag-off-companion-leak.yaml`) belong here as structured built-in rules so one agent sees
+the PR description, repository guidelines, condensed diff, and full worktree together. The
+self-critique directive keeps any finding proving a concrete runtime behavior change, bypassed or
+incomplete guard, error path, weakened test, or contradicted claim/guideline without requiring each
+new Pass B or rule defect name to be listed in `ReviewCritiquePrompts`.
 
 In recall mode, rule findings the critique dropped are restored by the hygiene restore rule (not low
 confidence, anchored, not covered by a same-category finding within `HYGIENE_COVER_LINES` or a

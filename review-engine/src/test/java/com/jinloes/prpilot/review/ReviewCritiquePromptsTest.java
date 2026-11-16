@@ -87,7 +87,12 @@ class ReviewCritiquePromptsTest {
                     .contains("anywhere in the diff for a deleted test or")
                     .contains("Keep a security finding when the caller-controlled source")
                     .contains("drop generic security hardening advice")
-                    .contains("weakened-test, or contradicted-claim finding is not a style finding")
+                    .contains(
+                            "Never drop a finding as \"style\" or \"design preference\" when it"
+                                    + " proves a concrete runtime behavior change, bypassed or"
+                                    + " incomplete guard")
+                    .contains("purely about formatting, naming, or linter-enforced style")
+                    .doesNotContain("A fail-open,")
                     .contains("<pr_description> and <commits> indeed omit it");
         }
 

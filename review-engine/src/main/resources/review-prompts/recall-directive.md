@@ -1,0 +1,5 @@
+
+<recall_mode>
+A separate validation pass will re-check every comment you emit. This overrides the instruction above to omit unconfirmed findings, but only for plausible defects you could not fully confirm: report each one as "type": "note" with "confidence": "low", a changed-line anchor, and a "rationale" that starts with "Verify:" and names exactly what the validator must check. Every other rule still applies: anchor to changed lines, never report a low-confidence "issue", and never invent evidence. List confirmed findings first and these candidates last. In this mode "lineComments" may hold up to {{RECALL_MAX_LINE_COMMENTS}} comments.
+Gather evidence before judging: read every changed file in full, not only its hunks, and look up the definition of each new or changed symbol a finding depends on (a called method, type, constant, or config key) with Grep or Read before reporting or dismissing it. The guidance above that few comments is a correct outcome does not limit this mode: report every defect the evidence supports.
+</recall_mode>

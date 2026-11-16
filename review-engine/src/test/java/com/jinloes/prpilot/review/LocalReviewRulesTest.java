@@ -227,7 +227,8 @@ class LocalReviewRulesTest {
                             "ambiguous-delimiter",
                             "unbounded-fanout",
                             "state-published-before-yield",
-                            "typed-identifier");
+                            "typed-identifier",
+                            "flag-off-companion-leak");
             assertThat(builtIn).allSatisfy(rule -> assertThat(rule.structured()).isTrue());
             assertThat(builtIn)
                     .extracting(Rule::source)
@@ -238,7 +239,8 @@ class LocalReviewRulesTest {
                             "built-in/ambiguous-delimiter.yaml",
                             "built-in/unbounded-fanout.yaml",
                             "built-in/state-published-before-yield.yaml",
-                            "built-in/typed-identifier.yaml");
+                            "built-in/typed-identifier.yaml",
+                            "built-in/flag-off-companion-leak.yaml");
         }
 
         @Test
@@ -276,6 +278,22 @@ class LocalReviewRulesTest {
         }
 
         @Test
+        void flagOffCompanionLeakRuleTracesLiveBehaviorWithTheGateOff() {
+            Rule rule =
+                    LocalReviewRules.builtIn().stream()
+                            .filter(candidate -> candidate.name().equals("flag-off-companion-leak"))
+                            .findFirst()
+                            .orElseThrow();
+
+            assertThat(rule.trigger()).contains("feature flag").contains("shared prompts");
+            assertThat(rule.prompt())
+                    .contains("with the gate OFF")
+                    .contains("inert helper functions")
+                    .contains("<pr_description>")
+                    .contains("<repo_guidelines>");
+        }
+
+        @Test
         void listsEveryBundledResourceFile() throws IOException {
             Path directory = Path.of("src/main/resources/review-rules");
             try (Stream<Path> files = Files.list(directory)) {
@@ -301,6 +319,7 @@ class LocalReviewRulesTest {
                             "unbounded-fanout",
                             "state-published-before-yield",
                             "typed-identifier",
+                            "flag-off-companion-leak",
                             "team");
         }
 
@@ -315,7 +334,8 @@ class LocalReviewRulesTest {
                             "ambiguous-delimiter",
                             "unbounded-fanout",
                             "state-published-before-yield",
-                            "typed-identifier");
+                            "typed-identifier",
+                            "flag-off-companion-leak");
         }
 
         @Test
@@ -343,9 +363,10 @@ class LocalReviewRulesTest {
                             "unbounded-fanout",
                             "state-published-before-yield",
                             "typed-identifier",
+                            "flag-off-companion-leak",
                             "helper-reuse");
-            assertThat(loaded.get(6).source()).isEqualTo("mine.yaml");
-            assertThat(loaded.get(6).trigger()).isEqualTo("my trigger");
+            assertThat(loaded.get(7).source()).isEqualTo("mine.yaml");
+            assertThat(loaded.get(7).trigger()).isEqualTo("my trigger");
         }
 
         @Test
@@ -360,7 +381,8 @@ class LocalReviewRulesTest {
                             "ambiguous-delimiter",
                             "unbounded-fanout",
                             "state-published-before-yield",
-                            "typed-identifier");
+                            "typed-identifier",
+                            "flag-off-companion-leak");
         }
 
         @Test
@@ -377,6 +399,7 @@ class LocalReviewRulesTest {
                             "unbounded-fanout",
                             "state-published-before-yield",
                             "typed-identifier",
+                            "flag-off-companion-leak",
                             "helper-reuse.md");
         }
     }

@@ -14,23 +14,22 @@ class ReviewPromptsTest {
     class BuildPrompt {
 
         @Test
-        void promptVersionSegmentsContextConformanceChanges() {
+        void promptVersionHashesAllPromptTemplatesChecklistsAndBuiltInRules() {
             assertThat(ReviewPrompts.PROMPT_VERSION)
+                    .matches("prompt-sha256-[0-9a-f]{12}")
                     .isEqualTo(
-                            "2026-10-thread-state-incremental-scope-corroboration-rule-gating"
-                                    + "-suggested-changes-stable-pagination-discarded-records"
-                                    + "-security-reliability-test-integrity-claims-gated-checklists"
-                                    + "-protobuf-schema-delta-data-anomalies-scoped-ids"
-                                    + "-inconsistent-acceptance-consumers-wall-clock-tests"
-                                    + "-stated-constraints-doc-status-hygiene"
-                                    + "-host-code-intelligence-overstated-doc-comments"
-                                    + "-error-channel-bypass-short-page-end-empty-page-unproven-deferred-authz-offset-drift-undefined-comment-labels"
-                                    + "-inconsistent-classification-abandoned-blocking-work"
-                                    + "-unrecognized-enum-setter-closed-world-state-sets"
-                                    + "-prompt-rule-contradictions-python-exc-info"
-                                    + "-incomplete-fail-closed-validation"
-                                    + "-message-text-error-classification-fail-closed-discards"
-                                    + "-nondeterministic-pick-broken-doc-passages-placeholder-sort-keys");
+                            PromptResources.computeVersion(
+                                    "prompt-sha256", ReviewPrompts.promptVersionParts()));
+            assertThat(ReviewPrompts.reviewPipelineVersion(true))
+                    .isEqualTo(ReviewPrompts.PROMPT_VERSION + "-supervisor-on");
+            assertThat(ReviewPrompts.reviewPipelineVersion(false))
+                    .isEqualTo(ReviewPrompts.PROMPT_VERSION + "-supervisor-off");
+            assertThat(ReviewPrompts.promptVersionParts())
+                    .contains(
+                            ReviewInstructions.REVIEW_INSTRUCTIONS,
+                            ReviewHygienePrompts.HYGIENE_RULES,
+                            ReviewCritiquePrompts.CRITIQUE_DIRECTIVE,
+                            "flag-off-companion-leak");
         }
 
         @Test
@@ -97,6 +96,16 @@ class ReviewPromptsTest {
                     .contains(ReviewInstructions.SECURITY_CHECKLIST)
                     .contains("- Fail-open decisions:")
                     .contains("must deny on error")
+                    .contains(
+                            "collapse upstream, parse, or projection failures into a coarse error status")
+                    .contains("log a WARN with a fixed reason token")
+                    .contains("- Incomplete guard exemptions:")
+                    .contains("every representation of an exit or action that reaches the guard")
+                    .contains("empty-list final answer slip through unverified")
+                    .contains("while ignoring its result or observation")
+                    .contains(
+                            "declarative unverified claim containing one of those words and no figure")
+                    .contains("limit the pre-step exemption")
                     .contains("- Partial failure:")
                     .contains("- Abandoned blocking work:")
                     .contains("the timeout does not cancel or interrupt")
@@ -112,6 +121,9 @@ class ReviewPromptsTest {
                     .contains("exponential backoff with jitter and a cap")
                     .contains("- Stale decisions:")
                     .contains("- Unguarded rollout:")
+                    .contains("When this pull request itself gates a feature behind a flag")
+                    .contains("with that gate off and that capability absent")
+                    .contains("is an \"issue\" naming the gate")
                     .contains("- Library contracts:")
                     .contains("- Placeholder logic:");
             assertThat(ReviewInstructions.SECURITY_CHECKLIST)
@@ -136,6 +148,9 @@ class ReviewPromptsTest {
                     .contains("a comment that states a constraint on a field or argument")
                     .contains("name what the annotation actually checks")
                     .contains("asking the author to")
+                    .contains("Repository patterns beat generic suggestions.")
+                    .contains("follows the established pattern of its class and siblings")
+                    .contains("unverified caller speculation (such as \"likely polled\"")
                     .contains("A test deleted, disabled, or weakened")
                     .contains("lock, cleanup, required call, or test assertion")
                     .contains("a deleted test or assertion may anchor on an");

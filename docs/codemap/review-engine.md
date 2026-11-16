@@ -14,11 +14,14 @@ guidance.
 - `review/ClaudeStreamParser.java` - Stateless parser for the CLI's `stream-json` output: final
   review text, the error subtype and session ID that drive `--resume`, and streamed status/chunk
   callbacks. Tests: `ClaudeStreamParserTest`.
-- `review/ReviewPrompts.java` - First-pass review prompt assembly, `PROMPT_VERSION`, and the shared
-  section builders (PR metadata, annotated diff, context and semantic sections, untrusted-content
-  escaping and truncation) that every stage prompt reuses. Tests: `ReviewPromptsTest`,
-  `ReviewPromptsSecurityTest`, `ReviewPromptsScopeTest`, and `ReviewPromptsRecallAndHistoryTest`,
-  sharing `ReviewPromptsTestSupport`.
+- `review/PromptResources.java` and `src/main/resources/review-prompts/` - UTF-8 loader (normalizing
+  CRLF) for the packaged Markdown prompt templates and checklists, plus deterministic SHA-256
+  derivation for `ReviewPrompts.PROMPT_VERSION`. Tests: `PromptResourcesTest`.
+- `review/ReviewPrompts.java` - First-pass review prompt assembly, hash-derived `PROMPT_VERSION`,
+  and the shared section builders (PR metadata, annotated diff, context and semantic sections,
+  untrusted-content escaping and truncation) that every stage prompt reuses. Tests:
+  `ReviewPromptsTest`, `ReviewPromptsSecurityTest`, `ReviewPromptsScopeTest`, and
+  `ReviewPromptsRecallAndHistoryTest`, sharing `ReviewPromptsTestSupport`.
 - `review/ReviewInstructions.java` and `ReviewOutputContract.java` - First-pass instruction text
   (preamble with claim checks, bug-hunt and security checklists, Pass A/B, recall variant) and the
   JSON response contract appended by every finding-emitting stage.
@@ -83,7 +86,8 @@ guidance.
 - `review/TriggeredChecklists.java` - Change-specific Pass B checks (CI workflows, dependency
   manifests, container images, schema migrations, protobuf schemas and tooling config, protobuf and
   gRPC code, LLM integrations, test changes) added only when a changed path or added line matches.
-  Tests: `TriggeredChecklistsTest`.
+  Tests: `TriggeredChecklistsTest` and `TriggeredChecklistsLlmTest`, sharing
+  `TriggeredChecklistsTestSupport`.
 - `review/LocalReviewRules.java` - Bounded loader for the reviewer's `reviewRulesDirectory`:
   structured YAML rules (name, description, trigger, prompt) and always-selected unstructured files,
   merged with the built-in rules in `src/main/resources/review-rules/` (a folder rule with the same

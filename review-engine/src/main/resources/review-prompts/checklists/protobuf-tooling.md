@@ -1,0 +1,6 @@
+- A weaker breaking-change policy: breaking.use moved to a looser category (FILE, then PACKAGE, WIRE_JSON, WIRE), new except, ignore, or ignore_only entries, ignore_unstable_packages turned on, or the breaking section removed. Name the schema change in this pull request that the loosening lets through.
+- Lint exceptions added for files this pull request changes.
+- A changed module name or managed-mode prefix (go_package_prefix, java_package_prefix), which moves the generated import paths of every consumer.
+- A buf.gen.yaml plugin or version change while neither the diff nor <generated_code> shows regenerated output.
+- A buf.lock dependency change (googleapis, protovalidate): review it as a dependency upgrade.
+- proto.lock entries deleted or edited by hand: the file records the field numbers already used, and editing it hides their reuse.

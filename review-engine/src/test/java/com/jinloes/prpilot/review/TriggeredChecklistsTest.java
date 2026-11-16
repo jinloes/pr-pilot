@@ -1,5 +1,9 @@
 package com.jinloes.prpilot.review;
 
+import static com.jinloes.prpilot.review.TriggeredChecklistsTestSupport.changed;
+import static com.jinloes.prpilot.review.TriggeredChecklistsTestSupport.deletedFileDiff;
+import static com.jinloes.prpilot.review.TriggeredChecklistsTestSupport.fileDiff;
+import static com.jinloes.prpilot.review.TriggeredChecklistsTestSupport.sectionFor;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
@@ -11,41 +15,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /** Tests for {@link TriggeredChecklists}. */
 class TriggeredChecklistsTest {
-
-    private static String fileDiff(String path, String... hunkLines) {
-        return "diff --git a/"
-                + path
-                + " b/"
-                + path
-                + "\n--- a/"
-                + path
-                + "\n+++ b/"
-                + path
-                + "\n@@ -1,1 +1,1 @@\n"
-                + String.join("\n", hunkLines)
-                + "\n";
-    }
-
-    private static String deletedFileDiff(String path, String removedLine) {
-        return "diff --git a/"
-                + path
-                + " b/"
-                + path
-                + "\ndeleted file mode 100644\n--- a/"
-                + path
-                + "\n+++ /dev/null\n@@ -1 +0,0 @@\n-"
-                + removedLine
-                + "\n";
-    }
-
-    private static String sectionFor(String... fileDiffs) {
-        return TriggeredChecklists.sectionFor(
-                InspectionManifest.fromDiff(String.join("", fileDiffs)).files());
-    }
-
-    private static String changed(String path) {
-        return sectionFor(fileDiff(path, "-old", "+new"));
-    }
 
     @Nested
     class SectionFor {
@@ -243,69 +212,6 @@ class TriggeredChecklistsTest {
                     .contains("\nSchema migrations:\n");
             assertThat(sectionFor(fileDiff("src/Repo.java", " " + ddl, "+int a;"))).isEmpty();
             assertThat(sectionFor(fileDiff("src/Repo.java", "-" + ddl, "+int a;"))).isEmpty();
-        }
-
-        @ParameterizedTest
-        @ValueSource(
-                strings = {
-                    "import openai",
-                    "var client = new OpenAIClient(key);",
-                    "from langchain_core.prompts import ChatPromptTemplate",
-                    "response = client.messages.create(model=MODEL)",
-                    "model: \"claude-sonnet-4-5\"",
-                    "String MODEL = \"gpt-4o\";",
-                    "BedrockRuntimeClient bedrock = BedrockRuntimeClient.create();",
-                    "result = model.generate_content(prompt)",
-                    "String systemPrompt = load();",
-                    "for (var call : message.toolCalls()) {",
-                    "const llmClient = createClient();",
-                    "completion = client.chat.completions.create(**args)",
-                    "from app.agents.subprompt.billing import BILLING_RULES",
-                    "AGENT_INSTRUCTIONS = load_rules()"
-                })
-        void triggersTheLlmChecklistForModelCallsOnAddedLines(String addedLine) {
-            assertThat(sectionFor(fileDiff("src/app/Service.java", "+" + addedLine)))
-                    .contains("\nLLM integrations:\n");
-        }
-
-        @ParameterizedTest
-        @ValueSource(
-                strings = {
-                    "String coherentState = \"x\";",
-                    "// the bedrock of this design",
-                    "boolean fullMatch = matcher.matches();",
-                    "chatRoom.send(message);",
-                    "String subPromptly = \"x\";"
-                })
-        void doesNotTriggerTheLlmChecklistOnLookAlikeWords(String addedLine) {
-            assertThat(sectionFor(fileDiff("src/app/Service.java", "+" + addedLine))).isEmpty();
-        }
-
-        @ParameterizedTest
-        @ValueSource(
-                strings = {
-                    "prompts/review.txt",
-                    "src/review.prompt.md",
-                    "agent.prompty",
-                    "src/app/subprompt/billing.py",
-                    "src/app/agents/definitions/billing_definition.py"
-                })
-        void triggersTheLlmChecklistForPromptFiles(String path) {
-            assertThat(changed(path)).contains("\nLLM integrations:\n");
-        }
-
-        @ParameterizedTest
-        @ValueSource(strings = {"src/app/agents/billing.py", "src/useragents/definitions/a.py"})
-        void doesNotTriggerTheLlmChecklistForOtherAgentPaths(String path) {
-            assertThat(changed(path)).doesNotContain("\nLLM integrations:\n");
-        }
-
-        @Test
-        void asksWhetherAPromptRuleContradictsToolGuidance() {
-            assertThat(changed("prompts/review.txt"))
-                    .contains("A changed prompt rule that contradicts another")
-                    .contains("Check the empty,")
-                    .contains("unchanged ones too");
         }
 
         @Test

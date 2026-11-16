@@ -5,6 +5,9 @@ import com.jinloes.prpilot.model.DiffCoverage;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.PullRequest;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import org.apache.commons.lang3.StringUtils;
 
 /**
@@ -55,25 +58,52 @@ public final class ReviewPrompts {
     private ReviewPrompts() {}
 
     /**
-     * Identifies the review prompt for outcome logging ({@link ReviewOutcomeLog}). Bump this
-     * whenever the stage text in {@link ReviewInstructions} and its sibling prompt classes, or the
-     * assembled prompt, changes in a way that could move comment quality — otherwise outcomes from
-     * two different prompts pool together and the log cannot answer the question it exists for.
+     * Identifies the review prompt for outcome logging ({@link ReviewOutcomeLog}). Derived
+     * automatically by hashing every prompt template, checklist, section preface, and bundled
+     * review rule, so any prompt change produces a distinct version without manual edits.
      *
      * <p>Not a compatibility version: nothing parses it, and old log lines keep their old value.
      */
     public static final String PROMPT_VERSION =
-            "2026-10-thread-state-incremental-scope-corroboration-rule-gating-suggested-changes"
-                    + "-stable-pagination-discarded-records"
-                    + "-security-reliability-test-integrity-claims-gated-checklists"
-                    + "-protobuf-schema-delta-data-anomalies-scoped-ids-inconsistent-acceptance-consumers-wall-clock-tests-stated-constraints"
-                    + "-doc-status-hygiene-host-code-intelligence-overstated-doc-comments"
-                    + "-error-channel-bypass-short-page-end-empty-page-unproven-deferred-authz-offset-drift-undefined-comment-labels"
-                    + "-inconsistent-classification-abandoned-blocking-work-unrecognized-enum-setter"
-                    + "-closed-world-state-sets-prompt-rule-contradictions-python-exc-info"
-                    + "-incomplete-fail-closed-validation"
-                    + "-message-text-error-classification-fail-closed-discards"
-                    + "-nondeterministic-pick-broken-doc-passages-placeholder-sort-keys";
+            PromptResources.computeVersion("prompt-sha256", promptVersionParts());
+
+    static List<String> promptVersionParts() {
+        List<String> parts = new ArrayList<>();
+        parts.add(ReviewInstructions.REVIEW_INSTRUCTIONS);
+        parts.add(ReviewInstructions.RECALL_REVIEW_INSTRUCTIONS);
+        parts.add(ReviewInstructions.RECALL_DIRECTIVE);
+        parts.add(ReviewInstructions.HOST_CODE_INTELLIGENCE);
+        parts.add(ReviewHygienePrompts.HYGIENE_PREAMBLE);
+        parts.add(ReviewHygienePrompts.HYGIENE_RULES);
+        parts.add(ReviewCritiquePrompts.CRITIQUE_PREAMBLE);
+        parts.add(ReviewCritiquePrompts.CRITIQUE_DIRECTIVE);
+        parts.add(ReviewCritiquePrompts.CORROBORATION_DIRECTIVE);
+        parts.add(PROTO_SCHEMA_CHANGES_PREFACE);
+        parts.add(GENERATED_CODE_PREFACE);
+        parts.add(ReviewRulePrompts.RULE_SELECTION_PREAMBLE);
+        parts.add(ReviewRulePrompts.RULE_REVIEW_PREAMBLE);
+        parts.add(ReviewSupervisorPrompts.HUNK_OBJECTIVE);
+        parts.add(ReviewSupervisorPrompts.FILE_OBJECTIVE);
+        LanguageChecklists.checklists()
+                .forEach(
+                        (language, items) -> {
+                            parts.add(language);
+                            parts.add(items);
+                        });
+        for (TriggeredChecklists.Checklist checklist : TriggeredChecklists.CHECKLISTS) {
+            parts.add(checklist.title());
+            parts.add(checklist.path() == null ? "" : checklist.path().pattern());
+            parts.add(checklist.addedLine() == null ? "" : checklist.addedLine().pattern());
+            parts.add(checklist.items());
+        }
+        for (LocalReviewRules.Rule rule : LocalReviewRules.builtIn()) {
+            parts.add(rule.name());
+            parts.add(rule.description());
+            parts.add(rule.trigger());
+            parts.add(rule.prompt());
+        }
+        return List.copyOf(parts);
+    }
 
     public static String reviewPipelineVersion(boolean supervisorEnabled) {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
@@ -160,7 +190,7 @@ public final class ReviewPrompts {
             prompt.append("\n<untrusted_semantic_evidence>\n")
                     .append(
                             JSON.writeValueAsString(
-                                    java.util.Map.of(
+                                    Map.of(
                                             "evidence",
                                             context.getEvidence(),
                                             "limitations",
