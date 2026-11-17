@@ -35,11 +35,13 @@ IntelliJ host integration. Depends directly on `core`, `github-engine`, and `rev
 - `settings/RepositoryReviewInstructions.java` - Remembered per-repository review instructions: key
   normalization, limits, and composition into `customInstructions` (mirrors
   `vscode-extension/src/repositoryInstructions.ts`).
-- `settings/PluginSettingsComponent.java` - Settings form composition root.
+- `settings/PluginSettingsComponent.java` - Settings form composition root
+  (`PluginSettingsComponentTest`, `PluginSettingsVocabularyTest`, `PluginSettingsCopilotModelsTest`,
+  and `PluginSettingsConfigurableTest`, sharing `PluginSettingsTestSupport` and `UiProbeRunner`).
 - `settings/CopilotModelSelector.java` - Provider-aware Copilot model combo and advanced controls.
 - `settings/ReviewGuidanceEditor.java` - Guidance profiles, focus areas, and custom instructions UI.
 - `settings/RepositoryInstructionsEditor.java` - Remembered repository-instructions UI
-  (`RepositoryInstructionsEditorTest`).
+  (`RepositoryInstructionsEditorTest`, sharing `UiProbeRunner`).
 - `settings/SettingsUi.java` - Shared Swing layout helpers.
 - `settings/PluginSettingsConfigurable.java` - Settings lifecycle integration.
 - `settings/GithubBaseUrlValidator.java` - HTTPS GitHub-origin normalization.

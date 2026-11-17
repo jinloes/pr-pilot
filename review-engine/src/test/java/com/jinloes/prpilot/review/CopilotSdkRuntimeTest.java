@@ -15,6 +15,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -161,11 +164,33 @@ class CopilotSdkRuntimeTest {
         }
 
         @Test
-        void incompleteFutureWrapsTimeoutAsIOException() {
-            CompletableFuture<String> future = new CompletableFuture<>();
+        void defaultBootTimeoutUsesSixtySecondsAndFormatsSecondsMessage() {
+            AtomicLong observedTimeoutMs = new AtomicLong();
+            CompletableFuture<String> future =
+                    new CompletableFuture<>() {
+                        @Override
+                        public String get(long timeout, TimeUnit unit) throws TimeoutException {
+                            observedTimeoutMs.set(unit.toMillis(timeout));
+                            throw new TimeoutException("simulated boot timeout");
+                        }
+                    };
             assertThatThrownBy(() -> CopilotSdkRuntime.awaitWithTimeout(future, "session creation"))
                     .isInstanceOf(IOException.class)
-                    .hasMessage("copilot session creation timed out after 60s");
+                    .hasMessage("copilot session creation timed out after 60s")
+                    .hasCauseInstanceOf(TimeoutException.class);
+            assertThat(observedTimeoutMs).hasValue(60_000L);
+        }
+
+        @Test
+        void incompleteFutureWrapsTimeoutAsIOException() {
+            CompletableFuture<String> future = new CompletableFuture<>();
+            assertThatThrownBy(
+                            () ->
+                                    CopilotSdkRuntime.awaitWithTimeout(
+                                            future, "session creation", 25L))
+                    .isInstanceOf(IOException.class)
+                    .hasMessage("copilot session creation timed out after 25ms")
+                    .hasCauseInstanceOf(TimeoutException.class);
         }
 
         @Test

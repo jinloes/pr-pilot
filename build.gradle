@@ -89,6 +89,11 @@ subprojects {
             }
         }
 
+        tasks.withType(Test).configureEach {
+            maxParallelForks =
+                    Math.max(1, Math.min(4, Runtime.runtime.availableProcessors().intdiv(2)))
+        }
+
         if (secureTraversalJdk.get()) {
             tasks.withType(Test).configureEach {
                 javaLauncher = javaToolchains.launcherFor {
@@ -101,7 +106,7 @@ subprojects {
     apply plugin: 'idea'
     idea {
         module {
-            excludeDirs += [file('build')]
+            excludeDirs += [file('build'), file('bin')]
         }
     }
 

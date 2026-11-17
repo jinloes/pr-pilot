@@ -9,6 +9,8 @@ export default tseslint.config(
   {
     ignores: [
       'dist',
+      'test-results',
+      'playwright-report',
       'node_modules',
       'coverage',
       '.stryker-tmp',

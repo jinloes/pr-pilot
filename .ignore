@@ -3,9 +3,10 @@
 # can still be opened directly by path.
 **/package-lock.json
 webview/visual/__snapshots__/
-.claude/logs/
+.claude/
 build/
 **/build/
+/*/bin/
 dist/
 **/dist/
 **/dist-test/

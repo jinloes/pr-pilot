@@ -72,7 +72,8 @@ guidance.
   changed-file commit history and textual call sites read only from the PR base commit's git
   objects, plus each changed `.proto` schema's delta against the diff's old side (merge base or
   incremental baseline) and its stale committed generated code; time-bounded and fail-open. Tests:
-  `BaseCommitContextTest`.
+  `BaseCommitContextTest`, `BaseCommitContextCallSitesTest`, and `BaseCommitContextSchemaTest`,
+  sharing `BaseCommitContextTestSupport`.
 - `review/ProtoSchemaChanges.java`, `ProtoSchemaDelta.java`, `ProtoSchema.java`, and
   `UnifiedPatch.java` - The `<proto_schema_changes>` section: strict application of each changed
   schema's hunks to its old-side version, a proto2/proto3/editions parser, and Buf-style rule IDs

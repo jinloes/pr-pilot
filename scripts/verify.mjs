@@ -4,7 +4,7 @@
 //   node scripts/verify.mjs path/to/File.java webview/src/App.tsx
 //   node scripts/verify.mjs --all           # every required check
 //   node scripts/verify.mjs --dry-run       # print the plan without running it
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -65,22 +65,34 @@ function isPlaywrightImageInput(file) {
 
 function webviewChecks() {
   return [
-    { name: 'webview lint', cwd: 'webview', npm: ['run', 'lint'] },
-    { name: 'webview typecheck', cwd: 'webview', npm: ['exec', '--', 'tsc', '--noEmit'] },
-    { name: 'webview unit tests', cwd: 'webview', npm: ['run', 'test:unit'] },
-    { name: 'webview a11y tests', cwd: 'webview', npm: ['run', 'test:a11y'] },
+    { name: 'webview lint', cwd: 'webview', npm: ['run', 'lint'], lane: 'webview-lint' },
+    {
+      name: 'webview typecheck',
+      cwd: 'webview',
+      npm: ['exec', '--', 'tsc', '--noEmit'],
+      lane: 'webview-typecheck',
+    },
+    { name: 'webview unit tests', cwd: 'webview', npm: ['run', 'test:unit'], lane: 'webview-unit' },
+    { name: 'webview a11y tests', cwd: 'webview', npm: ['run', 'test:a11y'], lane: 'webview-a11y' },
   ]
 }
 
 function extensionChecks() {
+  // run-unit-tests.mjs writes and cleans dist-test/, so keep extension steps ordered in one lane.
   return [
-    { name: 'vscode-extension lint', cwd: 'vscode-extension', npm: ['run', 'lint'] },
+    { name: 'vscode-extension lint', cwd: 'vscode-extension', npm: ['run', 'lint'], lane: 'extension' },
     {
       name: 'vscode-extension typecheck',
       cwd: 'vscode-extension',
       npm: ['exec', '--', 'tsc', '--noEmit'],
+      lane: 'extension',
     },
-    { name: 'vscode-extension unit tests', cwd: 'vscode-extension', npm: ['run', 'test:unit'] },
+    {
+      name: 'vscode-extension unit tests',
+      cwd: 'vscode-extension',
+      npm: ['run', 'test:unit'],
+      lane: 'extension',
+    },
   ]
 }
 
@@ -137,7 +149,11 @@ export function planChecks(changedPaths, options = {}) {
   }
   if (jvmModules.size > 0) {
     const tasks = JVM_ORDER.filter((module) => jvmModules.has(module)).map((m) => `:${m}:check`)
-    checks.push({ name: `gradle ${tasks.join(' ')}`, gradle: ['--console=plain', '--continue', ...tasks] })
+    checks.push({
+      name: `gradle ${tasks.join(' ')}`,
+      gradle: ['--console=plain', '--continue', ...tasks],
+      lane: 'gradle',
+    })
   }
   if (webview) checks.push(...webviewChecks())
   if (extension) checks.push(...extensionChecks())
@@ -192,42 +208,147 @@ function describe(check) {
   return check.gradle ? `./gradlew ${check.gradle.join(' ')}` : `(cd ${check.cwd} && npm ${check.npm.join(' ')})`
 }
 
-function runCheck(check, repoRoot) {
-  if (check.inProcess) {
-    try {
-      const { errors, warnings } = IN_PROCESS[check.inProcess].run(repoRoot)
-      return { ok: errors.length === 0, output: errors.join('\n'), warnings }
-    } catch (error) {
-      return { ok: false, output: String(error?.stack ?? error), warnings: [] }
-    }
+function runInProcessCheck(check, repoRoot) {
+  try {
+    const { errors, warnings } = IN_PROCESS[check.inProcess].run(repoRoot)
+    return { ok: errors.length === 0, output: errors.join('\n'), warnings }
+  } catch (error) {
+    return { ok: false, output: String(error?.stack ?? error), warnings: [] }
   }
+}
+
+function runProcessCheck(check, repoRoot) {
   const inv = invocationFor(check, repoRoot)
-  const result = spawnSync(inv.command, inv.args, {
-    cwd: inv.cwd,
-    shell: inv.shell,
-    encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024,
-    env: { ...process.env, CI: process.env.CI ?? '1', FORCE_COLOR: '0' },
+  return new Promise((resolve) => {
+    const chunks = []
+    let child
+    try {
+      child = spawn(inv.command, inv.args, {
+        cwd: inv.cwd,
+        shell: inv.shell,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, CI: process.env.CI ?? '1', FORCE_COLOR: '0' },
+      })
+    } catch (error) {
+      resolve({ ok: false, output: String(error?.message ?? error), warnings: [] })
+      return
+    }
+    child.stdout?.on('data', (chunk) => chunks.push(chunk))
+    child.stderr?.on('data', (chunk) => chunks.push(chunk))
+    child.on('error', (error) => {
+      chunks.push(Buffer.from(String(error?.message ?? error)))
+      resolve({ ok: false, output: Buffer.concat(chunks).toString('utf8'), warnings: [] })
+    })
+    child.on('close', (code) => {
+      resolve({ ok: code === 0, output: Buffer.concat(chunks).toString('utf8'), warnings: [] })
+    })
   })
-  const output = `${result.stdout ?? ''}${result.stderr ?? ''}${result.error?.message ?? ''}`
-  return { ok: result.status === 0, output, warnings: [] }
 }
 
 export const MIN_NODE = [26, 0]
+const MAX_PARALLEL_LANES = 4
 
 export function nodeVersionSupported(version) {
   const [major, minor] = version.replace(/^v/, '').split('.').map(Number)
   return major > MIN_NODE[0] || (major === MIN_NODE[0] && minor >= MIN_NODE[1])
 }
 
-function main(argv) {
+/**
+ * Resolves a Node >= 26 binary from `.nvmrc` / nvm / volta when a non-interactive shell starts
+ * on an older default Node, so agents and IDE tasks need no manual PATH setup.
+ */
+export function resolveNvmrcNode(repoRoot, options = {}) {
+  const platform = options.platform ?? process.platform
+  if (platform === 'win32') return null
+  const home = options.homedir ?? os.homedir()
+  const env = options.env ?? process.env
+  const exists = options.existsSync ?? fs.existsSync
+  const readdir = options.readdirSync ?? fs.readdirSync
+  const readFile = options.readFileSync ?? fs.readFileSync
+
+  const nvmDir = env.NVM_DIR || path.join(home, '.nvm')
+  const versionsDir = path.join(nvmDir, 'versions', 'node')
+  const candidates = []
+
+  const nvmrcPath = path.join(repoRoot, '.nvmrc')
+  if (exists(nvmrcPath)) {
+    const pinned = readFile(nvmrcPath, 'utf8').trim().replace(/^v/, '')
+    if (pinned && nodeVersionSupported(pinned)) {
+      candidates.push(path.join(versionsDir, `v${pinned}`, 'bin', 'node'))
+    }
+  }
+  if (exists(versionsDir)) {
+    const installed = readdir(versionsDir)
+      .filter((entry) => /^v\d+\.\d+\.\d+$/.test(entry) && nodeVersionSupported(entry))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    for (const version of installed) {
+      candidates.push(path.join(versionsDir, version, 'bin', 'node'))
+    }
+  }
+  for (const candidate of candidates) {
+    if (exists(candidate)) return candidate
+  }
+  return null
+}
+
+function maybeReexecWithSupportedNode(repoRoot, argv) {
+  if (process.env.PR_PILOT_VERIFY_REEXEC === '1') return null
+  const candidate = resolveNvmrcNode(repoRoot)
+  if (!candidate) return null
+  const binDir = path.dirname(candidate)
+  const env = {
+    ...process.env,
+    PR_PILOT_VERIFY_REEXEC: '1',
+    PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
+  }
+  delete env.npm_execpath
+  const result = spawnSync(candidate, [fileURLToPath(import.meta.url), ...argv], {
+    stdio: 'inherit',
+    env,
+    shell: false,
+  })
+  return result.status ?? 1
+}
+
+export async function executeChecks(checks, runner, onComplete) {
+  const lanes = []
+  const byLane = new Map()
+  for (const [index, check] of checks.entries()) {
+    const key = check.lane ?? `check-${index}`
+    if (!byLane.has(key)) {
+      const group = []
+      byLane.set(key, group)
+      lanes.push(group)
+    }
+    byLane.get(key).push({ index, check })
+  }
+
+  let nextLane = 0
+  async function worker() {
+    while (nextLane < lanes.length) {
+      const lane = lanes[nextLane++]
+      for (const { index, check } of lane) {
+        const started = Date.now()
+        const result = await runner(check)
+        onComplete({ index, check, result, seconds: ((Date.now() - started) / 1000).toFixed(0) })
+      }
+    }
+  }
+
+  const concurrency = Math.min(MAX_PARALLEL_LANES, lanes.length)
+  await Promise.all(Array.from({ length: concurrency }, () => worker()))
+}
+
+async function main(argv) {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   if (!nodeVersionSupported(process.version)) {
+    const reexecCode = maybeReexecWithSupportedNode(repoRoot, argv)
+    if (reexecCode !== null) return reexecCode
     console.error(
       `Node ${process.version} is too old; webview tooling needs >= ${MIN_NODE.join('.')} (see .nvmrc).`,
     )
     return 1
   }
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const flags = new Set(argv.filter((arg) => arg.startsWith('--')))
   const explicit = argv.filter((arg) => !arg.startsWith('--'))
   const files = explicit.length > 0 ? explicit : changedFiles(repoRoot)
@@ -246,26 +367,41 @@ function main(argv) {
 
   const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-pilot-verify-'))
   let failed = 0
-  for (const [index, check] of checks.entries()) {
-    const started = Date.now()
-    const { ok, output, warnings } = runCheck(check, repoRoot)
-    notes.push(...warnings)
-    const seconds = ((Date.now() - started) / 1000).toFixed(0)
-    if (ok) {
+  const record = ({ index, check, result, seconds }) => {
+    notes.push(...result.warnings)
+    if (result.ok) {
       console.log(`ok   ${check.name} (${seconds}s)`)
-      continue
+      return
     }
     failed++
     const logFile = path.join(logDir, `${index}-${check.name.replace(/[^\w.-]+/g, '_').slice(0, 60)}.log`)
-    fs.writeFileSync(logFile, output)
-    const tail = output.trimEnd().split('\n').slice(-60).join('\n')
+    fs.writeFileSync(logFile, result.output)
+    const tail = result.output.trimEnd().split('\n').slice(-60).join('\n')
     console.log(`FAIL ${check.name} (${seconds}s) - ${describe(check)}\n${tail}\nfull log: ${logFile}\n`)
   }
+
+  const inProcessChecks = checks
+    .map((check, index) => ({ check, index }))
+    .filter(({ check }) => Boolean(check.inProcess))
+  const processChecks = checks.filter((check) => !check.inProcess)
+
+  for (const { check, index } of inProcessChecks) {
+    const started = Date.now()
+    const result = runInProcessCheck(check, repoRoot)
+    record({ index, check, result, seconds: ((Date.now() - started) / 1000).toFixed(0) })
+  }
+  await executeChecks(
+    processChecks,
+    (check) => runProcessCheck(check, repoRoot),
+    ({ index, check, result, seconds }) =>
+      record({ index: index + inProcessChecks.length, check, result, seconds }),
+  )
+
   notes.forEach((note) => console.log(`note: ${note}`))
   if (failed === 0) fs.rmSync(logDir, { recursive: true, force: true })
   return failed === 0 ? 0 : 1
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.exit(main(process.argv.slice(2)))
+  main(process.argv.slice(2)).then((code) => process.exit(code))
 }

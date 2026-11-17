@@ -1,7 +1,24 @@
 # Local data and outcome logging
 
-Design constraints for files PR Pilot writes under `~/.pr-pilot`. The file inventory is in
+Design constraints for files PR Pilot reads and writes under `~/.pr-pilot`. The file inventory is in
 [ARCHITECTURE.md](../../ARCHITECTURE.md#local-data-files).
+
+## Semantic runtime and host state
+
+The shared semantic runtime reads `~/.pr-pilot/semantic-review.json` (schema 1) as machine-local
+launch configuration; it never writes that file or persists import baselines. Owned extracted
+workers and per-call requests live in temporary directories outside the worktree and are removed
+after their synchronous process calls finish. `semantic-worktrees.json` durably records retained
+repository/worktree/head identities under `~/.pr-pilot`, guarded by `semantic-worktrees.lock`, while
+`semantic-leases/<id>.lock` holds the active execution lease. Cancellation or restart releases
+process locks, not retention: only explicit project-closed, lease-free, identity-checked, clean
+non-force cleanup removes a retained worktree. The preparation binding itself is memory-only, so
+restarting preserves maintenance access without granting authority to Continue.
+
+`pending-prs.json` (with user-triggered `.corrupt-<timestamp>` quarantine copies that leave GitHub
+drafts untouched) and `seen-prs.json` are IntelliJ-only (`PendingReviewIndex` and `SeenPRSet`); VS
+Code persists the equivalent state via extension `globalState` (see
+[Notification parity](hosts-and-sidecar.md#notification-parity)).
 
 ### Outcome logging is stateless because IntelliJ does not use ReviewSessionService
 `reviews/recordOutcome` takes **both** the generated and the submitted comment sets from its caller

@@ -5,23 +5,17 @@ using a local AI CLI/runtime (Claude Code or GitHub Copilot, selected per-host i
 
 ## Scope
 
-- Keep this file focused on stable architecture and design constraints.
-- See `CODEMAP.md` for implementation locations, task entry points, and related tests.
-- Put workflow/checklist instructions in `AGENTS.md`.
-- Put volatile version inventory in build manifests unless a version is itself an architecture
-  constraint.
+- Stable architecture and design constraints only; see `CODEMAP.md` for code/test paths and
+  `AGENTS.md` for workflow rules.
+- Keep volatile version numbers in build manifests unless a version is itself a constraint.
 
 ## System shape
 
 PR Pilot is a multi-module Java 21 project with two IDE hosts sharing one React webview. `core`,
-`github-engine`, and `review-engine` own host-neutral behavior. IntelliJ calls the engines
-in-process; VS Code reaches the same capabilities through the stdio JSON-RPC `sidecar`. Host modules
-own only IDE lifecycle, settings integration, and bridge wiring.
-
-The shared webview owns the user workflow from PR discovery through review editing and submission.
-GitHub credentials remain inside `github-engine`, while provider processes and review semantics
-remain inside `review-engine`. Every engine capability must remain reachable from both hosts through
-the parity boundary described below.
+`github-engine`, and `review-engine` own host-neutral behavior: IntelliJ calls them in-process and
+VS Code reaches them through the stdio JSON-RPC `sidecar`, leaving hosts with IDE lifecycle,
+settings, and bridge wiring only. GitHub credentials stay inside `github-engine` and provider
+processes stay inside `review-engine`.
 
 Visual references:
 
@@ -236,23 +230,13 @@ or tokens are written to disk.
 
 ## Local data files
 
-The shared semantic runtime reads `~/.pr-pilot/semantic-review.json` (schema 1) as
-machine-local launch configuration. It does not write that file or persist import baselines.
-Owned extracted workers and per-call requests are temporary, outside the worktree, and removed
-after their synchronous owned process calls finish. `semantic-worktrees.json` durably records
-retained repository/worktree/head identities under this directory, guarded by
-`semantic-worktrees.lock`; `semantic-leases/<id>.lock` holds the active execution lease.
-Cancellation or restart releases process locks, not retention. Only explicit project-closed,
-lease-free, identity-checked, clean non-force cleanup removes a retained worktree. The preparation
-binding itself is memory-only: restarting preserves maintenance access, not authority to Continue.
+Runtime state under `~/.pr-pilot/` (retention and locking rules in
+[local-data.md](docs/architecture/local-data.md)):
 
-IntelliJ-only (`intellij-plugin`'s `PendingReviewIndex`/`SeenPRSet`); VS Code persists the
-equivalent state via extension `globalState` instead (see
-[Notification parity](docs/architecture/hosts-and-sidecar.md#notification-parity)).
-
-| Path | Purpose |
-|------|---------|
-| `~/.pr-pilot/pending-prs.json` | Index of PRs with saved drafts (owner, repo, number, title, savedAt, headSha) |
-| `~/.pr-pilot/pending-prs.json.corrupt-<timestamp>` | User-triggered quarantine copy of an unreadable draft index; GitHub drafts are unchanged |
-| `~/.pr-pilot/seen-prs.json` | Set of `owner/repo#number` strings already notified about |
-| `~/.pr-pilot/review-outcomes.jsonl` | Append-only outcome log: one JSON object per generated/submitted comment (`ReviewOutcomeLog`, engine-owned), with category but no prose or paths, written by both hosts on submit |
+| Path | Owner / Scope | Purpose |
+|------|---------------|---------|
+| `~/.pr-pilot/semantic-review.json` | User-authored | Machine-local semantic launch configuration (schema 1; read-only) |
+| `~/.pr-pilot/semantic-worktrees.json` | `review-engine` | Retained repository/worktree/head identities (`semantic-worktrees.lock`, `semantic-leases/<id>.lock`) |
+| `~/.pr-pilot/pending-prs.json` | IntelliJ only | Saved-draft PR index (VS Code uses extension `globalState`; `.corrupt-<timestamp>` on quarantine) |
+| `~/.pr-pilot/seen-prs.json` | IntelliJ only | Notified `owner/repo#number` set (VS Code uses `globalState`) |
+| `~/.pr-pilot/review-outcomes.jsonl` | Both hosts (`review-engine`) | Append-only outcome hashes/metadata per submitted review, without prose or file paths |

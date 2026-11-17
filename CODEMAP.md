@@ -33,6 +33,8 @@ only the map for the module you are changing.
   source-inventory protocol.
 - `AGENTS.md` - Agent workflow, testing rules, and cross-host obligations; `intellij-plugin/`,
   `webview/`, and `vscode-extension/` each add a directory-scoped `AGENTS.md`.
+- `.agents/skills/cut-release/SKILL.md` - On-demand skill for cutting and verifying `vX.Y.Z` /
+  `vX.Y.Z-rc.N` releases across IntelliJ and VS Code without loading release rules into every prompt.
 - `.nvmrc` - Node version for webview/extension tooling (matches CI).
 - `.ignore` - Hides lockfiles, visual snapshots, and build output from ripgrep-based search tools.
 - `ARCHITECTURE.md` - Design-constraint index, settings persistence, and local data.

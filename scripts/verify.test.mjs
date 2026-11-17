@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
+import path from 'node:path'
 import test from 'node:test'
-import { nodeVersionSupported, planChecks } from './verify.mjs'
+import { executeChecks, nodeVersionSupported, planChecks, resolveNvmrcNode } from './verify.mjs'
 
 const names = (plan) => plan.checks.map((check) => check.name)
 const gradleTasks = (plan) => plan.checks.find((check) => check.gradle)?.gradle.slice(2) ?? []
@@ -118,3 +119,77 @@ test('node version guard matches the webview engines floor', () => {
   assert.equal(nodeVersionSupported('v26.13.0'), true)
   assert.equal(nodeVersionSupported('v27.1.0'), true)
 })
+
+test('resolveNvmrcNode prefers exact .nvmrc install then newest installed >= 26', () => {
+  const pinnedBin = path.join('/home/dev', '.nvm', 'versions', 'node', 'v26.13.0', 'bin', 'node')
+  const newerBin = path.join('/home/dev', '.nvm', 'versions', 'node', 'v26.15.0', 'bin', 'node')
+  const versionsDir = path.join('/home/dev', '.nvm', 'versions', 'node')
+
+  assert.equal(
+    resolveNvmrcNode('/repo', {
+      platform: 'darwin',
+      homedir: '/home/dev',
+      env: {},
+      existsSync: (target) => target === path.join('/repo', '.nvmrc') || target === pinnedBin,
+      readFileSync: () => '26.13.0\n',
+      readdirSync: () => ['v22.10.0', 'v26.13.0', 'v26.15.0'],
+    }),
+    pinnedBin,
+  )
+
+  assert.equal(
+    resolveNvmrcNode('/repo', {
+      platform: 'linux',
+      homedir: '/home/dev',
+      env: {},
+      existsSync: (target) => target === versionsDir || target === newerBin,
+      readFileSync: () => '',
+      readdirSync: () => ['v22.10.0', 'v26.4.0', 'v26.15.0'],
+    }),
+    newerBin,
+  )
+
+  assert.equal(
+    resolveNvmrcNode('/repo', {
+      platform: 'linux',
+      homedir: '/home/dev',
+      env: {},
+      existsSync: () => false,
+      readFileSync: () => '',
+      readdirSync: () => [],
+    }),
+    null,
+  )
+})
+
+test('executeChecks runs distinct lanes concurrently while keeping same-lane steps sequential', async () => {
+  const events = []
+  let active = 0
+  let maxActive = 0
+  const checks = [
+    { name: 'ext-lint', lane: 'extension' },
+    { name: 'ext-unit', lane: 'extension' },
+    { name: 'webview-lint', lane: 'webview-lint' },
+    { name: 'gradle', lane: 'gradle' },
+  ]
+  await executeChecks(
+    checks,
+    async (check) => {
+      events.push(`start:${check.name}`)
+      active++
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setTimeout(resolve, 15))
+      active--
+      events.push(`end:${check.name}`)
+      return { ok: true, output: '', warnings: [] }
+    },
+    () => {},
+  )
+
+  assert.ok(maxActive >= 3, `expected at least 3 lanes active concurrently, saw ${maxActive}`)
+  assert.ok(
+    events.indexOf('end:ext-lint') < events.indexOf('start:ext-unit'),
+    `same-lane checks must stay sequential: ${events.join(', ')}`,
+  )
+})
+

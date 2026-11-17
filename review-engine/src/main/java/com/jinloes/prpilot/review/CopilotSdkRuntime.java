@@ -278,16 +278,18 @@ final class CopilotSdkRuntime {
     }
 
     static <T> T awaitWithTimeout(Future<T> future, String operation) throws IOException {
+        return awaitWithTimeout(future, operation, SDK_BOOT_TIMEOUT_MS);
+    }
+
+    static <T> T awaitWithTimeout(Future<T> future, String operation, long timeoutMs)
+            throws IOException {
         try {
-            return future.get(SDK_BOOT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException timeout) {
+            String formatted =
+                    timeoutMs % 1000L == 0L ? (timeoutMs / 1000L) + "s" : timeoutMs + "ms";
             throw new IOException(
-                    "copilot "
-                            + operation
-                            + " timed out after "
-                            + (SDK_BOOT_TIMEOUT_MS / 1000)
-                            + "s",
-                    timeout);
+                    "copilot " + operation + " timed out after " + formatted, timeout);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IOException("copilot " + operation + " failed", interrupted);

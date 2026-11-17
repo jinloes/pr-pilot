@@ -3,18 +3,19 @@
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
-# IntelliJ IDEA
+# IntelliJ IDEA / Eclipse JDT / VS Code Java
 .idea/
 *.iml
 *.iws
 *.ipr
 out/
+/*/bin/
 
 # IntelliJ Platform Gradle Plugin caches
 .intellijPlatform/
 
 # Claude Code
-.claude/worktrees/
+.claude/
 .claire/
 
 # macOS

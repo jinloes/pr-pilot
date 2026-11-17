@@ -10,7 +10,9 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173',
+    // Write to an isolated outDir under test-results/ so running Playwright a11y concurrently
+    // with Gradle's :intellij-plugin:buildWebview never races on webview/dist.
+    command: 'npx vite build --outDir test-results/a11y-dist && npx vite preview --outDir test-results/a11y-dist --host 127.0.0.1 --port 4173',
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

@@ -45,7 +45,7 @@ tasks.named('test') {
 // cannot run in PIT's minions; mutating the classes they cover would report only false survivors.
 pitest {
     excludedTestClasses = [
-        'com.jinloes.prpilot.review.BaseCommitContextTest*',
+        'com.jinloes.prpilot.review.BaseCommitContext*Test*',
         'com.jinloes.prpilot.review.BoundedProcessRunnerTest*',
         'com.jinloes.prpilot.review.ClaudeServiceTest*',
         'com.jinloes.prpilot.review.GitWorktreeServiceTest*',

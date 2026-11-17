@@ -111,15 +111,23 @@ test {
 
 def webviewSrcDir = "$rootDir/webview"
 
-// Resolve npm from common install locations so the task works when Gradle
-// is launched from the macOS Dock or an IDE that doesn't inherit the full PATH.
+// Resolve npm from .nvmrc / common install locations so the task works when Gradle
+// is launched from the macOS Dock, an IDE, or a non-interactive shell without nvm on PATH.
 def resolvedNpm = {
-    def candidates = [
-        "${System.getProperty('user.home')}/.volta/bin/npm",
+    def home = System.getProperty('user.home')
+    def nvmDir = System.getenv('NVM_DIR') ?: "$home/.nvm"
+    def nvmrcFile = rootProject.file('.nvmrc')
+    def nvmrc = nvmrcFile.exists() ? nvmrcFile.text.trim().replaceFirst('^v', '') : ''
+    def candidates = []
+    if (nvmrc) {
+        candidates.add("$nvmDir/versions/node/v${nvmrc}/bin/npm")
+    }
+    candidates.addAll([
+        "$home/.volta/bin/npm",
         '/opt/homebrew/bin/npm',
         '/usr/local/bin/npm',
         '/usr/bin/npm',
-    ]
+    ])
     for (def c : candidates) {
         if (new File(c).exists()) return c
     }
@@ -129,7 +137,7 @@ def resolvedNpm = {
 
 tasks.register('installWebviewDeps', Exec) {
     workingDir webviewSrcDir
-    commandLine resolvedNpm, 'install'
+    commandLine resolvedNpm, 'install', '--no-audit', '--no-fund'
     inputs.file("$webviewSrcDir/package.json")
     outputs.dir("$webviewSrcDir/node_modules")
 }
