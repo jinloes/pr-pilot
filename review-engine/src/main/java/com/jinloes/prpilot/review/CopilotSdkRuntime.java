@@ -2,20 +2,26 @@ package com.jinloes.prpilot.review;
 
 import com.github.copilot.CopilotClient;
 import com.github.copilot.CopilotSession;
+import com.github.copilot.SystemMessageMode;
 import com.github.copilot.generated.AssistantMessageDeltaEvent;
 import com.github.copilot.generated.AssistantMessageEvent;
 import com.github.copilot.generated.SessionErrorEvent;
 import com.github.copilot.generated.ToolExecutionStartEvent;
+import com.github.copilot.rpc.BuiltInTools;
 import com.github.copilot.rpc.CopilotClientMode;
 import com.github.copilot.rpc.CopilotClientOptions;
+import com.github.copilot.rpc.InfiniteSessionConfig;
 import com.github.copilot.rpc.McpServerConfig;
 import com.github.copilot.rpc.MessageOptions;
 import com.github.copilot.rpc.PermissionHandler;
 import com.github.copilot.rpc.PermissionRequestResult;
 import com.github.copilot.rpc.SessionConfig;
+import com.github.copilot.rpc.SystemMessageConfig;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +30,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import org.apache.commons.lang3.StringUtils;
 
@@ -37,6 +44,87 @@ import org.apache.commons.lang3.StringUtils;
 final class CopilotSdkRuntime {
 
     private static final long SDK_BOOT_TIMEOUT_MS = 60L * 1000L;
+
+    /**
+     * Built-in read-only file tools exposed when MCP is off (matching {@code
+     * ClaudeService.READ_ONLY_TOOLS}). Passing an explicit allowlist prevents installed Copilot
+     * plugins, {@code ~/.copilot/mcp-config.json} servers, shell tools, and subagents from leaking
+     * into review sessions.
+     */
+    static final List<String> READ_ONLY_TOOLS = List.of("view", "grep", "glob");
+
+    /**
+     * Built-in interactive, subagent, skill, shell, and mutating tools excluded when MCP servers
+     * are enabled (where an open {@code availableTools} allowlist is needed so MCP server tools
+     * remain visible).
+     */
+    static final List<String> EXCLUDED_NON_REVIEW_TOOLS = buildExcludedTools();
+
+    /**
+     * Maximum approved tool calls in one Copilot session (matching {@code
+     * ClaudeService.REVIEW_MAX_TURNS}). Beyond this budget, further tool requests are rejected with
+     * an instruction to emit the final response from context already gathered.
+     */
+    static final int MAX_SESSION_TOOL_CALLS = 40;
+
+    /**
+     * Separate assistant turns that may still attempt tools after budget exhaustion before the
+     * session is aborted as a wedged loop. Counting turns rather than raw parallel calls ensures a
+     * model that batches 10-20 parallel reads in one turn is never aborted before seeing the budget
+     * rejection and emitting its JSON on the next turn.
+     */
+    static final int MAX_POST_BUDGET_TOOL_TURNS = 3;
+
+    /** Safety cap for a single burst of overflow calls with no intervening turn boundary. */
+    static final int MAX_SINGLE_TURN_OVERFLOW = 50;
+
+    /**
+     * Replaces Copilot CLI's ~13 KB interactive coding-agent system prompt (which instructs some
+     * models to emit progress updates, cap replies at 100 words, or "take as many turns as needed")
+     * with focused read-only PR analysis tool discipline.
+     */
+    static final String READ_ONLY_SYSTEM_MESSAGE =
+            """
+            You are a non-interactive pull request review and code analysis engine.
+            Follow the user prompt's instructions and output format strictly; never emit \
+            conversational progress updates or narration before your response.
+            Tool discipline:
+            - Batch all independent grep/rg, glob, and view calls in parallel in a single turn.
+            - For grep/rg, always pass output_mode: "content", "-n": true, "-C": 5 (or "-A"/"-B"), \
+            and narrow with paths or glob so one search returns line numbers and surrounding code \
+            without opening every matching file.
+            - For view, prefer view_range around the relevant lines instead of reading whole \
+            files unless the prompt requires the full file (such as a changed .proto schema).
+            - Do not search for or re-read repository guidance .md files already supplied in \
+            <repo_guidelines>.
+            - Stop calling tools as soon as candidate findings are verified or ruled out; 1-3 \
+            focused tool waves are sufficient for most pull requests.""";
+
+    static final String TOOL_FREE_SYSTEM_MESSAGE =
+            "You are a non-interactive pull request review engine. Follow the user prompt's"
+                    + " instructions and output format strictly, without conversational preamble.";
+
+    static final String TOOL_BUDGET_REJECT_MESSAGE =
+            "Investigation tool budget reached ("
+                    + MAX_SESSION_TOOL_CALLS
+                    + " calls). Stop calling tools and output the final response now following the"
+                    + " required format.";
+
+    private static List<String> buildExcludedTools() {
+        List<String> excluded = new ArrayList<>(BuiltInTools.ISOLATED);
+        excluded.addAll(
+                List.of(
+                        "bash",
+                        "shell",
+                        "powershell",
+                        "edit",
+                        "create",
+                        "write",
+                        "str_replace_editor",
+                        "sql",
+                        "web_fetch"));
+        return Collections.unmodifiableList(excluded);
+    }
 
     private CopilotSdkRuntime() {}
 
@@ -132,40 +220,24 @@ final class CopilotSdkRuntime {
 
         @Override
         public RuntimeSession createSession(SessionRequest sessionRequest) throws Exception {
-            PermissionHandler permissionHandler =
-                    (permissionRequest, ctx) ->
-                            CompletableFuture.completedFuture(
-                                    permissionDecision(
-                                            permissionRequest.getKind(),
-                                            sessionRequest.allowsMcp(),
-                                            sessionRequest.allowReadTools()));
+            AtomicReference<CopilotSession> liveSession = new AtomicReference<>();
+            ToolBudget toolBudget = new ToolBudget();
             SessionConfig config =
-                    new SessionConfig()
-                            .setOnPermissionRequest(permissionHandler)
-                            .setStreaming(true)
-                            .setWorkingDirectory(sessionRequest.workingDir().getAbsolutePath())
-                            .setReasoningEffort(sessionRequest.effort())
-                            // Never enable on-disk config discovery: for a review the working
-                            // directory is the untrusted PR-branch worktree, so discovery would
-                            // load an attacker-controlled repo-local .mcp.json (which can launch
-                            // an arbitrary process). Trusted MCP servers are injected explicitly
-                            // below from the user's own config dir instead.
-                            .setEnableConfigDiscovery(false);
-            if (!sessionRequest.allowReadTools()) {
-                config.setAvailableTools(List.of());
-            }
-            Map<String, McpServerConfig> mcpServers = mcpServers(sessionRequest);
-            if (!mcpServers.isEmpty()) {
-                config.setMcpServers(mcpServers);
-            }
-            if (StringUtils.isNotBlank(sessionRequest.model())) {
-                config.setModel(sessionRequest.model());
-            }
-            if (StringUtils.isNotBlank(sessionRequest.configDir())) {
-                config.setConfigDirectory(sessionRequest.configDir());
-            }
-            return new SdkRuntimeSession(
-                    awaitWithTimeout(client.createSession(config), "session creation"));
+                    buildSessionConfig(
+                            sessionRequest,
+                            toolBudget,
+                            () -> {
+                                CopilotSession active = liveSession.get();
+                                if (active != null) active.abort();
+                            });
+            CopilotSession created =
+                    awaitWithTimeout(client.createSession(config), "session creation");
+            liveSession.set(created);
+            Closeable turnTracker =
+                    created.on(
+                            AssistantMessageEvent.class,
+                            ignored -> toolBudget.onAssistantTurnBoundary());
+            return new SdkRuntimeSession(created, turnTracker);
         }
 
         @Override
@@ -181,9 +253,11 @@ final class CopilotSdkRuntime {
 
     static final class SdkRuntimeSession implements RuntimeSession {
         private final CopilotSession session;
+        private final Closeable internalSubscription;
 
-        SdkRuntimeSession(CopilotSession session) {
+        SdkRuntimeSession(CopilotSession session, Closeable internalSubscription) {
             this.session = session;
+            this.internalSubscription = internalSubscription;
         }
 
         @Override
@@ -239,7 +313,55 @@ final class CopilotSdkRuntime {
 
         @Override
         public void close() {
+            try {
+                if (internalSubscription != null) internalSubscription.close();
+            } catch (IOException ignored) {
+                // Best-effort cleanup before closing session.
+            }
             session.close();
+        }
+    }
+
+    /**
+     * Tracks per-session tool calls and post-budget assistant turns so parallel tool batches inside
+     * a single turn receive budget rejections cleanly without aborting the session before the model
+     * gets a turn to emit its final JSON.
+     */
+    static final class ToolBudget {
+        private int attemptedCalls;
+        private boolean exhausted;
+        private boolean awaitingNextTurn;
+        private int postBudgetToolTurns;
+        private int singleBurstOverflow;
+
+        record Decision(boolean approved, boolean runawayAbort) {}
+
+        synchronized Decision recordToolAttempt() {
+            attemptedCalls++;
+            if (attemptedCalls <= MAX_SESSION_TOOL_CALLS) {
+                return new Decision(true, false);
+            }
+            if (!exhausted) {
+                exhausted = true;
+                awaitingNextTurn = true;
+                singleBurstOverflow = 1;
+                return new Decision(false, false);
+            }
+            if (awaitingNextTurn) {
+                singleBurstOverflow++;
+                return new Decision(false, singleBurstOverflow > MAX_SINGLE_TURN_OVERFLOW);
+            }
+            postBudgetToolTurns++;
+            awaitingNextTurn = true;
+            singleBurstOverflow = 1;
+            return new Decision(false, postBudgetToolTurns > MAX_POST_BUDGET_TOOL_TURNS);
+        }
+
+        synchronized void onAssistantTurnBoundary() {
+            if (exhausted) {
+                awaitingNextTurn = false;
+                singleBurstOverflow = 0;
+            }
         }
     }
 
@@ -260,21 +382,100 @@ final class CopilotSdkRuntime {
         return servers;
     }
 
+    static SessionConfig buildSessionConfig(
+            SessionRequest sessionRequest, ToolBudget toolBudget, Runnable onRunawayToolLoop) {
+        PermissionHandler permissionHandler =
+                (permissionRequest, ctx) ->
+                        CompletableFuture.completedFuture(
+                                permissionDecision(
+                                        permissionRequest.getKind(),
+                                        sessionRequest.allowsMcp(),
+                                        sessionRequest.allowReadTools(),
+                                        toolBudget,
+                                        onRunawayToolLoop));
+        SessionConfig config =
+                new SessionConfig()
+                        .setOnPermissionRequest(permissionHandler)
+                        .setStreaming(true)
+                        .setWorkingDirectory(sessionRequest.workingDir().getAbsolutePath())
+                        .setReasoningEffort(sessionRequest.effort())
+                        .setSystemMessage(
+                                new SystemMessageConfig()
+                                        .setMode(SystemMessageMode.REPLACE)
+                                        .setContent(
+                                                sessionRequest.allowReadTools()
+                                                        ? READ_ONLY_SYSTEM_MESSAGE
+                                                        : TOOL_FREE_SYSTEM_MESSAGE))
+                        // Never enable on-disk config discovery or custom instructions from the
+                        // untrusted PR-branch worktree; trusted repo guidance comes from
+                        // BaseCommitContext and trusted MCP servers are injected explicitly below.
+                        .setEnableConfigDiscovery(false)
+                        .setSkipCustomInstructions(true)
+                        .setEnableSkills(false)
+                        .setEnableFileHooks(false)
+                        .setSkillDirectories(List.of())
+                        .setAgentDirectories(List.of())
+                        .setHookDirectories(List.of())
+                        // Disable infinite context compaction so a single review pass cannot loop
+                        // across multiple context windows of file reads.
+                        .setInfiniteSessions(new InfiniteSessionConfig().setEnabled(false))
+                        // Always pass an explicit map (including empty) — leaving mcpServers null
+                        // lets the CLI inherit ~/.copilot/mcp-config.json even when inheritMcp is
+                        // false, and read-only remote MCP tools can bypass onPermissionRequest.
+                        .setMcpServers(mcpServers(sessionRequest));
+        if (!sessionRequest.allowReadTools()) {
+            config.setAvailableTools(List.of());
+            config.setPluginDirectories(List.of());
+        } else if (!sessionRequest.allowsMcp()) {
+            config.setAvailableTools(READ_ONLY_TOOLS);
+            config.setPluginDirectories(List.of());
+        } else {
+            config.setExcludedTools(EXCLUDED_NON_REVIEW_TOOLS);
+            if (!sessionRequest.inheritMcp()) {
+                config.setPluginDirectories(List.of());
+            }
+        }
+        if (StringUtils.isNotBlank(sessionRequest.model())) {
+            config.setModel(sessionRequest.model());
+        }
+        if (StringUtils.isNotBlank(sessionRequest.configDir())) {
+            config.setConfigDirectory(sessionRequest.configDir());
+        }
+        return config;
+    }
+
     static PermissionRequestResult permissionDecision(String kind, boolean allowMcp) {
-        return permissionDecision(kind, allowMcp, true);
+        return permissionDecision(kind, allowMcp, true, null, null);
     }
 
     static PermissionRequestResult permissionDecision(
             String kind, boolean allowMcp, boolean allowReadTools) {
-        if (allowReadTools && "read".equals(kind)) {
-            return PermissionRequestResult.approveOnce();
+        return permissionDecision(kind, allowMcp, allowReadTools, null, null);
+    }
+
+    static PermissionRequestResult permissionDecision(
+            String kind,
+            boolean allowMcp,
+            boolean allowReadTools,
+            ToolBudget toolBudget,
+            Runnable onRunawayToolLoop) {
+        boolean permittedKind =
+                (allowReadTools && "read".equals(kind)) || (allowMcp && "mcp".equals(kind));
+        if (!permittedKind) {
+            return PermissionRequestResult.reject(
+                    "PR Pilot reviews allow read-only file access only; write, shell, and network"
+                            + " tools are disabled.");
         }
-        if (allowMcp && "mcp".equals(kind)) {
-            return PermissionRequestResult.approveOnce();
+        if (toolBudget != null) {
+            ToolBudget.Decision decision = toolBudget.recordToolAttempt();
+            if (!decision.approved()) {
+                if (decision.runawayAbort() && onRunawayToolLoop != null) {
+                    onRunawayToolLoop.run();
+                }
+                return PermissionRequestResult.reject(TOOL_BUDGET_REJECT_MESSAGE);
+            }
         }
-        return PermissionRequestResult.reject(
-                "PR Pilot reviews allow read-only file access only; write, shell, and network tools"
-                        + " are disabled.");
+        return PermissionRequestResult.approveOnce();
     }
 
     static <T> T awaitWithTimeout(Future<T> future, String operation) throws IOException {

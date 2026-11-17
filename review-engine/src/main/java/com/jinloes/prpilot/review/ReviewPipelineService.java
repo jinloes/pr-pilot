@@ -8,7 +8,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -16,6 +18,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import org.apache.commons.lang3.StringUtils;
@@ -40,6 +43,7 @@ public final class ReviewPipelineService {
     static final String REPORT_DROPPED_PROPERTY = "prpilot.review.reportDropped";
     static final String STATUS_HYGIENE_FAILED = "Hygiene pass failed; continuing without it";
     private static final long SECONDARY_POLL_MS = 250;
+    static final long DEFAULT_SECONDARY_POST_PRIMARY_TIMEOUT_MS = 3L * 60L * 1000L;
     static final int MERGED_CANDIDATE_CAP = 40;
     static final String STATUS_COVERAGE_COMPLETE =
             "Coverage check: every changed file was reviewed; no follow-up findings needed";
@@ -53,6 +57,7 @@ public final class ReviewPipelineService {
     private final ReviewProviderExecutor secondary;
     private final Runnable cancelSecondary;
     private final String secondaryModel;
+    private final long secondaryPostPrimaryTimeoutMs;
 
     private ReviewPipelineService(ReviewProviderExecutor provider) {
         this(provider, new ChunkedReviewService(), new ReviewCoverageAnalyzer());
@@ -78,7 +83,8 @@ public final class ReviewPipelineService {
                 baseContextResolver,
                 null,
                 null,
-                "");
+                "",
+                DEFAULT_SECONDARY_POST_PRIMARY_TIMEOUT_MS);
     }
 
     private ReviewPipelineService(
@@ -89,7 +95,8 @@ public final class ReviewPipelineService {
             BaseContextResolver baseContextResolver,
             ReviewProviderExecutor secondary,
             Runnable cancelSecondary,
-            String secondaryModel) {
+            String secondaryModel,
+            long secondaryPostPrimaryTimeoutMs) {
         this.provider = provider;
         this.chunkedReviewService = chunkedReviewService;
         this.coverageAnalyzer = coverageAnalyzer;
@@ -98,6 +105,7 @@ public final class ReviewPipelineService {
         this.secondary = secondary;
         this.cancelSecondary = cancelSecondary;
         this.secondaryModel = StringUtils.defaultString(secondaryModel);
+        this.secondaryPostPrimaryTimeoutMs = secondaryPostPrimaryTimeoutMs;
     }
 
     private static BaseContextResolver defaultResolver() {
@@ -135,7 +143,21 @@ public final class ReviewPipelineService {
                 baseContextResolver,
                 reviewer,
                 cancel,
-                model);
+                model,
+                secondaryPostPrimaryTimeoutMs);
+    }
+
+    ReviewPipelineService withSecondaryPostPrimaryTimeoutMs(long timeoutMs) {
+        return new ReviewPipelineService(
+                provider,
+                chunkedReviewService,
+                coverageAnalyzer,
+                execution,
+                baseContextResolver,
+                secondary,
+                cancelSecondary,
+                secondaryModel,
+                timeoutMs);
     }
 
     public static ReviewPipelineService forClaude(ClaudeService service, String model) {
@@ -183,7 +205,8 @@ public final class ReviewPipelineService {
                         baseContextResolver,
                         null,
                         null,
-                        "")
+                        "",
+                        secondaryPostPrimaryTimeoutMs)
                 .review(
                         request.withSemanticContext(execution.context()),
                         chunked,
@@ -243,9 +266,7 @@ public final class ReviewPipelineService {
         List<String> bufferedHygieneStatuses = new CopyOnWriteArrayList<>();
         boolean auxiliaryJoined = false;
 
-        try (Closeable primaryScope = provider.openSessionScope();
-                Closeable secondaryScope =
-                        secondary != null ? secondary.openSessionScope() : () -> {}) {
+        try (Closeable primaryScope = provider.openSessionScope()) {
             final PRReviewRequest stageRequest = request;
             if (auxiliaryExecutor != null) {
                 if (!rules.isEmpty()) {
@@ -515,8 +536,18 @@ public final class ReviewPipelineService {
                         });
         boolean primaryCompleted = false;
         Future<ReviewPassResult> future = null;
+        AtomicBoolean forwardSecondaryStatus = new AtomicBoolean(false);
+        Queue<String> waitingStatuses = new ConcurrentLinkedQueue<>();
+        Consumer<String> secondaryStatus =
+                status -> {
+                    if (forwardSecondaryStatus.get()
+                            && StringUtils.isNotBlank(status)
+                            && !"Generating review…".equals(status)) {
+                        waitingStatuses.offer(status);
+                    }
+                };
         try {
-            future = executor.submit(() -> runSecondary(request, chunked));
+            future = executor.submit(() -> runSecondary(request, chunked, secondaryStatus));
             // Status is reported only from this thread: host status sinks are not thread-safe.
             onStatus.accept(secondReviewerStatus("started in parallel"));
             ReviewPassResult primary = runPrimary(request, chunked, onStatus, onChunk);
@@ -526,8 +557,16 @@ public final class ReviewPipelineService {
                             "Primary",
                             provider.displayModel(),
                             "finished with " + findings(primary)));
-            if (!future.isDone()) onStatus.accept(secondReviewerStatus("still running; waiting…"));
-            ReviewPassResult second = awaitSecondary(future);
+            if (!future.isDone()) {
+                onStatus.accept(secondReviewerStatus("still running; waiting…"));
+                forwardSecondaryStatus.set(true);
+            }
+            SecondaryWait outcome = awaitSecondary(future, waitingStatuses, onStatus);
+            if (outcome.timedOut()) {
+                onStatus.accept(secondReviewerStatus("timed out; using primary findings"));
+                return new Passes(primary, null);
+            }
+            ReviewPassResult second = outcome.result();
             if (second == null) {
                 onStatus.accept(secondReviewerStatus("failed; using primary findings"));
                 return new Passes(primary, null);
@@ -641,33 +680,68 @@ public final class ReviewPipelineService {
         }
     }
 
-    private ReviewPassResult runSecondary(PRReviewRequest request, boolean chunked)
+    private record SecondaryWait(ReviewPassResult result, boolean timedOut) {}
+
+    private ReviewPassResult runSecondary(
+            PRReviewRequest request, boolean chunked, Consumer<String> onStatus)
             throws IOException, InterruptedException {
-        Consumer<String> noStatus = ignored -> {};
         BiConsumer<String, String> noChunks = (ignoredType, ignoredText) -> {};
-        return chunked
-                ? chunkedReviewService.reviewPass(
-                        request,
-                        noStatus,
-                        passRequest -> secondary.primary(passRequest, noStatus, noChunks))
-                : secondary.primary(request, noStatus, noChunks);
+        try (Closeable ignored = secondary.openSessionScope()) {
+            return chunked
+                    ? chunkedReviewService.reviewPass(
+                            request,
+                            onStatus,
+                            passRequest -> secondary.primary(passRequest, onStatus, noChunks))
+                    : secondary.primary(request, onStatus, noChunks);
+        }
     }
 
-    /** Waits for the second reviewer, returning null when it failed; cancellation propagates. */
-    private ReviewPassResult awaitSecondary(Future<ReviewPassResult> future)
+    private static void drainSecondaryStatuses(
+            Queue<String> waitingStatuses, Consumer<String> sink) {
+        String pending;
+        while ((pending = waitingStatuses.poll()) != null) {
+            sink.accept(pending);
+        }
+    }
+
+    /**
+     * Waits up to {@link #secondaryPostPrimaryTimeoutMs} after primary completion for the second
+     * reviewer, draining its live tool statuses onto the calling thread; cancellation propagates.
+     */
+    private SecondaryWait awaitSecondary(
+            Future<ReviewPassResult> future,
+            Queue<String> waitingStatuses,
+            Consumer<String> onStatus)
             throws InterruptedException {
+        long deadlineNanos =
+                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(secondaryPostPrimaryTimeoutMs);
         try {
             while (true) {
                 provider.checkCancelled();
+                drainSecondaryStatuses(waitingStatuses, onStatus);
+                long remainingMs = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
+                if (remainingMs <= 0) {
+                    log.warn(
+                            "Second reviewer ({}) exceeded post-primary timeout ({}ms); keeping"
+                                    + " the primary review",
+                            secondaryModel,
+                            secondaryPostPrimaryTimeoutMs);
+                    if (cancelSecondary != null) cancelSecondary.run();
+                    future.cancel(true);
+                    return new SecondaryWait(null, true);
+                }
+                long pollMs = Math.min(SECONDARY_POLL_MS, remainingMs);
                 try {
-                    return future.get(SECONDARY_POLL_MS, TimeUnit.MILLISECONDS);
+                    ReviewPassResult result = future.get(pollMs, TimeUnit.MILLISECONDS);
+                    drainSecondaryStatuses(waitingStatuses, onStatus);
+                    return new SecondaryWait(result, false);
                 } catch (TimeoutException stillRunning) {
-                    // Poll again so a cancelled primary review stops waiting promptly.
+                    // Poll again to check cancellation, drain statuses, and enforce deadline.
                 }
             }
         } catch (ExecutionException failed) {
             log.warn("Second reviewer failed; keeping the primary review", failed.getCause());
-            return null;
+            return new SecondaryWait(null, false);
         } catch (InterruptedException interrupted) {
             if (cancelSecondary != null) cancelSecondary.run();
             future.cancel(true);

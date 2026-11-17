@@ -54,11 +54,14 @@ second reviewer is configured, the review prompt allows a bounded number of low-
 user, even when critique itself fails. An optional second reviewer (`reviewSecondReviewerModel`,
 always a Copilot model) runs the same request in parallel with the primary; its findings are merged
 and deduplicated with the primary's before critique, it can never fail the review (its errors and
-timeouts are logged and ignored), and cancelling the primary cancels it. Its progress (started,
-still running, finished/failed) is reported only from the primary's thread, because host status
-sinks such as the sidecar's stdout are not thread-safe. The final comment count is capped after
-merging. The outcome log does not yet distinguish reviews that used a second reviewer.
-Near-duplicate collapse and reviewer attribution are described in the next section.
+timeouts are logged and ignored), and cancelling the primary cancels it. Once the primary completes,
+the pipeline waits at most `DEFAULT_SECONDARY_POST_PRIMARY_TIMEOUT_MS` (3 minutes) for the second
+reviewer before cancelling it and continuing with the primary's findings. Its progress (started,
+still running, any tool calls while waiting, finished/timed out/failed) is reported only from the
+primary's thread, because host status sinks such as the sidecar's stdout are not thread-safe. The
+final comment count is capped after merging. The outcome log does not yet distinguish reviews that
+used a second reviewer. Near-duplicate collapse and reviewer attribution are described in the next
+section.
 
 ### Reviewer attribution and corroboration
 Before the second-reviewer merge, `ReviewerAttribution` collapses near-duplicates: each

@@ -36,6 +36,10 @@ class ReviewPromptsSecurityTest {
                             "Fix the bug", "", "myorg", "myrepo", 99, "", "alice", "2024-01-01");
             String prompt = ReviewPrompts.buildPrompt(new PRReviewRequest(p, ""));
             assertThat(prompt).contains("read-only tools (Read, Grep, Glob)");
+            assertThat(prompt)
+                    .contains("Keep tool use targeted and batched")
+                    .contains("view_range")
+                    .contains("<repo_guidelines>");
             assertThat(prompt).doesNotContain("MCP servers").doesNotContain("gh pr diff");
         }
 

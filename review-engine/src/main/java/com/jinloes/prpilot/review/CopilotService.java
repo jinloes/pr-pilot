@@ -512,6 +512,9 @@ public class CopilotService {
             StringBuilder deltaBuffer = new StringBuilder();
             AtomicReference<String> finalMessage = new AtomicReference<>();
             AtomicReference<String> sessionError = new AtomicReference<>();
+            CopilotSdkRuntime.ToolBudget runToolBudget = new CopilotSdkRuntime.ToolBudget();
+            AtomicBoolean abortedForToolBudget = new AtomicBoolean();
+            RuntimeSession activeSession = session;
 
             subscriptions.add(
                     session.onAssistantMessageDelta(
@@ -524,6 +527,7 @@ public class CopilotService {
             subscriptions.add(
                     session.onAssistantMessage(
                             content -> {
+                                runToolBudget.onAssistantTurnBoundary();
                                 if (StringUtils.isNotBlank(content)) {
                                     finalMessage.set(content);
                                 }
@@ -532,6 +536,28 @@ public class CopilotService {
                     session.onToolExecutionStart(
                             toolName -> {
                                 if (StringUtils.isNotBlank(toolName)) {
+                                    CopilotSdkRuntime.ToolBudget.Decision decision =
+                                            runToolBudget.recordToolAttempt();
+                                    if (!decision.approved()) {
+                                        if (decision.runawayAbort()
+                                                && abortedForToolBudget.compareAndSet(
+                                                        false, true)) {
+                                            sessionError.compareAndSet(
+                                                    null,
+                                                    "copilot exceeded the investigation tool"
+                                                            + " budget ("
+                                                            + CopilotSdkRuntime
+                                                                    .MAX_SESSION_TOOL_CALLS
+                                                            + " calls) without returning a"
+                                                            + " response.");
+                                            try {
+                                                activeSession.abort();
+                                            } catch (Exception ignored) {
+                                                // Best effort abort of runaway tool loop.
+                                            }
+                                        }
+                                        return;
+                                    }
                                     onStatus.accept(toolName);
                                 }
                             }));

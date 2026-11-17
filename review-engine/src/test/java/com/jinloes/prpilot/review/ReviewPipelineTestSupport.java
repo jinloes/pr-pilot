@@ -306,6 +306,7 @@ final class ReviewPipelineTestSupport {
         IOException failure;
         boolean blockUntilInterrupted;
         CountDownLatch release;
+        Consumer<Consumer<String>> whileRunning = ignored -> {};
         final List<PRReviewRequest> requests = new CopyOnWriteArrayList<>();
         final CountDownLatch started = new CountDownLatch(1);
         final CountDownLatch interrupted = new CountDownLatch(1);
@@ -328,6 +329,7 @@ final class ReviewPipelineTestSupport {
                 }
             }
             if (release != null) release.await(5, TimeUnit.SECONDS);
+            whileRunning.accept(onStatus);
             if (failure != null) throw failure;
             return result;
         }

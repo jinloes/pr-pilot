@@ -5,8 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.github.copilot.SystemMessageMode;
 import com.github.copilot.rpc.McpHttpServerConfig;
 import com.github.copilot.rpc.McpServerConfig;
+import com.github.copilot.rpc.PermissionRequestResult;
+import com.github.copilot.rpc.SessionConfig;
 import com.jinloes.prpilot.review.CopilotSdkRuntime.SessionRequest;
 import java.io.File;
 import java.io.IOException;
@@ -17,6 +20,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.AfterEach;
@@ -56,6 +60,48 @@ class CopilotSdkRuntimeTest {
         void deniesReadToolsForToolFreeSupervisorSessions() {
             assertThat(CopilotSdkRuntime.permissionDecision("read", false, false).getKind())
                     .isEqualTo("reject");
+        }
+
+        @Test
+        void
+                rejectsParallelOverflowInSameTurnWithoutAbortingThenAbortsOnlyAfterRepeatedPostBudgetTurns() {
+            CopilotSdkRuntime.ToolBudget budget = new CopilotSdkRuntime.ToolBudget();
+            AtomicBoolean aborted = new AtomicBoolean();
+
+            for (int i = 1; i <= CopilotSdkRuntime.MAX_SESSION_TOOL_CALLS; i++) {
+                assertThat(
+                                CopilotSdkRuntime.permissionDecision(
+                                                "read",
+                                                false,
+                                                true,
+                                                budget,
+                                                () -> aborted.set(true))
+                                        .getKind())
+                        .isEqualTo("approve-once");
+            }
+            // A large parallel batch in the SAME turn (e.g. 20 parallel view/rg calls) rejects the
+            // overflow calls cleanly without aborting so the model gets a turn to emit its JSON.
+            for (int i = 0; i < 20; i++) {
+                PermissionRequestResult rejected =
+                        CopilotSdkRuntime.permissionDecision(
+                                "read", false, true, budget, () -> aborted.set(true));
+                assertThat(rejected.getKind()).isEqualTo("reject");
+            }
+            assertThat(aborted).isFalse();
+
+            for (int turn = 1; turn <= CopilotSdkRuntime.MAX_POST_BUDGET_TOOL_TURNS; turn++) {
+                budget.onAssistantTurnBoundary();
+                for (int parallel = 0; parallel < 5; parallel++) {
+                    CopilotSdkRuntime.permissionDecision(
+                            "read", false, true, budget, () -> aborted.set(true));
+                }
+                assertThat(aborted).isFalse();
+            }
+
+            budget.onAssistantTurnBoundary();
+            CopilotSdkRuntime.permissionDecision(
+                    "read", false, true, budget, () -> aborted.set(true));
+            assertThat(aborted).isTrue();
         }
     }
 
@@ -150,6 +196,71 @@ class CopilotSdkRuntimeTest {
 
             assertThat(request.hostCodeIntelligence()).isNull();
             assertThat(CopilotSdkRuntime.mcpServers(request)).isEmpty();
+        }
+
+        @Test
+        void buildSessionConfigLocksNonMcpSessionsToExplicitEmptyMcpAndReadOnlyAllowlist() {
+            SessionConfig config =
+                    CopilotSdkRuntime.buildSessionConfig(
+                            request(false, true, null),
+                            new CopilotSdkRuntime.ToolBudget(),
+                            () -> {});
+
+            // Never null: leaving mcpServers null lets the CLI inherit ~/.copilot/mcp-config.json.
+            assertThat(config.getMcpServers()).isNotNull().isEmpty();
+            assertThat(config.getAvailableTools())
+                    .containsExactlyElementsOf(CopilotSdkRuntime.READ_ONLY_TOOLS);
+            assertThat(config.getPluginDirectories()).isEmpty();
+            assertThat(config.getSkillDirectories()).isEmpty();
+            assertThat(config.getAgentDirectories()).isEmpty();
+            assertThat(config.getHookDirectories()).isEmpty();
+            assertThat(config.getEnableConfigDiscovery()).contains(false);
+            assertThat(config.getSkipCustomInstructions()).contains(true);
+            assertThat(config.getEnableSkills()).contains(false);
+            assertThat(config.getEnableFileHooks()).contains(false);
+            assertThat(config.getInfiniteSessions().getEnabled()).contains(false);
+            assertThat(config.getSystemMessage()).isNotNull();
+            assertThat(config.getSystemMessage().getMode()).isEqualTo(SystemMessageMode.REPLACE);
+            assertThat(config.getSystemMessage().getContent())
+                    .contains("output_mode: \"content\"", "view_range", "<repo_guidelines>");
+
+            SessionConfig toolFree =
+                    CopilotSdkRuntime.buildSessionConfig(
+                            request(false, false, null),
+                            new CopilotSdkRuntime.ToolBudget(),
+                            () -> {});
+            assertThat(toolFree.getSystemMessage().getMode()).isEqualTo(SystemMessageMode.REPLACE);
+            assertThat(toolFree.getSystemMessage().getContent())
+                    .isEqualTo(CopilotSdkRuntime.TOOL_FREE_SYSTEM_MESSAGE);
+        }
+
+        @Test
+        void
+                buildSessionConfigExcludesNonReviewToolsWhenMcpIsActiveAndBlocksPluginsUnlessInherited()
+                        throws IOException {
+            writeTrustedConfig("search");
+
+            SessionConfig hostOnly =
+                    CopilotSdkRuntime.buildSessionConfig(
+                            request(false, true, HOST),
+                            new CopilotSdkRuntime.ToolBudget(),
+                            () -> {});
+            assertThat(hostOnly.getAvailableTools()).isNull();
+            assertThat(hostOnly.getExcludedTools())
+                    .contains("bash", "edit", "create", "task", "skill", "ask_user");
+            assertThat(hostOnly.getPluginDirectories()).isEmpty();
+            assertThat(hostOnly.getMcpServers()).containsOnlyKeys(HostCodeIntelligence.SERVER_NAME);
+
+            SessionConfig inherited =
+                    CopilotSdkRuntime.buildSessionConfig(
+                            request(true, true, null),
+                            new CopilotSdkRuntime.ToolBudget(),
+                            () -> {});
+            assertThat(inherited.getAvailableTools()).isNull();
+            assertThat(inherited.getExcludedTools())
+                    .contains("bash", "edit", "create", "task", "skill", "ask_user");
+            assertThat(inherited.getPluginDirectories()).isNull();
+            assertThat(inherited.getMcpServers()).containsOnlyKeys("search");
         }
     }
 

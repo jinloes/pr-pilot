@@ -140,5 +140,71 @@ class CopilotServiceClientScopeTest {
                 assertThat(createdClients).hasValue(2);
             }
         }
+
+        @Test
+        void allowsParallelBatchCrossingToolBudgetToFinishFinalJsonTurnWithoutAborting()
+                throws Exception {
+            FakeRuntimeSession session = new FakeRuntimeSession();
+            session.sendAction =
+                    active -> {
+                        // Simulate 4 parallel batches (1 + 13 + 15 + 20 = 49 calls across 4 turns)
+                        // followed by the final JSON response on turn 5.
+                        for (int count : new int[] {1, 13, 15, 20}) {
+                            active.emitMessage("");
+                            for (int i = 0; i < count; i++) {
+                                active.emitTool("view");
+                            }
+                        }
+                        active.emitMessage(CopilotServiceTestSupport.reviewJson("APPROVE"));
+                    };
+            FakeRuntimeClient client = new FakeRuntimeClient(ignored -> session);
+            CopilotService service = new CopilotService(null, new FakeRuntimeFactory(() -> client));
+            List<String> statuses = new CopyOnWriteArrayList<>();
+
+            String response =
+                    service.completeReviewPrompt(
+                            "prompt", "", "medium", false, null, true, 5_000, statuses::add);
+
+            assertThat(response).isEqualTo(CopilotServiceTestSupport.reviewJson("APPROVE"));
+            assertThat(session.abortCount.get()).isZero();
+            assertThat(statuses).hasSize(CopilotSdkRuntime.MAX_SESSION_TOOL_CALLS);
+        }
+
+        @Test
+        void abortsARunawaySessionThatIgnoresToolBudgetAcrossRepeatedTurns() {
+            FakeRuntimeSession session = new FakeRuntimeSession();
+            session.sendAction =
+                    active -> {
+                        active.emitMessage("");
+                        for (int i = 0; i <= CopilotSdkRuntime.MAX_SESSION_TOOL_CALLS; i++) {
+                            active.emitTool("view");
+                        }
+                        for (int turn = 0;
+                                turn <= CopilotSdkRuntime.MAX_POST_BUDGET_TOOL_TURNS;
+                                turn++) {
+                            active.emitMessage("");
+                            active.emitTool("view");
+                        }
+                    };
+            FakeRuntimeClient client = new FakeRuntimeClient(ignored -> session);
+            CopilotService service = new CopilotService(null, new FakeRuntimeFactory(() -> client));
+            List<String> statuses = new CopyOnWriteArrayList<>();
+
+            assertThatThrownBy(
+                            () ->
+                                    service.completeReviewPrompt(
+                                            "prompt",
+                                            "",
+                                            "high",
+                                            false,
+                                            null,
+                                            true,
+                                            5_000,
+                                            statuses::add))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("exceeded the investigation tool budget");
+            assertThat(session.abortCount.get()).isEqualTo(1);
+            assertThat(statuses).hasSize(CopilotSdkRuntime.MAX_SESSION_TOOL_CALLS);
+        }
     }
 }

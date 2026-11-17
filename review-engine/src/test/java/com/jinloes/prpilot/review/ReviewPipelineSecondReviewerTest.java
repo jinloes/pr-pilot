@@ -81,12 +81,18 @@ class ReviewPipelineSecondReviewerTest {
         }
 
         @Test
-        void reportsWaitingWhenTheSecondReviewerOutlastsThePrimary() throws Exception {
+        void reportsWaitingAndForwardsLiveSecondaryToolStatusAfterPrimaryFinishes()
+                throws Exception {
             FakeProvider provider = new FakeProvider();
             provider.primaryResult = pass(result());
             FakeSecondary secondary = new FakeSecondary();
             secondary.result = pass(result());
             secondary.release = new CountDownLatch(1);
+            secondary.whileRunning =
+                    status -> {
+                        status.accept("Generating review…");
+                        status.accept("view");
+                    };
             provider.completions.add(reviewJson());
             List<String> statuses = new CopyOnWriteArrayList<>();
             Consumer<String> onStatus =
@@ -103,8 +109,43 @@ class ReviewPipelineSecondReviewerTest {
                             "Second reviewer (gpt-5.5) started in parallel",
                             "Primary reviewer (claude-opus) finished with 0 findings",
                             "Second reviewer (gpt-5.5) still running; waiting…",
+                            "view",
                             "Second reviewer (gpt-5.5) finished with 0 findings",
                             "Merged reviewers into 0 findings");
+        }
+
+        @Test
+        void timesOutAndCancelsASlowSecondReviewerAfterPrimaryCompletes() throws Exception {
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    pass(result(comment("src/A.java", 1, "high", "Primary finding.")));
+            provider.completionFailure = new IOException("validator unavailable");
+            FakeSecondary secondary = new FakeSecondary();
+            secondary.blockUntilInterrupted = true;
+            List<String> statuses = new CopyOnWriteArrayList<>();
+
+            ReviewResult result =
+                    withSecondary(provider, secondary)
+                            .withSecondaryPostPrimaryTimeoutMs(40)
+                            .review(
+                                    request(oneRiskyHunk()),
+                                    false,
+                                    false,
+                                    false,
+                                    statuses::add,
+                                    null);
+
+            assertThat(statuses)
+                    .containsSubsequence(
+                            "Primary reviewer (claude-opus) finished with 1 finding",
+                            "Second reviewer (gpt-5.5) still running; waiting…",
+                            "Second reviewer (gpt-5.5) timed out; using primary findings")
+                    .noneMatch(status -> status.startsWith("Merged reviewers"));
+            assertThat(secondary.cancels).hasValue(1);
+            assertThat(secondary.interrupted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(result.getLineComments())
+                    .extracting(LineComment::getBody)
+                    .containsExactly("Primary finding.");
         }
 
         @Test

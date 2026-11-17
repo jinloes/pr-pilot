@@ -36,25 +36,35 @@ The two providers have genuinely different capability surfaces, which is easy to
 
 | | Claude | Copilot |
 |---|---|---|
-| Tool gating | Hard allowlist of three read tools | No allowlist |
-| Approval | N/A — anything off-list is unavailable | Permission callback approves any tool the CLI classifies as `kind == "read"` |
+| Tool gating | Hard allowlist (`Read Grep Glob`) | Hard allowlist (`view`, `grep`, `glob`) when MCP is off; `excludedTools` (shell/write/subagent/skill/ask_user) when MCP is on |
+| Approval | N/A — anything off-list is unavailable | Permission callback approves `read` (and `mcp` when elevated) up to `MAX_SESSION_TOOL_CALLS` (40), then rejects excess calls with a JSON-output nudge and aborts only if the model ignores the rejection across more than `MAX_POST_BUDGET_TOOL_TURNS` (3) subsequent turns |
 
-Copilot's surface is therefore whatever the CLI labels read-only, not a fixed set. Temporary stream
-output is owner-only and deleted in `finally`; raw model output is not retained in logs.
+Temporary stream output is owner-only and deleted in `finally`; raw model output is not retained in
+logs.
 
-Copilot review/chat sessions reject all SDK permission requests by default. On-disk config discovery
-(`setEnableConfigDiscovery`) is **never** enabled — unconditionally `false`, not derived from any
-setting — because the session working directory is the untrusted PR-branch worktree, and discovery
-would scan it for a repo-local `.mcp.json`. A malicious PR could ship an `.mcp.json` whose server
-`command` is an arbitrary process, which the SDK could launch at discovery time before any tool-call
-permission gate runs. `copilotInheritMcp` is an explicit capability elevation, but it never touches
-the worktree: when enabled, `CopilotMcpConfig.loadTrustedServers` reads MCP server definitions only
-from the user's own trusted config (`<configDir>/mcp-config.json`, default `~/.copilot`) and injects
-them via `SessionConfig.setMcpServers`. The permission handler still approves only `read` (always)
-and `mcp` (when elevated) and keeps rejecting shell/write/url. The optional `copilotConfigDir`
-setting maps to `configDir`/`setConfigDirectory` and also scopes which trusted config file is read.
-Never enable config discovery against the worktree and never replace the explicit permission handler
-with blanket approval.
+Copilot review/chat sessions replace Copilot CLI's generic interactive coding-agent system prompt
+(`SystemMessageMode.REPLACE`) with a concise non-interactive review system message that enforces
+batched parallel tool calls, `grep` with line numbers/context, `view_range` reads, and skipping
+`.md` guidance already present in `<repo_guidelines>`. They also reject all SDK permission requests
+by default, disable infinite session compaction (`InfiniteSessionConfig.setEnabled(false)`), disable
+skills and file hooks, skip custom-instruction discovery (`setSkipCustomInstructions(true)`, since
+sanitized base-commit guidance is injected via `BaseCommitContext`), and clear
+plugin/skill/agent/hook directories unless `copilotInheritMcp` is enabled. On-disk config discovery
+(`setEnableConfigDiscovery`) is **never**
+enabled — unconditionally `false`, not derived from any setting — because the session working
+directory is the untrusted PR-branch worktree, and discovery would scan it for a repo-local
+`.mcp.json`. A malicious PR could ship an `.mcp.json` whose server `command` is an arbitrary
+process, which the SDK could launch at discovery time before any tool-call permission gate runs.
+**Always** pass `SessionConfig.setMcpServers(mcpServers)` even when the map is empty: leaving
+`mcpServers` `null` lets `copilot --server` load `~/.copilot/mcp-config.json` anyway, and read-only
+remote MCP tools can execute without triggering `onPermissionRequest`. `copilotInheritMcp` is an
+explicit capability elevation, but it never touches the worktree: when enabled,
+`CopilotMcpConfig.loadTrustedServers` reads MCP server definitions only from the user's own trusted
+config (`<configDir>/mcp-config.json`, default `~/.copilot`) and injects them via
+`SessionConfig.setMcpServers`. The optional `copilotConfigDir` setting maps to
+`configDir`/`setConfigDirectory` and also scopes which trusted config file is read. Never enable
+config discovery against the worktree and never replace the explicit permission handler with blanket
+approval.
 
 ### Host code intelligence over MCP
 `GenerateReviewParams.hostCodeIntelligence` and `ChatParams.hostCodeIntelligence` carry an optional
