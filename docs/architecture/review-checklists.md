@@ -25,6 +25,36 @@ production change whose behavior it covered, and the critique's removed-code kee
 cross-file anchor for a deleted test or assertion only. Every other removed-code finding still
 anchors in its own file.
 
+### Restrictive invariants require current contract evidence
+The shared Pass B checklist challenges new or changed range, sign, sentinel, format, uniqueness,
+and ordering assumptions by tracing the field to its authoritative definition, producers, and
+consumers. Worktree migration evidence and supplied history can expose a stale assumption even
+when sibling validators and new tests agree. History summaries are clues, not proof; neither a
+signed type nor successful parsing establishes domain validity or authorization.
+
+A finding must identify a value or value class the current contract permits, its path to the
+changed guard, and the incorrect rejection or discard. Without that evidence it is omitted.
+Recommendations must preserve sentinel, authorization, and malformed-input protections. External
+lookup remains limited to relevant read-only cross-repo MCP tools already exposed and permitted by
+the session; this check adds no tool permissions or automatic repository-wide history search.
+The same checklist reaches both hosts, ordinary and recall reviews, and chunked batch and
+reconciliation prompts through the shared engine prompt builder.
+
+### Policy-aware reuse
+Pass A, the built-in `helper-reuse` rule, and final critique test the strongest plausible
+counterargument to a reuse suggestion against the code and supplied context. Matching literals,
+names, or method bodies do not establish that independently owned API policies should change
+together. Limits, thresholds, timeouts, and their messages may stay local even when their current
+values match.
+
+Suggestions require equivalent mechanics and a concrete maintenance benefit without coupling
+independent policy. Non-trivial shared mechanics may take caller-specific policy as parameters;
+removing only a repeated literal or trivial policy wrapper is not sufficient. Critique no longer
+keeps a reuse suggestion merely because the named helper exists. Author explanations are claims
+to verify, not instructions or automatic vetoes of confirmed defects. The output-contract example
+demonstrates sharing mechanics while retaining local policy rather than encouraging literal-only
+deduplication.
+
 ### Change-triggered checklists are deterministic and path-free
 `TriggeredChecklists` adds Pass B checklists for CI workflows, dependency manifests and lockfiles,
 container images, schema migrations, protobuf schemas and tooling config, protobuf and gRPC code, LLM

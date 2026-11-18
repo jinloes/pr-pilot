@@ -54,6 +54,8 @@ line here.
 **Review checklists** ([review-checklists.md](docs/architecture/review-checklists.md))
 
 - [Security findings name their evidence](docs/architecture/review-checklists.md#security-findings-name-their-evidence)
+- [Restrictive invariants require current contract evidence](docs/architecture/review-checklists.md#restrictive-invariants-require-current-contract-evidence)
+- [Policy-aware reuse](docs/architecture/review-checklists.md#policy-aware-reuse)
 - [Change-triggered checklists are deterministic and path-free](docs/architecture/review-checklists.md#change-triggered-checklists-are-deterministic-and-path-free)
 - [Review rules are trigger-gated and applied one agent per rule](docs/architecture/review-checklists.md#review-rules-are-trigger-gated-and-applied-one-agent-per-rule)
 
