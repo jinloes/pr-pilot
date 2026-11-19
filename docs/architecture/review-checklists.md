@@ -40,6 +40,32 @@ the session; this check adds no tool permissions or automatic repository-wide hi
 The same checklist reaches both hosts, ordinary and recall reviews, and chunked batch and
 reconciliation prompts through the shared engine prompt builder.
 
+### Downstream context
+Pass B traces new or changed remote reads, including new callers of unchanged helpers, through
+wrappers, graph resolvers, decorators, and secondary fetches. The check compares the actual
+identity, tenant, delegation, scope, and operation-specific context against the downstream contract.
+It follows permission-filtered empty/partial results and errors through the changed caller's
+absence/completeness mapping. This is a correctness check, not dependent on a changed downstream
+signature or a missing external caller.
+
+Local source comes first. If insufficient, the primary and critique prompts allow relevant
+read-only MCP search and authoritative source/contract lookup only when already exposed and
+permitted. External evidence must apply to the PR's dependency/version and cite repository, path,
+symbol, revision/version when available, contract behavior, and the local failure path in
+`rationale`. Search snippets, draft rationales, and author claims are not proof. Critique retrieves
+the source again; if unavailable and no other evidence confirms the finding, it drops it.
+
+Neither an available context field nor an unexplained empty result proves a missing-context bug;
+authorization filtering, missing ingestion, authoritative absence, and transport failure must not
+be conflated. Fixes must preserve inbound authorization and tenant isolation and establish that the
+specific operation permits the proposed context; blanket elevation is not acceptable. An unsupported
+fix is removed even when the underlying defect is confirmed.
+
+This changes shared prompts for both hosts, ordinary/recall reviews, and chunked reconciliation,
+not provider permissions. Copilot can investigate external contracts through explicitly enabled
+trusted MCP tools; Claude remains local-only, as do passes where MCP is disabled. No server
+discovery, runtime service probes, or shell/network access is added.
+
 ### Policy-aware reuse
 Pass A, the built-in `helper-reuse` rule, and final critique test the strongest plausible
 counterargument to a reuse suggestion against the code and supplied context. Matching literals,

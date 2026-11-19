@@ -25,11 +25,7 @@ Visual references:
 
 ## Key design decisions
 
-Only decisions that encode active constraints future code must respect and are not obvious from
-source.
-
-Add a new decision as a `###` section in the matching `docs/architecture/*.md` file and an index
-line here.
+Index non-obvious constraints here; add their `###` sections in `docs/architecture/*.md`.
 
 **Semantic review** ([semantic-review.md](docs/architecture/semantic-review.md))
 
@@ -56,6 +52,7 @@ line here.
 - [Security findings name their evidence](docs/architecture/review-checklists.md#security-findings-name-their-evidence)
 - [Restrictive invariants require current contract evidence](docs/architecture/review-checklists.md#restrictive-invariants-require-current-contract-evidence)
 - [Policy-aware reuse](docs/architecture/review-checklists.md#policy-aware-reuse)
+- [Downstream context](docs/architecture/review-checklists.md#downstream-context)
 - [Change-triggered checklists are deterministic and path-free](docs/architecture/review-checklists.md#change-triggered-checklists-are-deterministic-and-path-free)
 - [Review rules are trigger-gated and applied one agent per rule](docs/architecture/review-checklists.md#review-rules-are-trigger-gated-and-applied-one-agent-per-rule)
 
