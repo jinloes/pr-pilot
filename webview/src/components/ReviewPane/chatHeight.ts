@@ -28,12 +28,39 @@ export function effectiveChatAvailableHeight(
   return Math.max(0, Math.min(containerHeight, heightPreservingReviewBody))
 }
 
+function safeLocalStorage(): Storage | null {
+  try {
+    return typeof window !== 'undefined' ? window.localStorage : null
+  } catch {
+    return null
+  }
+}
+
 export function loadChatHeight(
-  storage: Pick<Storage, 'getItem'> = localStorage,
+  storage?: Pick<Storage, 'getItem'> | null,
   availableHeight = Number.POSITIVE_INFINITY,
 ): number {
-  const saved = Number(storage.getItem(CHAT_HEIGHT_KEY))
+  let saved = Number.NaN
+  try {
+    const target = storage === undefined ? safeLocalStorage() : storage
+    const raw = target?.getItem(CHAT_HEIGHT_KEY) ?? null
+    saved = raw === null ? Number.NaN : Number(raw)
+  } catch {
+    saved = Number.NaN
+  }
   const preferred = saved >= MIN_CHAT_HEIGHT && saved <= MAX_CHAT_HEIGHT ? saved : DEFAULT_CHAT_HEIGHT
   return Number.isFinite(availableHeight) ? clampChatHeight(preferred, availableHeight) : preferred
+}
+
+export function saveChatHeight(
+  height: number,
+  storage?: Pick<Storage, 'setItem'> | null,
+): void {
+  try {
+    const target = storage === undefined ? safeLocalStorage() : storage
+    target?.setItem(CHAT_HEIGHT_KEY, String(height))
+  } catch {
+    // Ignore storage quota or sandbox restrictions in embedded webviews.
+  }
 }
 

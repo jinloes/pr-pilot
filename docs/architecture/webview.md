@@ -212,13 +212,21 @@ fields. Sources are display-only and are not saved to GitHub drafts.
 ### Suggested change preview and removal
 A finding with `suggestedChange` shows a read-only `suggested-change` region under the comment: the
 anchored line's current text from the rendered diff as "before" and the replacement as "after", in
-monospace with diff colors, plus a "Remove suggestion" button that is hidden when the pane is
-read-only. Removing goes through `EditCommentHandlers.onRemoveSuggestion(index)`, clears only the
-field and marks the draft changed like an edit. Because a suggestion replaces one specific line,
-`withoutSuggestion` clears it whenever that pairing may no longer hold: a body edit (inline or
-orphan), a verifier "revise", a `validateComments` snap that changes `line`, and `reanchorDraft` on
-every comment of a stale draft. Both bridges accept it as an optional string bounded at 1,000
-characters, matching the codec limit.
+monospace with diff colors, plus a "Remove suggestion" button hidden when the pane is read-only.
+Removing runs `EditCommentHandlers.onRemoveSuggestion(index)`, clearing the field and marking the
+draft dirty. Because a suggestion replaces one specific line, `withoutSuggestion` clears it whenever
+that pairing may change: a body edit, a verifier "revise", a `validateComments` snap, or
+`reanchorDraft`. Both bridges bound it at 1,000 characters to match the codec limit.
+
+### Opening diff files and findings in the IDE editor
+Non-deleted `DiffViewer` file headers, inline findings, and normalized unanchored findings emit
+`openFile` (`{ type: 'openFile', number, owner, repo, file, line? }`). Both bridges require PR
+identity, a clean `/` repository-relative `file` (no leading/trailing `/`, `\`, drive prefix, `.`,
+or `..`), and optional 1-based `line`. Both hosts verify the active PR and matching `owner/repo`
+checkout, then resolve targets `workspace-checkout-first` with `toRealPath`/`realpath` confinement:
+existing workspace files open editable, while files present only in the PR-head worktree open
+read-only (`Document.setReadOnly(true)` in IntelliJ; repo+PR-scoped `pr-pilot-worktree:` URIs in
+VS Code) so worktree cleanup never mutates disk attributes or discards user edits.
 
 ### VS Code webview surfaces
 The VS Code host exposes PR Pilot as an editor-tab `WebviewPanel` opened by `pr-pilot.open`. The

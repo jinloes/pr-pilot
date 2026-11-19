@@ -126,7 +126,8 @@ tolerates and repairs common model schema deviations instead of rejecting the en
 previously surfaced as "The model returned an invalid review format" for otherwise-good output.
 Unknown top-level/comment fields are ignored; an over-long `summary` is truncated to 800 chars; a
 comment `body` with embedded newlines is collapsed to one line but otherwise preserved in full; a
-low-confidence `"issue"` is downgraded to `"suggestion"` rather than failing the review; the final
+low-confidence `"issue"` (or any low-confidence comment missing a `rationale`) is dropped rather
+than failing the review, while `"issue"` + `"nit"` normalizes to `"suggestion"`; the final
 `verdict` is derived from (and corrected to match) the surviving comments rather than trusting the
 model's stated verdict. Only individually-malformed line comments (missing/blank required field,
 invalid enum value) are dropped — one bad comment no longer discards the other 19. A hard parse
@@ -213,9 +214,15 @@ logging appends `-supervisor-on` or `-supervisor-off`, so supervised and baselin
 pooled.
 
 ### Prompt-injection hardening
-When wrapping untrusted payloads in XML-like tags, escape matching closing tags inside payload to
-prevent tag breakout. Repository guidelines, PR metadata, descriptions, diffs, prior reviews, and
-chat context remain untrusted reference data even when tag escaping is applied; the latest
+When wrapping untrusted payloads in XML-like tags (including JSON-serialized sections such as
+`<untrusted_semantic_evidence>`, `<inspection_manifest>`, `<coverage_state>`, and
+`<follow_up_directives>`), escape closing tags case- and whitespace-insensitively and neutralize
+forged reserved structural/trusted tags inside the payload to prevent tag breakout. Supervisor
+`<follow_up_directives>` is rendered as an engine-owned section outside `<custom_instructions>`, and
+chat `<turn>` tags are neutralized inside `<conversation_history>` turns without altering generic
+`<Turn>` types in diffs. PR titles in `<pr_metadata>` are normalized to a single line and
+null-guarded. Repository guidelines, PR metadata, descriptions, diffs, prior reviews, and chat
+context remain untrusted reference data even when tag escaping is applied; the latest
 `<user_message>` is the authorized request but cannot override persona or confidentiality
 constraints. The chat builder retains only ten history turns and bounds each turn, the PR
 description, review comments, diff, attachment, and current request before provider execution. Provider capability isolation is the primary

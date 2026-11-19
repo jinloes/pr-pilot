@@ -1,9 +1,9 @@
 import { useEffect, type Dispatch, type RefObject } from 'react'
 import { sendToHost, type PR } from '../../bridge/types'
 import {
-  CHAT_HEIGHT_KEY,
   clampChatHeight,
   effectiveChatAvailableHeight,
+  saveChatHeight,
 } from './chatHeight'
 import {
   isSelectionInFormField,
@@ -66,7 +66,7 @@ export function useReviewChatEffects({
       const clamped = clampChatHeight(chatHeightRef.current, availableHeight)
       chatHeightRef.current = clamped
       setChatHeightState(clamped)
-      localStorage.setItem(CHAT_HEIGHT_KEY, String(clamped))
+      saveChatHeight(clamped)
     }
     updateBounds()
     if (typeof ResizeObserver === 'undefined') return

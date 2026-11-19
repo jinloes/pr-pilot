@@ -1,6 +1,7 @@
 import type { LineComment, ReviewResult } from './models';
 import type {
     SidecarChatResult,
+    SidecarCopilotModelsResult,
     SidecarDraftReviewMutationResult,
     SidecarDraftReviewResult,
     SidecarExistingReviewsResult,
@@ -37,6 +38,7 @@ export const REQUIRED_CAPABILITIES = [
     'linkedIssues',
     'repoProfile',
     'repoGuidelines',
+    'copilotModels',
     'worktrees',
     'semanticReviews',
     'reviewGeneration',
@@ -89,6 +91,26 @@ export function parseChatResult(value: unknown): SidecarChatResult | null {
     return {
         content: result.content,
         historyQuestion: typeof result.historyQuestion === 'string' ? result.historyQuestion : '',
+    };
+}
+
+const COPILOT_MODEL_SOURCES = new Set<SidecarCopilotModelsResult['source']>(['ACCOUNT', 'CLI_HELP', 'NONE']);
+
+/** Validates the shape returned by `reviews/listCopilotModels`. */
+export function parseCopilotModelsResult(value: unknown): SidecarCopilotModelsResult | null {
+    if (!value || typeof value !== 'object') return null;
+    const result = value as Record<string, unknown>;
+    if (!Array.isArray(result.models)
+        || result.models.some((id) => typeof id !== 'string')
+        || typeof result.source !== 'string'
+        || !COPILOT_MODEL_SOURCES.has(result.source as SidecarCopilotModelsResult['source'])
+        || typeof result.failureReason !== 'string') {
+        return null;
+    }
+    return {
+        models: [...result.models] as string[],
+        source: result.source as SidecarCopilotModelsResult['source'],
+        failureReason: result.failureReason,
     };
 }
 

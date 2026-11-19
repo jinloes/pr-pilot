@@ -19,10 +19,10 @@ status, and parse final `assistant.message` JSON with delta fallback. During a m
 `ReviewPipelineService` run, `CopilotService.openClientScope()` keeps one started `RuntimeClient`
 alive across the primary pass, chunked batches, supervisor, rule selection/agents, hygiene pass, and
 self-critique (closing each `RuntimeSession` after its call and invalidating the shared client if
-`createSession` fails), while standalone calls keep per-call client lifecycles. VS Code's
-`copilot.ts` additionally uses the TypeScript SDK (`@github/copilot-sdk`) directly, but only for
-model discovery (`listModels`) — there is no sidecar RPC endpoint for model discovery yet, so that
-one path still spawns the CLI in the extension process.
+`createSession` fails), while standalone calls keep per-call client lifecycles. Both hosts also
+route Copilot model discovery (`CopilotModelDiscovery` via `reviews/listCopilotModels` on
+`ReviewEngineApi`) through the Java engine/sidecar rather than bundling a second Copilot SDK in the
+VS Code extension.
 
 ### Provider capability isolation
 Claude review/chat processes are granted a **read-only tool allowlist** (`--tools "Read Grep Glob"`,
@@ -128,9 +128,9 @@ back to a short hardcoded suggestion list.
   `PluginSettingsComponent` merges the result into the (editable) model combo in Settings → Tools →
   PR Pilot, shows a **Refresh** button, and explains the result's source or failure in the hint
   below the combo.
-- **VS Code**: `copilot.ts` `listModels()` reads the session catalog, falling back to the SDK's
-  `client.listModels()` (no CLI parsing), and `filterModelIds()` drops policy-`disabled`/blank IDs.
-  The native Settings entries use
+- **VS Code**: `copilot.ts` `listModels(sidecar, forceRefresh)` calls the sidecar's
+  `reviews/listCopilotModels` capability (`CopilotModelDiscovery` in `review-engine`) so the
+  extension never spawns `copilot` directly or ships `@github/copilot-sdk`. The native Settings entries use
   static dropdowns for the supported Claude and Copilot fallback models. The **settings webview**
   (`settings.ts` + `settingsView.ts`) — opened via the gear in the PR Pilot view title or the
   `pr-pilot.openSettings` command — shows a live model dropdown and hides the non-active provider's

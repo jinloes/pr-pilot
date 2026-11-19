@@ -1,11 +1,10 @@
-import * as fs from 'fs';
-import * as os from 'os';
 import {
-    CopilotClient,
-    RuntimeConnection,
-    type PermissionRequestResult,
-} from '@github/copilot-sdk';
-import { existsOnPath } from './claude';
+    candidateBinaryPaths,
+    existsOnPath,
+    resolveCandidateBinary,
+    resolveFromPath,
+} from './claude';
+import type { SidecarCopilotModelsResult } from './sidecarTypes';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -14,9 +13,12 @@ import { existsOnPath } from './claude';
  * catches more real correctness/security issues while still following the strict JSON schema.
  */
 export const DEFAULT_REASONING_EFFORT = 'high';
-export const SDK_BOOT_TIMEOUT_MS = 60 * 1000;
 
-export function permissionDecision(kind: string, allowMcp: boolean): PermissionRequestResult {
+export type PermissionDecision =
+    | { kind: 'approve-once' }
+    | { kind: 'reject'; feedback: string };
+
+export function permissionDecision(kind: string, allowMcp: boolean): PermissionDecision {
     if (kind === 'read') {
         return { kind: 'approve-once' };
     }
@@ -39,19 +41,12 @@ export function resolveReviewInheritMcp(inheritMcp: boolean, forceForReview: boo
 
 // ── Binary resolution ──────────────────────────────────────────────────────────
 
-function findCopilotBinary(): string {
-    const home = process.env.HOME || os.homedir();
-    const candidates = [
-        `${home}/.local/bin/copilot`,
-        `${home}/.npm-global/bin/copilot`,
-        '/usr/local/bin/copilot',
-        '/opt/homebrew/bin/copilot',
-        '/usr/bin/copilot',
-    ];
-    for (const p of candidates) {
-        try { if (fs.statSync(p).isFile()) return p; } catch { /* not found */ }
+export function findCopilotBinary(): string {
+    for (const p of candidateBinaryPaths('copilot')) {
+        const resolved = resolveCandidateBinary(p);
+        if (resolved) return resolved;
     }
-    return 'copilot';
+    return resolveFromPath('copilot') ?? 'copilot';
 }
 
 /**
@@ -59,7 +54,10 @@ function findCopilotBinary(): string {
  * hard-coded candidate path exists, or `copilot` is found on PATH.
  */
 export function copilotBinaryAvailable(): boolean {
-    return findCopilotBinary() !== 'copilot' || existsOnPath('copilot');
+    for (const p of candidateBinaryPaths('copilot')) {
+        if (resolveCandidateBinary(p)) return true;
+    }
+    return existsOnPath('copilot');
 }
 
 type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
@@ -99,27 +97,16 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, ope
     }
 }
 
-// ── Runtime management ────────────────────────────────────────────────────────
+// ── Model discovery (sidecar-backed) ──────────────────────────────────────────
 
-function buildRuntimeEnv(): NodeJS.ProcessEnv {
-    return {
-        ...process.env,
-        HOME: process.env.HOME || os.homedir(),
-        PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH ?? ''}`,
-    };
+export interface CopilotModelClient {
+    listCopilotModels(forceRefresh?: boolean): Promise<SidecarCopilotModelsResult>;
 }
-
-// Review/chat generation now runs sidecar-side (shared review-engine CopilotService), so this
-// module retains only model discovery (no RPC endpoint exists for that yet) and the small pure
-// helpers (permissionDecision, normalizeReasoningEffort, resolveReviewInheritMcp) still exercised
-// directly by tests and by extension.ts's provider-agnostic settings wiring.
-
-// ── Model discovery ───────────────────────────────────────────────────────────
 
 /**
  * Last successful list of Copilot model IDs, or `null` when no probe has succeeded yet. A failed
  * probe never overwrites a good list, so a transient failure doesn't strip newer models from the
- * dropdown. Mirrors CopilotModelDiscovery's cache semantics.
+ * dropdown.
  */
 let modelCache: string[] | null = null;
 
@@ -139,10 +126,8 @@ interface ModelInfoLike {
 }
 
 /**
- * Extracts usable model IDs from a model catalog (`session.rpc.model.list()` entries or
- * `client.listModels()` output): drops non-object entries, policy-`disabled` models and blank IDs,
- * then de-dupes while preserving catalog order. Pure (no I/O) so it can be tested without spawning
- * the CLI. Mirrors CopilotModelDiscovery.filterModelIds.
+ * Extracts usable model IDs from a model catalog: drops non-object entries, policy-`disabled`
+ * models and blank IDs, then de-dupes while preserving catalog order.
  */
 export function filterModelIds(models: readonly unknown[]): string[] {
     const ids = models
@@ -154,64 +139,55 @@ export function filterModelIds(models: readonly unknown[]): string[] {
 }
 
 /**
- * Lists the models a session can select, as the CLI's own `/model` picker does. The global
- * `models.list` RPC omits models the session catalog includes (for example newly enabled Gemini
- * models), so a short-lived, tool-free session is opened, queried, and deleted. No prompt is sent,
- * so this uses no model quota.
+ * Discovers Copilot models via the sidecar's `reviews/listCopilotModels` capability, preserving
+ * `source` (`ACCOUNT` | `CLI_HELP` | `NONE`) and `failureReason`. Only live `ACCOUNT` catalogs are
+ * cached in `modelCache`, so a `CLI_HELP` fallback never overwrites previously loaded account models.
  */
-async function listSessionModels(client: CopilotClient): Promise<unknown[]> {
-    const session = await withTimeout(client.createSession({
-        workingDirectory: os.homedir(),
-        availableTools: [],
-        enableConfigDiscovery: false,
-        onPermissionRequest: () => ({ kind: 'reject' }),
-    }), SDK_BOOT_TIMEOUT_MS, 'session creation');
+export async function discoverModels(
+    sidecar: CopilotModelClient,
+    forceRefresh = false,
+): Promise<SidecarCopilotModelsResult> {
+    if (!forceRefresh && modelCache !== null) {
+        return { models: modelCache, source: 'ACCOUNT', failureReason: '' };
+    }
+
     try {
-        const result = await withTimeout(session.rpc.model.list({}), SDK_BOOT_TIMEOUT_MS, 'model discovery');
-        return Array.isArray(result?.list) ? result.list : [];
-    } finally {
-        await client.deleteSession(session.sessionId).catch(() => undefined);
+        const result = await sidecar.listCopilotModels(forceRefresh);
+        const ids = Array.from(
+            new Set(
+                result.models
+                    .map((id) => id.trim())
+                    .filter((id) => id.length > 0),
+            ),
+        );
+        if (result.source === 'ACCOUNT' && ids.length > 0) {
+            modelCache = ids;
+        } else if (ids.length === 0 && result.failureReason) {
+            console.warn('[pr-pilot] Copilot model discovery returned no models:', result.failureReason);
+        }
+        return {
+            models: ids,
+            source: result.source,
+            failureReason: result.failureReason,
+        };
+    } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.warn('[pr-pilot] Failed to probe copilot models via sidecar:', reason);
+        return { models: [], source: 'NONE', failureReason: reason };
     }
 }
 
 /**
- * Returns the Copilot model IDs the current account can select: the session model catalog, falling
- * back to the global `client.listModels()` catalog when the session route fails or returns
- * nothing. Only models whose policy is not `disabled` are returned. Serves the cached list unless
- * `forceRefresh` is set. On failure returns an empty array and keeps any previously cached list, so
- * callers can fall back without losing a good result.
- *
- * Mirrors CopilotModelDiscovery.refresh (IntelliJ), which uses the same catalogs.
+ * Returns the Copilot model IDs the current account can select via the sidecar's
+ * `reviews/listCopilotModels` capability (`CopilotModelDiscovery` in `review-engine`). Serves the
+ * cached list unless `forceRefresh` is set. On failure returns an empty array and keeps any
+ * previously cached list, so callers can fall back without losing a good result.
  */
-export async function listModels(forceRefresh = false): Promise<string[]> {
-    if (!forceRefresh && modelCache !== null) return modelCache;
-
-    const client = new CopilotClient({
-        connection: RuntimeConnection.forStdio({ path: findCopilotBinary() }),
-        workingDirectory: os.homedir(),
-        env: buildRuntimeEnv(),
-        mode: 'copilot-cli',
-    });
-    try {
-        await withTimeout(client.start(), SDK_BOOT_TIMEOUT_MS, 'runtime startup');
-        let ids: string[] = [];
-        try {
-            ids = filterModelIds(await listSessionModels(client));
-        } catch (err) {
-            console.warn('[pr-pilot] Session model catalog unavailable; using models.list:',
-                err instanceof Error ? err.message : String(err));
-        }
-        if (ids.length === 0) {
-            ids = filterModelIds(await withTimeout(client.listModels(), SDK_BOOT_TIMEOUT_MS, 'model discovery'));
-        }
-        if (ids.length > 0) modelCache = ids;
-        return ids;
-    } catch (err) {
-        console.warn('[pr-pilot] Failed to probe copilot models:',
-            err instanceof Error ? err.message : String(err));
-        return [];
-    } finally {
-        await client.stop().catch(() => undefined);
-    }
+export async function listModels(
+    sidecar: CopilotModelClient,
+    forceRefresh = false,
+): Promise<string[]> {
+    const result = await discoverModels(sidecar, forceRefresh);
+    return result.models;
 }
 

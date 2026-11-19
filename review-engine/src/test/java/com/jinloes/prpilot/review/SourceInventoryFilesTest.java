@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.jinloes.prpilot.model.SourceInventory;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
@@ -222,14 +223,17 @@ class SourceInventoryFilesTest {
 
         @Test
         void settingsDoNotSwallowAccessErrorsOrBudgetCancellation() throws Exception {
-            Path locked = Files.createDirectory(root.resolve("locked"));
-            var permissions = Files.getPosixFilePermissions(locked);
-            try {
-                Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
-                assertThatThrownBy(() -> capture(locked.resolve("missing/settings")))
-                        .isInstanceOf(java.nio.file.AccessDeniedException.class);
-            } finally {
-                Files.setPosixFilePermissions(locked, permissions);
+            if (root.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+                Path locked = Files.createDirectory(root.resolve("locked"));
+                var permissions = Files.getPosixFilePermissions(locked);
+                try {
+                    Files.setPosixFilePermissions(
+                            locked, PosixFilePermissions.fromString("---------"));
+                    assertThatThrownBy(() -> capture(locked.resolve("missing/settings")))
+                            .isInstanceOf(AccessDeniedException.class);
+                } finally {
+                    Files.setPosixFilePermissions(locked, permissions);
+                }
             }
             List<String> paths = List.of(root.resolve("absent/settings").toString());
             assertThatThrownBy(

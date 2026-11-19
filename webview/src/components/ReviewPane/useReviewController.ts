@@ -8,7 +8,7 @@ import { applyReviewQualityRepairs, runReviewQualityCheck, type ReviewQualityAct
 import { validateComments, withoutSuggestion } from '@/lib/validateComments'
 import type { ExampleFixResult, VerifyResult } from '../ChatPane/structuredResult'
 import { withAttachedPatch } from '@/lib/attachPatch'
-import { CHAT_HEIGHT_KEY, clampChatHeight, EMPTY_CHAT_HEIGHT, loadChatHeight } from './chatHeight'
+import { clampChatHeight, EMPTY_CHAT_HEIGHT, loadChatHeight, saveChatHeight } from './chatHeight'
 import { adjacentCommentIndex, focusedIndexAfterCommentDeletion, nextCommentIndex } from './commentNavigation'
 import { diffOf, initialPaneState, resultOf, reviewReducer, validationDiffOf, type DraftPresentState, type PaneState, type Verdict } from './reviewState'
 import { emptyReviewActivity, finishReviewActivity, formatReviewActivityLabel, type ReviewActivity } from './reviewActivity'
@@ -85,7 +85,7 @@ export function useReviewController({
   const beforeDeepPauseRef = useRef<PaneState>(initialPaneState)
   const [qualityExpanded, setQualityExpanded] = useState(false)
   const [commentsMovedToBody, setCommentsMovedToBody] = useState(false)
-  const [chatHeight, setChatHeightState] = useState(() => loadChatHeight(localStorage, window.innerHeight))
+  const [chatHeight, setChatHeightState] = useState(() => loadChatHeight(undefined, window.innerHeight))
   const [chatAvailableHeight, setChatAvailableHeight] = useState(window.innerHeight)
   const chatHeightRef = useRef(chatHeight)
   const paneRef = useRef<HTMLDivElement>(null)
@@ -98,7 +98,12 @@ export function useReviewController({
   const activeReviewOperationIdRef = useRef<string | null>(null)
   const generationStartedAtRef = useRef<number | null>(null)
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [lastSavedSnapshot, setLastSavedSnapshot] = useState<string | null>(null)
   const lastSavedSnapshotRef = useRef<string | null>(null)
+  const setSavedSnapshot = useCallback((snapshot: string | null) => {
+    lastSavedSnapshotRef.current = snapshot
+    setLastSavedSnapshot(snapshot)
+  }, [])
   const generatedBaselineRef = useRef<ReviewResult | null>(null)
   // Whether the reviewer has moved comment focus since the current review or draft loaded.
   const commentNavigatedRef = useRef(false)
@@ -159,7 +164,7 @@ export function useReviewController({
     setIntellijAssisted(false)
     activeReviewOperationIdRef.current = null
     generationStartedAtRef.current = null
-    lastSavedSnapshotRef.current = null
+    setSavedSnapshot(null)
     generatedBaselineRef.current = null
     inFlightSaveRef.current = null
     pendingAutosaveRef.current = null
@@ -169,7 +174,7 @@ export function useReviewController({
       autosaveTimerRef.current = null
     }
     clearAllWatchdogs()
-  }, [pr, clearAllWatchdogs])
+  }, [pr, clearAllWatchdogs, setSavedSnapshot])
 
   useReviewHostMessages({
     currentPrRef,
@@ -181,7 +186,7 @@ export function useReviewController({
     repositoryInstructionsRef,
     repositoryInstructionsDraftRef,
     generatedBaselineRef,
-    lastSavedSnapshotRef,
+    setSavedSnapshot,
     inFlightSaveRef,
     pendingSubmitRef,
     submitInFlightRef,
@@ -243,7 +248,7 @@ export function useReviewController({
     chatDragRef.current = null
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
-    localStorage.setItem(CHAT_HEIGHT_KEY, String(chatHeightRef.current))
+    saveChatHeight(chatHeightRef.current)
     document.removeEventListener('pointermove', handleChatResizeMove)
     document.removeEventListener('pointerup', handleChatResizeUp)
   }
@@ -288,6 +293,7 @@ export function useReviewController({
     onDirtyStateChange,
     pendingSubmitRef,
     submitInFlightRef,
+    lastSavedSnapshot,
     lastSavedSnapshotRef,
     generatedBaselineRef,
     inFlightSaveRef,
@@ -728,7 +734,7 @@ export function useReviewController({
       cancelChatReplyPlacement: () => setChatCommentDraft(null),
       setChatHasContent,
       setChatHeight,
-      commitChatHeight: (height) => localStorage.setItem(CHAT_HEIGHT_KEY, String(height)),
+      commitChatHeight: (height) => saveChatHeight(height),
       startChatResize,
       openPr: () => {
         if (pr) sendToHost({ type: 'openUrl', url: pr.htmlUrl })

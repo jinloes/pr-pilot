@@ -8,11 +8,13 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
@@ -231,23 +233,32 @@ public final class SemanticWorktreeStore {
         byte[] bytes = JSON.writeValueAsBytes(records);
         if (bytes.length > 1024 * 1024) throw new IOException("Retained registry limit");
         Path temporary =
-                Files.createTempFile(
-                        directory,
-                        "semantic-worktrees-",
-                        ".tmp",
-                        PosixFilePermissions.asFileAttribute(
-                                PosixFilePermissions.fromString("rw-------")));
+                supportsPosix(directory)
+                        ? Files.createTempFile(
+                                directory,
+                                "semantic-worktrees-",
+                                ".tmp",
+                                PosixFilePermissions.asFileAttribute(
+                                        PosixFilePermissions.fromString("rw-------")))
+                        : Files.createTempFile(directory, "semantic-worktrees-", ".tmp");
         try {
             try (FileChannel file = FileChannel.open(temporary, StandardOpenOption.WRITE)) {
                 var buffer = java.nio.ByteBuffer.wrap(bytes);
                 while (buffer.hasRemaining()) file.write(buffer);
                 file.force(true);
             }
-            Files.move(
-                    temporary,
-                    directory.resolve("semantic-worktrees.json"),
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
+            try {
+                Files.move(
+                        temporary,
+                        directory.resolve("semantic-worktrees.json"),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException fallback) {
+                Files.move(
+                        temporary,
+                        directory.resolve("semantic-worktrees.json"),
+                        StandardCopyOption.REPLACE_EXISTING);
+            }
         } finally {
             Files.deleteIfExists(temporary);
         }
@@ -256,10 +267,14 @@ public final class SemanticWorktreeStore {
     private static FileChannel openLock(Path path) throws IOException {
         if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
             try {
-                Files.createFile(
-                        path,
-                        PosixFilePermissions.asFileAttribute(
-                                PosixFilePermissions.fromString("rw-------")));
+                if (supportsPosix(path)) {
+                    Files.createFile(
+                            path,
+                            PosixFilePermissions.asFileAttribute(
+                                    PosixFilePermissions.fromString("rw-------")));
+                } else {
+                    Files.createFile(path);
+                }
             } catch (java.nio.file.FileAlreadyExistsException ignored) {
             }
         }
@@ -269,14 +284,15 @@ public final class SemanticWorktreeStore {
 
     private static void ownedFile(Path path) throws IOException {
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
-                || !Files.getOwner(path, LinkOption.NOFOLLOW_LINKS)
-                        .getName()
-                        .equals(System.getProperty("user.name"))
-                || Files.getPosixFilePermissions(path).stream()
-                        .anyMatch(
-                                p ->
-                                        p.name().startsWith("GROUP_")
-                                                || p.name().startsWith("OTHERS_")))
+                || (supportsPosix(path)
+                        && (!sameCurrentUser(
+                                        Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName())
+                                || Files.getPosixFilePermissions(path).stream()
+                                        .anyMatch(
+                                                p ->
+                                                        p.name().startsWith("GROUP_")
+                                                                || p.name()
+                                                                        .startsWith("OTHERS_")))))
             throw new IOException("Unsafe retained registry/lock");
     }
 
@@ -284,20 +300,36 @@ public final class SemanticWorktreeStore {
         if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
             canonicalDirectory(path.getParent());
             try {
-                Files.createDirectory(
-                        path,
-                        PosixFilePermissions.asFileAttribute(
-                                PosixFilePermissions.fromString("rwx------")));
+                if (supportsPosix(path)) {
+                    Files.createDirectory(
+                            path,
+                            PosixFilePermissions.asFileAttribute(
+                                    PosixFilePermissions.fromString("rwx------")));
+                } else {
+                    Files.createDirectory(path);
+                }
             } catch (java.nio.file.FileAlreadyExistsException ignored) {
             }
         }
         canonicalDirectory(path);
-        if (!Files.getOwner(path).getName().equals(System.getProperty("user.name"))
-                || Files.getPosixFilePermissions(path)
-                        .contains(java.nio.file.attribute.PosixFilePermission.GROUP_WRITE)
-                || Files.getPosixFilePermissions(path)
-                        .contains(java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE))
+        if (supportsPosix(path)
+                && (!sameCurrentUser(Files.getOwner(path).getName())
+                        || Files.getPosixFilePermissions(path)
+                                .contains(PosixFilePermission.GROUP_WRITE)
+                        || Files.getPosixFilePermissions(path)
+                                .contains(PosixFilePermission.OTHERS_WRITE)))
             throw new IOException("Unsafe retained directory");
+    }
+
+    private static boolean supportsPosix(Path path) {
+        return path.getFileSystem().supportedFileAttributeViews().contains("posix");
+    }
+
+    private static boolean sameCurrentUser(String ownerName) {
+        String current = System.getProperty("user.name", "");
+        return ownerName.equals(current)
+                || ownerName.endsWith("\\" + current)
+                || ownerName.equalsIgnoreCase("BUILTIN\\Administrators");
     }
 
     private static void canonicalDirectory(Path path) throws IOException {

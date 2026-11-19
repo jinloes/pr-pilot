@@ -12,10 +12,9 @@ using a local AI CLI/runtime (Claude Code or GitHub Copilot, selected per-host i
 ## System shape
 
 PR Pilot is a multi-module Java 21 project with two IDE hosts sharing one React webview. `core`,
-`github-engine`, and `review-engine` own host-neutral behavior: IntelliJ calls them in-process and
-VS Code reaches them through the stdio JSON-RPC `sidecar`, leaving hosts with IDE lifecycle,
-settings, and bridge wiring only. GitHub credentials stay inside `github-engine` and provider
-processes stay inside `review-engine`.
+`github-engine`, and `review-engine` own host-neutral logic: IntelliJ calls them in-process and VS
+Code reaches them via the stdio JSON-RPC `sidecar`, leaving hosts with IDE lifecycle, settings, and
+bridge wiring. GitHub tokens stay in `github-engine`; provider processes stay in `review-engine`.
 
 Visual references:
 
@@ -168,6 +167,7 @@ line here.
 - [Incremental review button and scope banner](docs/architecture/webview.md#incremental-review-button-and-scope-banner)
 - [Reviewer sources chip](docs/architecture/webview.md#reviewer-sources-chip)
 - [Suggested change preview and removal](docs/architecture/webview.md#suggested-change-preview-and-removal)
+- [Opening diff files and findings in the IDE editor](docs/architecture/webview.md#opening-diff-files-and-findings-in-the-ide-editor)
 - [VS Code webview surfaces](docs/architecture/webview.md#vs-code-webview-surfaces)
 - [IntelliJ webview surfaces](docs/architecture/webview.md#intellij-webview-surfaces)
 
@@ -194,10 +194,9 @@ line here.
 
 ## Settings persistence
 
-IntelliJ stores these in `PluginSettings` (`claudeReviews.xml`); VS Code contributes the same names
-as `pr-pilot.<name>` in `vscode-extension/package.json`. Field semantics, guidance profiles, and
-the VS Code default-mirroring rule are in [settings.md](docs/architecture/settings.md). No API keys
-or tokens are written to disk.
+IntelliJ stores these in `PluginSettings` (`claudeReviews.xml`); VS Code contributes `pr-pilot.<name>`
+in `vscode-extension/package.json`. Details live in [settings.md](docs/architecture/settings.md); no
+API keys or tokens are written to disk.
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -226,7 +225,7 @@ or tokens are written to disk.
 | `reviewSecondReviewerEffort` | `"medium"` | Second reviewer's Copilot reasoning effort |
 | `experimentalIntellijAssistedReview` | `false` | IntelliJ-assisted review opt-in |
 | `experimentalVsCodeCodeIntelligence` | `false` | VS Code language-server lookups for Copilot; VS Code only |
-| `reviewGuidanceGlobs` | `[]` | Base-commit guidance globs; VS Code settings view only |
+| `reviewGuidanceGlobs` | `[]` | Base-commit guidance globs |
 
 ## Local data files
 

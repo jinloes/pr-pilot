@@ -36,15 +36,12 @@ export const MIRRORS = [
     ],
   },
   {
-    what: 'Copilot model probing and model picker',
+    what: 'Copilot model selector command',
     sides: [
-      [
-        `review-engine/${JAVA}/review/CopilotModelDiscovery.java`,
-        `intellij-plugin/${JAVA}/settings/CopilotModelSelector.java`,
-      ],
-      [`${VSCODE}/copilot.ts`, `${VSCODE}/copilotModel.ts`],
+      [`intellij-plugin/${JAVA}/settings/CopilotModelSelector.java`],
+      [`${VSCODE}/copilotModel.ts`],
     ],
-    extra: 'Compare listModels/filterModelIds and the selectCopilotModel command.',
+    extra: 'Model probing lives in review-engine (reviews/listCopilotModels); only the command entry points remain per-host.',
   },
   {
     what: 'settings UI (provider-aware model selector, effort, base URL)',

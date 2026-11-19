@@ -183,4 +183,80 @@ class StdioJsonRpcServerTest extends StdioJsonRpcServerTestBase {
 
         assertThat(response).isNull();
     }
+
+    @Test
+    void oversizedSynchronousResponseEmitsFallbackServerErrorFrame() throws Exception {
+        String hugePayload = "x".repeat(StdioFrameCodec.MAX_MESSAGE_BYTES + 1024);
+        ReviewSessionService oversizedReview =
+                new ReviewSessionService() {
+                    @Override
+                    public ReviewEngineApi.GuidelinesResult readGuidelines(
+                            ReviewEngineApi.ReadGuidelinesParams params) {
+                        return new ReviewEngineApi.GuidelinesResult(hugePayload);
+                    }
+                };
+        StdioJsonRpcServer oversizedServer =
+                new StdioJsonRpcServer(
+                        objectMapper,
+                        frameCodec,
+                        new SidecarBootstrapService(),
+                        new GitHubEngine(),
+                        oversizedReview,
+                        reviewExecutor);
+        ByteArrayOutputStream input = new ByteArrayOutputStream();
+        frameCodec.writeFrame(
+                input,
+                ("{\"jsonrpc\":\"2.0\",\"id\":77,\"method\":\"reviews/readGuidelines\","
+                                + "\"params\":{\"projectDir\":\"/repo\",\"globs\":[]}}")
+                        .getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        oversizedServer.run(new ByteArrayInputStream(input.toByteArray()), output);
+
+        ByteArrayInputStream responses = new ByteArrayInputStream(output.toByteArray());
+        byte[] responseFrame = frameCodec.readFrame(responses);
+        assertThat(responseFrame).isNotNull();
+        JsonNode response = objectMapper.readTree(responseFrame);
+        assertThat(response.path("id").asInt()).isEqualTo(77);
+        assertThat(response.path("error").path("code").asInt()).isEqualTo(-32000);
+        assertThat(response.path("error").path("message").asText())
+                .isEqualTo(StdioJsonRpcServer.RESPONSE_TOO_LARGE_MESSAGE);
+        assertThat(frameCodec.readFrame(responses)).isNull();
+    }
+
+    @Test
+    void unhandledHandlerExceptionReturnsInternalErrorOverRunLoop() throws Exception {
+        ReviewSessionService throwingReview =
+                new ReviewSessionService() {
+                    @Override
+                    public ReviewEngineApi.GuidelinesResult readGuidelines(
+                            ReviewEngineApi.ReadGuidelinesParams params) {
+                        throw new IllegalStateException("simulated failure");
+                    }
+                };
+        StdioJsonRpcServer throwingServer =
+                new StdioJsonRpcServer(
+                        objectMapper,
+                        frameCodec,
+                        new SidecarBootstrapService(),
+                        new GitHubEngine(),
+                        throwingReview,
+                        reviewExecutor);
+        ByteArrayOutputStream input = new ByteArrayOutputStream();
+        frameCodec.writeFrame(
+                input,
+                ("{\"jsonrpc\":\"2.0\",\"id\":88,\"method\":\"reviews/readGuidelines\","
+                                + "\"params\":{\"projectDir\":\"/repo\",\"globs\":[]}}")
+                        .getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        throwingServer.run(new ByteArrayInputStream(input.toByteArray()), output);
+
+        JsonNode response =
+                objectMapper.readTree(
+                        frameCodec.readFrame(new ByteArrayInputStream(output.toByteArray())));
+        assertThat(response.path("id").asInt()).isEqualTo(88);
+        assertThat(response.path("error").path("code").asInt()).isEqualTo(-32603);
+        assertThat(response.path("error").path("message").asText()).isEqualTo("Internal error");
+    }
 }

@@ -364,4 +364,11 @@ export interface SidecarChatResult {
     historyQuestion: string;
 }
 
+/** Result of `reviews/listCopilotModels`: discovered model IDs plus provenance. */
+export interface SidecarCopilotModelsResult {
+    models: string[];
+    source: 'ACCOUNT' | 'CLI_HELP' | 'NONE';
+    failureReason: string;
+}
+
 /** Validates the shape returned by `reviews/generate`. */

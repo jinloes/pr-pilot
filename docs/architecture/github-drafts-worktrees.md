@@ -51,7 +51,10 @@ instructs it to search that tree and treat the result as evidence. Forks get the
 blank, malformed, or unavailable after fetch (for example, after a force-push): neither a branch tip
 nor the user's checkout is an acceptable substitute. `head.sha` arrives from the GitHub API, so it
 is validated as a hex object name before reaching a git command line; a value like `HEAD`, `main`,
-or `--upload-pack=…` is refused rather than being passed as a revision.
+or `--upload-pack=…` is refused rather than being passed as a revision. Worktree creation also
+passes `-c core.symlinks=false` so tracked Git symlinks check out as plain link-target text files
+rather than OS symlinks, and fails closed if any post-checkout symlink resolves outside the
+canonical worktree root.
 
 ### The review worktree is not indexed by the IDE
 Reviews run against a detached git worktree at `$TMPDIR/pr-pilot-wt-<unique>`
@@ -112,8 +115,8 @@ fast-fail behavior for permanent `4xx` errors.
 
 ### Draft review storage semantics
 Inline comment metadata is encoded in review body HTML comment for resilient draft reload. Pending
-review creation omits `event`. On 422 for inline comments, fallback to body-first creation then
-per-comment POST. When a pending draft lacks usable hidden metadata, hosts fall back to GitHub API
+review creation omits `event`. On 422 for inline comments, fallback creates a body-only pending
+review carrying detached comments in a visible orphan section (`DraftReviewCodec.buildOrphanSection`). When a pending draft lacks usable hidden metadata, hosts fall back to GitHub API
 review comments and set `importedFromGitHub`; the webview warns that recovered review details may be
 incomplete and offers a **Re-anchor from current diff** action that re-runs `validateComments` to
 snap comments back to valid positions, clears the imported flag, and (via autosave) re-encodes

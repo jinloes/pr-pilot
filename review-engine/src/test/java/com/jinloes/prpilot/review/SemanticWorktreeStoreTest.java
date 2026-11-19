@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -65,15 +66,21 @@ class SemanticWorktreeStoreTest {
                                 }))
                 .isFalse();
         assertThat(removed).isFalse();
-        Path alias =
-                Files.createSymbolicLink(
-                        temporary.resolve("ordinary-alias"), Path.of(retained.worktree()));
-        assertThat(restarted.ordinaryRemoval(alias, () -> true)).isFalse();
+        try {
+            Path alias =
+                    Files.createSymbolicLink(
+                            temporary.resolve("ordinary-alias"), Path.of(retained.worktree()));
+            assertThat(restarted.ordinaryRemoval(alias, () -> true)).isFalse();
+        } catch (UnsupportedOperationException | FileSystemException symlinkDenied) {
+            // Unprivileged Windows runners cannot create OS symlinks without Developer Mode.
+        }
         assertThat(restarted.ordinaryRemoval(temporary.resolve("ordinary"), () -> true)).isTrue();
-        assertThat(
-                        Files.getPosixFilePermissions(
-                                temporary.resolve("state/semantic-worktrees.json")))
-                .isEqualTo(PosixFilePermissions.fromString("rw-------"));
+        if (temporary.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+            assertThat(
+                            Files.getPosixFilePermissions(
+                                    temporary.resolve("state/semantic-worktrees.json")))
+                    .isEqualTo(PosixFilePermissions.fromString("rw-------"));
+        }
     }
 
     @Test
@@ -116,9 +123,13 @@ class SemanticWorktreeStoreTest {
                                             throw new AssertionError("Removal must not run");
                                         }))
                 .isInstanceOf(IOException.class);
-        Files.delete(registry);
-        Files.createSymbolicLink(registry, temporary.resolve("outside"));
-        assertThatThrownBy(store::list).isInstanceOf(IOException.class);
+        try {
+            Files.delete(registry);
+            Files.createSymbolicLink(registry, temporary.resolve("outside"));
+            assertThatThrownBy(store::list).isInstanceOf(IOException.class);
+        } catch (UnsupportedOperationException | FileSystemException symlinkDenied) {
+            // Unprivileged Windows runners cannot create OS symlinks without Developer Mode.
+        }
     }
 
     @Test
@@ -132,10 +143,15 @@ class SemanticWorktreeStoreTest {
                                         Path.of(retained.worktree()),
                                         HEAD))
                 .isInstanceOf(IOException.class);
-        Path link =
-                Files.createSymbolicLink(temporary.resolve("alias"), Path.of(retained.worktree()));
-        assertThatThrownBy(() -> store.register(Path.of(retained.repository()), link, HEAD))
-                .isInstanceOf(IOException.class);
+        try {
+            Path link =
+                    Files.createSymbolicLink(
+                            temporary.resolve("alias"), Path.of(retained.worktree()));
+            assertThatThrownBy(() -> store.register(Path.of(retained.repository()), link, HEAD))
+                    .isInstanceOf(IOException.class);
+        } catch (UnsupportedOperationException | FileSystemException symlinkDenied) {
+            // Unprivileged Windows runners cannot create OS symlinks without Developer Mode.
+        }
     }
 
     @Test
@@ -146,7 +162,8 @@ class SemanticWorktreeStoreTest {
         try (var lease = store.acquire(retained.id())) {
             Process child = helper(lock, "probe");
             assertThat(child.waitFor(10, TimeUnit.SECONDS)).isTrue();
-            assertThat(new String(child.getInputStream().readAllBytes())).isEqualTo("BUSY\n");
+            assertThat(new String(child.getInputStream().readAllBytes()).replace("\r\n", "\n"))
+                    .isEqualTo("BUSY\n");
             assertThat(child.exitValue()).isZero();
         }
         Process child = helper(lock, "hold");
@@ -162,7 +179,19 @@ class SemanticWorktreeStoreTest {
             child.destroyForcibly();
             assertThat(child.waitFor(10, TimeUnit.SECONDS)).isTrue();
         }
-        try (var lease = store(new Git()).acquire(retained.id())) {
+        SemanticWorktreeStore.Lease reacquired = null;
+        long reacquireDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (reacquired == null) {
+            try {
+                reacquired = store(new Git()).acquire(retained.id());
+            } catch (IOException transientLockRelease) {
+                if (System.nanoTime() >= reacquireDeadline) {
+                    throw transientLockRelease;
+                }
+                Thread.sleep(25);
+            }
+        }
+        try (var lease = reacquired) {
             assertThat(lease.retained()).isEqualTo(retained);
             assertThat(store.list()).containsExactly(retained);
         }

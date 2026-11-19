@@ -1,7 +1,8 @@
 package com.jinloes.prpilot.ui;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.util.ui.UIUtil;
+import com.intellij.ui.JBColor;
+import java.util.Locale;
 import javax.swing.UIManager;
 import org.apache.commons.lang3.StringUtils;
 
@@ -13,6 +14,18 @@ final class WebviewThemeController {
         this.panel = panel;
     }
 
+    static String resolveCurrentTheme() {
+        String lafName =
+                StringUtils.defaultString(
+                                UIManager.getLookAndFeel() == null
+                                        ? null
+                                        : UIManager.getLookAndFeel().getName())
+                        .toLowerCase(Locale.ROOT);
+        boolean highContrast = lafName.contains("contrast");
+        boolean dark = !JBColor.isBright();
+        return HostThemeClassifier.classify(dark, highContrast);
+    }
+
     void pushCurrentTheme() {
         ApplicationManager.getApplication()
                 .invokeLater(
@@ -20,18 +33,9 @@ final class WebviewThemeController {
                             if (panel.isDisposedForHost()) {
                                 return;
                             }
-                            String lafName =
-                                    StringUtils.defaultString(
-                                                    UIManager.getLookAndFeel() == null
-                                                            ? null
-                                                            : UIManager.getLookAndFeel().getName())
-                                            .toLowerCase(java.util.Locale.ROOT);
-                            boolean highContrast = lafName.contains("contrast");
-                            boolean dark = UIUtil.isUnderDarcula();
-                            String theme = HostThemeClassifier.classify(dark, highContrast);
                             panel.pushMessage(
                                     new WebviewBridgeMessages.ThemeChangedMsg(
-                                            "themeChanged", theme));
+                                            "themeChanged", resolveCurrentTheme()));
                         });
     }
 }

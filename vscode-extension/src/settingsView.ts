@@ -127,31 +127,51 @@ export interface ModelsMessage {
 }
 
 /**
- * Builds the `models` message for a refresh. `discovered` empty means the live probe failed; the
- * dropdown then keeps the last good list (`previous`) or falls back to suggestions.
+ * Builds the `models` message for a refresh. Only `source === 'ACCOUNT'` counts as a fresh live
+ * catalog (`ok: true`); `CLI_HELP` preserves any previously loaded `ACCOUNT` list (`previous`) or
+ * surfaces CLI defaults with a stale-list warning when no account list has ever loaded.
  */
 export function buildModelsMessage(
     discovered: string[],
     previous: string[] | null,
     current: string,
     quiet: boolean,
+    source: 'ACCOUNT' | 'CLI_HELP' | 'NONE' = discovered.length > 0 ? 'ACCOUNT' : 'NONE',
+    failureReason = '',
 ): ModelsMessage {
-    const ok = discovered.length > 0;
     const hasPrevious = previous !== null && previous.length > 0;
-    let message: string;
-    if (ok) {
-        message = `${discovered.length} models available to your Copilot account.`;
-    } else if (hasPrevious) {
-        message = 'Could not refresh Copilot models. Showing the last loaded list.';
-    } else {
-        message = 'Could not load Copilot models. Showing suggestions.';
+    const reasonDetail = failureReason.trim();
+    const reasonSuffix = reasonDetail ? ` (${reasonDetail})` : '';
+
+    if (source === 'ACCOUNT' && discovered.length > 0) {
+        return {
+            type: 'models',
+            ok: true,
+            quiet,
+            message: `${discovered.length} models available to your Copilot account.`,
+            copilotModels: mergeCopilotModelOptions(discovered, current),
+        };
     }
+
+    if (source === 'CLI_HELP' && discovered.length > 0 && !hasPrevious) {
+        return {
+            type: 'models',
+            ok: false,
+            quiet,
+            message: `Could not load your account's models${reasonSuffix}; showing CLI defaults, which may miss newer models.`,
+            copilotModels: mergeCopilotModelOptions(discovered, current),
+        };
+    }
+
+    const message = hasPrevious
+        ? `Could not refresh Copilot models${reasonSuffix}. Showing the last loaded list.`
+        : `Could not load Copilot models${reasonSuffix}. Showing suggestions.`;
     return {
         type: 'models',
-        ok,
+        ok: false,
         quiet,
         message,
-        copilotModels: mergeCopilotModelOptions(ok ? discovered : (previous ?? []), current),
+        copilotModels: mergeCopilotModelOptions(hasPrevious ? previous : [], current),
     };
 }
 

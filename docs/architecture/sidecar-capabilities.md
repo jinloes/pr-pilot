@@ -53,6 +53,8 @@ logic (worktrees, binary probing, notification polling, prompt constants); `MIRR
 when a change touches one. Guidance-doc reading used to be on that list and was retired by
 moving it behind the `reviews/readGuidelines` capability — the two copies had already diverged on
 the truncation marker, which is the concrete argument for preferring deletion over dual maintenance.
+Copilot model discovery was likewise moved behind `reviews/listCopilotModels` (`copilotModels`
+capability) so VS Code no longer bundles `@github/copilot-sdk` or spawns `copilot` locally.
 
 ### Sidecar streaming: async requests plus server-push notifications
 The base JSON-RPC loop in `StdioJsonRpcServer.run()` is still one blocking read → dispatch →
@@ -149,20 +151,21 @@ The sidecar's `prs/saveDraftReview`, `prs/submitReview`, and `prs/deleteDraftRev
 expose `DraftReviewMutationService` over JSON-RPC. `save` deletes any existing pending review first
 (non-fatal on failure), fetches the PR's head SHA, and POSTs a new pending review; on a GitHub `422`
 (one or more inline comments reference an invalid path/line) it falls back to creating the review
-body-only, then POSTs each comment individually so only the bad ones are dropped, appending a
-"Comments not attached inline" section to the body via `DraftReviewCodec.buildDroppedSection` when
-any are dropped. Hidden metadata is regenerated from accepted inline comments only, so detached
-comments cannot be resurrected when the draft is decoded. `DraftReviewCodec` owns the stable
-metadata tag format and short JSON keys used by both hosts. `submit` first reads the pending review
-(`GET .../reviews/{id}`; a failed read returns that failure and posts nothing), then posts to
-`.../reviews/{id}/events` with an explicit body: the reviewer's dialog text followed by the pending
-body's visible text, with the hidden metadata removed by `DraftReviewCodec.visibleBody`. The
+body-only, carrying the detached comments in a visible section via
+`DraftReviewCodec.buildOrphanSection`. Hidden metadata is regenerated from accepted inline comments
+only, so detached comments cannot be resurrected when the draft is decoded. `DraftReviewCodec` owns
+the stable metadata tag format and short JSON keys used by both hosts. `submit` first reads the
+pending review (`GET .../reviews/{id}`; a failed read returns that failure and posts nothing), then
+posts to `.../reviews/{id}/events` with an explicit body: the reviewer's dialog text followed by the
+pending body's visible text, with the hidden metadata removed by `DraftReviewCodec.visibleBody`. The
 per-event default body is used only when both are empty. `delete` removes a pending review. HTTP
-retries are method-aware: retry-safe reads/deletes keep bounded retries, but non-idempotent POST
-mutations receive one attempt because a lost response after server acceptance must not duplicate a
-review, comment, or submission. All three share the token-free status vocabulary (`invalid_request`,
-`invalid_base_url`, `not_installed`, `not_authenticated`, `rate_limited`, `network_error`,
-`api_failed`) plus `ok`. The host-side mutation-serialization guard
+retries are method-aware: idempotent `GET` reads and `PUT` body updates keep bounded retries (and
+rate-limited `403` responses with `x-ratelimit-remaining: 0` or `Retry-After` map to `rate_limited`
+rather than `not_authenticated`), whereas non-idempotent `POST` and `DELETE` mutations receive one
+attempt because a lost response after server acceptance must not duplicate a review/submission or
+turn a completed delete into a synthetic `404`. All three share the token-free status vocabulary
+(`invalid_request`, `invalid_base_url`, `not_installed`, `not_authenticated`, `rate_limited`,
+`network_error`, `api_failed`) plus `ok`. The host-side mutation-serialization guard
 (`state.mutationQueue`/`enqueueMutation` in `extension.ts`) is UI-state sequencing local to each
 host, not a GitHub API concern.
 

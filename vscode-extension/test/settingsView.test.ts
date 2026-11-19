@@ -102,6 +102,34 @@ test('buildModelsMessage falls back to suggestions when nothing has ever loaded'
     assert.deepEqual(msg.copilotModels, COPILOT_MODEL_SUGGESTIONS);
 });
 
+test('buildModelsMessage warns on CLI_HELP without overwriting previously cached ACCOUNT models', () => {
+    const withPrevious = buildModelsMessage(
+        ['stale-cli'],
+        ['claude-opus-5.5'],
+        '',
+        false,
+        'CLI_HELP',
+        'Copilot did not respond in time',
+    );
+    assert.equal(withPrevious.ok, false);
+    assert.match(withPrevious.message, /Copilot did not respond in time/);
+    assert.match(withPrevious.message, /last loaded list/);
+    assert.deepEqual(withPrevious.copilotModels, ['claude-opus-5.5']);
+
+    const coldFallback = buildModelsMessage(
+        ['cli-default-1', 'cli-default-2'],
+        null,
+        '',
+        true,
+        'CLI_HELP',
+        'not signed in',
+    );
+    assert.equal(coldFallback.ok, false);
+    assert.match(coldFallback.message, /not signed in/);
+    assert.match(coldFallback.message, /showing CLI defaults/i);
+    assert.deepEqual(coldFallback.copilotModels, ['cli-default-1', 'cli-default-2']);
+});
+
 // ── escapeHtml ────────────────────────────────────────────────────────────────
 
 test('escapeHtml escapes all HTML-significant characters', () => {

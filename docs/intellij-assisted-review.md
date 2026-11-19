@@ -70,7 +70,7 @@ and old envelopes are rejected. Stderr pollution, malformed output or any mismat
 
 ### Packaged semantic runtime and native readiness
 
-The engine JAR now contains the worker plus a digest/version manifest. `SemanticRuntime`
+The engine JAR embeds the worker plus a digest/version manifest. `SemanticRuntime`
 loads these classloader resources, verifies them and extracts a temporary owned copy outside
 the review worktree. Installed code never falls back to a sibling Gradle build directory.
 The private settings operation returns presence, hashes and physical-identity fingerprints,
@@ -118,8 +118,7 @@ The response preserves unsupported/ambiguous/skipped/capped PSI evidence in
 Ordinary reviews remain the default on both hosts. The mode is experimental and off by default:
 first enable **Enable IntelliJ-assisted review (experimental)** under **Experimental** in
 PR Pilot settings (IntelliJ IDEA: **Settings/Preferences > Tools > PR Pilot**; VS Code:
-`pr-pilot.experimentalIntellijAssistedReview`). Users who relied on the checkbox before it was
-gated must enable this setting once. While it is off, the controls below are hidden and a host
+`pr-pilot.experimentalIntellijAssistedReview`). While it is off, the controls below are hidden and a host
 rejects any IntelliJ-assisted request instead of running an ordinary review. Then, with a PR
 selected, expand **Review instructions (optional) → Advanced review options**, enable
 **IntelliJ-assisted review**, then Generate. Preparation returns a retained exact-head worktree and
@@ -152,14 +151,13 @@ retained worktrees. Refresh the list, close that exact project
 in every IDE, explicitly confirm closure, and remove it. Active leases, dirty trees, tampering
 or uncertain identity block cleanup; removal never uses `git worktree remove --force`.
 
-**Verification status:** service-entry tests feed raw native observations through a package-private
+**Verification boundary:** service-entry tests feed raw native observations through a package-private
 test seam, then drive real STATUS/arm/START/finish/CAPTURE/VERIFY orchestration, including queued
 finish invalidation and scheduled MCP dispatch. They do not manufacture READY or import baselines.
-The production constructor still selects the strict real-platform adapter; incompatible tracker
+The production constructor selects the strict real-platform adapter; incompatible tracker
 ABIs fail closed. These fixtures, host callbacks and fake-provider pipelines do not prove an
-installed SDK/import/provider run. Renewed real-adapter timing controls and the installed
-ZIP/Boot/VSIX clean/defect/lifecycle matrix remain separate gates. The visual suite also retains an
-unresolved high-contrast toast baseline mismatch; passing unit tests are not completion evidence.
+installed SDK/import/provider run: live adapter timing controls and the installed
+ZIP/Boot/VSIX clean/defect/lifecycle matrix remain separate manual verification gates.
 
 ### Source inventory verification and manual setup
 
@@ -185,8 +183,8 @@ loader for the installed SDK262 under `~/Applications/IntelliJ IDEA.app/Contents
 The installed-SDK test is explicitly skipped when that separate installation is absent;
 set the unitTest system property `sourceInventory.sdk262` for a different installation.
 
-**TEST-4 requires explicit user authorization and manual IDE actions.** This
-implementation does not perform them. Manually build/package with the existing
+**Live IDE verification requires explicit user authorization and manual IDE actions.** Automated
+tests never perform them. Manually build/package with the existing
 plugin build prerequisites, install the resulting plugin into a disposable 262+
 IDE profile, enable its MCP server and configure an explicit trusted `ijctl`
 server outside the fixture. Open/trust/import/index a disposable Git fixture
@@ -269,9 +267,9 @@ print("Retain private evidence:", evidence)
 ```
 
 This raw recipe is for a manually controlled disposable fixture, not a substitute
-for the secure engine consumer or an atomic filesystem snapshot. **TEST-3** tests
-the actual `collect` method, fixed child process and Git reconciliation; **TEST-4**
-records real native membership using raw ijctl. Neither proves import/index
+for the secure engine consumer or an atomic filesystem snapshot. Automated worker integration tests
+exercise the actual `collect` method, fixed child process and Git reconciliation, while manual live-IDE
+verification records real native membership using raw ijctl. Neither proves import/index
 readiness. Keep raw evidence private and delete its temporary request files when
 finished.
 

@@ -392,6 +392,15 @@ export interface OpenUrlRequest {
   url: string
 }
 
+export interface OpenFileRequest {
+  type: 'openFile'
+  number: number
+  owner: string
+  repo: string
+  file: string
+  line?: number
+}
+
 export interface OpenSettingsRequest {
   type: 'openSettings'
 }
@@ -439,6 +448,7 @@ export type OutgoingMessage =
   | DeleteDraftRequest
   | CancelReviewRequest
   | OpenUrlRequest
+  | OpenFileRequest
   | OpenSettingsRequest
   | RunAuthLoginRequest
   | ClearChatRequest

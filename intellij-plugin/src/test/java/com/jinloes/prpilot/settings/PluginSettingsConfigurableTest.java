@@ -126,6 +126,30 @@ class PluginSettingsConfigurableTest {
             component.setReviewSecondReviewerModel("");
             configurable.reset();
             assertThat(component.getReviewSecondReviewerModel()).isEqualTo("gpt-5.4");
+
+            component.setReviewGuidanceGlobs(".review/ai-agent/*.md\ndocs/rules/*.md");
+            assertThat(configurable.isModified()).isTrue();
+            configurable.apply();
+            assertThat(settings.getReviewGuidanceGlobs())
+                    .containsExactly(".review/ai-agent/*.md", "docs/rules/*.md");
+            assertThat(configurable.isModified()).isFalse();
+            component.setReviewGuidanceGlobs("");
+            assertThat(configurable.isModified()).isTrue();
+            configurable.reset();
+            assertThat(component.getReviewGuidanceGlobs())
+                    .isEqualTo(".review/ai-agent/*.md\ndocs/rules/*.md");
+            assertThat(configurable.isModified()).isFalse();
+
+            PluginSettings.ReviewGuidanceProfile guidanceProfile =
+                    new PluginSettings.ReviewGuidanceProfile(
+                            "sec", "Security", "auth", "Check tokens", ".security/*.md");
+            component.setReviewGuidanceProfiles(List.of(guidanceProfile));
+            component.setActiveReviewGuidanceProfileId("sec");
+            assertThat(configurable.isModified()).isTrue();
+            configurable.apply();
+            assertThat(settings.getReviewGuidanceProfiles())
+                    .singleElement()
+                    .satisfies(p -> assertThat(p.guidanceGlobs).isEqualTo(".security/*.md"));
             assertThat(home.resolve(".pr-pilot")).doesNotExist();
         } finally {
             appField.set(null, previousApp);

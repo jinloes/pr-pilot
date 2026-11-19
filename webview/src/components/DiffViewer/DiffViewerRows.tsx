@@ -5,6 +5,7 @@ import { splitAttachedPatch } from '@/lib/attachPatch'
 import type { FileData, HunkData } from 'react-diff-view'
 import {
   Check,
+  FileCode2,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -49,6 +50,9 @@ import { cn } from '@/lib/utils'
 import { findingLabel } from './findingNavigation'
 import {
   DELETE_COMMENT_DESCRIPTION,
+  isDeletedDiffFile,
+  isSafeRelativePath,
+  isValidEditorLine,
   newLineOf,
   oldLineOf,
   type LineCommentMap,
@@ -146,6 +150,7 @@ interface FileViewProps {
   onRemoveSuggestion?: (idx: number) => void
   onVerifyComment?: (comment: LineComment) => void
   onSuggestFixComment?: (comment: LineComment) => void
+  onOpenFile?: (file: string, line?: number) => void
   readOnly: boolean
 }
 
@@ -166,6 +171,7 @@ export function FileView({
   onRemoveSuggestion,
   onVerifyComment,
   onSuggestFixComment,
+  onOpenFile,
   readOnly,
 }: FileViewProps) {
   return (
@@ -182,6 +188,18 @@ export function FileView({
         <h2 id={`diff-file-${CSS.escape(displayPath)}`} className="diff-file__path">{displayPath}</h2>
         {file.type !== 'modify' && (
           <span className={`diff-file__badge diff-file__badge--${file.type}`}>{file.type}</span>
+        )}
+        {onOpenFile && !isDeletedDiffFile(file) && isSafeRelativePath(displayPath) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground shrink-0"
+            onClick={() => onOpenFile(displayPath)}
+            aria-label={`Open in editor: ${displayPath}`}
+          >
+            <FileCode2 className="w-3.5 h-3.5" />
+            <span>Open in editor</span>
+          </Button>
         )}
       </div>
       <table className="diff-table">
@@ -205,6 +223,7 @@ export function FileView({
               onRemoveSuggestion={onRemoveSuggestion}
               onVerifyComment={onVerifyComment}
               onSuggestFixComment={onSuggestFixComment}
+              onOpenFile={onOpenFile && !isDeletedDiffFile(file) && isSafeRelativePath(displayPath) ? onOpenFile : undefined}
               readOnly={readOnly}
             />
           ))}
@@ -231,6 +250,7 @@ interface HunkRowsProps {
   onRemoveSuggestion?: (idx: number) => void
   onVerifyComment?: (comment: LineComment) => void
   onSuggestFixComment?: (comment: LineComment) => void
+  onOpenFile?: (file: string, line?: number) => void
   readOnly: boolean
 }
 
@@ -249,6 +269,7 @@ function HunkRows({
   onRemoveSuggestion,
   onVerifyComment,
   onSuggestFixComment,
+  onOpenFile,
   readOnly,
 }: HunkRowsProps) {
   const highlighted = useMemo(
@@ -312,6 +333,7 @@ function HunkRows({
               <InlineCommentRow
                 key={`c-${globalIdx}`}
                 comment={comment}
+                filePath={filePath}
                 globalIdx={globalIdx}
                 focused={globalIdx === focusedCommentIdx}
                 onEdit={onEditComment ? (body) => onEditComment(globalIdx, body) : undefined}
@@ -320,6 +342,11 @@ function HunkRows({
                 anchoredLineText={change.content}
                 onVerify={onVerifyComment ? () => onVerifyComment(comment) : undefined}
                 onSuggestFix={onSuggestFixComment ? () => onSuggestFixComment(comment) : undefined}
+                onOpenInEditor={
+                  onOpenFile && isSafeRelativePath(filePath)
+                    ? () => onOpenFile(filePath, isValidEditorLine(comment.line) ? comment.line : undefined)
+                    : undefined
+                }
                 readOnly={readOnly}
               />
             ))}
@@ -376,6 +403,7 @@ function FindingSources({ sources }: { sources: string[] }) {
 
 interface InlineCommentRowProps {
   comment: LineComment
+  filePath: string
   globalIdx: number
   focused: boolean
   onEdit?: (body: string) => void
@@ -385,11 +413,13 @@ interface InlineCommentRowProps {
   anchoredLineText?: string
   onVerify?: () => void
   onSuggestFix?: () => void
+  onOpenInEditor?: () => void
   readOnly: boolean
 }
 
 function InlineCommentRow({
   comment,
+  filePath,
   globalIdx,
   focused,
   onEdit,
@@ -398,6 +428,7 @@ function InlineCommentRow({
   anchoredLineText,
   onVerify,
   onSuggestFix,
+  onOpenInEditor,
   readOnly,
 }: InlineCommentRowProps) {
   const [editing, setEditing] = useState(false)
@@ -471,8 +502,29 @@ function InlineCommentRow({
               )}
               {comment.sources && comment.sources.length > 0 && <FindingSources sources={comment.sources} />}
             </div>
-            {(onVerify || onSuggestFix || onEdit || onDelete) && !editing && (
+            {(onOpenInEditor || onVerify || onSuggestFix || onEdit || onDelete) && !editing && (
               <div className="diff-comment__actions">
+                {onOpenInEditor && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="diff-comment__ai-action text-muted-foreground hover:text-foreground"
+                        onClick={onOpenInEditor}
+                        aria-label={
+                          isValidEditorLine(comment.line)
+                            ? `Open in editor: ${filePath} line ${comment.line}`
+                            : `Open in editor: ${filePath}`
+                        }
+                      >
+                        <FileCode2 className="w-3.5 h-3.5" />
+                        <span className="diff-comment__action-label">Open in editor</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Open in editor</TooltipContent>
+                  </Tooltip>
+                )}
                 {onVerify && (
                   <Tooltip>
                     <TooltipTrigger asChild>

@@ -163,6 +163,19 @@ class PluginSettingsComponentTest {
         assertThat(scrollPane.getMaximumSize()).isEqualTo(scrollPane.getPreferredSize());
         assertThat(scrollPane.getMinimumSize()).isEqualTo(scrollPane.getPreferredSize());
         assertFieldWithHint(scrollPane, hintContaining(panel, "Extra instructions appended"));
+
+        JBTextArea guidanceGlobsArea =
+                (JBTextArea) label(panel, "Repository guidance files:").getLabelFor();
+        JBScrollPane globsScrollPane =
+                descendants(panel).stream()
+                        .filter(JBScrollPane.class::isInstance)
+                        .map(JBScrollPane.class::cast)
+                        .filter(candidate -> candidate.getViewport().getView() == guidanceGlobsArea)
+                        .findFirst()
+                        .orElseThrow();
+        assertThat(globsScrollPane.getPreferredSize().width).isEqualTo(JBUI.scale(320));
+        assertFieldWithHint(
+                globsScrollPane, hintContaining(panel, "One repository-relative glob per line"));
     }
 
     static void verifyProfileLayout() {

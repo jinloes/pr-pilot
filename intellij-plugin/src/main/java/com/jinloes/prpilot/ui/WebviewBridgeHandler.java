@@ -65,6 +65,13 @@ final class WebviewBridgeHandler {
                         getApplication().invokeLater(() -> BrowserUtil.browse(url));
                     }
                 }
+                case "openFile" ->
+                        panel.handleOpenFile(
+                                number,
+                                owner,
+                                repo,
+                                node.path("file").asText(),
+                                node.has("line") ? node.path("line").asInt(1) : 1);
                 case "openSettings" ->
                         getApplication()
                                 .invokeLater(

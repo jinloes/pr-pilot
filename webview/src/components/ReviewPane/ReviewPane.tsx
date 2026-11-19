@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useState } from 'react'
 import { ChevronDown, ChevronUp, ExternalLink, MessageSquare } from 'lucide-react'
-import type { PR, ReviewResult } from '../../bridge/types'
+import { sendToHost, type PR, type ReviewResult } from '../../bridge/types'
 import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
@@ -13,6 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { ChatPane } from '../ChatPane'
+import { isSafeRelativePath, isValidEditorLine } from '../DiffViewer/diffHelpers'
 import { LiveStatus } from '../a11y/LiveStatus'
 import { AccessibleResizer } from '../layout/AccessibleResizer'
 import { chatHeightBounds } from './chatHeight'
@@ -142,6 +143,17 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
       onReanchor={actions.reanchorDraft}
       onOpenSettings={actions.openSettings}
       onOpenAuthGuide={actions.openAuthGuide}
+      onOpenFile={(file, line) => {
+        if (!isSafeRelativePath(file)) return
+        sendToHost({
+          type: 'openFile',
+          number: pr.number,
+          owner: pr.owner,
+          repo: pr.repo,
+          file,
+          ...(isValidEditorLine(line) ? { line } : {}),
+        })
+      }}
     />
   )
 

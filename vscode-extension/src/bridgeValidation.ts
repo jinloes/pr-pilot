@@ -23,6 +23,7 @@ const MESSAGE_TYPES = new Set([
   'clearChat',
   'cancelChat',
   'openUrl',
+  'openFile',
   'openSettings',
   'runAuthLogin',
   'webviewLayoutChanged',
@@ -55,6 +56,20 @@ function isValidOptionalContextLocation(value: unknown): boolean {
 
 function isBoundedString(value: unknown, maxLength = MAX_TEXT): value is string {
   return typeof value === 'string' && value.length <= maxLength;
+}
+
+export function isValidRepoRelativeFile(value: unknown): value is string {
+  if (!isBoundedString(value, 4_096) || value.length === 0 || value.includes('\0')) {
+    return false;
+  }
+  if (value.includes('\\') || value.startsWith('/') || value.endsWith('/')) {
+    return false;
+  }
+  if (/^[A-Za-z]:/.test(value)) {
+    return false;
+  }
+  const segments = value.split('/');
+  return segments.every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
 }
 
 function isOperationId(value: unknown): value is string {
@@ -114,6 +129,14 @@ export function isValidBridgeRequest(msg: AnyMessage | null | undefined): msg is
       return msg.type === 'openSettings' || msg.type === 'runAuthLogin' || isOperationId(msg.operationId);
     case 'openUrl':
       return isBoundedString(msg.url, 4_096);
+    case 'openFile':
+      return hasValidPrIdentity(msg)
+        && isValidRepoRelativeFile(msg.file)
+        && (msg.line === undefined
+          || (typeof msg.line === 'number'
+            && Number.isInteger(msg.line)
+            && msg.line >= 1
+            && msg.line <= 10_000_000));
     case 'webviewLayoutChanged':
       return isBoundedString(msg.reason, 4_096);
     case 'askClaude':

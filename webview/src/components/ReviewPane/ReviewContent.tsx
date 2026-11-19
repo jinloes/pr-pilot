@@ -14,10 +14,13 @@ import type { IncrementalFallbackReason, LineComment, ReviewResult, ReviewScope 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { formatBudget, splitDiffCoverage, unlistedCount, type DiffCoverage } from '@/lib/diffCoverage'
+import { parseDiffSafely } from '@/lib/diffParse'
 import { cn } from '@/lib/utils'
 import { DiffViewer, type CommentPlacement } from '../DiffViewer'
+import { isDeletedDiffFile } from '../DiffViewer/diffHelpers'
+import { displayPathForFile } from '../DiffViewer/fileNavigation'
 import { ReviewDisplay } from '../ReviewDisplay'
-import { OrphanCommentsSection } from './OrphanComments'
+import { OrphanCommentsSection, type OpenableDiffFile } from './OrphanComments'
 import type { PaneState } from './reviewState'
 
 export interface EditCommentHandlers {
@@ -56,6 +59,7 @@ interface PaneContentProps {
   onReanchor: () => void
   onOpenSettings: () => void
   onOpenAuthGuide: () => void
+  onOpenFile?: (file: string, line?: number) => void
 }
 
 function formatElapsed(seconds: number): string {
@@ -200,6 +204,7 @@ function ReviewAndDiff({
   orphanComments,
   onEditOrphan,
   onDeleteOrphan,
+  onOpenFile,
   readOnly = false,
   commentPlacement,
   generationMessage,
@@ -208,10 +213,12 @@ function ReviewAndDiff({
   onChunkedModeChange,
   nextRegeneration,
   reviewScope,
+  validationDiff,
 }: CoverageRemedyProps & {
   result: ReviewResult | null
   reviewScope?: ReviewScope
   diff?: string
+  validationDiff?: string
   generationElapsedSec?: number
   focusedCommentIdx: number
   commentFocusRequestId: number
@@ -226,6 +233,7 @@ function ReviewAndDiff({
   orphanComments: LineComment[]
   onEditOrphan: (orphan: LineComment, body: string) => void
   onDeleteOrphan: (orphan: LineComment) => void
+  onOpenFile?: (file: string, line?: number) => void
   readOnly?: boolean
   commentPlacement?: CommentPlacement
   generationMessage?: string
@@ -233,6 +241,9 @@ function ReviewAndDiff({
   const generationSummary = formatGenerationSummary(generationElapsedSec)
   // The diff view renders only the kept files; the coverage trailer is metadata, not diff text.
   const { body: displayDiff, coverage } = splitDiffCoverage(diff)
+  const diffPaths = orphanComments.length > 0 && onOpenFile
+    ? collectOpenableDiffPaths(validationDiff || diff, diff)
+    : []
   return (
     <>
       {generationMessage && (
@@ -299,6 +310,8 @@ function ReviewAndDiff({
         <div className="px-4 pt-3">
           <OrphanCommentsSection
             orphans={orphanComments}
+            diffPaths={diffPaths}
+            onOpenFile={onOpenFile}
             onEdit={onEditOrphan}
             onDelete={onDeleteOrphan}
             readOnly={readOnly}
@@ -320,6 +333,7 @@ function ReviewAndDiff({
             onAddComment={editCommentHandlers.onAddComment}
             onVerifyComment={onVerifyComment}
             onSuggestFixComment={onSuggestFixComment}
+            onOpenFile={onOpenFile}
             commentPlacement={commentPlacement}
             readOnly={readOnly}
           />
@@ -329,10 +343,41 @@ function ReviewAndDiff({
   )
 }
 
+function collectOpenableDiffPaths(primaryDiff?: string, secondaryDiff?: string): OpenableDiffFile[] {
+  const byPath = new Map<string, boolean>()
+  const addParsedSource = (rawDiff?: string) => {
+    if (!rawDiff) return
+    const { body, coverage } = splitDiffCoverage(rawDiff)
+    if (body) {
+      const parsed = parseDiffSafely(body)
+      if (parsed.status === 'parsed') {
+        for (const file of parsed.files) {
+          const filePath = displayPathForFile(file)
+          const deleted = isDeletedDiffFile(file)
+          byPath.set(filePath, (byPath.get(filePath) ?? false) || deleted)
+        }
+      }
+    }
+    if (coverage?.paths) {
+      for (const omittedPath of coverage.paths) {
+        if (!byPath.has(omittedPath)) {
+          byPath.set(omittedPath, false)
+        }
+      }
+    }
+  }
+  addParsedSource(primaryDiff)
+  if (secondaryDiff && secondaryDiff !== primaryDiff) {
+    addParsedSource(secondaryDiff)
+  }
+  return Array.from(byPath, ([path, deleted]) => ({ path, deleted }))
+}
+
 function ErrorWithReview({
   message,
   result,
   diff,
+  validationDiff,
   focusedCommentIdx,
   commentFocusRequestId,
   editCommentHandlers,
@@ -341,6 +386,7 @@ function ErrorWithReview({
   onEditOrphan,
   onDeleteOrphan,
   onFocusComment,
+  onOpenFile,
   readOnly = false,
   actions,
   coverageGain,
@@ -351,6 +397,7 @@ function ErrorWithReview({
   message: string
   result: ReviewResult | null
   diff: string
+  validationDiff?: string
   focusedCommentIdx: number
   commentFocusRequestId: number
   editCommentHandlers: EditCommentHandlers
@@ -359,6 +406,7 @@ function ErrorWithReview({
   onEditOrphan: (orphan: LineComment, body: string) => void
   onDeleteOrphan: (orphan: LineComment) => void
   onFocusComment: (index: number) => void
+  onOpenFile?: (file: string, line?: number) => void
   readOnly?: boolean
   actions?: ReactNode
 }) {
@@ -374,6 +422,7 @@ function ErrorWithReview({
         <ReviewAndDiff
           result={result}
           diff={diff || undefined}
+          validationDiff={validationDiff}
           focusedCommentIdx={focusedCommentIdx}
           commentFocusRequestId={commentFocusRequestId}
           editCommentHandlers={editCommentHandlers}
@@ -382,6 +431,7 @@ function ErrorWithReview({
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
+          onOpenFile={onOpenFile}
           readOnly={readOnly}
           coverageGain={coverageGain}
           chunkedMode={chunkedMode}
@@ -480,6 +530,7 @@ export function PaneContent({
   onReanchor,
   onOpenSettings,
   onOpenAuthGuide,
+  onOpenFile,
 }: PaneContentProps) {
   switch (state.kind) {
     case 'idle':
@@ -508,6 +559,7 @@ export function PaneContent({
             <ReviewAndDiff
               result={null}
               diff={state.diff}
+              validationDiff={state.validationDiff}
               focusedCommentIdx={focusedCommentIdx}
               commentFocusRequestId={commentFocusRequestId}
               editCommentHandlers={editCommentHandlers}
@@ -516,6 +568,7 @@ export function PaneContent({
               orphanComments={[]}
               onEditOrphan={onEditOrphan}
               onDeleteOrphan={onDeleteOrphan}
+              onOpenFile={onOpenFile}
               readOnly
               {...coverageProps}
             />
@@ -555,6 +608,7 @@ export function PaneContent({
         <ReviewAndDiff
           result={state.result}
           diff={state.diff}
+          validationDiff={state.validationDiff}
           generationElapsedSec={state.generationElapsedSec}
           focusedCommentIdx={focusedCommentIdx}
           commentFocusRequestId={commentFocusRequestId}
@@ -566,6 +620,7 @@ export function PaneContent({
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
+          onOpenFile={onOpenFile}
           readOnly
           generationMessage={state.replacingDraft
             ? 'Regenerating — current draft remains until the new review is ready. Editing and review actions are paused.'
@@ -582,6 +637,7 @@ export function PaneContent({
         <ReviewAndDiff
           result={state.result}
           diff={state.diff}
+          validationDiff={state.validationDiff}
           generationElapsedSec={state.generationElapsedSec}
           focusedCommentIdx={focusedCommentIdx}
           commentFocusRequestId={commentFocusRequestId}
@@ -598,6 +654,7 @@ export function PaneContent({
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
+          onOpenFile={onOpenFile}
           coverageGain={coverageGain}
           chunkedMode={chunkedMode}
           onChunkedModeChange={onChunkedModeChange}
@@ -610,6 +667,7 @@ export function PaneContent({
         <ReviewAndDiff
           result={state.result}
           diff={state.diff}
+          validationDiff={state.validationDiff}
           reviewScope={state.reviewScope}
           generationElapsedSec={state.generationElapsedSec}
           focusedCommentIdx={focusedCommentIdx}
@@ -623,6 +681,7 @@ export function PaneContent({
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
+          onOpenFile={onOpenFile}
           coverageGain={coverageGain}
           chunkedMode={chunkedMode}
           onChunkedModeChange={onChunkedModeChange}
@@ -658,6 +717,7 @@ export function PaneContent({
             message={state.message}
             result={state.result ?? null}
             diff={state.diff ?? ''}
+            validationDiff={state.validationDiff}
             focusedCommentIdx={focusedCommentIdx}
             commentFocusRequestId={commentFocusRequestId}
             editCommentHandlers={editCommentHandlers}
@@ -666,6 +726,7 @@ export function PaneContent({
             orphanComments={orphanComments}
             onEditOrphan={onEditOrphan}
             onDeleteOrphan={onDeleteOrphan}
+            onOpenFile={onOpenFile}
             readOnly
             actions={(
               <Button variant="outline" size="sm" onClick={onGenerate} className="w-fit gap-1.5">
@@ -698,6 +759,7 @@ export function PaneContent({
           message={state.message}
           result={state.result}
           diff={state.diff}
+          validationDiff={state.validationDiff}
           focusedCommentIdx={focusedCommentIdx}
           commentFocusRequestId={commentFocusRequestId}
           editCommentHandlers={editCommentHandlers}
@@ -706,6 +768,7 @@ export function PaneContent({
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
+          onOpenFile={onOpenFile}
           coverageGain={coverageGain}
           chunkedMode={chunkedMode}
           onChunkedModeChange={onChunkedModeChange}
@@ -719,6 +782,7 @@ export function PaneContent({
           message={state.message}
           result={state.result}
           diff={state.diff}
+          validationDiff={state.validationDiff}
           focusedCommentIdx={focusedCommentIdx}
           commentFocusRequestId={commentFocusRequestId}
           editCommentHandlers={editCommentHandlers}
@@ -727,6 +791,7 @@ export function PaneContent({
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
+          onOpenFile={onOpenFile}
           coverageGain={coverageGain}
           chunkedMode={chunkedMode}
           onChunkedModeChange={onChunkedModeChange}
@@ -740,6 +805,7 @@ export function PaneContent({
           message={state.message}
           result={state.draft.result}
           diff={state.draft.diff ?? ''}
+          validationDiff={state.draft.validationDiff}
           focusedCommentIdx={focusedCommentIdx}
           commentFocusRequestId={commentFocusRequestId}
           editCommentHandlers={editCommentHandlers}
@@ -748,6 +814,7 @@ export function PaneContent({
           orphanComments={orphanComments}
           onEditOrphan={onEditOrphan}
           onDeleteOrphan={onDeleteOrphan}
+          onOpenFile={onOpenFile}
           actions={(
             <div className="flex flex-wrap gap-2">
               <Button variant="destructive" size="sm" onClick={onRetryDelete}>Retry delete</Button>

@@ -52,3 +52,20 @@ test('extractFrames rejects frames larger than the protocol limit', () => {
   const oversizedHeader = Buffer.from(`Content-Length: ${8 * 1024 * 1024 + 1}\r\n\r\n`, 'ascii');
   assert.throws(() => extractFrames(oversizedHeader, () => undefined), /exceeds the maximum size/);
 });
+
+test('extractFrames rejects headers exceeding 8 KiB both terminated and unterminated', () => {
+  const unterminated = Buffer.alloc(8 * 1024 + 1, 'X');
+  assert.throws(
+    () => extractFrames(unterminated, () => undefined),
+    /header exceeds the maximum size/,
+  );
+
+  const terminatedOversized = Buffer.from(
+    `X-Padding: ${'a'.repeat(8 * 1024)}\r\nContent-Length: 2\r\n\r\n{}`,
+    'ascii',
+  );
+  assert.throws(
+    () => extractFrames(terminatedOversized, () => undefined),
+    /header exceeds the maximum size/,
+  );
+});

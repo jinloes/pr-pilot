@@ -2,7 +2,9 @@ package com.jinloes.prpilot.review;
 
 import com.jinloes.prpilot.model.ReviewProvider;
 import java.io.IOException;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
@@ -55,17 +57,27 @@ public final class ProviderSetupProbe {
 
     private static AuthenticationStatus probeClaudeAuth()
             throws IOException, InterruptedException, TimeoutException {
+        ProcessBuilder pb =
+                buildClaudeAuthProcess(
+                        ClaudeService.findClaudeBinary(),
+                        BinaryLocator.isWindows(),
+                        System.getenv(),
+                        System.getProperty("user.home", "/"));
         BoundedProcessRunner.ProcessResult result =
-                new BoundedProcessRunner()
-                        .run(
-                                new ProcessBuilder(
-                                        ClaudeService.findClaudeBinary(),
-                                        "auth",
-                                        "status",
-                                        "--text"),
-                                AUTH_TIMEOUT_SECONDS,
-                                TimeUnit.SECONDS);
+                new BoundedProcessRunner().run(pb, AUTH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         return classifyClaudeAuthResult(result);
+    }
+
+    static ProcessBuilder buildClaudeAuthProcess(
+            String binary, boolean windows, Map<String, String> env, String userHome)
+            throws IOException {
+        ProcessBuilder pb =
+                new ProcessBuilder(
+                        BinaryLocator.buildCommand(
+                                binary, windows, env, List.of("auth", "status", "--text")));
+        pb.environment().put("HOME", userHome);
+        BinaryLocator.putPathEnv(pb.environment(), userHome);
+        return pb;
     }
 
     static AuthenticationStatus classifyClaudeAuthResult(

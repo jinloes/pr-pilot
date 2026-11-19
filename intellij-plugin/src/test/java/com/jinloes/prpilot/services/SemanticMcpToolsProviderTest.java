@@ -287,7 +287,10 @@ class SemanticMcpToolsProviderTest {
                 var request =
                         SemanticSnapshotTestFixtures.request(
                                 SemanticReviewContext.Operation.STATUS);
-                request.setProjectPath("/request-cannot-select-this-project");
+                request.setProjectPath(
+                        SemanticSnapshotTestFixtures.FIXTURE_ROOT
+                                .resolveSibling("request-cannot-select-this-project")
+                                .toString());
                 tool(descriptor)
                         .call(
                                 SourceInventoryMcpProvider.json(
@@ -304,8 +307,11 @@ class SemanticMcpToolsProviderTest {
                 assertThat(fixture.background).hasSize(1);
                 fixture.background.remove(0).run();
                 var result = (McpToolCallResult) callback.result.get();
-                assertThat(result.getStructuredContent().toString())
-                        .contains("WRONG_PROJECT", "/fixture", "NOT_READY");
+                var payload = new ObjectMapper().readTree(result.getStructuredContent().toString());
+                assertThat(payload.path("status").asText()).isEqualTo("NOT_READY");
+                assertThat(payload.path("projectPath").asText())
+                        .isEqualTo(SemanticSnapshotTestFixtures.FIXTURE_PATH);
+                assertThat(payload.path("reasons").toString()).contains("WRONG_PROJECT");
             }
         }
 
@@ -431,13 +437,13 @@ class SemanticMcpToolsProviderTest {
                                     "operation",
                                     "STATUS",
                                     "projectPath",
-                                    "/fixture",
+                                    SemanticSnapshotTestFixtures.FIXTURE_PATH,
                                     "nonce",
                                     UUID.randomUUID().toString()));
             assertThat(
                             SemanticMcpToolsProvider.decode(json.writeValueAsString(node))
                                     .getProjectPath())
-                    .isEqualTo("/fixture");
+                    .isEqualTo(SemanticSnapshotTestFixtures.FIXTURE_PATH);
             assertThat(SemanticMcpToolsProvider.tools("IU-261.1")).isEmpty();
             assertThat(SemanticMcpToolsProvider.tools("unknown")).isEmpty();
             for (String invalid :

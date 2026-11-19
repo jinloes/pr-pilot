@@ -6,6 +6,8 @@ Paths are relative to `webview/`.
 Shared Vite/React/TypeScript UI used by both IDE hosts.
 
 - `src/App.tsx` - Application state and top-level host workflow.
+- `src/components/ErrorBoundary/ErrorBoundary.tsx` - Top-level React render error boundary with
+  accessible recovery (`Reload view`) that remounts in-app without `window.location.reload()`.
 - `src/bridge/types.ts` - Cross-host message schemas and the receive path; `validation.ts`
   validates every host message, and `rejectedMessage.ts` diagnoses rejected ones and ends a
   review run whose terminal message was rejected.

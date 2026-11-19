@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Check, X } from 'lucide-react'
+import { AlertTriangle, Check, FileCode2, X } from 'lucide-react'
 import type { LineComment } from '../../bridge/types'
 import {
   AlertDialog,
@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { DELETE_COMMENT_DESCRIPTION } from '../DiffViewer/DiffViewer'
+import { isSafeRelativePath, isValidEditorLine } from '../DiffViewer/diffHelpers'
 
 const ORPHAN_BADGE: Record<LineComment['type'], string> = {
   issue: 'text-status-issue border-status-issue/50 bg-status-issue/10',
@@ -22,13 +23,60 @@ const ORPHAN_BADGE: Record<LineComment['type'], string> = {
   note: 'text-status-note border-status-note/50 bg-status-note/10',
 }
 
+export interface OpenableDiffFile {
+  path: string
+  deleted?: boolean
+}
+
+// eslint-disable-next-line react-refresh/only-export-components -- Pure path normalizer colocated with OrphanCommentsSection for direct unit testing.
+export function normalizeOpenableFilePath(
+  rawFile: string,
+  diffFiles: readonly (string | OpenableDiffFile)[] = [],
+): string | null {
+  let candidate = rawFile.trim()
+  while (candidate.startsWith('./')) {
+    candidate = candidate.slice(2)
+  }
+  if (!isSafeRelativePath(candidate)) return null
+  const entries = diffFiles.map((entry) =>
+    typeof entry === 'string' ? { path: entry, deleted: false } : { path: entry.path, deleted: entry.deleted === true },
+  )
+  if (entries.length === 0) return null
+
+  const exact = entries.find((entry) => entry.path === candidate)
+  if (exact) {
+    return exact.deleted || !isSafeRelativePath(exact.path) ? null : exact.path
+  }
+
+  const suffixMatches = entries.filter((entry) => entry.path.endsWith(`/${candidate}`))
+  if (suffixMatches.length === 1) {
+    const match = suffixMatches[0]
+    return match.deleted || !isSafeRelativePath(match.path) ? null : match.path
+  }
+  if (suffixMatches.length > 1) return null
+
+  if (candidate.startsWith('a/') || candidate.startsWith('b/')) {
+    const stripped = candidate.slice(2)
+    if (!isSafeRelativePath(stripped)) return null
+    const strippedExact = entries.find((entry) => entry.path === stripped)
+    if (strippedExact) {
+      return strippedExact.deleted || !isSafeRelativePath(strippedExact.path) ? null : strippedExact.path
+    }
+  }
+  return null
+}
+
 export function OrphanCommentsSection({
   orphans,
+  diffPaths = [],
+  onOpenFile,
   onEdit,
   onDelete,
   readOnly = false,
 }: {
   orphans: LineComment[]
+  diffPaths?: readonly (string | OpenableDiffFile)[]
+  onOpenFile?: (file: string, line?: number) => void
   onEdit?: (orphan: LineComment, body: string) => void
   onDelete?: (orphan: LineComment) => void
   readOnly?: boolean
@@ -50,6 +98,8 @@ export function OrphanCommentsSection({
             key={`${orphan.file}|${orphan.line}|${index}`}
             index={index}
             orphan={orphan}
+            openTargetPath={onOpenFile ? normalizeOpenableFilePath(orphan.file, diffPaths) : null}
+            onOpenFile={onOpenFile}
             onEdit={onEdit ? (body) => onEdit(orphan, body) : undefined}
             onDelete={onDelete ? () => onDelete(orphan) : undefined}
             readOnly={readOnly}
@@ -63,12 +113,16 @@ export function OrphanCommentsSection({
 function OrphanRow({
   index,
   orphan,
+  openTargetPath,
+  onOpenFile,
   onEdit,
   onDelete,
   readOnly,
 }: {
   index: number
   orphan: LineComment
+  openTargetPath: string | null
+  onOpenFile?: (file: string, line?: number) => void
   onEdit?: (body: string) => void
   onDelete?: () => void
   readOnly: boolean
@@ -100,15 +154,31 @@ function OrphanRow({
 
   return (
     <li id={`orphan-comment-${index}`} className="scroll-mt-16 px-3 py-2 flex flex-col gap-1.5">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 min-w-0">
         <span className={cn('inline-flex items-center rounded border px-1.5 py-0 text-[9px] font-bold tracking-widest uppercase', ORPHAN_BADGE[orphan.type])}>
           {orphan.type}
         </span>
-        <span className="font-mono text-[11px] text-muted-foreground truncate flex-1">
+        <span className="font-mono text-[11px] text-muted-foreground truncate min-w-0 flex-1">
           {orphan.file}:{orphan.line}
         </span>
-        {!editing && (onEdit || onDelete) && (
-          <div className="flex items-center gap-1">
+        {!editing && ((onOpenFile && openTargetPath) || onEdit || onDelete) && (
+          <div className="flex flex-wrap items-center gap-1">
+            {onOpenFile && openTargetPath && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-1.5 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+                onClick={() => onOpenFile(openTargetPath, isValidEditorLine(orphan.line) ? orphan.line : undefined)}
+                aria-label={
+                  isValidEditorLine(orphan.line)
+                    ? `Open in editor: ${openTargetPath} line ${orphan.line}`
+                    : `Open in editor: ${openTargetPath}`
+                }
+              >
+                <FileCode2 className="w-3 h-3" />
+                Open in editor
+              </Button>
+            )}
             {onEdit && (
               <Button
                 variant="ghost"

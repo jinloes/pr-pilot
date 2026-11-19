@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jinloes.prpilot.model.ReviewProvider;
 import java.io.IOException;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class ProviderSetupProbeTest {
@@ -79,6 +80,31 @@ class ProviderSetupProbeTest {
 
         assertThat(result.authenticationStatus()).isEqualTo("unverified");
         assertThat(result.authCommand()).isEqualTo("copilot login");
+    }
+
+    @Test
+    void buildClaudeAuthProcessWrapsWindowsBatchShimAndNormalizesPathEnv() throws IOException {
+        String shim = "C:\\Program Files (x86)\\nodejs\\claude.cmd";
+        ProcessBuilder pb =
+                ProviderSetupProbe.buildClaudeAuthProcess(
+                        shim,
+                        true,
+                        Map.of("ComSpec", "C:\\Windows\\System32\\cmd.exe"),
+                        "C:\\Users\\tester");
+
+        assertThat(pb.command())
+                .containsExactly(
+                        "C:\\Windows\\System32\\cmd.exe",
+                        "/d",
+                        "/c",
+                        "call",
+                        shim,
+                        "auth",
+                        "status",
+                        "--text");
+        assertThat(pb.environment()).containsKey("PATH");
+        assertThat(pb.environment().keySet().stream().filter("path"::equalsIgnoreCase).count())
+                .isEqualTo(1);
     }
 
     private static ProviderSetupProbe.AuthenticationStatus classify(

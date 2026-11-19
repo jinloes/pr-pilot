@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -64,15 +66,21 @@ class BoundedProcessRunnerTest {
 
         @Test
         void timeoutTerminatesAndWaitsForRecordedChildrenAndGrandchildren() throws Exception {
-            var file = java.nio.file.Files.createTempFile("owned-tree-", ".pids");
+            var file = Files.createTempFile("owned-tree-", ".pids");
             try {
+                BoundedProcessRunner.ProcessStarter starter =
+                        pb -> {
+                            Process started = pb.start();
+                            awaitTreePids(file, 3, 25);
+                            return started;
+                        };
                 assertThatThrownBy(
                                 () ->
-                                        new BoundedProcessRunner()
+                                        new BoundedProcessRunner(starter)
                                                 .runOwnedTree(
-                                                        treeCommand(file), 2, TimeUnit.SECONDS))
+                                                        treeCommand(file), 6, TimeUnit.SECONDS))
                         .isInstanceOf(TimeoutException.class);
-                var pids = java.nio.file.Files.readAllLines(file);
+                var pids = Files.readAllLines(file);
                 assertThat(pids).hasSize(3);
                 for (String pid : pids) {
                     assertThat(
@@ -89,15 +97,21 @@ class BoundedProcessRunnerTest {
 
         @Test
         void interruptionWaitsForTreeAndPreservesInterrupt() throws Exception {
-            var file = java.nio.file.Files.createTempFile("owned-tree-", ".pids");
+            var file = Files.createTempFile("owned-tree-", ".pids");
             var outcome = new java.util.concurrent.atomic.AtomicReference<Throwable>();
             var interrupted = new java.util.concurrent.atomic.AtomicBoolean();
+            BoundedProcessRunner.ProcessStarter starter =
+                    pb -> {
+                        Process started = pb.start();
+                        awaitTreePids(file, 3, 25);
+                        return started;
+                    };
             Thread thread =
                     new Thread(
                             () -> {
                                 try {
-                                    new BoundedProcessRunner()
-                                            .runOwnedTree(treeCommand(file), 10, TimeUnit.SECONDS);
+                                    new BoundedProcessRunner(starter)
+                                            .runOwnedTree(treeCommand(file), 30, TimeUnit.SECONDS);
                                 } catch (Throwable e) {
                                     outcome.set(e);
                                     interrupted.set(Thread.currentThread().isInterrupted());
@@ -105,19 +119,14 @@ class BoundedProcessRunnerTest {
                             });
             try {
                 thread.start();
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                while (java.nio.file.Files.readAllLines(file).size() != 3
-                        && System.nanoTime() < deadline) {
-                    Thread.sleep(10);
-                }
-                assertThat(java.nio.file.Files.readAllLines(file)).hasSize(3);
-                Thread.sleep(100); // Allow the runner to record the grandchild before cancellation.
+                awaitTreePids(file, 3, 25);
+                Thread.sleep(150); // Allow the runner to record the grandchild before cancellation.
                 thread.interrupt();
-                thread.join(7000);
+                thread.join(10_000);
                 assertThat(thread.isAlive()).isFalse();
                 assertThat(outcome.get()).isInstanceOf(InterruptedException.class);
                 assertThat(interrupted.get()).isTrue();
-                for (String pid : java.nio.file.Files.readAllLines(file)) {
+                for (String pid : Files.readAllLines(file)) {
                     assertThat(
                                     ProcessHandle.of(Long.parseLong(pid))
                                             .map(ProcessHandle::isAlive)
@@ -126,7 +135,7 @@ class BoundedProcessRunnerTest {
                 }
             } finally {
                 thread.interrupt();
-                thread.join(7000);
+                thread.join(10_000);
                 killFixture(file);
             }
         }
@@ -137,60 +146,97 @@ class BoundedProcessRunnerTest {
                             () ->
                                     new BoundedProcessRunner()
                                             .runOwnedTree(
-                                                    new ProcessBuilder(
-                                                            "/bin/sh",
-                                                            "-c",
-                                                            "printf '{}'; printf 'polluted' >&2"),
-                                                    2,
-                                                    TimeUnit.SECONDS))
+                                                    stderrFixtureCommand(), 10, TimeUnit.SECONDS))
                     .hasMessageContaining("stderr");
         }
 
-        private ProcessBuilder treeCommand(java.nio.file.Path file) {
+        private ProcessBuilder stderrFixtureCommand() throws Exception {
             return new ProcessBuilder(
-                    java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java")
-                            .toString(),
+                    Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                     "-cp",
-                    System.getProperty("java.class.path"),
+                    fixtureClassPath(),
+                    StderrFixture.class.getName());
+        }
+
+        private ProcessBuilder treeCommand(Path file) throws Exception {
+            return new ProcessBuilder(
+                    Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                    "-XX:TieredStopAtLevel=1",
+                    "-cp",
+                    fixtureClassPath(),
                     TreeFixture.class.getName(),
                     file.toString(),
                     "2");
         }
 
-        private void killFixture(java.nio.file.Path file) throws IOException {
-            for (String pid : java.nio.file.Files.readAllLines(file)) {
+        private static void awaitTreePids(Path file, int expectedCount, long timeoutSeconds)
+                throws IOException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+            while (Files.readAllLines(file).size() < expectedCount
+                    && System.nanoTime() < deadline) {
+                try {
+                    Thread.sleep(15);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted waiting for fixture PIDs", e);
+                }
+            }
+            assertThat(Files.readAllLines(file)).hasSize(expectedCount);
+        }
+
+        private void killFixture(Path file) throws IOException {
+            for (String pid : Files.readAllLines(file)) {
                 ProcessHandle.of(Long.parseLong(pid))
                         .ifPresent(
                                 handle -> {
                                     if (handle.isAlive()) handle.destroyForcibly();
                                 });
             }
-            java.nio.file.Files.delete(file);
+            Files.delete(file);
+        }
+    }
+
+    private static String fixtureClassPath() throws Exception {
+        return Path.of(
+                        TreeFixture.class
+                                .getProtectionDomain()
+                                .getCodeSource()
+                                .getLocation()
+                                .toURI())
+                .toString();
+    }
+
+    public static class StderrFixture {
+        public static void main(String[] args) {
+            System.out.print("{}");
+            System.out.flush();
+            System.err.print("polluted");
+            System.err.flush();
         }
     }
 
     public static class TreeFixture {
         public static void main(String[] args) throws Exception {
-            java.nio.file.Files.writeString(
-                    java.nio.file.Path.of(args[0]),
+            Files.writeString(
+                    Path.of(args[0]),
                     ProcessHandle.current().pid() + "\n",
                     java.nio.file.StandardOpenOption.APPEND);
             int depth = Integer.parseInt(args[1]);
             if (depth == 0) {
-                Thread.sleep(30_000);
+                Thread.sleep(60_000);
             } else {
                 Process child =
                         new ProcessBuilder(
-                                        java.nio.file.Path.of(
-                                                        System.getProperty("java.home"),
-                                                        "bin",
-                                                        "java")
+                                        Path.of(System.getProperty("java.home"), "bin", "java")
                                                 .toString(),
+                                        "-XX:TieredStopAtLevel=1",
                                         "-cp",
-                                        System.getProperty("java.class.path"),
+                                        fixtureClassPath(),
                                         TreeFixture.class.getName(),
                                         args[0],
                                         Integer.toString(depth - 1))
+                                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                                .redirectError(ProcessBuilder.Redirect.DISCARD)
                                 .start();
                 child.waitFor();
             }

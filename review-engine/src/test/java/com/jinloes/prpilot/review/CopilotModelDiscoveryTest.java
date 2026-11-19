@@ -1,6 +1,7 @@
 package com.jinloes.prpilot.review;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.github.copilot.rpc.ModelInfo;
 import com.github.copilot.rpc.ModelPolicy;
@@ -13,6 +14,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -260,6 +262,32 @@ class CopilotModelDiscoveryTest {
         }
 
         @Test
+        void helpFallbackDoesNotOverwritePreviouslyCachedAccountModels() {
+            Result account = new Result(List.of("account-1", "account-2"), Source.ACCOUNT, "");
+            CopilotModelDiscovery.refresh(() -> account);
+
+            Result fallback =
+                    CopilotModelDiscovery.refresh(
+                            () -> new Result(List.of("stale-cli"), Source.CLI_HELP, "timed out"));
+
+            assertThat(fallback.source()).isEqualTo(Source.CLI_HELP);
+            assertThat(fallback.failureReason()).isEqualTo("timed out");
+            assertThat(CopilotModelDiscovery.cached()).isEqualTo(account);
+        }
+
+        @Test
+        void stepBudgetMillisCapsEachStepAndRejectsExpiredDeadline() throws Exception {
+            long plenty = System.nanoTime() + TimeUnit.SECONDS.toNanos(45);
+            assertThat(CopilotModelDiscovery.stepBudgetMillis(plenty))
+                    .isLessThanOrEqualTo(TimeUnit.SECONDS.toMillis(12))
+                    .isPositive();
+
+            long expired = System.nanoTime() - TimeUnit.MILLISECONDS.toNanos(5);
+            assertThatThrownBy(() -> CopilotModelDiscovery.stepBudgetMillis(expired))
+                    .isInstanceOf(TimeoutException.class);
+        }
+
+        @Test
         void failedRefreshKeepsThePreviousGoodList() {
             Result good = new Result(List.of("m1"), Source.ACCOUNT, "");
             CopilotModelDiscovery.refresh(() -> good);
@@ -359,6 +387,25 @@ class CopilotModelDiscoveryTest {
                     CopilotModelDiscovery.probe(ignored -> StubProcess.completed(help, 0), 1);
 
             assertThat(result).containsExactly("model-a");
+        }
+
+        @Test
+        void buildHelpProbeCommandWrapsWindowsBatchShim() throws IOException {
+            String shim = "C:\\Program Files (x86)\\nodejs\\copilot.cmd";
+
+            assertThat(
+                            CopilotModelDiscovery.buildHelpProbeCommand(
+                                    shim,
+                                    true,
+                                    Map.of("ComSpec", "C:\\Windows\\System32\\cmd.exe")))
+                    .containsExactly(
+                            "C:\\Windows\\System32\\cmd.exe",
+                            "/d",
+                            "/c",
+                            "call",
+                            shim,
+                            "help",
+                            "config");
         }
 
         @Test

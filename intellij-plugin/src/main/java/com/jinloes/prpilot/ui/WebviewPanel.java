@@ -10,8 +10,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.intellij.ide.ui.LafManagerListener;
+import com.intellij.notification.NotificationGroupManager;
+import com.intellij.notification.NotificationType;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
@@ -24,6 +31,8 @@ import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.ProviderSetupProbe;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
+import com.jinloes.prpilot.review.SemanticReviewService;
+import com.jinloes.prpilot.review.SemanticWorktreeStore;
 import com.jinloes.prpilot.services.DraftRecoveryStore;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.services.IntellijGitHubService;
@@ -41,16 +50,25 @@ import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrWorktree;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ProviderReadinessDto;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.SetupRequiredMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.WebviewPr;
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BinaryOperator;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.text.StringEscapeUtils;
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
 import org.cef.handler.CefLoadHandlerAdapter;
@@ -134,8 +152,7 @@ public class WebviewPanel implements Disposable {
     PendingReviewIndexNotifications.Registration pendingIndexRecoveryRegistration = () -> {};
     final IntellijClaudeService claudeService;
     private final GitWorktreeService worktreeService = new GitWorktreeService();
-    final com.jinloes.prpilot.review.SemanticReviewService semanticReviews =
-            new com.jinloes.prpilot.review.SemanticReviewService();
+    final SemanticReviewService semanticReviews = new SemanticReviewService();
 
     final IntellijGitHubService ghSvc;
     final DraftRecoveryStore draftRecoveryStore;
@@ -143,9 +160,9 @@ public class WebviewPanel implements Disposable {
     private final Consumer<Object> testMessageSink;
 
     /** Experimental opt-in; while off, the webview hides the IntelliJ-assisted controls. */
-    final java.util.function.BooleanSupplier intellijAssistedEnabled;
+    final BooleanSupplier intellijAssistedEnabled;
 
-    private final java.util.function.BinaryOperator<String> repositoryInstructionsLookup;
+    private final BinaryOperator<String> repositoryInstructionsLookup;
 
     static final String INTELLIJ_ASSISTED_DISABLED_ERROR =
             "IntelliJ-assisted review is disabled; enable it in PR Pilot settings (experimental)";
@@ -217,28 +234,25 @@ public class WebviewPanel implements Disposable {
         this.lifecycleController = new WebviewPanelLifecycle(this);
         DeepReviewIo io =
                 new DeepReviewIo() {
-                    public com.jinloes.prpilot.review.SemanticReviewService.Preparation prepare(
+                    public SemanticReviewService.Preparation prepare(
                             JsonNode options, FreshDeepPr fresh) throws Exception {
                         String base = project.getBasePath();
                         var root =
-                                base == null
-                                        ? null
-                                        : worktreeService.findGitRoot(new java.io.File(base));
+                                base == null ? null : worktreeService.findGitRoot(new File(base));
                         String detected = base == null ? null : ghSvc.detectCurrentRepo(base);
                         String owner = options.path("owner").asText(),
                                 repo = options.path("repo").asText();
                         if (root == null || !(owner + "/" + repo).equalsIgnoreCase(detected))
-                            throw new java.io.IOException(
+                            throw new IOException(
                                     "Open the pull request repository before preparing a deep review.");
                         String digest =
-                                java.util.HexFormat.of()
+                                HexFormat.of()
                                         .formatHex(
-                                                java.security.MessageDigest.getInstance("SHA-256")
+                                                MessageDigest.getInstance("SHA-256")
                                                         .digest(
                                                                 fresh.diff()
                                                                         .getBytes(
-                                                                                java.nio.charset
-                                                                                        .StandardCharsets
+                                                                                StandardCharsets
                                                                                         .UTF_8)));
                         int number = options.path("number").asInt();
                         return semanticReviews.prepare(
@@ -271,8 +285,7 @@ public class WebviewPanel implements Disposable {
                                 new DeepInvocation(pending, server));
                     }
 
-                    public List<com.jinloes.prpilot.review.SemanticWorktreeStore.Retained> list()
-                            throws Exception {
+                    public List<SemanticWorktreeStore.Retained> list() throws Exception {
                         return semanticReviews.list();
                     }
 
@@ -361,7 +374,7 @@ public class WebviewPanel implements Disposable {
             PullRequest selected,
             DeepReviewIo io,
             Consumer<Runnable> background,
-            java.util.function.Supplier<Object> settings,
+            Supplier<Object> settings,
             Consumer<Object> messages) {
         this(selected, io, background, settings, messages, () -> true);
     }
@@ -371,9 +384,9 @@ public class WebviewPanel implements Disposable {
             PullRequest selected,
             DeepReviewIo io,
             Consumer<Runnable> background,
-            java.util.function.Supplier<Object> settings,
+            Supplier<Object> settings,
             Consumer<Object> messages,
-            java.util.function.BooleanSupplier intellijAssistedEnabled) {
+            BooleanSupplier intellijAssistedEnabled) {
         project = null;
         browser = null;
         browserPanel = null;
@@ -460,7 +473,7 @@ public class WebviewPanel implements Disposable {
 
     private Object readDeepSettingsIdentity() {
         PluginSettings settings = PluginSettings.getInstance();
-        return java.util.Arrays.asList(
+        return Arrays.asList(
                 IntellijClaudeService.snapshotReviewRuntimeSettings().identity(),
                 settings.getResolvedReviewFocusAreas(),
                 settings.getResolvedReviewCustomInstructions(),
@@ -477,7 +490,7 @@ public class WebviewPanel implements Disposable {
                 || !before.sha().equals(after.sha())
                 || diff == null
                 || diff.isBlank())
-            throw new java.io.IOException("Cannot bind a fresh PR head and diff. Prepare again.");
+            throw new IOException("Cannot bind a fresh PR head and diff. Prepare again.");
         return new FreshDeepPr(after, diff);
     }
 
@@ -584,6 +597,160 @@ public class WebviewPanel implements Disposable {
         reviewController.handleDeleteDraft(number, owner, repo);
     }
 
+    void handleOpenFile(int number, String owner, String repo, String file, int line) {
+        final PullRequest pr;
+        final long expectedRevision;
+        final String expectedKey;
+        final long expectedEpoch;
+        synchronized (this) {
+            pr = activePR;
+            if (disposed
+                    || pr == null
+                    || !WebviewPrSupport.matchesPrRequest(pr, number, owner, repo)) {
+                return;
+            }
+            expectedRevision = selectionRevision;
+            expectedKey = bridgePrKey(pr.getNumber(), pr.getOwner(), pr.getRepo());
+            expectedEpoch = worktreeManager.epoch();
+        }
+        getApplication()
+                .executeOnPooledThread(
+                        () -> {
+                            if (disposed
+                                    || project == null
+                                    || project.isDisposed()
+                                    || !isCurrentSelection(expectedKey, expectedRevision)) {
+                                return;
+                            }
+                            String basePath = project.getBasePath();
+                            File gitRoot =
+                                    basePath == null
+                                            ? null
+                                            : worktreeService.findGitRoot(new File(basePath));
+                            String detectedRepo =
+                                    basePath == null ? null : ghSvc.detectCurrentRepo(basePath);
+                            if (disposed
+                                    || project.isDisposed()
+                                    || !isCurrentSelection(expectedKey, expectedRevision)) {
+                                return;
+                            }
+                            String safeRepoRef =
+                                    StringEscapeUtils.escapeHtml4(
+                                            pr.getOwner() + "/" + pr.getRepo());
+                            String safeFile = StringEscapeUtils.escapeHtml4(file);
+                            boolean sameRepo =
+                                    gitRoot != null
+                                            && detectedRepo != null
+                                            && detectedRepo.equalsIgnoreCase(
+                                                    pr.getOwner() + "/" + pr.getRepo());
+                            if (!sameRepo) {
+                                notifyEditorOpenInfo(
+                                        "Open "
+                                                + safeRepoRef
+                                                + " in the IDE to jump to pull request files in the editor.");
+                                return;
+                            }
+                            WebviewPanelSupport.ResolvedEditorTarget target;
+                            try {
+                                target =
+                                        WebviewPanelSupport.resolveOpenFileTarget(
+                                                gitRoot.toPath(),
+                                                () -> {
+                                                    if (!isCurrentSelection(
+                                                            expectedKey, expectedRevision)) {
+                                                        return null;
+                                                    }
+                                                    try {
+                                                        File dir =
+                                                                worktreeManager.resolveDirectory(
+                                                                        pr, expectedEpoch);
+                                                        return dir == null ? null : dir.toPath();
+                                                    } catch (RuntimeException failure) {
+                                                        log.debug(
+                                                                "PR worktree fallback unavailable for {}#{}: {}",
+                                                                pr.getOwner() + "/" + pr.getRepo(),
+                                                                pr.getNumber(),
+                                                                failure.getMessage());
+                                                        return null;
+                                                    }
+                                                },
+                                                file,
+                                                line);
+                            } catch (IOException failure) {
+                                log.warn(
+                                        "Failed to resolve editor target for {}: {}",
+                                        file,
+                                        failure.getMessage());
+                                if (!isCurrentSelection(expectedKey, expectedRevision)) {
+                                    return;
+                                }
+                                notifyEditorOpenInfo(
+                                        "Could not resolve "
+                                                + safeFile
+                                                + " in the current checkout.");
+                                return;
+                            }
+                            if (!isCurrentSelection(expectedKey, expectedRevision)) {
+                                return;
+                            }
+                            if (target == null) {
+                                notifyEditorOpenInfo(
+                                        "Could not find "
+                                                + safeFile
+                                                + " in the current checkout or PR branch.");
+                                return;
+                            }
+                            VirtualFile vf =
+                                    LocalFileSystem.getInstance()
+                                            .refreshAndFindFileByIoFile(target.file().toFile());
+                            if (!isCurrentSelection(expectedKey, expectedRevision)) {
+                                return;
+                            }
+                            if (vf == null) {
+                                notifyEditorOpenInfo(
+                                        "Could not open " + safeFile + " in the IDE editor.");
+                                return;
+                            }
+                            getApplication()
+                                    .invokeLater(
+                                            () -> {
+                                                if (disposed
+                                                        || project.isDisposed()
+                                                        || !isCurrentSelection(
+                                                                expectedKey, expectedRevision)) {
+                                                    return;
+                                                }
+                                                if (target.temporaryWorktree()) {
+                                                    Document doc =
+                                                            FileDocumentManager.getInstance()
+                                                                    .getDocument(vf);
+                                                    if (doc != null) {
+                                                        doc.setReadOnly(true);
+                                                    }
+                                                }
+                                                new OpenFileDescriptor(
+                                                                project,
+                                                                vf,
+                                                                target.zeroBasedLine(),
+                                                                0)
+                                                        .navigate(true);
+                                            });
+                        });
+    }
+
+    private void notifyEditorOpenInfo(String content) {
+        getApplication()
+                .invokeLater(
+                        () -> {
+                            if (disposed || project == null || project.isDisposed()) return;
+                            NotificationGroupManager.getInstance()
+                                    .getNotificationGroup("PR Pilot")
+                                    .createNotification(
+                                            "PR Pilot", content, NotificationType.INFORMATION)
+                                    .notify(project);
+                        });
+    }
+
     String rememberedRepositoryInstructions(String owner, String repo) {
         return StringUtils.defaultIfEmpty(repositoryInstructionsLookup.apply(owner, repo), null);
     }
@@ -667,7 +834,7 @@ public class WebviewPanel implements Disposable {
         return worktreeManager.resolve(pr);
     }
 
-    static IntellijClaudeService serviceForWorktree(java.io.File directory) {
+    static IntellijClaudeService serviceForWorktree(File directory) {
         return WebviewWorktreeManager.serviceForWorktree(directory);
     }
 

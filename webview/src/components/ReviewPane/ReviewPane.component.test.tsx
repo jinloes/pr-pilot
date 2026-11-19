@@ -404,4 +404,34 @@ describe('narrow review footer', () => {
     await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
     expect(outgoingOf(cefQuery, 'deleteDraft')).toHaveLength(1)
   })
+
+  it('opens orphan targets from validationDiff or coverage paths and hides unverified paths', async () => {
+    const user = userEvent.setup()
+    const cefQuery = installHost()
+    render(<ReviewPane pr={pr} />)
+    const fullDiff = `${diffWithFiles(2)}\n${coverageTrailer(1, ['src/omitted.ts'])}`
+    act(() => {
+      hostMessage({
+        type: 'reviewResult',
+        prKey: 'acme/widget#42',
+        result: {
+          summary: 'Incremental.',
+          verdict: 'COMMENT',
+          lineComments: [
+            { file: 'src/file-1.ts', line: 99, type: 'issue', body: 'In validationDiff.' },
+            { file: 'src/omitted.ts', line: 12, type: 'note', body: 'In coverage trailer.' },
+            { file: 'src/unrelated.ts', line: 4, type: 'note', body: 'Not in PR.' },
+          ],
+        },
+        diff: diffWithFiles(1),
+        validationDiff: fullDiff,
+      })
+    })
+
+    expect(screen.queryByRole('button', { name: /Open in editor: src\/unrelated\.ts/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Open in editor: src/omitted.ts line 12' }))
+    expect(outgoingOf(cefQuery, 'openFile')).toEqual([
+      { protocolVersion: 1, type: 'openFile', number: 42, owner: 'acme', repo: 'widget', file: 'src/omitted.ts', line: 12 },
+    ])
+  })
 })

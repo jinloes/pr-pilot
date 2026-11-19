@@ -115,11 +115,11 @@ subprojects {
     plugins.withId('java') {
         spotless {
             java {
-                // Pinned below 1.35.0: 1.28.0+ references javac-internal classes (e.g.
-                // com.sun.tools.javac.tree.JCTree$JCAnyPattern) that are unresolvable via
-                // --add-exports on any locally available JDK — verified identical failure on
-                // 17/21/25, so this is a broken artifact, not a JDK-version incompatibility.
-                // 1.22.0 is the newest release confirmed to run cleanly with no extra JVM args.
+                // Pinned at 1.22.0: 1.28.0+ references javac-internal classes (e.g.
+                // com.sun.tools.javac.tree.JCTree$JCAnyPattern) that fail without --add-exports,
+                // while Spotless 8.10.4 refuses google-java-format < 1.30.0 when the Gradle daemon
+                // itself runs on JVM 25+. Run Gradle with JDK 21 (the project toolchain) so 1.22.0
+                // runs cleanly with no extra JVM args.
                 googleJavaFormat('1.22.0').aosp()
                 trimTrailingWhitespace()
                 endWithNewline()

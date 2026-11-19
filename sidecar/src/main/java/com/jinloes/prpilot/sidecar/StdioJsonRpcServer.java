@@ -17,6 +17,8 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Frames JSON-RPC over stdio and dispatches each request to the handler registered for its method.
@@ -24,9 +26,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * through {@link StdioJsonRpcServerOperationScheduler}.
  */
 final class StdioJsonRpcServer {
+    private static final Logger log = LoggerFactory.getLogger(StdioJsonRpcServer.class);
     private static final String JSON_RPC_VERSION = "2.0";
     private static final int REQUEST_QUEUE_CAPACITY = 64;
     private static final int SERVER_BUSY_CODE = -32000;
+    private static final int RESPONSE_TOO_LARGE_CODE = -32000;
+    static final String RESPONSE_TOO_LARGE_MESSAGE =
+            "JSON-RPC response exceeded maximum frame size (8 MiB)";
 
     /** Handles one decoded request; returns {@code null} when the reply is sent asynchronously. */
     @FunctionalInterface
@@ -119,6 +125,7 @@ final class StdioJsonRpcServer {
                 try {
                     request = objectMapper.readTree(frame);
                 } catch (IOException exception) {
+                    log.warn("Malformed JSON-RPC frame ({} bytes)", frame.length, exception);
                     send(support.error(null, -32700, "Parse error"));
                     continue;
                 }
@@ -170,6 +177,7 @@ final class StdioJsonRpcServer {
         try {
             request = objectMapper.readTree(frame);
         } catch (IOException exception) {
+            log.warn("Malformed JSON-RPC frame ({} bytes)", frame.length, exception);
             return support.error(null, -32700, "Parse error");
         }
 
@@ -182,7 +190,8 @@ final class StdioJsonRpcServer {
 
     private JsonNode handleRequest(JsonNode request) {
         boolean notification = !request.has("id");
-        MethodHandler handler = handlers.get(request.path("method").asText());
+        String method = request.path("method").asText();
+        MethodHandler handler = handlers.get(method);
         JsonNode response;
         try {
             response =
@@ -190,6 +199,11 @@ final class StdioJsonRpcServer {
                             ? support.error(support.requestId(request), -32601, "Method not found")
                             : handler.handle(request);
         } catch (RuntimeException exception) {
+            log.error(
+                    "Unhandled exception in JSON-RPC method '{}' (id={})",
+                    method,
+                    support.requestId(request),
+                    exception);
             response = support.error(support.requestId(request), -32603, "Internal error");
         }
 
@@ -207,18 +221,43 @@ final class StdioJsonRpcServer {
 
     /**
      * Writes a frame to the shared stdout stream under {@link #writeLock} so the main read loop and
-     * background {@link #reviewExecutor} tasks never interleave partial frames. Failures are
-     * swallowed — a broken pipe here means the client already disconnected, which the main read
-     * loop will independently observe and exit on.
+     * background {@link #reviewExecutor} tasks never interleave partial frames. If a JSON-RPC
+     * response exceeds {@link StdioFrameCodec#MAX_MESSAGE_BYTES}, emits a compact {@code -32000}
+     * error frame for the same request ID so callers fail fast instead of hanging; oversized
+     * notifications are logged and dropped. Genuine broken-pipe errors are logged at debug level.
      */
     private void send(JsonNode node) {
         OutputStream output = this.currentOutput;
         if (output == null) return;
+        boolean isResponse = node != null && node.has("id") && !node.has("method");
         synchronized (writeLock) {
             try {
                 frameCodec.writeFrame(output, objectMapper.writeValueAsBytes(node));
+            } catch (StdioFrameCodec.FrameTooLargeException tooLarge) {
+                if (isResponse) {
+                    JsonNode id = node.get("id");
+                    log.warn(
+                            "JSON-RPC response for id={} exceeded maximum frame size ({} bytes); sending fallback error",
+                            id,
+                            tooLarge.payloadLength());
+                    try {
+                        JsonNode fallback =
+                                support.error(
+                                        id, RESPONSE_TOO_LARGE_CODE, RESPONSE_TOO_LARGE_MESSAGE);
+                        frameCodec.writeFrame(output, objectMapper.writeValueAsBytes(fallback));
+                    } catch (IOException fallbackFailure) {
+                        log.debug(
+                                "Failed to write fallback oversized-response error frame",
+                                fallbackFailure);
+                    }
+                } else {
+                    log.warn(
+                            "Dropping oversized JSON-RPC notification method='{}' ({} bytes)",
+                            node == null ? "<null>" : node.path("method").asText("<unknown>"),
+                            tooLarge.payloadLength());
+                }
             } catch (IOException exception) {
-                // Best effort; see method javadoc.
+                log.debug("Failed to write JSON-RPC frame to stdout", exception);
             }
         }
     }

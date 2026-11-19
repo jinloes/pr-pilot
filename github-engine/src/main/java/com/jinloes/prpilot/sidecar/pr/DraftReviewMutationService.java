@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jinloes.prpilot.sidecar.github.GitHubApiBase;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
 import com.jinloes.prpilot.sidecar.github.GitHubFailure;
+import com.jinloes.prpilot.sidecar.github.GitHubResponse;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -19,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.LongConsumer;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -360,7 +362,7 @@ public final class DraftReviewMutationService {
     }
 
     static boolean isRetryableHttpMethod(String method) {
-        return !"POST".equals(method);
+        return "GET".equals(method) || "PUT".equals(method);
     }
 
     private JsonNode readJson(String body) {
@@ -478,14 +480,31 @@ public final class DraftReviewMutationService {
     /**
      * Real GitHub REST client backed by {@link HttpClient}. Never logs or returns the token.
      *
-     * <p>Deliberately does <em>not</em> use the shared {@code GitHubHttpClient}: that client's
-     * retry policy is only safe for idempotent reads. These verbs create and submit reviews, so
-     * merging them would risk a retried POST duplicating a submitted review. Keep write transport
-     * separate until mutation retries are made idempotent (e.g. via a request key).
+     * <p>Deliberately does <em>not</em> use the shared {@code GitHubHttpClient}: only idempotent
+     * {@code GET} reads and {@code PUT} body updates are retried here, whereas non-idempotent
+     * {@code POST} and {@code DELETE} mutations execute a single attempt so a lost response after
+     * server acceptance never duplicates a review/submission or turns a completed delete into a
+     * synthetic 404.
      */
-    private static final class HttpGitHubRestClient implements GitHubRestClient {
+    static final class HttpGitHubRestClient implements GitHubRestClient {
         private final HttpClient httpClient =
                 HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
+        private final LongConsumer sleepMillis;
+
+        HttpGitHubRestClient() {
+            this(
+                    millis -> {
+                        try {
+                            Thread.sleep(millis);
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                        }
+                    });
+        }
+
+        HttpGitHubRestClient(LongConsumer sleepMillis) {
+            this.sleepMillis = Objects.requireNonNull(sleepMillis);
+        }
 
         @Override
         public RestResponse get(String apiBase, String token, String path) {
@@ -542,18 +561,22 @@ public final class DraftReviewMutationService {
                                     request,
                                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
                     int statusCode = response.statusCode();
-                    if (statusCode == 401 || statusCode == 403) {
-                        throw new MutationException(
-                                "not_authenticated",
-                                "Run 'gh auth login' in a terminal for this GitHub host.");
-                    }
-                    if (statusCode == 429) {
+                    GitHubResponse ghResponse =
+                            GitHubResponse.fromHeaders(
+                                    statusCode, response.body(), response.headers().map());
+                    if (ghResponse.isRateLimited()) {
                         if (attempt < maxAttempts) {
                             backoff(attempt);
                             continue;
                         }
                         throw new MutationException(
-                                "rate_limited", "GitHub rate limit exceeded. Try again shortly.");
+                                GitHubFailure.RATE_LIMITED.status(),
+                                GitHubFailure.RATE_LIMITED.message());
+                    }
+                    if (ghResponse.isUnauthenticated()) {
+                        throw new MutationException(
+                                GitHubFailure.NOT_AUTHENTICATED.status(),
+                                GitHubFailure.NOT_AUTHENTICATED.message());
                     }
                     if (statusCode >= 500) {
                         if (attempt < maxAttempts) {
@@ -561,7 +584,8 @@ public final class DraftReviewMutationService {
                             continue;
                         }
                         throw new MutationException(
-                                "network_error", "Unable to reach GitHub. Check your connection.");
+                                GitHubFailure.NETWORK_ERROR.status(),
+                                GitHubFailure.NETWORK_ERROR.message());
                     }
                     return new RestResponse(statusCode, response.body());
                 } catch (IOException exception) {
@@ -572,25 +596,23 @@ public final class DraftReviewMutationService {
                     }
                     if (attempt == maxAttempts) {
                         throw new MutationException(
-                                "network_error", "Unable to reach GitHub. Check your connection.");
+                                GitHubFailure.NETWORK_ERROR.status(),
+                                GitHubFailure.NETWORK_ERROR.message());
                     }
                     backoff(attempt);
                 } catch (InterruptedException exception) {
                     Thread.currentThread().interrupt();
                     throw new MutationException(
-                            "network_error", "Unable to reach GitHub. Check your connection.");
+                            GitHubFailure.NETWORK_ERROR.status(),
+                            GitHubFailure.NETWORK_ERROR.message());
                 }
             }
             throw new MutationException(
-                    "network_error", "Unable to reach GitHub. Check your connection.");
+                    GitHubFailure.NETWORK_ERROR.status(), GitHubFailure.NETWORK_ERROR.message());
         }
 
         private void backoff(int attempt) {
-            try {
-                Thread.sleep(250L * attempt);
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-            }
+            sleepMillis.accept(250L * attempt);
         }
     }
 }

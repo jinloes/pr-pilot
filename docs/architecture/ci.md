@@ -95,15 +95,12 @@ that pull request fails until the image moves with it. To bump Playwright:
 ### Windows parity is measured, not gated
 
 `Host checks` runs the host-sensitive subset on Windows and macOS (binary probing, worktree paths,
-extension unit tests, and VSIX packaging) and is required. `Windows parity (non-blocking)` runs the
-whole Gradle `check` and the webview unit tests on Windows with `continue-on-error`, because
-Windows-only failures remain in `core`, `review-engine`, `review-benchmark` and `intellij-plugin`;
-its test reports are uploaded for triage. The causes seen locally and in CI are POSIX file
-permissions, command lines over the Windows length limit (`CreateProcess error=206`), CRLF checkouts
-in test git repositories that inherit the system `core.autocrlf=true`, undeletable read-only git
-object files, path canonicalization (including fixtures that use `/fixture` as an absolute path),
-URL-to-path conversion, symlink privileges, and tests that need `sh`. Fix those failures rather
-than skipping tests on Windows, then make the job required and drop `continue-on-error`. The
+extension unit tests, and VSIX packaging) and is required; Windows Gradle steps pass `--no-daemon`
+so background JVM daemons do not hold `.gradle/caches/*.lock` files open during post-job cache
+archiving. `Windows parity (non-blocking)` runs the whole Gradle `check` and the webview unit tests
+on Windows; tests whose sole contract is POSIX permission bits (`rwx------` / group-writable launch
+checks) use `@EnabledOnOs({OS.LINUX, OS.MAC})`. Once Windows parity stays green in CI, promote it
+to required in the `main merge gate` ruleset and drop `continue-on-error`. The
 plugin's webview build starts `npm.cmd` on Windows: Java cannot launch npm's `.cmd` shim by its
 bare name, and runners have no `npm.exe`, so without it `intellij-plugin` does not build there.
 Non-ASCII test literals rely on

@@ -212,7 +212,10 @@
           "type": "array",
           "default": [],
           "maxItems": 100,
-          "items": { "type": "string", "maxLength": 500 },
+          "items": {
+            "type": "string",
+            "maxLength": 500
+          },
           "markdownDescription": "Extra repository guidance files added to every review prompt, as paths or globs relative to the repository root (for example `.review/ai-agent/*.md`). Files are read from the pull request's base commit, never from the PR branch, so a PR cannot change its own review rules. Added to the built-in guidance (`AGENTS.md`, `CLAUDE.md`, contributing and PR-template files). An active review-guidance profile uses its own list instead."
         },
         "pr-pilot.reviewGuidanceProfiles": {
@@ -221,17 +224,40 @@
           "maxItems": 50,
           "items": {
             "type": "object",
-            "required": ["id", "name", "focusAreas", "customInstructions", "guidanceGlobs"],
+            "required": [
+              "id",
+              "name",
+              "focusAreas",
+              "customInstructions",
+              "guidanceGlobs"
+            ],
             "additionalProperties": false,
             "properties": {
-              "id": { "type": "string", "minLength": 1, "maxLength": 128 },
-              "name": { "type": "string", "minLength": 1, "maxLength": 100 },
-              "focusAreas": { "type": "string", "maxLength": 20000 },
-              "customInstructions": { "type": "string", "maxLength": 20000 },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "focusAreas": {
+                "type": "string",
+                "maxLength": 20000
+              },
+              "customInstructions": {
+                "type": "string",
+                "maxLength": 20000
+              },
               "guidanceGlobs": {
                 "type": "array",
                 "maxItems": 100,
-                "items": { "type": "string", "maxLength": 500 }
+                "items": {
+                  "type": "string",
+                  "maxLength": 500
+                }
               }
             }
           },
@@ -310,7 +336,6 @@
     "test:coverage": "node ./scripts/run-coverage.mjs"
   },
   "dependencies": {
-    "@github/copilot-sdk": "^1.0.27",
     "yaml": "^2.9.1"
   },
   "devDependencies": {

@@ -164,5 +164,34 @@ class WebviewPanelMessageValidationTest {
 
             assertThat(WebviewPanel.isValidIncomingMessage(node)).isFalse();
         }
+
+        @Test
+        void validatesOpenFilePathAndOptionalLineBounds() throws Exception {
+            var validWithLine =
+                    MAPPER.readTree(
+                            "{\"protocolVersion\":1,\"type\":\"openFile\",\"number\":7,"
+                                    + "\"owner\":\"acme\",\"repo\":\"platform\","
+                                    + "\"file\":\"src/Main.java\",\"line\":42}");
+            var validWithoutLine =
+                    MAPPER.readTree(
+                            "{\"protocolVersion\":1,\"type\":\"openFile\",\"number\":7,"
+                                    + "\"owner\":\"acme\",\"repo\":\"platform\","
+                                    + "\"file\":\"src/Main.java\"}");
+            assertThat(WebviewPanel.isValidIncomingMessage(validWithLine)).isTrue();
+            assertThat(WebviewPanel.isValidIncomingMessage(validWithoutLine)).isTrue();
+
+            for (String invalidJson :
+                    new String[] {
+                        "{\"protocolVersion\":1,\"type\":\"openFile\",\"number\":7,\"owner\":\"acme\",\"repo\":\"platform\",\"file\":\"../Main.java\"}",
+                        "{\"protocolVersion\":1,\"type\":\"openFile\",\"number\":7,\"owner\":\"acme\",\"repo\":\"platform\",\"file\":\"/etc/passwd\"}",
+                        "{\"protocolVersion\":1,\"type\":\"openFile\",\"number\":7,\"owner\":\"acme\",\"repo\":\"platform\",\"file\":\"C:/secret.txt\"}",
+                        "{\"protocolVersion\":1,\"type\":\"openFile\",\"number\":7,\"owner\":\"acme\",\"repo\":\"platform\",\"file\":\"src\\\\Main.java\"}",
+                        "{\"protocolVersion\":1,\"type\":\"openFile\",\"number\":7,\"owner\":\"acme\",\"repo\":\"platform\",\"file\":\"src/Main.java\",\"line\":0}"
+                    }) {
+                assertThat(WebviewPanel.isValidIncomingMessage(MAPPER.readTree(invalidJson)))
+                        .as("expected invalid openFile for %s", invalidJson)
+                        .isFalse();
+            }
+        }
     }
 }

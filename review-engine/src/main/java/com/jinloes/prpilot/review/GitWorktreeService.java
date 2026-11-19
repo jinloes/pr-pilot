@@ -2,6 +2,12 @@ package com.jinloes.prpilot.review;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
@@ -81,14 +87,7 @@ public class GitWorktreeService {
         fetch(repoDir, 60, "origin", branch);
         String commitish = pinnedCommitish(repoDir, headSha);
         log.info("Creating worktree at {} for {}", worktreeDir, commitish);
-        runGit(
-                repoDir,
-                30,
-                "worktree",
-                "add",
-                "--detach",
-                worktreeDir.getAbsolutePath(),
-                commitish);
+        addDetachedWorktree(repoDir, worktreeDir, commitish);
     }
 
     /**
@@ -113,14 +112,92 @@ public class GitWorktreeService {
         fetch(repoDir, 120, forkCloneUrl, branch);
         String commitish = pinnedCommitish(repoDir, headSha);
         log.info("Creating worktree at {} from {}", worktreeDir, commitish);
+        addDetachedWorktree(repoDir, worktreeDir, commitish);
+    }
+
+    private void addDetachedWorktree(File repoDir, File worktreeDir, String commitish)
+            throws IOException {
         runGit(
                 repoDir,
                 30,
+                "-c",
+                "core.symlinks=false",
                 "worktree",
                 "add",
                 "--detach",
                 worktreeDir.getAbsolutePath(),
                 commitish);
+        try {
+            verifyNoEscapingSymlinks(worktreeDir.toPath());
+        } catch (IOException | RuntimeException failure) {
+            removeOrdinaryWorktree(repoDir, worktreeDir);
+            throw failure;
+        }
+    }
+
+    /**
+     * Verifies without following links that no symbolic link inside {@code worktreeRoot} resolves
+     * outside its canonical boundary. Tracked Git symlinks are already checked out as plain text by
+     * {@code core.symlinks=false}; this guard fails closed if any OS symlink still escapes.
+     */
+    public static void verifyNoEscapingSymlinks(Path worktreeRoot) throws IOException {
+        Path canonicalRoot = worktreeRoot.toRealPath(LinkOption.NOFOLLOW_LINKS);
+        Files.walkFileTree(
+                canonicalRoot,
+                new SimpleFileVisitor<>() {
+                    @Override
+                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs)
+                            throws IOException {
+                        if (dir.equals(canonicalRoot.resolve(".git"))) {
+                            return FileVisitResult.SKIP_SUBTREE;
+                        }
+                        if (Files.isSymbolicLink(dir)) {
+                            checkSymlinkTarget(canonicalRoot, dir);
+                            return FileVisitResult.SKIP_SUBTREE;
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
+
+                    @Override
+                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+                            throws IOException {
+                        if (!file.equals(canonicalRoot.resolve(".git"))
+                                && Files.isSymbolicLink(file)) {
+                            checkSymlinkTarget(canonicalRoot, file);
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+    }
+
+    private static void checkSymlinkTarget(Path canonicalRoot, Path symlink) throws IOException {
+        Path rawTarget = Files.readSymbolicLink(symlink);
+        Path parent = symlink.getParent();
+        Path lexicalResolved =
+                (parent == null ? canonicalRoot.resolve(rawTarget) : parent.resolve(rawTarget))
+                        .normalize();
+        if (!lexicalResolved.startsWith(canonicalRoot)) {
+            throw new IOException(
+                    "Worktree contains a symbolic link escaping the checkout: "
+                            + canonicalRoot.relativize(symlink));
+        }
+        if (Files.exists(lexicalResolved, LinkOption.NOFOLLOW_LINKS)
+                || Files.exists(lexicalResolved)) {
+            final Path realTarget;
+            try {
+                realTarget = lexicalResolved.toRealPath();
+            } catch (IOException unresolvableTarget) {
+                throw new IOException(
+                        "Worktree contains an unresolvable symbolic link: "
+                                + canonicalRoot.relativize(symlink),
+                        unresolvableTarget);
+            }
+            if (!realTarget.startsWith(canonicalRoot)) {
+                throw new IOException(
+                        "Worktree contains a symbolic link whose target escapes the checkout: "
+                                + canonicalRoot.relativize(symlink));
+            }
+        }
     }
 
     void fetch(File repoDir, long timeoutSeconds, String remote, String branch) throws IOException {
@@ -260,13 +337,21 @@ public class GitWorktreeService {
         return false;
     }
 
+    static String gitSubcommand(String... args) {
+        int i = 0;
+        while (i + 1 < args.length && "-c".equals(args[i])) {
+            i += 2;
+        }
+        return i < args.length ? args[i] : "git";
+    }
+
     void runGit(File dir, long timeoutSeconds, String... args) throws IOException {
         GitResult result = execGit(dir, timeoutSeconds, args);
         if (result.exitCode() != 0) {
             String trimmed = result.output().trim();
             throw new IOException(
                     "git "
-                            + args[0]
+                            + gitSubcommand(args)
                             + " failed (exit "
                             + result.exitCode()
                             + "): "
@@ -287,8 +372,16 @@ public class GitWorktreeService {
         cmd.addAll(List.of(args));
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir).redirectErrorStream(true);
         pb.environment().put("HOME", System.getProperty("user.home", "/"));
-        String existingPath = pb.environment().getOrDefault("PATH", "");
-        pb.environment().put("PATH", "/opt/homebrew/bin:/usr/local/bin:" + existingPath);
+        if (!BinaryLocator.isWindows()) {
+            String existingPath = pb.environment().getOrDefault("PATH", "");
+            String prefix = "/opt/homebrew/bin" + File.pathSeparator + "/usr/local/bin";
+            pb.environment()
+                    .put(
+                            "PATH",
+                            existingPath.isBlank()
+                                    ? prefix
+                                    : prefix + File.pathSeparator + existingPath);
+        }
         try {
             BoundedProcessRunner.ProcessResult result =
                     processRunner.run(pb, timeoutSeconds, TimeUnit.SECONDS);
@@ -298,10 +391,11 @@ public class GitWorktreeService {
                             : result.output();
             return new GitResult(result.exitCode(), output);
         } catch (TimeoutException e) {
-            throw new IOException("git " + args[0] + " timed out after " + timeoutSeconds + "s", e);
+            throw new IOException(
+                    "git " + gitSubcommand(args) + " timed out after " + timeoutSeconds + "s", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IOException("git " + args[0] + " interrupted", e);
+            throw new IOException("git " + gitSubcommand(args) + " interrupted", e);
         }
     }
 }

@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Registers the review-engine JSON-RPC methods that run as cancellable background operations, plus
@@ -17,6 +19,8 @@ import java.util.UUID;
  * StdioJsonRpcServerOperationScheduler}.
  */
 final class StdioJsonRpcServerAsyncReviewHandlers {
+    private static final Logger log =
+            LoggerFactory.getLogger(StdioJsonRpcServerAsyncReviewHandlers.class);
     private static final int MAX_OPERATION_ID_LENGTH = 128;
 
     private final ObjectMapper objectMapper;
@@ -88,11 +92,21 @@ final class StdioJsonRpcServerAsyncReviewHandlers {
                     } catch (InterruptedException interrupted) {
                         Thread.currentThread().interrupt();
                         operation.completeCancellation();
-                    } catch (Exception exception) {
+                    } catch (Throwable failure) {
+                        if (!operation.isCancelled()) {
+                            log.warn(
+                                    "Async JSON-RPC method 'reviews/generate' failed (id={}, operationId={})",
+                                    id,
+                                    params.operationId(),
+                                    failure);
+                        }
                         operation.complete(
                                 operation.isCancelled()
                                         ? support.error(id, -32000, "Review interrupted.")
-                                        : support.error(id, -32000, safeMessage(exception)));
+                                        : support.error(id, -32000, safeMessage(failure)));
+                        if (failure instanceof VirtualMachineError vmError) {
+                            throw vmError;
+                        }
                     }
                 })) {
             return support.error(id, -32602, "Duplicate operation ID");
@@ -137,11 +151,21 @@ final class StdioJsonRpcServerAsyncReviewHandlers {
                     } catch (InterruptedException interrupted) {
                         Thread.currentThread().interrupt();
                         operation.completeCancellation();
-                    } catch (Exception exception) {
+                    } catch (Throwable failure) {
+                        if (!operation.isCancelled()) {
+                            log.warn(
+                                    "Async JSON-RPC method 'reviews/chat' failed (id={}, operationId={})",
+                                    id,
+                                    params.operationId(),
+                                    failure);
+                        }
                         operation.complete(
                                 operation.isCancelled()
                                         ? support.error(id, -32000, "Chat interrupted.")
-                                        : support.error(id, -32000, safeMessage(exception)));
+                                        : support.error(id, -32000, safeMessage(failure)));
+                        if (failure instanceof VirtualMachineError vmError) {
+                            throw vmError;
+                        }
                     }
                 })) {
             return support.error(id, -32602, "Duplicate operation ID");
@@ -176,9 +200,9 @@ final class StdioJsonRpcServerAsyncReviewHandlers {
                 && operationId.chars().noneMatch(Character::isISOControl);
     }
 
-    private String safeMessage(Exception exception) {
-        String message = exception.getMessage();
-        return message == null ? exception.getClass().getSimpleName() : message;
+    private String safeMessage(Throwable failure) {
+        String message = failure.getMessage();
+        return message == null ? failure.getClass().getSimpleName() : message;
     }
 
     private ObjectNode statusParams(JsonNode id, String message) {
@@ -251,8 +275,16 @@ final class StdioJsonRpcServerAsyncReviewHandlers {
                     } catch (InterruptedException failure) {
                         Thread.currentThread().interrupt();
                         operation.completeCancellation();
-                    } catch (Exception failure) {
+                    } catch (Throwable failure) {
+                        log.warn(
+                                "Async JSON-RPC method 'reviews/prepareDeepReview' failed (id={}, operationId={})",
+                                id,
+                                params.operationId(),
+                                failure);
                         operation.complete(support.error(id, -32000, safeMessage(failure)));
+                        if (failure instanceof VirtualMachineError vmError) {
+                            throw vmError;
+                        }
                     }
                 })) return support.error(id, -32602, "Duplicate operation ID");
         return null;
@@ -289,16 +321,26 @@ final class StdioJsonRpcServerAsyncReviewHandlers {
 
     private JsonNode deepMaintenance(JsonNode request, DeepMaintenance action) {
         JsonNode id = support.requestId(request);
+        String operationId = "deep-maintenance-" + UUID.randomUUID();
         if (!scheduler.submit(
-                "deep-maintenance-" + UUID.randomUUID(),
+                operationId,
                 id,
                 request.has("id"),
                 "Maintenance interrupted.",
                 operation -> {
                     try {
                         operation.complete(support.result(id, action.run()));
-                    } catch (Exception failure) {
+                    } catch (Throwable failure) {
+                        log.warn(
+                                "Async JSON-RPC method '{}' failed (id={}, operationId={})",
+                                request.path("method").asText(),
+                                id,
+                                operationId,
+                                failure);
                         operation.complete(support.error(id, -32000, safeMessage(failure)));
+                        if (failure instanceof VirtualMachineError vmError) {
+                            throw vmError;
+                        }
                     }
                 })) return support.error(id, -32000, "Maintenance busy");
         return null;

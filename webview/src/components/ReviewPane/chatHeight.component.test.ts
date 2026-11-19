@@ -10,6 +10,7 @@ import {
   clampChatHeight,
   effectiveChatAvailableHeight,
   loadChatHeight,
+  saveChatHeight,
 } from './chatHeight'
 import { ReviewPane } from './ReviewPane'
 
@@ -60,6 +61,24 @@ describe('loadChatHeight', () => {
     expect(effectiveChatAvailableHeight(500, 260, 34)).toBe(374)
     expect(clampChatHeight(260, effectiveChatAvailableHeight(500, 260, 34))).toBe(134)
     expect(effectiveChatAvailableHeight(500, 260, 200)).toBe(500)
+  })
+
+  it('survives restricted contexts where accessing window.localStorage throws SecurityError', () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage')
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('Blocked by sandbox', 'SecurityError')
+      },
+    })
+    try {
+      expect(loadChatHeight(undefined, 900)).toBe(DEFAULT_CHAT_HEIGHT)
+      expect(() => saveChatHeight(320)).not.toThrow()
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(window, 'localStorage', originalDescriptor)
+      }
+    }
   })
 })
 

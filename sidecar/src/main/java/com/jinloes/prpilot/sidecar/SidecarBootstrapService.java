@@ -48,6 +48,7 @@ final class SidecarBootstrapService {
                     Map.entry("linkedIssues", Set.of("prs/getLinkedIssues")),
                     Map.entry("repoProfile", Set.of("repo/getProfile")),
                     Map.entry("repoGuidelines", Set.of("reviews/readGuidelines")),
+                    Map.entry("copilotModels", Set.of("reviews/listCopilotModels")),
                     Map.entry(
                             "semanticReviews",
                             Set.of(

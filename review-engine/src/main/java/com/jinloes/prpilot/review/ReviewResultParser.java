@@ -53,8 +53,9 @@ final class ReviewResultParser {
      * Extracts a JSON object from the raw claude output (which may include markdown fences or
      * leading/trailing prose) and builds a {@link ReviewResult} from it.
      *
-     * <p>Individual malformed line comments are dropped (and a low-confidence "issue" is downgraded
-     * to "suggestion") rather than failing the entire review — capable models occasionally emit one
+     * <p>Individual malformed line comments (and low-confidence "issue" comments or low-confidence
+     * comments missing a rationale) are dropped, and `"issue"` + `"nit"` normalizes to
+     * `"suggestion"`, rather than failing the entire review — capable models occasionally emit one
      * non-conforming comment among otherwise-valid output, and rejecting the whole review in that
      * case throws away 19 good comments to punish 1 bad one. The top-level shape (an object with a
      * string "summary" and an array "lineComments") is still a hard requirement, since there is

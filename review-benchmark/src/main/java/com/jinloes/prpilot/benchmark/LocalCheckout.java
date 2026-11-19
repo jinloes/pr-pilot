@@ -5,6 +5,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.sidecar.pr.PrDiffResult;
 import com.jinloes.prpilot.sidecar.pr.PrDiffService;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -197,12 +198,23 @@ final class LocalCheckout implements AutoCloseable {
                         .directory(dir)
                         .redirectError(ProcessBuilder.Redirect.DISCARD)
                         .start();
-        // Outputs read here (a SHA or a count) are tiny, so reading before waiting cannot block.
-        String stdout = new String(process.getInputStream().readAllBytes(), UTF_8);
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        Thread reader =
+                Thread.ofVirtual()
+                        .start(
+                                () -> {
+                                    try (var in = process.getInputStream()) {
+                                        in.transferTo(buffer);
+                                    } catch (IOException ignored) {
+                                    }
+                                });
         if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             process.destroyForcibly();
+            reader.join(1_000);
             throw new IOException("git " + args[0] + " timed out");
         }
+        reader.join(5_000);
+        String stdout = buffer.toString(UTF_8);
         return process.exitValue() == 0 ? stdout.strip() : null;
     }
 

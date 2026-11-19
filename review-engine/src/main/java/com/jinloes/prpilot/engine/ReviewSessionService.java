@@ -8,6 +8,7 @@ import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.review.CancellationToken;
 import com.jinloes.prpilot.review.ClaudeService;
+import com.jinloes.prpilot.review.CopilotModelDiscovery;
 import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.HostCodeIntelligence;
@@ -26,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import org.apache.commons.lang3.StringUtils;
 
 /**
@@ -496,6 +498,24 @@ public class ReviewSessionService implements ReviewEngineApi {
         // own copy of the default file list.
         return new GuidelinesResult(
                 RepoGuidelinesReader.read(new File(params.projectDir()), params.globs()));
+    }
+
+    @Override
+    public CopilotModelsResult listCopilotModels(ListCopilotModelsParams params) {
+        return listCopilotModels(
+                params, CopilotModelDiscovery::cached, CopilotModelDiscovery::refresh);
+    }
+
+    static CopilotModelsResult listCopilotModels(
+            ListCopilotModelsParams params,
+            Supplier<CopilotModelDiscovery.Result> cachedLookup,
+            Supplier<CopilotModelDiscovery.Result> refreshLookup) {
+        boolean forceRefresh = params != null && params.forceRefresh();
+        CopilotModelDiscovery.Result cached = cachedLookup.get();
+        CopilotModelDiscovery.Result result =
+                (!forceRefresh && cached != null) ? cached : refreshLookup.get();
+        return new CopilotModelsResult(
+                result.models(), result.source().name(), result.failureReason());
     }
 
     @Override

@@ -23,10 +23,28 @@ final class StdioJsonRpcServerReviewHandlers {
 
     void register(Map<String, StdioJsonRpcServer.MethodHandler> handlers) {
         handlers.put("reviews/readGuidelines", this::readGuidelines);
+        handlers.put("reviews/listCopilotModels", this::listCopilotModels);
         handlers.put("reviews/findGitRoot", this::findGitRoot);
         handlers.put("reviews/recordOutcome", this::recordReviewOutcome);
         handlers.put("reviews/createWorktree", this::createWorktree);
         handlers.put("reviews/removeWorktree", this::removeWorktree);
+    }
+
+    private ObjectNode listCopilotModels(JsonNode request) {
+        JsonNode params = request.get("params");
+        if (params != null && !params.isNull()) {
+            if (!params.isObject()
+                    || !support.hasOnlyFields(params, Set.of("forceRefresh"))
+                    || (params.has("forceRefresh") && !params.path("forceRefresh").isBoolean())) {
+                return support.error(support.requestId(request), -32602, "Invalid params");
+            }
+        }
+        boolean forceRefresh =
+                params != null && params.isObject() && params.path("forceRefresh").asBoolean(false);
+        return support.result(
+                support.requestId(request),
+                review.listCopilotModels(
+                        new ReviewEngineApi.ListCopilotModelsParams(forceRefresh)));
     }
 
     /**

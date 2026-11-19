@@ -29,11 +29,43 @@ import { selectCopilotModel } from './copilotModel';
 import { createCodeIntelligenceTools } from './codeIntelligence';
 import { withCodeIntelligenceServer } from './codeIntelligenceServer';
 import { createVscodeCodeIntelligenceBackend } from './codeIntelligenceVscode';
+import {
+    buildReadOnlyWorktreeQuery,
+    buildReadOnlyWorktreeUriKey,
+    handleOpenFileInEditor,
+    type ReadOnlyWorktreeUriParams,
+    WORKTREE_PREVIEW_SCHEME,
+} from './openFile';
 import type { ActivePR, HandlerDependencies, Provider, ProviderReadiness, ReviewGenerationSettings, ViewState } from './extensionTypes';
 
 // Process-wide, lazily-started Java engine host. GitHub operations are never performed in the
 // Node extension process, so missing Java/jar or transport failures surface as setup errors.
 let sidecarClient: SidecarClient;
+const worktreePreviewPaths = new Map<string, string>();
+let worktreePreviewDidChange: vscode.EventEmitter<vscode.Uri> | undefined;
+
+function registerReadOnlyWorktreePreviewUri({
+    filePath,
+    relativeFile,
+    owner,
+    repo,
+    prNumber,
+}: ReadOnlyWorktreeUriParams): vscode.Uri {
+    const uriPath = buildReadOnlyWorktreeUriKey(owner, repo, prNumber, relativeFile);
+    const query = buildReadOnlyWorktreeQuery(filePath);
+    const mapKey = `${uriPath}?${query}`;
+    const existed = worktreePreviewPaths.has(mapKey);
+    if (worktreePreviewPaths.size >= 200 && !existed) {
+        const oldest = worktreePreviewPaths.keys().next().value;
+        if (oldest !== undefined) worktreePreviewPaths.delete(oldest);
+    }
+    worktreePreviewPaths.set(mapKey, filePath);
+    const uri = vscode.Uri.from({ scheme: WORKTREE_PREVIEW_SCHEME, path: uriPath, query });
+    if (existed) {
+        worktreePreviewDidChange?.fire(uri);
+    }
+    return uri;
+}
 
 function provider(): Provider {
     const value = config().get<string>('reviewProvider', 'claude');
@@ -100,7 +132,18 @@ export function activate(context: vscode.ExtensionContext) {
         githubBaseUrl,
         (pr) => viewProvider.openPullRequest(pr),
     );
+    worktreePreviewDidChange = new vscode.EventEmitter<vscode.Uri>();
     context.subscriptions.push(
+        worktreePreviewDidChange,
+        vscode.workspace.registerTextDocumentContentProvider(WORKTREE_PREVIEW_SCHEME, {
+            onDidChange: worktreePreviewDidChange.event,
+            provideTextDocumentContent: async (uri) => {
+                const mapKey = uri.query ? `${uri.path}?${uri.query}` : uri.path;
+                const target = worktreePreviewPaths.get(mapKey) ?? worktreePreviewPaths.get(uri.path);
+                if (!target) throw new Error('PR worktree preview is no longer available.');
+                return fs.promises.readFile(target, 'utf8');
+            },
+        }),
         vscode.window.createTreeView('pr-pilot.main', { treeDataProvider: new EmptyLauncherTree() }),
         vscode.commands.registerCommand('pr-pilot.open', () => viewProvider.openPanel()),
         vscode.commands.registerCommand('pr-pilot.selectCopilotModel', selectCopilotModel),
@@ -313,6 +356,7 @@ class ClaudeReviewsViewProvider {
                         void vscode.env.openExternal(vscode.Uri.parse(msg.url));
                     }
                     break;
+                case 'openFile': await handleOpenFile(state, msg); break;
                 case 'openSettings': await vscode.commands.executeCommand('pr-pilot.openSettings'); break;
                 case 'runAuthLogin': runAuthLoginInTerminal(); break;
                 case 'webviewLayoutChanged': break;
@@ -355,9 +399,14 @@ async function providerSetupReadiness(): Promise<ProviderReadiness> {
     const readiness = providerReadiness();
     if (!readiness.available || readiness.provider === 'copilot') return readiness;
     const authenticationStatus = await probeClaudeAuthentication((complete) => {
+        const invocation = claude.buildClaudeAuthProbeCommand(claude.findClaudeBinary());
+        if (!invocation) {
+            complete(new Error('Unsafe or missing Claude binary path'), '', '');
+            return;
+        }
         execFile(
-            claude.findClaudeBinary(),
-            ['auth', 'status', '--text'],
+            invocation.command,
+            invocation.args,
             { timeout: 5_000, windowsHide: true },
             (error, stdout, stderr) => complete(error, String(stdout), String(stderr)),
         );
@@ -551,4 +600,24 @@ function handleCancelChat(state: ViewState, msg: Record<string, unknown>): Promi
 }
 function handleAskClaude(state: ViewState, msg: Record<string, unknown>): Promise<void> {
     return reviewHandlers.handleAskClaude(state, msg);
+}
+function handleOpenFile(state: ViewState, msg: Record<string, unknown>): Promise<void> {
+    return handleOpenFileInEditor(
+        state,
+        {
+            number: msg.number as number,
+            owner: msg.owner as string,
+            repo: msg.repo as string,
+            file: msg.file as string,
+            line: typeof msg.line === 'number' ? msg.line : undefined,
+        },
+        {
+            vscode,
+            workingDir,
+            findGitRoot: (startDir) => sidecarClient.findGitRoot(startDir),
+            detectRepo: (startDir) => sidecarClient.detectRepo(startDir),
+            resolveWorkingDir: worktreeOperations.resolveWorkingDir,
+            toReadOnlyWorktreeUri: registerReadOnlyWorktreePreviewUri,
+        },
+    );
 }

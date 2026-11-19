@@ -25,7 +25,7 @@ class SourceInventoryMcpProviderTest {
                                     "operation",
                                     "DISCOVER",
                                     "projectPath",
-                                    "/worktree",
+                                    SemanticSnapshotTestFixtures.FIXTURE_PATH,
                                     "nonce",
                                     UUID.randomUUID().toString()));
             assertThat(SourceInventoryMcpProvider.decode(request))

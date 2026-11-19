@@ -30,6 +30,7 @@ final class BridgeMessageValidator {
                     "clearChat",
                     "cancelChat",
                     "openUrl",
+                    "openFile",
                     "openSettings",
                     "runAuthLogin",
                     "webviewLayoutChanged");
@@ -63,6 +64,10 @@ final class BridgeMessageValidator {
                     validOperationId(node.get("operationId"));
             case "openSettings", "runAuthLogin" -> true;
             case "openUrl" -> boundedText(node.get("url"), 4_096);
+            case "openFile" ->
+                    hasValidPrIdentity(node)
+                            && validRepoRelativeFile(node.get("file"))
+                            && optionalPositiveLine(node.get("line"));
             case "webviewLayoutChanged" -> boundedText(node.get("reason"), 4_096);
             case "askClaude" ->
                     validOperationId(node.get("operationId"))
@@ -192,6 +197,34 @@ final class BridgeMessageValidator {
         return node == null
                 || node.isNull()
                 || (node.isInt() && node.intValue() >= 0 && node.intValue() <= 10_000_000);
+    }
+
+    private static boolean optionalPositiveLine(JsonNode node) {
+        return node == null
+                || (node.isInt() && node.intValue() >= 1 && node.intValue() <= 10_000_000);
+    }
+
+    static boolean validRepoRelativeFile(JsonNode node) {
+        return boundedText(node, 4_096) && validRepoRelativeFile(node.textValue());
+    }
+
+    static boolean validRepoRelativeFile(String raw) {
+        if (raw == null || raw.isEmpty() || raw.length() > 4_096 || raw.indexOf('\0') >= 0) {
+            return false;
+        }
+        if (raw.indexOf('\\') >= 0 || raw.startsWith("/") || raw.endsWith("/")) {
+            return false;
+        }
+        if (raw.length() >= 2 && Character.isLetter(raw.charAt(0)) && raw.charAt(1) == ':') {
+            return false;
+        }
+        String[] segments = raw.split("/", -1);
+        for (String segment : segments) {
+            if (segment.isEmpty() || ".".equals(segment) || "..".equals(segment)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean boundedText(JsonNode node, int maxLength) {

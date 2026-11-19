@@ -1,12 +1,13 @@
 import * as path from 'path';
 import type { ReviewResult } from './models';
-import { parseChatResult, parseReviewResult } from './sidecarProtocol';
+import { parseChatResult, parseCopilotModelsResult, parseReviewResult } from './sidecarProtocol';
 import { SidecarGitHubClient } from './sidecarGitHubClient';
 import type {
     DeepReviewPreparation,
     RetainedDeepReview,
     SidecarChatParams,
     SidecarChatResult,
+    SidecarCopilotModelsResult,
     SidecarGenerateReviewParams,
     SidecarGitHubAuthResult,
     SidecarPrListResult,
@@ -27,6 +28,7 @@ import type { OutcomeComment } from './sidecarTypes';
 
 const REVIEW_REQUEST_TIMEOUT_MS = 35 * 60 * 1000;
 const WORKTREE_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+const MODEL_DISCOVERY_TIMEOUT_MS = 75 * 1000;
 
 export class SidecarReviewClient extends SidecarGitHubClient {
     async generateReview(
@@ -117,6 +119,21 @@ export class SidecarReviewClient extends SidecarGitHubClient {
         } catch {
             return '';
         }
+    }
+
+    /**
+     * Discovers the Copilot model IDs available to the signed-in account via the shared
+     * {@code review-engine} {@code CopilotModelDiscovery}, retiring the extension's separate
+     * `@github/copilot-sdk` CLI spawn.
+     */
+    async listCopilotModels(forceRefresh = false): Promise<SidecarCopilotModelsResult> {
+        await this.initialize();
+        const value = await this.requestRaw(
+            'reviews/listCopilotModels',
+            { forceRefresh },
+            { timeoutMs: MODEL_DISCOVERY_TIMEOUT_MS },
+        );
+        return this.parseResult('Copilot model discovery', parseCopilotModelsResult, value);
     }
 
     /*

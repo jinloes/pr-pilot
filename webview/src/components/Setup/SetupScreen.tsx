@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CheckCircle2, Circle, Copy, ExternalLink, RefreshCw, Settings2, Terminal, TriangleAlert } from 'lucide-react'
 import { sendToHost, type ProviderReadiness } from '../../bridge/types'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { LiveStatus } from '../a11y/LiveStatus'
 import { setupRecoveryAction, setupSteps, type SetupReason } from './setupRecovery'
 
 interface SetupScreenProps {
@@ -30,19 +31,32 @@ export function SetupScreen({ reason, detail, providerReadiness, refreshing, onR
   const guideUrl = recovery.guideUrl
   const [copyLabel, setCopyLabel] = useState<'copy' | 'copied' | 'failed'>('copy')
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null)
+  const [liveAnnouncement, setLiveAnnouncement] = useState('')
+  const prevRefreshingRef = useRef(refreshing)
 
   const authCommand = recovery.command
   const canRunInHost = host === 'VS Code' && recovery.canRunInHost === true
   const providerFailure = reason === 'provider_not_installed' || reason === 'provider_not_authenticated'
+
+  useEffect(() => {
+    if (prevRefreshingRef.current && !refreshing) {
+      const completedAt = Date.now()
+      setLastCheckedAt(completedAt)
+      setLiveAnnouncement(`Status checked at ${new Date(completedAt).toLocaleTimeString()}.`)
+    }
+    prevRefreshingRef.current = refreshing
+  }, [refreshing])
 
   async function handleCopyAuthCommand() {
     if (!authCommand) return
     try {
       await navigator.clipboard.writeText(authCommand)
       setCopyLabel('copied')
+      setLiveAnnouncement('Authentication command copied to clipboard.')
       window.setTimeout(() => setCopyLabel('copy'), 1200)
     } catch {
       setCopyLabel('failed')
+      setLiveAnnouncement('Failed to copy authentication command.')
       window.setTimeout(() => setCopyLabel('copy'), 1200)
     }
   }
@@ -56,7 +70,8 @@ export function SetupScreen({ reason, detail, providerReadiness, refreshing, onR
   }
 
   function checkStatus() {
-    setLastCheckedAt(Date.now())
+    const checkedAt = Date.now()
+    setLastCheckedAt(checkedAt)
     onRefresh()
   }
 
@@ -110,13 +125,14 @@ export function SetupScreen({ reason, detail, providerReadiness, refreshing, onR
                       : 'Copy auth command'}
               </Button>
             </div>
-            {lastCheckedAt && (
-              <p className="text-[11px] text-muted-foreground">
-                Last checked at {new Date(lastCheckedAt).toLocaleTimeString()}
-              </p>
-            )}
           </div>
         )}
+        {lastCheckedAt !== null && (
+          <p className="text-[11px] text-muted-foreground">
+            Last checked at {new Date(lastCheckedAt).toLocaleTimeString()}
+          </p>
+        )}
+        <LiveStatus message={liveAnnouncement} />
         <div className="flex flex-wrap items-center justify-center gap-2">
           {providerFailure && (
             <Button

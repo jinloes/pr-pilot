@@ -63,3 +63,27 @@ export function findByPathSuffix(map: FileCommentMap, path: string): LineComment
   }
   return undefined
 }
+
+export function isDeletedDiffFile(file: {
+  type: string
+  newPath?: string
+  oldMode?: string
+  newMode?: string
+  newRevision?: string
+}): boolean {
+  return file.type === 'delete'
+    || file.newPath === '/dev/null'
+    || Boolean(file.oldMode && !file.newMode)
+    || Boolean(file.newRevision && /^0+$/.test(file.newRevision))
+}
+
+export function isSafeRelativePath(candidate: string): boolean {
+  if (!candidate || candidate.length > 4096 || candidate.includes('\0') || candidate.includes('\\')) return false
+  if (candidate.startsWith('/') || candidate.endsWith('/') || /^[A-Za-z]:/.test(candidate)) return false
+  const segments = candidate.split('/')
+  return segments.every((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+}
+
+export function isValidEditorLine(line: number | undefined): line is number {
+  return line !== undefined && Number.isInteger(line) && line >= 1 && line <= 10_000_000
+}

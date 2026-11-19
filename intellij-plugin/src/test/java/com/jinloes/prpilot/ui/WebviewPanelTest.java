@@ -7,11 +7,16 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
+import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.services.IntellijClaudeService;
+import com.jinloes.prpilot.services.IntellijGitHubService;
 import java.awt.BorderLayout;
 import java.awt.Rectangle;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.FileSystemException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.JPanel;
+import org.apache.commons.io.file.PathUtils;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -377,6 +383,149 @@ class WebviewPanelTest {
             parent.setSize(width, height);
             parent.doLayout();
             host.doLayout();
+        }
+    }
+
+    @Nested
+    class OpenFileResolution {
+
+        @Test
+        void prefersWorkspaceCheckoutAndFallsBackToReadOnlyPrWorktreeWithConfinement()
+                throws Exception {
+            Path root = Files.createTempDirectory("pr-pilot-openfile-");
+            try {
+                Path workspace = Files.createDirectories(root.resolve("workspace"));
+                Path worktree = Files.createDirectories(root.resolve("worktree"));
+                Path outside = Files.createDirectories(root.resolve("outside"));
+                Files.createDirectories(workspace.resolve("src"));
+                Files.createDirectories(worktree.resolve("src"));
+
+                Path wsFile = Files.writeString(workspace.resolve("src/Main.java"), "v1\n");
+                Path dotDotEnv = Files.writeString(workspace.resolve("..env"), "KEY=1\n");
+                Files.writeString(worktree.resolve("src/Main.java"), "v2\n");
+                Path wtAdded = Files.writeString(worktree.resolve("src/Added.java"), "new\n");
+                Path secret = Files.writeString(outside.resolve("secret.txt"), "secret\n");
+
+                AtomicInteger worktreeLookups = new AtomicInteger();
+                var fromWorkspace =
+                        WebviewPanelSupport.resolveOpenFileTarget(
+                                workspace,
+                                () -> {
+                                    worktreeLookups.incrementAndGet();
+                                    return worktree;
+                                },
+                                "src/Main.java",
+                                15);
+                assertThat(fromWorkspace).isNotNull();
+                assertThat(fromWorkspace.file()).isEqualTo(wsFile.toRealPath());
+                assertThat(fromWorkspace.zeroBasedLine()).isEqualTo(14);
+                assertThat(fromWorkspace.temporaryWorktree()).isFalse();
+                assertThat(worktreeLookups).hasValue(0);
+
+                var fromDotDotPrefix =
+                        WebviewPanelSupport.resolveOpenFileTarget(
+                                workspace, () -> worktree, "..env", 10_000_001);
+                assertThat(fromDotDotPrefix).isNotNull();
+                assertThat(fromDotDotPrefix.file()).isEqualTo(dotDotEnv.toRealPath());
+                assertThat(fromDotDotPrefix.zeroBasedLine()).isZero();
+
+                assertThat(
+                                WebviewPanelSupport.resolveOpenFileTarget(
+                                                workspace, () -> worktree, "src/Main.java", -5)
+                                        .zeroBasedLine())
+                        .isZero();
+
+                var fromWorktree =
+                        WebviewPanelSupport.resolveOpenFileTarget(
+                                workspace,
+                                () -> {
+                                    worktreeLookups.incrementAndGet();
+                                    return worktree;
+                                },
+                                "src/Added.java",
+                                1);
+                assertThat(fromWorktree).isNotNull();
+                assertThat(fromWorktree.file()).isEqualTo(wtAdded.toRealPath());
+                assertThat(fromWorktree.zeroBasedLine()).isZero();
+                assertThat(fromWorktree.temporaryWorktree()).isTrue();
+                assertThat(worktreeLookups).hasValue(1);
+
+                assertThat(
+                                WebviewPanelSupport.resolveOpenFileTarget(
+                                        workspace, () -> worktree, "../outside/secret.txt", 1))
+                        .isNull();
+                assertThat(
+                                WebviewPanelSupport.resolveOpenFileTarget(
+                                        workspace, () -> worktree, "src/bad\0name.java", 1))
+                        .isNull();
+                assertThat(
+                                WebviewPanelSupport.resolveOpenFileTarget(
+                                        workspace, () -> worktree, "src/bad:name?.java", 1))
+                        .isNull();
+
+                try {
+                    Path link = workspace.resolve("src/Escape.java");
+                    Files.createSymbolicLink(link, secret);
+                    assertThat(
+                                    WebviewPanelSupport.resolveOpenFileTarget(
+                                            workspace, () -> null, "src/Escape.java", 1))
+                            .isNull();
+                } catch (UnsupportedOperationException | FileSystemException symlinkDenied) {
+                    // Unprivileged Windows environments without Developer Mode cannot create OS
+                    // symlinks.
+                }
+            } finally {
+                PathUtils.deleteDirectory(root);
+            }
+        }
+
+        @Test
+        void resolveDirectorySkipsStaleEpochWithoutCreatingOrLeakingWorktrees() throws Exception {
+            Path root = Files.createTempDirectory("pr-pilot-worktree-epoch-");
+            try {
+                AtomicInteger createdWorktrees = new AtomicInteger();
+                GitWorktreeService trackingGit =
+                        new GitWorktreeService() {
+                            @Override
+                            public File findGitRoot(File startDir) {
+                                return root.toFile();
+                            }
+
+                            @Override
+                            public void createWorktree(
+                                    File repoDir, String branch, String headSha, File worktreeDir) {
+                                createdWorktrees.incrementAndGet();
+                            }
+                        };
+                WorktreeCoordinator<WebviewBridgeMessages.PrWorktree> coordinator =
+                        new WorktreeCoordinator<>();
+                WebviewWorktreeManager manager =
+                        new WebviewWorktreeManager(
+                                root.toString(),
+                                new IntellijGitHubService(),
+                                trackingGit,
+                                coordinator);
+                long staleEpoch = manager.epoch();
+                assertThat(coordinator.acquireIfEpoch("acme/widget#9", staleEpoch)).isNotNull();
+                manager.clear();
+                assertThat(coordinator.acquireIfEpoch("acme/widget#9", staleEpoch)).isNull();
+
+                PullRequest pr =
+                        new PullRequest(
+                                "PR",
+                                "https://github.com/acme/widget/pull/9",
+                                "acme",
+                                "widget",
+                                9,
+                                "",
+                                "author",
+                                "2026-01-01");
+                assertThat(manager.resolveDirectory(pr, staleEpoch)).isNull();
+                assertThat(createdWorktrees).hasValue(0);
+                assertThat(manager.activeValue()).isNull();
+            } finally {
+                PathUtils.deleteDirectory(root);
+            }
         }
     }
 }

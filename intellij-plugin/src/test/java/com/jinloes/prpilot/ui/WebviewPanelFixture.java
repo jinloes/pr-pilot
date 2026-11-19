@@ -8,6 +8,7 @@ import com.jinloes.prpilot.review.SemanticReviewService;
 import com.jinloes.prpilot.review.SemanticWorktreeStore;
 import com.jinloes.prpilot.services.IntellijGitHubService;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -69,8 +70,15 @@ final class WebviewPanelFixture implements DeepReviewController.DeepReviewIo {
             com.fasterxml.jackson.databind.JsonNode options,
             DeepReviewController.FreshDeepPr fresh) {
         assertThat(options.path("intellijAssisted").asBoolean()).isTrue();
+        String fixtureRepo =
+                Path.of(System.getProperty("java.io.tmpdir"))
+                        .toAbsolutePath()
+                        .normalize()
+                        .resolve("fixture")
+                        .toString();
+        String fixtureDeep = Path.of(fixtureRepo).resolve("deep").toString();
         return new SemanticReviewService.Preparation(
-                id, fresh.head().sha(), "/fixture/deep", List.of("private"));
+                id, fresh.head().sha(), fixtureDeep, List.of("private"));
     }
 
     public DeepReviewController.FreshDeepPr fresh(int number, String owner, String repo)
@@ -89,8 +97,14 @@ final class WebviewPanelFixture implements DeepReviewController.DeepReviewIo {
     }
 
     public List<SemanticWorktreeStore.Retained> list() {
-        return List.of(
-                new SemanticWorktreeStore.Retained(id, "/fixture", "/fixture/deep", head, 1));
+        String fixtureRepo =
+                Path.of(System.getProperty("java.io.tmpdir"))
+                        .toAbsolutePath()
+                        .normalize()
+                        .resolve("fixture")
+                        .toString();
+        String fixtureDeep = Path.of(fixtureRepo).resolve("deep").toString();
+        return List.of(new SemanticWorktreeStore.Retained(id, fixtureRepo, fixtureDeep, head, 1));
     }
 
     public void cleanup(String retainedId, boolean closed) {

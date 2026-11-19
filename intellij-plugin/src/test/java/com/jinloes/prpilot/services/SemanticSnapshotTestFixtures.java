@@ -51,13 +51,22 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Shared native-IDE fixtures for semantic snapshot and MCP tool tests. */
 final class SemanticSnapshotTestFixtures {
 
+    static final Path FIXTURE_ROOT =
+            Path.of(System.getProperty("java.io.tmpdir"))
+                    .toAbsolutePath()
+                    .normalize()
+                    .resolve("pr-pilot-fixture");
+    static final String FIXTURE_PATH = FIXTURE_ROOT.toString();
+    static final String FIXTURE_JDK_PATH =
+            FIXTURE_ROOT.resolveSibling("pr-pilot-fixture-jdk").toString();
+
     private SemanticSnapshotTestFixtures() {}
 
     static SemanticReviewContext.Request request(SemanticReviewContext.Operation operation) {
         var request = new SemanticReviewContext.Request();
         request.setSchemaVersion(2);
         request.setOperation(operation);
-        request.setProjectPath("/fixture");
+        request.setProjectPath(FIXTURE_PATH);
         request.setNonce(UUID.randomUUID().toString());
         if (operation != SemanticReviewContext.Operation.STATUS) {
             request.setDiscoveryId(UUID.randomUUID().toString());
@@ -161,7 +170,7 @@ final class SemanticSnapshotTestFixtures {
                 root =
                         nativeInputs
                                 ? Files.createTempDirectory("semantic-native-").toRealPath()
-                                : Path.of("/fixture");
+                                : FIXTURE_ROOT;
             } catch (Exception e) {
                 throw new IllegalStateException(e);
             }
@@ -312,7 +321,7 @@ final class SemanticSnapshotTestFixtures {
 
             BuildInput(String path) {
                 id = new ExternalSystemProjectId(new ProjectSystemId("GRADLE"), path);
-                String setting = path + "/build.gradle";
+                String setting = Path.of(path).resolve("build.gradle").toString();
                 paths.add(setting);
                 settings.put(setting, new SettingNode(setting));
                 aware =
@@ -371,7 +380,7 @@ final class SemanticSnapshotTestFixtures {
                                     root.toString(),
                                     false,
                                     sdk,
-                                    "/fixture-jdk",
+                                    FIXTURE_JDK_PATH,
                                     List.of(
                                             new SemanticSnapshotService.OrderFacts(
                                                     "dependency", dependencyValid)),
@@ -544,7 +553,8 @@ final class SemanticSnapshotTestFixtures {
             var owner = new AtomicReference<Disposable>();
             var id =
                     new ExternalSystemProjectId(
-                            new ProjectSystemId("GRADLE"), "/fixture/" + UUID.randomUUID());
+                            new ProjectSystemId("GRADLE"),
+                            FIXTURE_ROOT.resolve(UUID.randomUUID().toString()).toString());
             var aware =
                     proxy(
                             ExternalSystemProjectAware.class,
@@ -584,7 +594,7 @@ final class SemanticSnapshotTestFixtures {
             service.dispose();
             if (inventory != null) inventory.dispose();
             ApplicationManager.setApplication(previous);
-            if (!root.toString().equals("/fixture")) {
+            if (!root.equals(FIXTURE_ROOT)) {
                 try {
                     Files.delete(root);
                 } catch (Exception e) {

@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.apache.commons.io.file.PathUtils;
+import org.apache.commons.io.file.StandardDeleteOption;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -52,7 +53,7 @@ class ReviewBenchCheckoutTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        PathUtils.deleteDirectory(root);
+        PathUtils.deleteDirectory(root, StandardDeleteOption.OVERRIDE_READ_ONLY);
     }
 
     private String url(Path repo) {
@@ -94,6 +95,22 @@ class ReviewBenchCheckoutTest {
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("git clone");
         }
+
+        @Test
+        void rejectsDriveQualifiedRelativeRootAndTraversalRepositoryNames() {
+            Path repos = root.resolve("repos");
+            for (String invalid : List.of("", " ", ".", "..", "a/b", "a\\b", "C:escape", "o:r")) {
+                assertThatThrownBy(
+                                () -> ReviewBenchCheckout.ensureClone(repos, invalid, url(mirror)))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("Invalid benchmark repository name");
+            }
+            assertThatThrownBy(
+                            () ->
+                                    ReviewBenchCheckout.ensureClone(
+                                            Path.of("relative-repos"), "C:escape", url(mirror)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Nested
@@ -113,11 +130,53 @@ class ReviewBenchCheckoutTest {
                             false)) {
                 worktree = checkout.worktreeDir();
                 assertThat(git(worktree.toPath(), "rev-parse", "HEAD")).isEqualTo(headSha);
-                assertThat(Files.readString(worktree.toPath().resolve("a.py")))
+                assertThat(
+                                Files.readString(worktree.toPath().resolve("a.py"))
+                                        .replace("\r\n", "\n"))
                         .isEqualTo("x = 2\n");
                 assertThat(checkout.diff().diff()).contains("-x = 1").contains("+x = 2");
             }
-            assertThat(git(clone.toPath(), "worktree", "list")).doesNotContain(worktree.getPath());
+            assertThat(git(clone.toPath(), "worktree", "list").replace('\\', '/'))
+                    .doesNotContain(worktree.getPath().replace('\\', '/'));
+        }
+
+        @Test
+        void checksOutTrackedGitSymlinksAsPlainFilesInsteadOfOsSymlinks() throws Exception {
+            Path work = root.resolve("work");
+            git(work, "checkout", "-q", "-B", "symlink-pr", baseSha);
+            Path outsideSecret = root.resolve("outside-secret.txt");
+            Files.writeString(outsideSecret, "TOP_SECRET_VALUE");
+            Process hashProc =
+                    new ProcessBuilder("git", "hash-object", "-w", "--stdin")
+                            .directory(work.toFile())
+                            .start();
+            try (var out = hashProc.getOutputStream()) {
+                out.write(
+                        outsideSecret.toAbsolutePath().toString().getBytes(StandardCharsets.UTF_8));
+            }
+            String blobSha =
+                    new String(hashProc.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
+                            .strip();
+            assertThat(hashProc.waitFor(10, TimeUnit.SECONDS)).isTrue();
+            git(work, "update-index", "--add", "--cacheinfo", "120000," + blobSha + ",leak.txt");
+            git(work, "commit", "-q", "-m", "add symlink");
+            String symlinkHead = git(work, "rev-parse", "HEAD");
+            git(work, "push", "-q", upstream.toString(), symlinkHead + ":refs/heads/symlink-pr");
+
+            File clone = ReviewBenchCheckout.ensureClone(root.resolve("repos"), "o_r", url(mirror));
+            try (ReviewBenchCheckout checkout =
+                    ReviewBenchCheckout.open(
+                            new GitWorktreeService(),
+                            clone,
+                            8,
+                            baseSha,
+                            symlinkHead,
+                            url(upstream),
+                            false)) {
+                Path checkedOut = checkout.worktreeDir().toPath().resolve("leak.txt");
+                assertThat(Files.isSymbolicLink(checkedOut)).isFalse();
+                assertThat(Files.readString(checkedOut)).doesNotContain("TOP_SECRET_VALUE");
+            }
         }
 
         @Test
@@ -142,6 +201,8 @@ class ReviewBenchCheckoutTest {
     static String git(Path dir, String... args) throws Exception {
         List<String> command = new ArrayList<>();
         command.add("git");
+        command.add("-c");
+        command.add("core.autocrlf=false");
         command.add("-c");
         command.add("user.name=Test");
         command.add("-c");

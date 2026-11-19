@@ -349,7 +349,7 @@ class SemanticSnapshotServiceTest {
                     f -> f.settings.values().iterator().next().present = false);
             controls.put(
                     "settings set changed",
-                    f -> f.linked.get(0).paths.add(f.root + "/settings.gradle"));
+                    f -> f.linked.get(0).paths.add(f.root.resolve("settings.gradle").toString()));
             controls.put(
                     "settings list callback",
                     f -> f.linked.get(0).listener.onSettingsFilesListChange());
@@ -449,11 +449,23 @@ class SemanticSnapshotServiceTest {
 
     @Nested
     class NativeCallbacks {
+        private static final String BUILD_GRADLE =
+                SemanticSnapshotTestFixtures.FIXTURE_ROOT.resolve("build.gradle").toString();
+        private static final String INCLUDED_BUILD_GRADLE =
+                SemanticSnapshotTestFixtures.FIXTURE_ROOT
+                        .resolve("included")
+                        .resolve("build.gradle")
+                        .toString();
+        private static final String OTHER_JAVA =
+                SemanticSnapshotTestFixtures.FIXTURE_ROOT.resolve("Other.java").toString();
+        private static final String WRONG_PROJECT_PATH =
+                SemanticSnapshotTestFixtures.FIXTURE_ROOT.resolveSibling("wrong").toString();
+
         @Test
         void actualDocumentSubscriptionInvalidatesArmedAndCompletedImportOnEditRevert()
                 throws Exception {
             try (var fixture = new NativeFixture()) {
-                var observed = fixture.observe(Set.of("/fixture/build.gradle"));
+                var observed = fixture.observe(Set.of(BUILD_GRADLE));
                 var original = receipt(1, "b".repeat(64));
                 for (boolean completed : List.of(false, true)) {
                     observed.baseline().armed(observed.baseline().arm(), original);
@@ -461,7 +473,7 @@ class SemanticSnapshotServiceTest {
                         observed.baseline().start(List.of(1L));
                         observed.baseline().finish(observed.baseline().success(), original);
                     }
-                    fixture.documentPath.set("/fixture/build.gradle");
+                    fixture.documentPath.set(BUILD_GRADLE);
                     fixture.documents.get().beforeDocumentChange(event("old", "edited"));
                     fixture.documents.get().beforeDocumentChange(event("edited", "old"));
                     assertThat(observed.baseline().phase())
@@ -475,16 +487,16 @@ class SemanticSnapshotServiceTest {
         @Test
         void unrelatedDocumentDoesNotInvalidateButSettingsEditDefeatsLateFinish() throws Exception {
             try (var fixture = new NativeFixture()) {
-                var observed = fixture.observe(Set.of("/fixture/build.gradle"));
+                var observed = fixture.observe(Set.of(BUILD_GRADLE));
                 var original = receipt(1, "b".repeat(64));
                 observed.baseline().armed(observed.baseline().arm(), original);
-                fixture.documentPath.set("/fixture/Other.java");
+                fixture.documentPath.set(OTHER_JAVA);
                 fixture.documents.get().beforeDocumentChange(event("old", "new"));
                 assertThat(observed.baseline().phase())
                         .isEqualTo(SemanticSnapshotService.Phase.ARMED);
                 observed.baseline().start(List.of(1L));
                 long token = observed.baseline().success();
-                fixture.documentPath.set("/fixture/build.gradle");
+                fixture.documentPath.set(BUILD_GRADLE);
                 fixture.documents.get().beforeDocumentChange(event("old", "new"));
                 observed.baseline().finish(token, original);
                 assertThat(observed.baseline().phase())
@@ -524,8 +536,8 @@ class SemanticSnapshotServiceTest {
         @Test
         void subscribedSettingsListChangeAndDisposalInvalidateEveryBuild() throws Exception {
             try (var fixture = new NativeFixture()) {
-                var first = fixture.observe(Set.of("/fixture/build.gradle"));
-                var second = fixture.observe(Set.of("/fixture/included/build.gradle"));
+                var first = fixture.observe(Set.of(BUILD_GRADLE));
+                var second = fixture.observe(Set.of(INCLUDED_BUILD_GRADLE));
                 first.baseline().armed(first.baseline().arm(), receipt(1, "b".repeat(64)));
                 second.baseline().armed(second.baseline().arm(), receipt(1, "c".repeat(64)));
                 first.listener().onSettingsFilesListChange();
@@ -552,11 +564,11 @@ class SemanticSnapshotServiceTest {
             try (var fixture = new NativeFixture()) {
                 for (var operation : SemanticReviewContext.Operation.values()) {
                     var request = request(operation);
-                    request.setProjectPath("/wrong");
+                    request.setProjectPath(WRONG_PROJECT_PATH);
                     assertThat(fixture.service.execute(request).getReasons())
                             .containsExactly("WRONG_PROJECT");
                     fixture.info.build = "IU-261.1";
-                    request.setProjectPath("/fixture");
+                    request.setProjectPath(SemanticSnapshotTestFixtures.FIXTURE_PATH);
                     assertThat(fixture.service.execute(request).getStatus())
                             .isEqualTo(SemanticReviewContext.Status.UNSUPPORTED);
                     fixture.info.build = "IU-262.1";
@@ -614,13 +626,15 @@ class SemanticSnapshotServiceTest {
     }
 
     private static SemanticSnapshotService.Receipt receipt(long stamp, String identity) {
+        String buildGradle =
+                SemanticSnapshotTestFixtures.FIXTURE_ROOT.resolve("build.gradle").toString();
         return new SemanticSnapshotService.Receipt(
                 List.of(
                         new SemanticSnapshotService.NativeSetting(
-                                "/fixture/build.gradle", true, "a".repeat(64), stamp)),
+                                buildGradle, true, "a".repeat(64), stamp)),
                 List.of(
                         new SourceInventoryFiles.Setting(
-                                "/fixture/build.gradle", true, "a".repeat(64), identity)));
+                                buildGradle, true, "a".repeat(64), identity)));
     }
 
     @Nested

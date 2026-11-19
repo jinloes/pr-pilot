@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringUtils;
 
 /**
@@ -84,6 +85,7 @@ public final class ReviewPrompts {
         parts.add(ReviewRulePrompts.RULE_REVIEW_PREAMBLE);
         parts.add(ReviewSupervisorPrompts.HUNK_OBJECTIVE);
         parts.add(ReviewSupervisorPrompts.FILE_OBJECTIVE);
+        parts.add(ReviewSupervisorPrompts.FOLLOW_UP_PREAMBLE);
         LanguageChecklists.checklists()
                 .forEach(
                         (language, items) -> {
@@ -102,6 +104,21 @@ public final class ReviewPrompts {
             parts.add(rule.trigger());
             parts.add(rule.prompt());
         }
+        parts.add(ReviewCritiquePrompts.DROP_REASONS_DIRECTIVE);
+        parts.add(CopilotSdkRuntime.READ_ONLY_SYSTEM_MESSAGE);
+        parts.add(CopilotSdkRuntime.TOOL_FREE_SYSTEM_MESSAGE);
+        parts.add(CopilotSdkRuntime.TOOL_BUDGET_REJECT_MESSAGE);
+        parts.add(String.join(",", CopilotSdkRuntime.READ_ONLY_TOOLS));
+        parts.add(String.valueOf(CopilotSdkRuntime.MAX_SESSION_TOOL_CALLS));
+        parts.add(ClaudeService.RESUME_NUDGE);
+        parts.add(ClaudeService.READ_ONLY_TOOLS);
+        parts.add(String.valueOf(ClaudeService.REVIEW_MAX_TURNS));
+        parts.add(String.valueOf(ClaudeService.RESUME_MAX_TURNS));
+        try {
+            parts.add(SemanticSkillBundle.load().instructions());
+        } catch (IOException failure) {
+            throw new IllegalStateException("Trusted semantic skills unavailable", failure);
+        }
         return List.copyOf(parts);
     }
 
@@ -109,13 +126,24 @@ public final class ReviewPrompts {
         return PROMPT_VERSION + (supervisorEnabled ? "-supervisor-on" : "-supervisor-off");
     }
 
+    private static final Pattern RESERVED_PROMPT_TAGS =
+            Pattern.compile(
+                    "(?i)<\\s*(/?)\\s*(trusted_semantic_review_skills|user_message|review_scope|follow_up_directives)\\b");
+
     /**
-     * Escapes the closing tag inside untrusted content so a crafted PR body / review / chat message
-     * cannot break out of its data-only container and inject instructions into the surrounding
-     * prompt. The opening tag is never written by users so does not need escaping.
+     * Escapes closing tags (including case and whitespace variants) and reserved structural/trusted
+     * tags inside untrusted content so crafted PR metadata, diffs, comments, or symbol names cannot
+     * break out of their data-only container and inject instructions into the surrounding prompt.
      */
     static String escapeClosingTag(String content, String tag) {
-        return content.replace("</" + tag + ">", "&lt;/" + tag + ">");
+        if (content == null) {
+            return "";
+        }
+        String closingEscaped =
+                Pattern.compile("(?i)<\\s*/\\s*" + Pattern.quote(tag) + "\\s*>")
+                        .matcher(content)
+                        .replaceAll("&lt;/" + tag + ">");
+        return RESERVED_PROMPT_TAGS.matcher(closingEscaped).replaceAll("&lt;$1$2");
     }
 
     static String truncatePromptContent(String content, int maxChars) {
@@ -148,6 +176,11 @@ public final class ReviewPrompts {
     }
 
     static String buildPrompt(PRReviewRequest request, InspectionManifest manifest) {
+        return buildPrompt(request, manifest, null);
+    }
+
+    static String buildPrompt(
+            PRReviewRequest request, InspectionManifest manifest, String trustedExtraSection) {
         StringBuilder prompt;
         if (request.isCandidateRecall()) {
             prompt =
@@ -164,8 +197,11 @@ public final class ReviewPrompts {
         prompt.append(TriggeredChecklists.sectionFor(manifest.files()));
         appendPrMetadata(prompt, request.getPr());
         appendContextSections(prompt, request);
+        if (StringUtils.isNotBlank(trustedExtraSection)) {
+            prompt.append("\n").append(trustedExtraSection.strip()).append("\n");
+        }
         prompt.append("\n<inspection_manifest>\n")
-                .append(manifest.toPromptJson())
+                .append(escapeClosingTag(manifest.toPromptJson(), "inspection_manifest"))
                 .append("\n</inspection_manifest>\n");
         appendPrDiff(prompt, request);
         return prompt.toString();
@@ -187,14 +223,15 @@ public final class ReviewPrompts {
             prompt.append("\n<trusted_semantic_review_skills>\n")
                     .append(SemanticSkillBundle.load().instructions())
                     .append("\n</trusted_semantic_review_skills>\n");
+            String serializedEvidence =
+                    JSON.writeValueAsString(
+                            Map.of(
+                                    "evidence",
+                                    context.getEvidence(),
+                                    "limitations",
+                                    context.getLimitations()));
             prompt.append("\n<untrusted_semantic_evidence>\n")
-                    .append(
-                            JSON.writeValueAsString(
-                                    Map.of(
-                                            "evidence",
-                                            context.getEvidence(),
-                                            "limitations",
-                                            context.getLimitations())))
+                    .append(escapeClosingTag(serializedEvidence, "untrusted_semantic_evidence"))
                     .append("\n</untrusted_semantic_evidence>\n");
         } catch (IOException failure) {
             throw new IllegalStateException("Trusted semantic skills unavailable", failure);
@@ -375,6 +412,8 @@ public final class ReviewPrompts {
     }
 
     static void appendPrMetadata(StringBuilder prompt, PullRequest pr) {
+        String singleLineTitle =
+                StringUtils.defaultString(pr.getTitle()).replaceAll("[\\r\\n]+", " ").trim();
         prompt.append("\n<pr_metadata>\n")
                 .append("number: ")
                 .append(pr.getNumber())
@@ -385,7 +424,7 @@ public final class ReviewPrompts {
                 .append(pr.getRepo())
                 .append("\n")
                 .append("title: ")
-                .append(escapeClosingTag(pr.getTitle(), "pr_metadata"))
+                .append(escapeClosingTag(singleLineTitle, "pr_metadata"))
                 .append("\n")
                 .append("</pr_metadata>\n");
     }

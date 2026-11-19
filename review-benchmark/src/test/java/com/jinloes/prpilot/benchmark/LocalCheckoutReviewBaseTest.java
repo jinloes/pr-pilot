@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import org.apache.commons.io.file.PathUtils;
+import org.apache.commons.io.file.StandardDeleteOption;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -60,7 +61,7 @@ class LocalCheckoutReviewBaseTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        PathUtils.deleteDirectory(root);
+        PathUtils.deleteDirectory(root, StandardDeleteOption.OVERRIDE_READ_ONLY);
     }
 
     @Nested

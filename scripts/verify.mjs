@@ -254,37 +254,71 @@ export function nodeVersionSupported(version) {
 }
 
 /**
- * Resolves a Node >= 26 binary from `.nvmrc` / nvm / volta when a non-interactive shell starts
- * on an older default Node, so agents and IDE tasks need no manual PATH setup.
+ * Resolves a Node >= 26 binary from `.nvmrc` / nvm / volta / fnm when a non-interactive shell
+ * starts on an older default Node, so agents and IDE tasks need no manual PATH setup.
  */
 export function resolveNvmrcNode(repoRoot, options = {}) {
   const platform = options.platform ?? process.platform
-  if (platform === 'win32') return null
+  const isWin = platform === 'win32'
+  const paths = isWin ? path.win32 : path.posix
   const home = options.homedir ?? os.homedir()
   const env = options.env ?? process.env
   const exists = options.existsSync ?? fs.existsSync
   const readdir = options.readdirSync ?? fs.readdirSync
   const readFile = options.readFileSync ?? fs.readFileSync
 
-  const nvmDir = env.NVM_DIR || path.join(home, '.nvm')
-  const versionsDir = path.join(nvmDir, 'versions', 'node')
-  const candidates = []
+  const exe = isWin ? ['node.exe'] : ['bin', 'node']
+  const voltaHome =
+    env.VOLTA_HOME ||
+    (isWin
+      ? paths.join(env.LOCALAPPDATA || paths.join(home, 'AppData', 'Local'), 'Volta')
+      : paths.join(home, '.volta'))
+  const voltaNodeDir = paths.join(voltaHome, 'tools', 'image', 'node')
 
+  const nvmDir = isWin
+    ? env.NVM_HOME || paths.join(env.APPDATA || paths.join(home, 'AppData', 'Roaming'), 'nvm')
+    : paths.join(env.NVM_DIR || paths.join(home, '.nvm'), 'versions', 'node')
+
+  const fnmDir = paths.join(
+    env.FNM_DIR ||
+      (isWin
+        ? paths.join(env.APPDATA || paths.join(home, 'AppData', 'Roaming'), 'fnm')
+        : paths.join(home, '.local', 'share', 'fnm')),
+    'node-versions',
+  )
+
+  const candidates = []
   const nvmrcPath = path.join(repoRoot, '.nvmrc')
   if (exists(nvmrcPath)) {
     const pinned = readFile(nvmrcPath, 'utf8').trim().replace(/^v/, '')
     if (pinned && nodeVersionSupported(pinned)) {
-      candidates.push(path.join(versionsDir, `v${pinned}`, 'bin', 'node'))
+      candidates.push(paths.join(voltaNodeDir, pinned, ...exe))
+      candidates.push(paths.join(voltaNodeDir, `v${pinned}`, ...exe))
+      candidates.push(paths.join(nvmDir, `v${pinned}`, ...exe))
+      if (isWin) candidates.push(paths.join(nvmDir, pinned, ...exe))
+      candidates.push(paths.join(fnmDir, `v${pinned}`, 'installation', ...exe))
     }
   }
-  if (exists(versionsDir)) {
-    const installed = readdir(versionsDir)
-      .filter((entry) => /^v\d+\.\d+\.\d+$/.test(entry) && nodeVersionSupported(entry))
-      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
-    for (const version of installed) {
-      candidates.push(path.join(versionsDir, version, 'bin', 'node'))
+
+  const installedBins = []
+  const collectVersions = (dir, toBin) => {
+    if (!exists(dir)) return
+    for (const entry of readdir(dir)) {
+      const clean = entry.replace(/^v/, '')
+      if (/^\d+\.\d+\.\d+$/.test(clean) && nodeVersionSupported(clean)) {
+        installedBins.push({ version: clean, bin: toBin(entry) })
+      }
     }
   }
+  collectVersions(voltaNodeDir, (entry) => paths.join(voltaNodeDir, entry, ...exe))
+  collectVersions(nvmDir, (entry) => paths.join(nvmDir, entry, ...exe))
+  collectVersions(fnmDir, (entry) => paths.join(fnmDir, entry, 'installation', ...exe))
+
+  installedBins.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
+  for (const item of installedBins) {
+    candidates.push(item.bin)
+  }
+
   for (const candidate of candidates) {
     if (exists(candidate)) return candidate
   }

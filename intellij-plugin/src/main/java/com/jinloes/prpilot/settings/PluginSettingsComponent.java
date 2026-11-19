@@ -298,6 +298,18 @@ public class PluginSettingsComponent {
                                 false)
                         .addLabeledComponent(
                                 SettingsUi.fieldLabel(
+                                        "Repository guidance files:", guidance.guidanceGlobsArea()),
+                                SettingsUi.fieldWithHint(
+                                        SettingsUi.boundedTextArea(guidance.guidanceGlobsArea()),
+                                        SettingsUi.hintLabel(
+                                                "<html><small>One repository-relative glob per line (for"
+                                                        + " example <code>.review/ai-agent/*.md</code>), read from"
+                                                        + " the PR base commit alongside AGENTS.md and"
+                                                        + " CONTRIBUTING.md.</small></html>")),
+                                1,
+                                false)
+                        .addLabeledComponent(
+                                SettingsUi.fieldLabel(
                                         "Remembered repository instructions:",
                                         repositoryInstructions.combo()),
                                 SettingsUi.fieldWithHint(

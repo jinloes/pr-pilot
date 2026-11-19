@@ -42,7 +42,7 @@ interface UseReviewHostMessagesOptions {
   repositoryInstructionsRef: Ref<string>
   repositoryInstructionsDraftRef: Ref<string>
   generatedBaselineRef: Ref<ReviewResult | null>
-  lastSavedSnapshotRef: Ref<string | null>
+  setSavedSnapshot: (snapshot: string | null) => void
   inFlightSaveRef: Ref<InFlightSave | null>
   pendingSubmitRef: Ref<{ verdict: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'; comment: string } | null>
   submitInFlightRef: Ref<boolean>
@@ -81,7 +81,7 @@ export function useReviewHostMessages({
   repositoryInstructionsRef,
   repositoryInstructionsDraftRef,
   generatedBaselineRef,
-  lastSavedSnapshotRef,
+  setSavedSnapshot,
   inFlightSaveRef,
   pendingSubmitRef,
   submitInFlightRef,
@@ -161,9 +161,11 @@ export function useReviewHostMessages({
             ? normalizeReviewResult(message.result, validationDiff)
             : undefined
           if (message.prState === 'DRAFT_PRESENT' && normalizedResult) {
-            lastSavedSnapshotRef.current = message.recoveryPending ? null : reviewSnapshot(normalizedResult)
+            setSavedSnapshot(message.recoveryPending ? null : reviewSnapshot(normalizedResult))
             setFocusedCommentIdx(0)
             commentNavigatedRef.current = false
+          } else {
+            setSavedSnapshot(null)
           }
           dispatch({
             type: 'draftLoaded',
@@ -259,7 +261,7 @@ export function useReviewHostMessages({
         case 'draftSaved': {
           const inFlight = inFlightSaveRef.current
           if (!inFlight || message.saveId !== inFlight.saveId) break
-          lastSavedSnapshotRef.current = inFlight.snapshot
+          setSavedSnapshot(inFlight.snapshot)
           inFlightSaveRef.current = null
           clearWatchdog(saveWatchdogRef)
           setSaving(false)
@@ -323,6 +325,7 @@ export function useReviewHostMessages({
 
         case 'draftDeleted':
           setCommentsMovedToBody(false)
+          setSavedSnapshot(null)
           clearWatchdog(deleteWatchdogRef)
           setDeleting(false)
           deleteDraftStateRef.current = null

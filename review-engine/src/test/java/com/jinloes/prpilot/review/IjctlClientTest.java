@@ -22,6 +22,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -29,6 +31,10 @@ class IjctlClientTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @Nested
+    @EnabledOnOs(
+            value = {OS.LINUX, OS.MAC},
+            disabledReason =
+                    "IjctlClient transport requires POSIX rwx------/rw------- launch asset permissions")
     class Query {
         private Path fixture, project, executable, config, worker;
         private ObjectNode schema;
@@ -399,6 +405,10 @@ class IjctlClientTest {
     }
 
     @Nested
+    @EnabledOnOs(
+            value = {OS.LINUX, OS.MAC},
+            disabledReason =
+                    "IjctlClient transport requires POSIX rwx------/rw------- launch asset permissions")
     class Snapshot {
         private Path fixture, project, executable, config, worker;
         private SemanticReviewContext.Request request;

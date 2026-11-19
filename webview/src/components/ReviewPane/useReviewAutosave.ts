@@ -27,6 +27,7 @@ interface UseReviewAutosaveOptions {
   onDirtyStateChange?: (dirty: boolean) => void
   pendingSubmitRef: Ref<{ verdict: Verdict; comment: string } | null>
   submitInFlightRef: Ref<boolean>
+  lastSavedSnapshot: string | null
   lastSavedSnapshotRef: Ref<string | null>
   generatedBaselineRef: Ref<ReviewResult | null>
   inFlightSaveRef: Ref<InFlightSave | null>
@@ -49,6 +50,7 @@ export function useReviewAutosave({
   onDirtyStateChange,
   pendingSubmitRef,
   submitInFlightRef,
+  lastSavedSnapshot,
   lastSavedSnapshotRef,
   generatedBaselineRef,
   inFlightSaveRef,
@@ -64,7 +66,7 @@ export function useReviewAutosave({
     ? state.result
     : null
   const savableSnapshot = savableResult ? reviewSnapshot(savableResult) : null
-  const autosaveDirty = isReviewDirty(savableSnapshot, lastSavedSnapshotRef.current)
+  const autosaveDirty = isReviewDirty(savableSnapshot, lastSavedSnapshot)
 
   useEffect(() => {
     const dirty = autosaveDirty || state.kind === 'reviewUnsaved' || state.kind === 'saveError'

@@ -10,6 +10,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringUtils;
 
 /**
@@ -71,6 +72,13 @@ public final class ReviewChatPrompts {
     /** A file below this many characters of remaining budget is listed but not shown. */
     static final int MIN_FILE_DIFF_CHARS = 1_000;
 
+    private static final Pattern FORGED_TURN_TAG = Pattern.compile("(?i)<\\s*(/?)\\s*(turn)\\b");
+
+    private static String escapeTurnContent(String content) {
+        String escaped = ReviewPrompts.escapeClosingTag(content, "turn");
+        return FORGED_TURN_TAG.matcher(escaped).replaceAll("&lt;$1$2");
+    }
+
     /**
      * Builds the chat prompt.
      *
@@ -100,11 +108,10 @@ public final class ReviewChatPrompts {
                     .append(role)
                     .append("\">\n")
                     .append(
-                            ReviewPrompts.escapeClosingTag(
+                            escapeTurnContent(
                                     ReviewPrompts.truncatePromptContent(
                                             StringUtils.defaultString(msg.getContent()),
-                                            MAX_HISTORY_TURN_CHARS),
-                                    "turn"))
+                                            MAX_HISTORY_TURN_CHARS)))
                     .append("\n</turn>\n\n");
         }
         if (context != null) appendSection(sb, "attachment", attachment(context.attachment()));

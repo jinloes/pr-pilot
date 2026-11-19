@@ -42,7 +42,7 @@ test('a TypeScript-side change points back at the JVM copy', () => {
 
 test('one file can be in several entries', () => {
   const notes = mirrorNotes(['vscode-extension/src/copilot.ts'])
-  assert.equal(notes.length, 3)
+  assert.equal(notes.length, 2)
 })
 
 test('one-way entries ignore changes to their second side', () => {

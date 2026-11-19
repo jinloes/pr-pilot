@@ -776,6 +776,12 @@
   border-color: hsl(var(--ring));
 }
 
+.diff-comment__textarea:focus-visible {
+  border-color: hsl(var(--ring));
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+}
+
 /* ── Search bar ──────────────────────────────────────── */
 
 .diff-search-bar {
@@ -789,7 +795,8 @@
 .diff-search-input {
   flex: 1;
   min-width: 0;
-  height: 22px;
+  min-height: 24px;
+  height: 24px;
   padding: 0 6px;
   background: hsl(var(--background));
   border: 1px solid hsl(var(--border));
@@ -803,6 +810,19 @@
 
 .diff-search-input:focus {
   border-color: hsl(var(--ring));
+}
+
+.diff-search-input:focus-visible {
+  border-color: hsl(var(--ring));
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+}
+
+@media (forced-colors: active) {
+  .diff-comment__textarea:focus-visible,
+  .diff-search-input:focus-visible {
+    outline: 2px solid Highlight;
+  }
 }
 
 .diff-search-count {

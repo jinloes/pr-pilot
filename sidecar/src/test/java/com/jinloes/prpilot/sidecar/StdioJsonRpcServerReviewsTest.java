@@ -553,6 +553,129 @@ class StdioJsonRpcServerReviewsTest extends StdioJsonRpcServerTestBase {
         assertThat(control.path("error").path("code").asInt()).isEqualTo(-32602);
     }
 
+    @Test
+    void oversizedScheduledReviewResponseReturnsFallbackErrorAndDropsOversizedNotification()
+            throws Exception {
+        String hugePayload = "z".repeat(StdioFrameCodec.MAX_MESSAGE_BYTES + 1024);
+        CountDownLatch finished = new CountDownLatch(1);
+        ReviewSessionService hugeReview =
+                new ReviewSessionService() {
+                    @Override
+                    public ReviewResult generate(
+                            ReviewEngineApi.GenerateReviewParams params,
+                            Consumer<String> onStatus,
+                            BiConsumer<String, String> onChunk) {
+                        onChunk.accept("text", hugePayload);
+                        onStatus.accept("Done");
+                        return new ReviewResult(hugePayload, "COMMENT", List.of());
+                    }
+                };
+        StdioJsonRpcServer asyncServer =
+                new StdioJsonRpcServer(
+                        objectMapper,
+                        frameCodec,
+                        new SidecarBootstrapService(),
+                        new GitHubEngine(),
+                        hugeReview,
+                        reviewExecutor);
+        ByteArrayOutputStream input = new ByteArrayOutputStream();
+        frameCodec.writeFrame(input, generateRequest(91, "review-91"));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        asyncServer.run(new ByteArrayInputStream(input.toByteArray()), output);
+        reviewExecutor.submit(finished::countDown);
+        assertThat(finished.await(5, TimeUnit.SECONDS)).isTrue();
+
+        List<JsonNode> frames = readFrames(output);
+        assertThat(frames).hasSize(2);
+        assertThat(frames.get(0).path("method").asText()).isEqualTo("reviews/status");
+        assertThat(frames.get(1).path("id").asInt()).isEqualTo(91);
+        assertThat(frames.get(1).path("error").path("code").asInt()).isEqualTo(-32000);
+        assertThat(frames.get(1).path("error").path("message").asText())
+                .isEqualTo(StdioJsonRpcServer.RESPONSE_TOO_LARGE_MESSAGE);
+    }
+
+    @Test
+    void listCopilotModelsValidatesParamsAndDelegatesToEngine() throws Exception {
+        AtomicReference<Boolean> seenForceRefresh = new AtomicReference<>();
+        ReviewSessionService fakeReview =
+                new ReviewSessionService() {
+                    @Override
+                    public ReviewEngineApi.CopilotModelsResult listCopilotModels(
+                            ReviewEngineApi.ListCopilotModelsParams params) {
+                        seenForceRefresh.set(params.forceRefresh());
+                        return new ReviewEngineApi.CopilotModelsResult(
+                                List.of("gpt-5.4", "claude-sonnet-4.6"), "ACCOUNT", "");
+                    }
+                };
+        StdioJsonRpcServer customServer =
+                new StdioJsonRpcServer(
+                        objectMapper,
+                        frameCodec,
+                        new SidecarBootstrapService(),
+                        new GitHubEngine(),
+                        fakeReview,
+                        reviewExecutor);
+
+        JsonNode ok =
+                customServer.handle(
+                        ("{\"jsonrpc\":\"2.0\",\"id\":51,\"method\":\"reviews/listCopilotModels\","
+                                        + "\"params\":{\"forceRefresh\":true}}")
+                                .getBytes(StandardCharsets.UTF_8));
+        assertThat(seenForceRefresh.get()).isTrue();
+        assertThat(ok.path("result").path("source").asText()).isEqualTo("ACCOUNT");
+        assertThat(ok.path("result").path("models"))
+                .extracting(JsonNode::asText)
+                .containsExactly("gpt-5.4", "claude-sonnet-4.6");
+
+        JsonNode defaulted =
+                customServer.handle(
+                        "{\"jsonrpc\":\"2.0\",\"id\":52,\"method\":\"reviews/listCopilotModels\"}"
+                                .getBytes(StandardCharsets.UTF_8));
+        assertThat(seenForceRefresh.get()).isFalse();
+        assertThat(defaulted.path("result").path("models")).hasSize(2);
+
+        JsonNode bad =
+                customServer.handle(
+                        ("{\"jsonrpc\":\"2.0\",\"id\":53,\"method\":\"reviews/listCopilotModels\","
+                                        + "\"params\":{\"forceRefresh\":\"yes\"}}")
+                                .getBytes(StandardCharsets.UTF_8));
+        assertThat(bad.path("error").path("code").asInt()).isEqualTo(-32602);
+    }
+
+    @Test
+    void asyncMaintenanceCompletesWithErrorFrameWhenActionThrowsNonExceptionThrowable()
+            throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ReviewSessionService failingReview =
+                new ReviewSessionService() {
+                    @Override
+                    public List<SemanticWorktreeStore.Retained> listDeepReviews() {
+                        throw new AssertionError("unexpected linkage failure");
+                    }
+                };
+        StdioJsonRpcServer customServer =
+                new StdioJsonRpcServer(
+                        objectMapper,
+                        frameCodec,
+                        new SidecarBootstrapService(),
+                        new GitHubEngine(),
+                        failingReview,
+                        reviewExecutor);
+        customServer.run(new ByteArrayInputStream(new byte[0]), output);
+
+        ObjectNode request = rpcRequest(61, "reviews/listDeepReviews");
+        assertThat(customServer.handle(objectMapper.writeValueAsBytes(request))).isNull();
+        reviewExecutor.submit(() -> {}).get(2, TimeUnit.SECONDS);
+
+        List<JsonNode> frames = readFrames(output);
+        assertThat(frames).hasSize(1);
+        assertThat(frames.get(0).path("id").asInt()).isEqualTo(61);
+        assertThat(frames.get(0).path("error").path("code").asInt()).isEqualTo(-32000);
+        assertThat(frames.get(0).path("error").path("message").asText())
+                .isEqualTo("unexpected linkage failure");
+    }
+
     @Nested
     class RecordOutcome {
 

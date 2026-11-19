@@ -5,6 +5,13 @@ import static com.jinloes.prpilot.review.ReviewPromptsTestSupport.fakeRequest;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jinloes.prpilot.model.PRReviewRequest;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -14,7 +21,7 @@ class ReviewPromptsTest {
     class BuildPrompt {
 
         @Test
-        void promptVersionHashesAllPromptTemplatesChecklistsAndBuiltInRules() {
+        void promptVersionHashesAllPromptTemplatesChecklistsAndBuiltInRules() throws Exception {
             assertThat(ReviewPrompts.PROMPT_VERSION)
                     .matches("prompt-sha256-[0-9a-f]{12}")
                     .isEqualTo(
@@ -24,12 +31,80 @@ class ReviewPromptsTest {
                     .isEqualTo(ReviewPrompts.PROMPT_VERSION + "-supervisor-on");
             assertThat(ReviewPrompts.reviewPipelineVersion(false))
                     .isEqualTo(ReviewPrompts.PROMPT_VERSION + "-supervisor-off");
-            assertThat(ReviewPrompts.promptVersionParts())
+            List<String> parts = ReviewPrompts.promptVersionParts();
+            assertThat(parts)
                     .contains(
                             ReviewInstructions.REVIEW_INSTRUCTIONS,
                             ReviewHygienePrompts.HYGIENE_RULES,
                             ReviewCritiquePrompts.CRITIQUE_DIRECTIVE,
+                            ReviewCritiquePrompts.DROP_REASONS_DIRECTIVE,
+                            CopilotSdkRuntime.READ_ONLY_SYSTEM_MESSAGE,
+                            CopilotSdkRuntime.TOOL_FREE_SYSTEM_MESSAGE,
+                            CopilotSdkRuntime.TOOL_BUDGET_REJECT_MESSAGE,
+                            ClaudeService.RESUME_NUDGE,
+                            SemanticSkillBundle.load().instructions(),
                             "flag-off-companion-leak");
+
+            String joinedParts = String.join("\n", parts);
+            Set<String> nonPromptMetadataFields = Set.of("PROMPT_VERSION");
+            for (Class<?> cls :
+                    List.of(
+                            ReviewPrompts.class,
+                            ReviewInstructions.class,
+                            ReviewOutputContract.class,
+                            ReviewHygienePrompts.class,
+                            ReviewCritiquePrompts.class,
+                            ReviewRulePrompts.class,
+                            ReviewSupervisorPrompts.class)) {
+                for (Field field : cls.getDeclaredFields()) {
+                    if (field.isSynthetic()
+                            || !Modifier.isStatic(field.getModifiers())
+                            || !Modifier.isFinal(field.getModifiers())
+                            || field.getType() != String.class
+                            || nonPromptMetadataFields.contains(field.getName())) {
+                        continue;
+                    }
+                    field.setAccessible(true);
+                    String value = (String) field.get(null);
+                    assertThat(joinedParts)
+                            .as(
+                                    "%s.%s must be hashed into PROMPT_VERSION",
+                                    cls.getSimpleName(), field.getName())
+                            .contains(value);
+                }
+            }
+
+            Path promptsDir = Path.of("src", "main", "resources", "review-prompts");
+            try (var stream = Files.walk(promptsDir)) {
+                List<Path> promptFiles =
+                        stream.filter(Files::isRegularFile)
+                                .filter(p -> p.toString().endsWith(".md"))
+                                .toList();
+                assertThat(promptFiles).isNotEmpty();
+                for (Path promptFile : promptFiles) {
+                    String relative =
+                            promptsDir.relativize(promptFile).toString().replace('\\', '/');
+                    String raw = PromptResources.load(relative).strip();
+                    for (String segment : raw.split("\\{\\{[A-Z0-9_]+}}")) {
+                        String trimmed = segment.strip();
+                        if (!trimmed.isEmpty()) {
+                            assertThat(joinedParts)
+                                    .as(
+                                            "review-prompts/%s must be hashed into PROMPT_VERSION",
+                                            relative)
+                                    .contains(trimmed);
+                        }
+                    }
+                }
+            }
+
+            for (int index = 0; index < parts.size(); index++) {
+                ArrayList<String> mutated = new ArrayList<>(parts);
+                mutated.set(index, mutated.get(index) + "\nmutated-sentinel");
+                assertThat(PromptResources.computeVersion("prompt-sha256", mutated))
+                        .as("mutating promptVersionParts[%s] must change PROMPT_VERSION", index)
+                        .isNotEqualTo(ReviewPrompts.PROMPT_VERSION);
+            }
         }
 
         @Test

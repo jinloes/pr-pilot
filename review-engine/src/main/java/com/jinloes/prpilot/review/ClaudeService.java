@@ -7,11 +7,14 @@ import com.jinloes.prpilot.model.ReviewResult;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -104,7 +107,7 @@ public class ClaudeService {
                     "--setting-sources",
                     "user");
 
-    private static final String RESUME_NUDGE =
+    static final String RESUME_NUDGE =
             "You have gathered sufficient context. Output the review JSON now following the"
                     + " schema exactly — no more tool calls.";
 
@@ -115,6 +118,9 @@ public class ClaudeService {
 
     /** Processes executing review or chat requests; several run at once during the rules pass. */
     private final Set<Process> activeProcesses = ConcurrentHashMap.newKeySet();
+
+    /** Temporary {@code --mcp-config} files owned by active Windows batch-shim processes. */
+    private final Map<Process, Path> processMcpConfigs = new ConcurrentHashMap<>();
 
     public ClaudeService() {
         this(null, new CancellationToken(), IO_EXECUTOR);
@@ -267,8 +273,10 @@ public class ClaudeService {
             List<String> args =
                     new ArrayList<>(List.of("--verbose", "--output-format", "stream-json"));
             if (StringUtils.isNotBlank(model)) {
+                String trimmedModel = model.trim();
+                validateCliOptionValue(trimmedModel, "model");
                 args.add("--model");
-                args.add(model);
+                args.add(trimmedModel);
             }
             process =
                     allowReadTools
@@ -322,10 +330,7 @@ public class ClaudeService {
                     stdoutFile.length());
             return ClaudeStreamParser.parseStdoutFileToRaw(stdoutFile, stderr, onStatus, onChunk);
         } finally {
-            if (process != null) activeProcesses.remove(process);
-            if (process != null) {
-                process.destroy();
-            }
+            cleanupProcess(process);
             deleteOutputFile(stdoutFile);
         }
     }
@@ -340,6 +345,7 @@ public class ClaudeService {
         Process process = null;
         File stdoutFile = createOutputFile("claude-resume-");
         try {
+            validateCliOptionValue(sessionId, "sessionId");
             List<String> args =
                     new ArrayList<>(
                             List.of(
@@ -347,10 +353,12 @@ public class ClaudeService {
                                     "--output-format",
                                     "stream-json",
                                     "--resume",
-                                    sessionId));
+                                    sessionId.trim()));
             if (StringUtils.isNotBlank(model)) {
+                String trimmedModel = model.trim();
+                validateCliOptionValue(trimmedModel, "model");
                 args.add("--model");
-                args.add(model);
+                args.add(trimmedModel);
             }
             process = buildProcess(stdoutFile, RESUME_MAX_TURNS, args.toArray(new String[0]));
             activeProcesses.add(process);
@@ -390,10 +398,7 @@ public class ClaudeService {
 
             return ClaudeStreamParser.parseStdoutFileToRaw(stdoutFile, stderr, onStatus, onChunk);
         } finally {
-            if (process != null) activeProcesses.remove(process);
-            if (process != null) {
-                process.destroy();
-            }
+            cleanupProcess(process);
             deleteOutputFile(stdoutFile);
         }
     }
@@ -485,10 +490,7 @@ public class ClaudeService {
             }
             return response;
         } finally {
-            if (process != null) activeProcesses.remove(process);
-            if (process != null) {
-                process.destroy();
-            }
+            cleanupProcess(process);
         }
     }
 
@@ -500,7 +502,7 @@ public class ClaudeService {
         cancellationToken.cancel();
         for (Process process : activeProcesses) {
             if (activeProcesses.remove(process)) {
-                process.destroyForcibly();
+                destroyProcessTree(process);
             }
         }
     }
@@ -521,21 +523,144 @@ public class ClaudeService {
     private Process buildProcess(
             File stdoutFile, int maxTurns, List<String> safeArgs, String... extraArgs)
             throws IOException {
-        List<String> cmd = new ArrayList<>(List.of(findClaudeBinary(), "--print"));
-        cmd.addAll(safeArgs);
-        cmd.addAll(List.of("--max-turns", String.valueOf(maxTurns)));
-        cmd.addAll(List.of(extraArgs));
-        ProcessBuilder pb = new ProcessBuilder(cmd);
-        pb.directory(workingDir);
-        String userHome = System.getProperty("user.home", "/");
-        pb.environment().put("HOME", userHome);
-        // GUI-launched IDEs do not inherit shell PATH configuration.
-        String existingPath = pb.environment().getOrDefault("PATH", "");
-        pb.environment().put("PATH", BinaryLocator.providerPath(userHome, existingPath));
-        if (stdoutFile != null) {
-            pb.redirectOutput(stdoutFile);
+        String binary = findClaudeBinary();
+        boolean cmdShim = isWindowsCmdShim(binary);
+        Path tempMcpConfig = null;
+        try {
+            if (cmdShim) {
+                validateBatchShimPath(binary);
+                tempMcpConfig = createMcpConfigFile();
+                Files.writeString(tempMcpConfig, "{\"mcpServers\":{}}", StandardCharsets.UTF_8);
+            }
+            List<String> cmd =
+                    prepareCommand(
+                            binary,
+                            cmdShim,
+                            resolveComSpec(System.getenv()),
+                            maxTurns,
+                            safeArgs,
+                            tempMcpConfig,
+                            extraArgs);
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.directory(workingDir);
+            String userHome = System.getProperty("user.home", "/");
+            pb.environment().put("HOME", userHome);
+            // GUI-launched IDEs do not inherit shell PATH configuration.
+            BinaryLocator.putPathEnv(pb.environment(), userHome);
+            if (stdoutFile != null) {
+                pb.redirectOutput(stdoutFile);
+            }
+            Process started = pb.start();
+            if (tempMcpConfig != null) {
+                Path cleanupTarget = tempMcpConfig;
+                processMcpConfigs.put(started, cleanupTarget);
+                started.onExit()
+                        .whenComplete(
+                                (ignored, failure) -> {
+                                    if (processMcpConfigs.remove(started, cleanupTarget)) {
+                                        deletePathQuietly(cleanupTarget);
+                                    }
+                                });
+            }
+            return started;
+        } catch (IOException | RuntimeException failure) {
+            if (tempMcpConfig != null) {
+                deletePathQuietly(tempMcpConfig);
+            }
+            throw failure;
         }
-        return pb.start();
+    }
+
+    private Path createMcpConfigFile() throws IOException {
+        try {
+            return Files.createTempFile(
+                    "pr-pilot-claude-mcp-",
+                    ".json",
+                    PosixFilePermissions.asFileAttribute(
+                            PosixFilePermissions.fromString("rw-------")));
+        } catch (UnsupportedOperationException e) {
+            return Files.createTempFile("pr-pilot-claude-mcp-", ".json");
+        }
+    }
+
+    static void validateCliOptionValue(String value, String optionName) throws IOException {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.isEmpty() || trimmed.startsWith("-")) {
+            throw new IOException("Invalid Claude CLI " + optionName + " value.");
+        }
+        for (int i = 0; i < trimmed.length(); i++) {
+            char ch = trimmed.charAt(i);
+            if (ch < 0x20 || ch == 0x7F) {
+                throw new IOException("Invalid Claude CLI " + optionName + " value.");
+            }
+        }
+    }
+
+    static void validateBatchShimPath(String binary) throws IOException {
+        BinaryLocator.validateWindowsBatchToken(binary, "path");
+    }
+
+    static String resolveComSpec(Map<String, String> env) {
+        return BinaryLocator.resolveComSpec(env);
+    }
+
+    static boolean isWindowsCmdShim(String binary) {
+        return BinaryLocator.isWindowsBatchShim(binary);
+    }
+
+    static List<String> prepareCommand(
+            String binary,
+            int maxTurns,
+            List<String> safeArgs,
+            Path tempMcpConfig,
+            String... extraArgs)
+            throws IOException {
+        return prepareCommand(
+                binary,
+                BinaryLocator.isBatchShimPath(binary),
+                resolveComSpec(System.getenv()),
+                maxTurns,
+                safeArgs,
+                tempMcpConfig,
+                extraArgs);
+    }
+
+    static List<String> prepareCommand(
+            String binary,
+            boolean cmdShim,
+            String comSpec,
+            int maxTurns,
+            List<String> safeArgs,
+            Path tempMcpConfig,
+            String... extraArgs)
+            throws IOException {
+        List<String> cliArgs = new ArrayList<>();
+        cliArgs.add("--print");
+        for (int i = 0; i < safeArgs.size(); i++) {
+            String arg = safeArgs.get(i);
+            if (tempMcpConfig != null
+                    && i > 0
+                    && "--mcp-config".equals(safeArgs.get(i - 1))
+                    && "{\"mcpServers\":{}}".equals(arg)) {
+                cliArgs.add(tempMcpConfig.toAbsolutePath().toString());
+            } else {
+                cliArgs.add(arg);
+            }
+        }
+        cliArgs.add("--max-turns");
+        cliArgs.add(String.valueOf(maxTurns));
+        cliArgs.addAll(List.of(extraArgs));
+        if (cmdShim) {
+            return BinaryLocator.buildCommand(
+                    binary,
+                    true,
+                    Map.of("ComSpec", StringUtils.defaultIfBlank(comSpec, "cmd.exe")),
+                    cliArgs);
+        }
+        List<String> cmd = new ArrayList<>(cliArgs.size() + 1);
+        cmd.add(binary);
+        cmd.addAll(cliArgs);
+        return cmd;
     }
 
     long reviewTimeoutMillis() {
@@ -576,7 +701,7 @@ public class ClaudeService {
             }
             return buffer.toString();
         } catch (IOException e) {
-            throw new java.io.UncheckedIOException(e);
+            throw new UncheckedIOException(e);
         }
     }
 
@@ -586,7 +711,7 @@ public class ClaudeService {
             return future.get(5, TimeUnit.SECONDS);
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
-            if (cause instanceof java.io.UncheckedIOException unchecked) {
+            if (cause instanceof UncheckedIOException unchecked) {
                 throw unchecked.getCause();
             }
             throw new IOException("Failed to " + operation + ".", cause);
@@ -596,9 +721,53 @@ public class ClaudeService {
         }
     }
 
+    private void cleanupProcess(Process process) {
+        if (process == null) {
+            return;
+        }
+        activeProcesses.remove(process);
+        if (process.isAlive()) {
+            destroyProcessTree(process);
+            try {
+                process.waitFor(5, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        } else {
+            destroyDescendants(process);
+        }
+        Path mcpConfig = processMcpConfigs.remove(process);
+        if (mcpConfig != null) {
+            deletePathQuietly(mcpConfig);
+        }
+    }
+
+    private static void deletePathQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException ignored) {
+            // Best-effort cleanup of owner-only empty MCP config temp.
+        }
+    }
+
+    private static void destroyDescendants(Process process) {
+        try {
+            for (ProcessHandle descendant : process.descendants().toList()) {
+                descendant.destroyForcibly();
+            }
+        } catch (UnsupportedOperationException ignored) {
+            // Stub Process implementations in unit tests may not support ProcessHandle.
+        }
+    }
+
+    static void destroyProcessTree(Process process) {
+        destroyDescendants(process);
+        process.destroyForcibly();
+    }
+
     private static void terminateProcess(Process process, CompletableFuture<?>... ioFutures)
             throws InterruptedException {
-        process.destroyForcibly();
+        destroyProcessTree(process);
         process.waitFor(5, TimeUnit.SECONDS);
         for (CompletableFuture<?> future : ioFutures) {
             future.cancel(true);
@@ -623,13 +792,6 @@ public class ClaudeService {
     }
 
     private static List<String> claudeBinaryCandidates() {
-        String home = System.getProperty("user.home", "");
-        return List.of(
-                home + "/.local/bin/claude", // Claude Code default install
-                home + "/.npm-global/bin/claude", // npm global without sudo
-                "/usr/local/bin/claude", // manual install
-                "/opt/homebrew/bin/claude", // Homebrew
-                "/usr/bin/claude" // system package managers
-                );
+        return BinaryLocator.candidatePaths("claude");
     }
 }

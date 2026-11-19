@@ -121,9 +121,9 @@ test('node version guard matches the webview engines floor', () => {
 })
 
 test('resolveNvmrcNode prefers exact .nvmrc install then newest installed >= 26', () => {
-  const pinnedBin = path.join('/home/dev', '.nvm', 'versions', 'node', 'v26.13.0', 'bin', 'node')
-  const newerBin = path.join('/home/dev', '.nvm', 'versions', 'node', 'v26.15.0', 'bin', 'node')
-  const versionsDir = path.join('/home/dev', '.nvm', 'versions', 'node')
+  const pinnedBin = path.posix.join('/home/dev', '.nvm', 'versions', 'node', 'v26.13.0', 'bin', 'node')
+  const newerBin = path.posix.join('/home/dev', '.nvm', 'versions', 'node', 'v26.15.0', 'bin', 'node')
+  const versionsDir = path.posix.join('/home/dev', '.nvm', 'versions', 'node')
 
   assert.equal(
     resolveNvmrcNode('/repo', {
@@ -147,6 +147,33 @@ test('resolveNvmrcNode prefers exact .nvmrc install then newest installed >= 26'
       readdirSync: () => ['v22.10.0', 'v26.4.0', 'v26.15.0'],
     }),
     newerBin,
+  )
+
+  const winVoltaPinned = 'C:\\Users\\dev\\AppData\\Local\\Volta\\tools\\image\\node\\26.13.0\\node.exe'
+  assert.equal(
+    resolveNvmrcNode('C:\\repo', {
+      platform: 'win32',
+      homedir: 'C:\\Users\\dev',
+      env: { LOCALAPPDATA: 'C:\\Users\\dev\\AppData\\Local' },
+      existsSync: (target) => target === path.join('C:\\repo', '.nvmrc') || target === winVoltaPinned,
+      readFileSync: () => '26.13.0\r\n',
+      readdirSync: () => [],
+    }),
+    winVoltaPinned,
+  )
+
+  const winNvmLatest = 'C:\\Users\\dev\\AppData\\Roaming\\nvm\\v26.14.0\\node.exe'
+  const winNvmDir = 'C:\\Users\\dev\\AppData\\Roaming\\nvm'
+  assert.equal(
+    resolveNvmrcNode('C:\\repo', {
+      platform: 'win32',
+      homedir: 'C:\\Users\\dev',
+      env: { APPDATA: 'C:\\Users\\dev\\AppData\\Roaming' },
+      existsSync: (target) => target === winNvmDir || target === winNvmLatest,
+      readFileSync: () => '',
+      readdirSync: (dir) => (dir === winNvmDir ? ['v20.20.2', 'v26.14.0'] : []),
+    }),
+    winNvmLatest,
   )
 
   assert.equal(

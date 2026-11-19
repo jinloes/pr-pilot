@@ -36,6 +36,7 @@ interface Props {
   onAddComment?: (comment: LineComment) => void
   onVerifyComment?: (comment: LineComment) => void
   onSuggestFixComment?: (comment: LineComment) => void
+  onOpenFile?: (file: string, line?: number) => void
   /** When set, the next line clicked opens the new-comment editor prefilled with this text. */
   commentPlacement?: CommentPlacement
   readOnly?: boolean
@@ -54,6 +55,7 @@ export function DiffViewer({
   onAddComment,
   onVerifyComment,
   onSuggestFixComment,
+  onOpenFile,
   commentPlacement,
   readOnly = false,
 }: Props) {
@@ -557,6 +559,7 @@ export function DiffViewer({
                   onRemoveSuggestion={onRemoveSuggestion}
                   onVerifyComment={onVerifyComment}
                   onSuggestFixComment={onSuggestFixComment}
+                  onOpenFile={onOpenFile}
                   readOnly={readOnly}
                 />
               )

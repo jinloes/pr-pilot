@@ -34,6 +34,10 @@ final class WebviewWorktreeManager {
     }
 
     IntellijClaudeService resolve(PullRequest pr) {
+        return resolveForEpoch(pr, null);
+    }
+
+    private IntellijClaudeService resolveForEpoch(PullRequest pr, Long expectedEpoch) {
         WorktreeCoordinator.WorktreeLease<PrWorktree> lease;
         File detectedRoot;
         String key;
@@ -55,7 +59,13 @@ final class WebviewWorktreeManager {
                 throw new IllegalStateException(
                         "Open the pull request repository before starting a review or chat.");
             }
-            lease = worktrees.acquire(key);
+            lease =
+                    expectedEpoch == null
+                            ? worktrees.acquire(key)
+                            : worktrees.acquireIfEpoch(key, expectedEpoch);
+            if (lease == null) {
+                throw new IllegalStateException("The selected pull request changed.");
+            }
         }
 
         if (!lease.owner()) {
@@ -104,6 +114,35 @@ final class WebviewWorktreeManager {
 
     PrWorktree activeValue() {
         return worktrees.activeValue();
+    }
+
+    PrWorktree activeValueForPr(PullRequest pr) {
+        if (pr == null) return null;
+        return worktrees.activeValueForKey(
+                worktreeKey(pr.getNumber(), pr.getOwner(), pr.getRepo()));
+    }
+
+    long epoch() {
+        return worktrees.epoch();
+    }
+
+    File resolveDirectory(PullRequest pr, long expectedEpoch) {
+        if (worktrees.epoch() != expectedEpoch) {
+            return null;
+        }
+        PrWorktree existing = activeValueForPr(pr);
+        if (existing != null
+                && existing.directory() != null
+                && existing.directory().isDirectory()
+                && worktrees.epoch() == expectedEpoch) {
+            return existing.directory();
+        }
+        resolveForEpoch(pr, expectedEpoch);
+        if (worktrees.epoch() != expectedEpoch) {
+            return null;
+        }
+        PrWorktree resolved = activeValueForPr(pr);
+        return resolved == null ? null : resolved.directory();
     }
 
     void removeAsync(PrWorktree worktree) {

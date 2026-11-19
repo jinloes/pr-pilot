@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * A detached worktree at a ReviewBench task's head commit, cloned from the task's review-bench
@@ -34,7 +35,20 @@ final class ReviewBenchCheckout implements AutoCloseable {
     /** Returns the clone at {@code reposDir/name}, cloning {@code url} without a checkout first. */
     static File ensureClone(Path reposDir, String name, String url)
             throws IOException, InterruptedException {
-        Path clone = reposDir.resolve(name);
+        if (name == null
+                || name.isBlank()
+                || name.contains("/")
+                || name.contains("\\")
+                || name.contains(":")
+                || ".".equals(name)
+                || "..".equals(name)) {
+            throw new IllegalArgumentException("Invalid benchmark repository name: " + name);
+        }
+        Path normalizedReposDir = reposDir.toAbsolutePath().normalize();
+        Path clone = normalizedReposDir.resolve(name).normalize();
+        if (!Objects.equals(clone.getParent(), normalizedReposDir)) {
+            throw new IllegalArgumentException("Invalid benchmark repository name: " + name);
+        }
         if (Files.exists(clone.resolve(".git"))) return clone.toFile();
         Files.createDirectories(reposDir);
         Path partial = reposDir.resolve(name + ".partial");
@@ -79,6 +93,8 @@ final class ReviewBenchCheckout implements AutoCloseable {
                 LocalCheckout.run(
                         repoDir,
                         WORKTREE_TIMEOUT_SECONDS,
+                        "-c",
+                        "core.symlinks=false",
                         "worktree",
                         "add",
                         "--detach",
@@ -86,6 +102,7 @@ final class ReviewBenchCheckout implements AutoCloseable {
                         head);
         if (exit != 0) throw new IOException("git worktree add exited with " + exit);
         try {
+            GitWorktreeService.verifyNoEscapingSymlinks(worktreeDir.toPath());
             return new ReviewBenchCheckout(
                     worktrees,
                     repoDir,
@@ -101,6 +118,9 @@ final class ReviewBenchCheckout implements AutoCloseable {
             throws IOException, InterruptedException {
         if (LocalCheckout.commitExists(repoDir, sha)) return;
         for (String remote : List.of("origin", upstreamUrl)) {
+            if (remote == null || remote.isBlank() || remote.startsWith("-")) {
+                continue;
+            }
             // Best effort: a remote that refuses fetch-by-SHA falls through to the next one.
             LocalCheckout.run(
                     repoDir,
@@ -109,6 +129,7 @@ final class ReviewBenchCheckout implements AutoCloseable {
                     "--quiet",
                     "--no-tags",
                     "--filter=blob:none",
+                    "--",
                     remote,
                     sha);
             if (LocalCheckout.commitExists(repoDir, sha)) return;

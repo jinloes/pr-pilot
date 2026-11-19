@@ -5,6 +5,8 @@ import com.jinloes.prpilot.sidecar.github.GitHubApiBase;
 import com.jinloes.prpilot.sidecar.github.GitHubAuthService;
 import java.time.Duration;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Resolves the diff of commits pushed since the viewer's latest submitted review. The baseline is
@@ -12,6 +14,7 @@ import java.util.Objects;
  * anything that prevents a trustworthy incremental diff falls back to a full review instead.
  */
 public final class IncrementalDiffService {
+    private static final Logger log = LoggerFactory.getLogger(IncrementalDiffService.class);
     private static final Duration BASELINE_TIMEOUT = Duration.ofSeconds(10);
     private static final int LIMIT_BYTES = PrDiffService.REVIEW_LIMIT_BYTES;
 
@@ -139,6 +142,12 @@ public final class IncrementalDiffService {
                         params.number(),
                         PrDiffService.VALIDATION_LIMIT_BYTES);
         if (pullRequest.status() != PrDiffService.Status.OK || pullRequest.diff() == null) {
+            log.warn(
+                    "Bypassing incremental diff PR-scope filter for {}/{}#{}: pullRequestDiff status={}",
+                    params.owner(),
+                    params.repo(),
+                    params.number(),
+                    pullRequest.status());
             return new IncrementalDiffScope.Restricted(compare.diff(), compare.truncated(), 0);
         }
         return IncrementalDiffScope.restrict(

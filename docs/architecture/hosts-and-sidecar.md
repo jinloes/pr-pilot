@@ -103,7 +103,9 @@ explicit capability elevation must remain visible in settings.
 Repo detection walks upward to `.git/config` and reads the `[remote "origin"]` URL specifically (not
 the first `url=` in the file) so multi-remote/fork setups resolve to origin consistently across
 hosts, handling SCP and `ssh://` remotes correctly. Webview assets are served via loopback
-`HttpServer` for proper same-origin module loading; path normalization blocks traversal.
+`HttpServer` for proper same-origin module loading; path normalization rejects malformed/encoded
+query, fragment, backslash, semicolon, or traversal segments (`404`), and HTML responses send
+`X-Content-Type-Options: nosniff` plus a strict `script-src 'self'` `Content-Security-Policy`.
 
 ### Pinned IntelliJ SDK versus local sandbox
 

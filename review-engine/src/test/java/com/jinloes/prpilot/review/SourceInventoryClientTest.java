@@ -40,8 +40,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 /** Real collect/process/Git tests. The subprocess simulates MCP, not a live native index. */
+@EnabledOnOs(
+        value = {OS.LINUX, OS.MAC},
+        disabledReason =
+                "SourceInventoryClient requires POSIX rwx------/rw------- launch asset permissions and shims")
 public class SourceInventoryClientTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private Path fixture, root, config, executable, log;

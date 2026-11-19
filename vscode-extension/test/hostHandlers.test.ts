@@ -18,10 +18,29 @@ function host(settings: Record<string, unknown> = {}) {
         }),
         cancelReview: async (operationId: string) => { cancelled.push(operationId); },
     };
+    const openedDocs: Array<{ uri: Record<string, unknown>; options: Record<string, unknown> }> = [];
+    const infoMessages: string[] = [];
     const vscode = {
         ConfigurationTarget: { Global: 1 },
+        ViewColumn: { Beside: 2 },
+        Range: class Range {
+            constructor(public startLine: number, public startChar: number, public endLine: number, public endChar: number) {}
+        },
+        Uri: {
+            file: (fsPath: string) => ({ scheme: 'file', fsPath }),
+            from: (parts: Record<string, unknown>) => ({ ...parts }),
+        },
+        window: {
+            showTextDocument: async (uri: Record<string, unknown>, options: Record<string, unknown>) => {
+                openedDocs.push({ uri, options });
+            },
+            showInformationMessage: async (message: string) => {
+                infoMessages.push(message);
+                return undefined;
+            },
+        },
         workspace: {
-            workspaceFolders: [{ uri: { fsPath: '/fixture' } }],
+            workspaceFolders: [{ uri: { fsPath: (settings.workspaceRoot as string) ?? '/fixture' } }],
             getConfiguration: () => ({
                 get: (key: string, fallback: unknown) => (key in settings ? settings[key] : fallback),
                 update: async (key: string, value: unknown, target: unknown) => {
@@ -50,7 +69,7 @@ function host(settings: Record<string, unknown> = {}) {
         };
         const expose = path.basename(file) === 'extension.js'
             ? '\nexports.testHost = {refresh: handleRefreshPRs, select: handleSelectPR, cancelChat: handleCancelChat, generate: handleGenerateReview, '
-                + 'saveRepositoryInstructions: handleSaveRepositoryInstructions, setClient: c => {sidecarClient=c}};'
+                + 'openFile: handleOpenFile, saveRepositoryInstructions: handleSaveRepositoryInstructions, setClient: c => {sidecarClient=c}};'
             : '';
         runInNewContext(readFileSync(file, 'utf8') + expose, { module, exports: module.exports,
             require: requireLocal, __dirname: path.dirname(file), __filename: file,
@@ -58,7 +77,7 @@ function host(settings: Record<string, unknown> = {}) {
         return module.exports;
     }
     const api = load(require.resolve('../src/extension')).testHost as {
-        refresh: Handler; select: Handler; cancelChat: Handler; generate: Handler; setClient: (value: object) => void;
+        refresh: Handler; select: Handler; cancelChat: Handler; generate: Handler; openFile: Handler; setClient: (value: object) => void;
         saveRepositoryInstructions: (state: Record<string, unknown>, msg: Record<string, unknown>,
             push: (message: Record<string, unknown>) => void) => Promise<void>;
     };
@@ -71,7 +90,7 @@ function host(settings: Record<string, unknown> = {}) {
         worktreeDir: null, gitRoot: null, worktreeKey: null, worktreeEpoch: 0, worktreeCreation: null,
         prefetchedPrContext: null,
     };
-    return { api, state, messages, cancelled, updates, settings };
+    return { api, state, messages, cancelled, updates, settings, openedDocs, infoMessages };
 }
 
 async function listFlag(settings: Record<string, unknown>): Promise<unknown> {
@@ -333,4 +352,40 @@ test('generation sends the second reviewer its own effort, defaulting to medium'
     assert.equal(configured.generateCalls[0].secondReviewerEffort, 'low');
     assert.equal(off.generateCalls[0].secondReviewerModel, undefined);
     assert.equal(off.generateCalls[0].secondReviewerEffort, undefined);
+});
+
+test('openFile opens editable workspace file first and read-only preview scheme for PR-only worktree file', async (t) => {
+    const fsMod = await import('node:fs');
+    const osMod = await import('node:os');
+    const root = fsMod.mkdtempSync(path.join(osMod.tmpdir(), 'pr-pilot-host-openfile-'));
+    t.after(() => fsMod.rmSync(root, { recursive: true, force: true }));
+    const ws = path.join(root, 'ws');
+    const wt = path.join(root, 'wt');
+    fsMod.mkdirSync(path.join(ws, 'src'), { recursive: true });
+    fsMod.mkdirSync(path.join(wt, 'src'), { recursive: true });
+    fsMod.writeFileSync(path.join(ws, 'src', 'app.ts'), 'export const a = 1;\n');
+    fsMod.writeFileSync(path.join(wt, 'src', 'newInPr.ts'), 'export const b = 2;\n');
+
+    const h = host({ workspaceRoot: ws });
+    h.api.setClient({
+        findGitRoot: async () => ws,
+        detectRepo: async () => 'acme/widget',
+    });
+    h.state.activePR = { number: 42, owner: 'acme', repo: 'widget', title: 'Test', body: '' };
+    h.state.worktreeDir = wt;
+    h.state.worktreeKey = 'acme/widget#42';
+
+    await h.api.openFile(h.state, { type: 'openFile', number: 42, owner: 'acme', repo: 'widget', file: 'src/app.ts', line: 7 });
+    assert.equal(h.openedDocs.length, 1);
+    assert.equal(h.openedDocs[0].uri.scheme, 'file');
+    assert.equal((h.openedDocs[0].options.selection as { startLine: number }).startLine, 6);
+
+    await h.api.openFile(h.state, { type: 'openFile', number: 42, owner: 'acme', repo: 'widget', file: 'src/newInPr.ts', line: 2 });
+    assert.equal(h.openedDocs.length, 2);
+    assert.equal(h.openedDocs[1].uri.scheme, 'pr-pilot-worktree');
+    assert.equal(h.openedDocs[1].uri.path, '/acme/widget/PR-42/src/newInPr.ts');
+    assert.match(String(h.openedDocs[1].uri.query ?? ''), /^wt=[0-9a-f]{12}$/);
+
+    await h.api.openFile(h.state, { type: 'openFile', number: 99, owner: 'acme', repo: 'widget', file: 'src/app.ts' });
+    assert.equal(h.openedDocs.length, 2, 'stale PR openFile must be ignored');
 });

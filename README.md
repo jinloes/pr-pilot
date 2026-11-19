@@ -43,7 +43,7 @@ Run these preflight checks in a terminal:
 git --version
 gh --version
 gh auth status
-java -version       # required for VS Code; verify the major version is 17 or newer
+java -version       # required for VS Code; verify the major version is 21 or newer
 claude --version    # if using Claude
 copilot --version   # if using Copilot
 ```
@@ -179,8 +179,9 @@ code, or sensitive pull-request content.
 
 ## Repository layout
 
-- `core/` - Plain Java 21 shared models and diff parser used by both hosts
+- `core/` - Plain Java 21 shared models and diff-coverage trailer used by both hosts
 - `github-engine/` - Plain Java 21 GitHub/repository/review engine shared by both hosts
+- `review-engine/` - Plain Java 21 provider invocation, prompt construction, pipeline, and worktrees
 - `intellij-plugin/` - IntelliJ host integration
 - `review-benchmark/` - Developer CLIs that measure review recall against a reference reviewer's comments and on
   [ReviewBench](https://github.com/review-bench/ReviewBench)
@@ -196,9 +197,9 @@ code, or sensitive pull-request content.
 
 ## Development requirements
 
-- An installed JDK 21 (Gradle builds use it as the Java toolchain) and Java 21+ at VS Code
-  extension runtime
-- Node.js 20.17 or newer
+- An installed JDK 21 (Gradle builds use it as the Java toolchain, and Spotless requires the Gradle
+  daemon to run on JDK 21) and Java 21+ at VS Code extension runtime
+- Node.js 26.0 or newer (use `.nvmrc`: `26.13.0`)
 - npm
 - GitHub CLI (`gh`) authenticated (`gh auth login`)
 - Optional for runtime review providers:

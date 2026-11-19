@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.review.CancellationToken;
 import com.jinloes.prpilot.review.ClaudeService;
+import com.jinloes.prpilot.review.CopilotModelDiscovery;
 import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
@@ -21,6 +22,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,10 +39,8 @@ class ReviewSessionServiceTest {
 
         @Test
         void cancelsOnlyTheOperationWithTheMatchingId() {
-            java.util.concurrent.atomic.AtomicInteger firstCancelled =
-                    new java.util.concurrent.atomic.AtomicInteger();
-            java.util.concurrent.atomic.AtomicInteger secondCancelled =
-                    new java.util.concurrent.atomic.AtomicInteger();
+            AtomicInteger firstCancelled = new AtomicInteger();
+            AtomicInteger secondCancelled = new AtomicInteger();
             registry.start("first", firstCancelled::incrementAndGet);
             registry.start("second", secondCancelled::incrementAndGet);
 
@@ -57,8 +57,7 @@ class ReviewSessionServiceTest {
 
         @Test
         void ignoresUnknownOrMalformedOperationIds() {
-            java.util.concurrent.atomic.AtomicInteger cancelled =
-                    new java.util.concurrent.atomic.AtomicInteger();
+            AtomicInteger cancelled = new AtomicInteger();
             registry.start("active", cancelled::incrementAndGet);
 
             assertThat(registry.cancel(new ReviewEngineApi.CancelParams("unknown")).cancelled())
@@ -443,6 +442,18 @@ class ReviewSessionServiceTest {
 
     @Nested
     class RemoveWorktree {
+        private static final String CANONICAL_REPO =
+                Path.of(System.getProperty("java.io.tmpdir"))
+                        .toAbsolutePath()
+                        .normalize()
+                        .resolve("repo")
+                        .toString();
+        private static final String CANONICAL_WORKTREE =
+                Path.of(System.getProperty("java.io.tmpdir"))
+                        .toAbsolutePath()
+                        .normalize()
+                        .resolve("worktree")
+                        .toString();
 
         @Test
         void propagatesCleanupFailureAsADomainResult() {
@@ -458,7 +469,8 @@ class ReviewSessionServiceTest {
 
             ReviewEngineApi.WorktreeRemovalResult result =
                     service.removeWorktree(
-                            new ReviewEngineApi.RemoveWorktreeParams("/repo", "/worktree"));
+                            new ReviewEngineApi.RemoveWorktreeParams(
+                                    CANONICAL_REPO, CANONICAL_WORKTREE));
 
             assertThat(result.removed()).isFalse();
         }
@@ -471,9 +483,65 @@ class ReviewSessionServiceTest {
             assertThat(
                             service.removeWorktree(
                                             new ReviewEngineApi.RemoveWorktreeParams(
-                                                    "", "/worktree"))
+                                                    "", CANONICAL_WORKTREE))
                                     .removed())
                     .isFalse();
+        }
+    }
+
+    @Nested
+    class ListCopilotModels {
+
+        @Test
+        void returnsCachedModelsWithoutProbingWhenForceRefreshIsFalse() {
+            var cached =
+                    new CopilotModelDiscovery.Result(
+                            List.of("claude-sonnet-4.6", "gpt-5.5"),
+                            CopilotModelDiscovery.Source.ACCOUNT,
+                            "");
+            var refreshed = new AtomicInteger();
+
+            ReviewEngineApi.CopilotModelsResult result =
+                    ReviewSessionService.listCopilotModels(
+                            new ReviewEngineApi.ListCopilotModelsParams(false),
+                            () -> cached,
+                            () -> {
+                                refreshed.incrementAndGet();
+                                return CopilotModelDiscovery.Result.none("unexpected");
+                            });
+
+            assertThat(result.models()).containsExactly("claude-sonnet-4.6", "gpt-5.5");
+            assertThat(result.source()).isEqualTo("ACCOUNT");
+            assertThat(result.failureReason()).isEmpty();
+            assertThat(refreshed).hasValue(0);
+        }
+
+        @Test
+        void probesWhenForceRefreshIsTrueOrCacheIsEmptyAndPropagatesProvenance() {
+            var cached =
+                    new CopilotModelDiscovery.Result(
+                            List.of("cached-model"), CopilotModelDiscovery.Source.ACCOUNT, "");
+            var fallback =
+                    new CopilotModelDiscovery.Result(
+                            List.of("cli-model"),
+                            CopilotModelDiscovery.Source.CLI_HELP,
+                            "not signed in");
+
+            ReviewEngineApi.CopilotModelsResult forced =
+                    ReviewSessionService.listCopilotModels(
+                            new ReviewEngineApi.ListCopilotModelsParams(true),
+                            () -> cached,
+                            () -> fallback);
+            assertThat(forced.models()).containsExactly("cli-model");
+            assertThat(forced.source()).isEqualTo("CLI_HELP");
+            assertThat(forced.failureReason()).isEqualTo("not signed in");
+
+            ReviewEngineApi.CopilotModelsResult uncached =
+                    ReviewSessionService.listCopilotModels(
+                            new ReviewEngineApi.ListCopilotModelsParams(false),
+                            () -> null,
+                            () -> fallback);
+            assertThat(uncached.source()).isEqualTo("CLI_HELP");
         }
     }
 }

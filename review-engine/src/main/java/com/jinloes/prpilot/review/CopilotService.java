@@ -619,8 +619,7 @@ public class CopilotService {
         Map<String, String> env = new LinkedHashMap<>(System.getenv());
         String userHome = System.getProperty("user.home", "/");
         env.put("HOME", userHome);
-        String existingPath = env.getOrDefault("PATH", "");
-        env.put("PATH", BinaryLocator.providerPath(userHome, existingPath));
+        BinaryLocator.putPathEnv(env, userHome);
         return new ClientRequest(findCopilotBinary(), workingDir, env);
     }
 
@@ -738,12 +737,6 @@ public class CopilotService {
     }
 
     private static List<String> copilotBinaryCandidates() {
-        String home = System.getProperty("user.home", "");
-        return List.of(
-                home + "/.local/bin/copilot",
-                home + "/.npm-global/bin/copilot",
-                "/usr/local/bin/copilot",
-                "/opt/homebrew/bin/copilot",
-                "/usr/bin/copilot");
+        return BinaryLocator.candidatePaths("copilot");
     }
 }

@@ -50,10 +50,13 @@ public final class CopilotModelDiscovery {
     private static final Pattern SECTION_START = Pattern.compile("^\\s*`model`:.*");
     private static final Pattern QUOTED_ITEM = Pattern.compile("^\\s*-\\s+\"([^\"]+)\"\\s*$");
 
-    /** Bounds each live-catalog step (runtime boot, then {@code models.list}). */
-    private static final long LIVE_TIMEOUT_SECONDS = 20;
+    /** Bounds each live-catalog step (runtime boot, then {@code models.list}) within RPC budget. */
+    private static final long LIVE_TIMEOUT_SECONDS = 12;
 
-    private static final long HELP_TIMEOUT_SECONDS = 10;
+    /** Overall monotonic budget across all live-catalog steps before falling back to CLI help. */
+    static final long LIVE_TOTAL_BUDGET_SECONDS = 45;
+
+    private static final long HELP_TIMEOUT_SECONDS = 8;
 
     /** Where a discovered model list came from. */
     public enum Source {
@@ -125,7 +128,12 @@ public final class CopilotModelDiscovery {
         if (running != null) return running.join();
         try {
             Result result = discoverer.get();
-            if (!result.models().isEmpty()) cache.set(result);
+            Result currentCache = cache.get();
+            if (result.source() == Source.ACCOUNT
+                    || (!result.models().isEmpty()
+                            && (currentCache == null || currentCache.source() != Source.ACCOUNT))) {
+                cache.set(result);
+            }
             mine.complete(result);
             return result;
         } catch (RuntimeException e) {
@@ -200,10 +208,12 @@ public final class CopilotModelDiscovery {
     }
 
     private static List<String> fetchAccountModels() throws Exception {
+        long deadlineNanos =
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(LIVE_TOTAL_BUDGET_SECONDS);
         String userHome = System.getProperty("user.home", "/");
         Map<String, String> env = new LinkedHashMap<>(System.getenv());
         env.put("HOME", userHome);
-        env.put("PATH", BinaryLocator.providerPath(userHome, env.getOrDefault("PATH", "")));
+        BinaryLocator.putPathEnv(env, userHome);
         try (CopilotClient client =
                 new CopilotClient(
                         new CopilotClientOptions()
@@ -212,14 +222,24 @@ public final class CopilotModelDiscovery {
                                 .setEnvironment(env)
                                 .setMode(CopilotClientMode.COPILOT_CLI)
                                 .setAutoStart(false))) {
-            client.start().get(LIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            client.start().get(stepBudgetMillis(deadlineNanos), TimeUnit.MILLISECONDS);
             return accountModels(
-                    () -> fetchSessionModels(client, userHome),
+                    () -> fetchSessionModels(client, userHome, deadlineNanos),
                     () ->
                             filterModelIds(
                                     client.listModels()
-                                            .get(LIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)));
+                                            .get(
+                                                    stepBudgetMillis(deadlineNanos),
+                                                    TimeUnit.MILLISECONDS)));
         }
+    }
+
+    static long stepBudgetMillis(long deadlineNanos) throws TimeoutException {
+        long remainingMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
+        if (remainingMillis <= 0) {
+            throw new TimeoutException("Copilot live model discovery budget exhausted");
+        }
+        return Math.min(remainingMillis, TimeUnit.SECONDS.toMillis(LIVE_TIMEOUT_SECONDS));
     }
 
     /**
@@ -244,8 +264,8 @@ public final class CopilotModelDiscovery {
      * Opens a short-lived, tool-free session, lists its selectable models, and deletes it. No
      * prompt is sent, so this uses no model quota.
      */
-    private static List<String> fetchSessionModels(CopilotClient client, String workingDirectory)
-            throws Exception {
+    private static List<String> fetchSessionModels(
+            CopilotClient client, String workingDirectory, long deadlineNanos) throws Exception {
         SessionConfig config =
                 new SessionConfig()
                         .setOnPermissionRequest(
@@ -257,15 +277,26 @@ public final class CopilotModelDiscovery {
                         .setAvailableTools(List.of())
                         .setEnableConfigDiscovery(false);
         CopilotSession session =
-                client.createSession(config).get(LIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                client.createSession(config)
+                        .get(stepBudgetMillis(deadlineNanos), TimeUnit.MILLISECONDS);
         try {
             SessionModelListResult result =
-                    session.getRpc().model.list().get(LIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    session.getRpc()
+                            .model
+                            .list()
+                            .get(stepBudgetMillis(deadlineNanos), TimeUnit.MILLISECONDS);
             return filterCatalogEntries(result != null ? result.list() : null);
         } finally {
             try {
+                long cleanupMillis =
+                        Math.max(
+                                1_000L,
+                                Math.min(
+                                        TimeUnit.NANOSECONDS.toMillis(
+                                                deadlineNanos - System.nanoTime()),
+                                        TimeUnit.SECONDS.toMillis(LIVE_TIMEOUT_SECONDS)));
                 client.deleteSession(session.getSessionId())
-                        .get(LIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                        .get(cleanupMillis, TimeUnit.MILLISECONDS);
             } catch (Exception e) {
                 log.debug("Could not delete the model discovery session", e);
             }
@@ -286,14 +317,23 @@ public final class CopilotModelDiscovery {
         return probe(ProcessBuilder::start, HELP_TIMEOUT_SECONDS);
     }
 
+    static List<String> buildHelpProbeCommand(
+            String binary, boolean windows, Map<String, String> env) throws IOException {
+        return BinaryLocator.buildCommand(binary, windows, env, List.of("help", "config"));
+    }
+
     static List<String> probe(
             BoundedProcessRunner.ProcessStarter processStarter, long timeoutSeconds) {
         try {
             ProcessBuilder pb =
-                    new ProcessBuilder(CopilotService.findCopilotBinary(), "help", "config");
-            pb.environment().put("HOME", System.getProperty("user.home", "/"));
-            String existingPath = pb.environment().getOrDefault("PATH", "");
-            pb.environment().put("PATH", "/opt/homebrew/bin:/usr/local/bin:" + existingPath);
+                    new ProcessBuilder(
+                            buildHelpProbeCommand(
+                                    CopilotService.findCopilotBinary(),
+                                    BinaryLocator.isWindows(),
+                                    System.getenv()));
+            String userHome = System.getProperty("user.home", "/");
+            pb.environment().put("HOME", userHome);
+            BinaryLocator.putPathEnv(pb.environment(), userHome);
             pb.redirectErrorStream(true);
             BoundedProcessRunner.ProcessResult result =
                     new BoundedProcessRunner(processStarter)

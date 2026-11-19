@@ -366,3 +366,23 @@ test('parseIncrementalDiffResult rejects malformed results', () => {
   assert.equal(parseIncrementalDiffResult({ status: 'unknown', message: 'x', limitBytes: 1 }), null);
   assert.equal(parseIncrementalDiffResult(null), null);
 });
+
+test('parseCopilotModelsResult validates ACCOUNT, CLI_HELP, and NONE payloads', async () => {
+  const { parseCopilotModelsResult } = await import('../src/sidecarProtocol');
+  assert.deepEqual(
+    parseCopilotModelsResult({ models: ['claude-sonnet-4.6', 'gpt-5.5'], source: 'ACCOUNT', failureReason: '' }),
+    { models: ['claude-sonnet-4.6', 'gpt-5.5'], source: 'ACCOUNT', failureReason: '' },
+  );
+  assert.deepEqual(
+    parseCopilotModelsResult({ models: ['gpt-5.4'], source: 'CLI_HELP', failureReason: 'timed out' }),
+    { models: ['gpt-5.4'], source: 'CLI_HELP', failureReason: 'timed out' },
+  );
+  assert.deepEqual(
+    parseCopilotModelsResult({ models: [], source: 'NONE', failureReason: 'not signed in' }),
+    { models: [], source: 'NONE', failureReason: 'not signed in' },
+  );
+  assert.equal(parseCopilotModelsResult({ models: ['a'], source: 'UNKNOWN', failureReason: '' }), null);
+  assert.equal(parseCopilotModelsResult({ models: [42], source: 'ACCOUNT', failureReason: '' }), null);
+  assert.equal(parseCopilotModelsResult({ models: [], source: 'NONE', failureReason: 123 }), null);
+  assert.equal(parseCopilotModelsResult(null), null);
+});

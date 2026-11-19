@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -110,7 +111,12 @@ class SourceInventoryTest {
             var request = new SourceInventory.DiscoverRequest();
             request.setSchemaVersion(1);
             request.setOperation(SourceInventory.Operation.DISCOVER);
-            request.setProjectPath("/worktree");
+            request.setProjectPath(
+                    Path.of(System.getProperty("java.io.tmpdir"))
+                            .toAbsolutePath()
+                            .normalize()
+                            .resolve("worktree")
+                            .toString());
             request.setNonce("00000000-0000-0000-0000-000000000001");
             assertThatIllegalArgumentException()
                     .isThrownBy(() -> SourceInventory.validate(request));

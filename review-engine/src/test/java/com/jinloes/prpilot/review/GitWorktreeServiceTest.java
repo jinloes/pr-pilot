@@ -14,6 +14,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ class GitWorktreeServiceTest {
     private final GitWorktreeService service = new GitWorktreeService();
 
     private static void git(File dir, String... args) throws IOException, InterruptedException {
-        List<String> cmd = new java.util.ArrayList<>(List.of("git"));
+        List<String> cmd = new ArrayList<>(List.of("git"));
         cmd.addAll(List.of(args));
         Process process = new ProcessBuilder(cmd).directory(dir).redirectErrorStream(true).start();
         process.getInputStream().readAllBytes(); // drain
@@ -220,6 +221,76 @@ class GitWorktreeServiceTest {
         }
 
         @Test
+        void checksOutTrackedSymlinksAsPlainFilesRatherThanFollowingExternalTargets()
+                throws Exception {
+            File outsideSecret = Files.createTempFile("gw-outside-secret", ".txt").toFile();
+            try {
+                Files.writeString(outsideSecret.toPath(), "TOP_SECRET_CREDENTIAL");
+                Process hashProc =
+                        new ProcessBuilder("git", "hash-object", "-w", "--stdin")
+                                .directory(repoDir)
+                                .start();
+                try (var stdin = hashProc.getOutputStream()) {
+                    stdin.write(outsideSecret.getAbsolutePath().getBytes(StandardCharsets.UTF_8));
+                }
+                String blobSha =
+                        new String(hashProc.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
+                                .trim();
+                assertThat(hashProc.waitFor()).isZero();
+                git(
+                        repoDir,
+                        "update-index",
+                        "--add",
+                        "--cacheinfo",
+                        "120000," + blobSha + ",escaped-link.txt");
+                git(repoDir, "commit", "-m", "add tracked symlink");
+                String symlinkCommit = headSha(repoDir);
+
+                service.createWorktree(repoDir, "main", symlinkCommit, worktreeDir);
+
+                Path checkedOut = worktreeDir.toPath().resolve("escaped-link.txt");
+                assertThat(Files.isSymbolicLink(checkedOut)).isFalse();
+                assertThat(Files.readString(checkedOut))
+                        .isEqualTo(outsideSecret.getAbsolutePath())
+                        .doesNotContain("TOP_SECRET_CREDENTIAL");
+            } finally {
+                Files.deleteIfExists(outsideSecret.toPath());
+            }
+        }
+
+        @Test
+        void rejectsPlantedOsSymlinkThatEscapesTheWorktree() throws Exception {
+            Path plantedRoot = Files.createTempDirectory("gw-planted");
+            Path outsideSecret = Files.createTempFile("gw-planted-secret", ".txt");
+            try {
+                Files.writeString(outsideSecret, "SECRET");
+                Path link = plantedRoot.resolve("leak.txt");
+                try {
+                    Files.createSymbolicLink(link, outsideSecret);
+                } catch (UnsupportedOperationException | IOException unprivilegedWindows) {
+                    Assumptions.abort(
+                            "OS symlink creation unavailable in this environment: "
+                                    + unprivilegedWindows.getMessage());
+                }
+                assertThatThrownBy(() -> GitWorktreeService.verifyNoEscapingSymlinks(plantedRoot))
+                        .isInstanceOf(IOException.class)
+                        .hasMessageContaining("symbolic link");
+
+                Files.deleteIfExists(link);
+                Path loopA = plantedRoot.resolve("loop-a");
+                Path loopB = plantedRoot.resolve("loop-b");
+                Files.createSymbolicLink(loopA, Path.of("loop-b"));
+                Files.createSymbolicLink(loopB, Path.of("loop-a"));
+                assertThatThrownBy(() -> GitWorktreeService.verifyNoEscapingSymlinks(plantedRoot))
+                        .isInstanceOf(IOException.class)
+                        .hasMessageContaining("symbolic link");
+            } finally {
+                Files.deleteIfExists(outsideSecret);
+                FileUtils.deleteDirectory(plantedRoot.toFile());
+            }
+        }
+
+        @Test
         void passesOptionShapedBranchesAfterTheOptionTerminator() throws IOException {
             class CapturingGitService extends GitWorktreeService {
                 private List<String> arguments;
@@ -248,6 +319,37 @@ class GitWorktreeServiceTest {
             assertThatThrownBy(() -> service.fetch(repoDir, 60, "origin", "feature\nmain"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("branch is invalid");
+        }
+
+        @Test
+        void formatsRealGitSubcommandWhenLeadingConfigFlagsArePresent() {
+            assertThat(
+                            GitWorktreeService.gitSubcommand(
+                                    "-c",
+                                    "core.symlinks=false",
+                                    "-c",
+                                    "core.hooksPath=",
+                                    "worktree",
+                                    "add"))
+                    .isEqualTo("worktree");
+            assertThat(GitWorktreeService.gitSubcommand("fetch", "origin")).isEqualTo("fetch");
+            assertThat(GitWorktreeService.gitSubcommand("-c", "core.symlinks=false"))
+                    .isEqualTo("git");
+            assertThatThrownBy(
+                            () ->
+                                    service.runGit(
+                                            repoDir,
+                                            15,
+                                            "-c",
+                                            "core.symlinks=false",
+                                            "worktree",
+                                            "add",
+                                            "--detach",
+                                            "--",
+                                            worktreeDir.getAbsolutePath(),
+                                            "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageStartingWith("git worktree failed");
         }
     }
 

@@ -1,11 +1,13 @@
 const HEADER_TERMINATOR = '\r\n\r\n';
+export const MAX_HEADER_BYTES = 8 * 1024;
+const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 
 /** Encodes a JSON-RPC payload with the same bounded Content-Length framing the sidecar's
  * StdioFrameCodec (Java) reads/writes. Kept as a pure function so framing can be unit tested
  * without spawning a real process. */
 export function encodeFrame(payload: string): Buffer {
     const body = Buffer.from(payload, 'utf8');
-    if (body.length > 8 * 1024 * 1024) throw new Error('JSON-RPC payload exceeds the maximum size');
+    if (body.length > MAX_MESSAGE_BYTES) throw new Error('JSON-RPC payload exceeds the maximum size');
     return Buffer.concat([Buffer.from(`Content-Length: ${body.length}${HEADER_TERMINATOR}`, 'ascii'), body]);
 }
 
@@ -16,6 +18,9 @@ export function extractFrames(buffer: Uint8Array, onFrame: (body: string) => voi
     let remaining: Buffer = Buffer.from(buffer);
     for (;;) {
         const headerEnd = remaining.indexOf(HEADER_TERMINATOR);
+        if (headerEnd > MAX_HEADER_BYTES || (headerEnd < 0 && remaining.length > MAX_HEADER_BYTES)) {
+            throw new Error('Sidecar frame header exceeds the maximum size');
+        }
         if (headerEnd < 0) return remaining;
         const header = remaining.subarray(0, headerEnd).toString('ascii');
         const match = /Content-Length:\s*(\d+)/i.exec(header);
@@ -23,7 +28,7 @@ export function extractFrames(buffer: Uint8Array, onFrame: (body: string) => voi
             throw new Error('Sidecar sent an invalid Content-Length header');
         }
         const length = parseInt(match[1], 10);
-        if (length > 8 * 1024 * 1024) throw new Error('Sidecar response exceeds the maximum size');
+        if (length > MAX_MESSAGE_BYTES) throw new Error('Sidecar response exceeds the maximum size');
         const bodyStart = headerEnd + HEADER_TERMINATOR.length;
         if (remaining.length < bodyStart + length) return remaining;
         onFrame(remaining.subarray(bodyStart, bodyStart + length).toString('utf8'));

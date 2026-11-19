@@ -13,6 +13,17 @@ final class WorktreeCoordinator<T> {
     private String inFlightKey;
     private CompletableFuture<T> inFlight;
 
+    synchronized long epoch() {
+        return epoch;
+    }
+
+    synchronized WorktreeLease<T> acquireIfEpoch(String key, long expectedEpoch) {
+        if (epoch != expectedEpoch) {
+            return null;
+        }
+        return acquire(key);
+    }
+
     synchronized WorktreeLease<T> acquire(String key) {
         if (activeValue != null && StringUtils.equals(activeKey, key)) {
             return new WorktreeLease<>(
@@ -62,6 +73,10 @@ final class WorktreeCoordinator<T> {
 
     synchronized T activeValue() {
         return activeValue;
+    }
+
+    synchronized T activeValueForKey(String key) {
+        return StringUtils.equals(activeKey, key) ? activeValue : null;
     }
 
     T clear() {

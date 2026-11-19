@@ -10,7 +10,9 @@ import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewResult;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -20,8 +22,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import org.apache.commons.io.file.PathUtils;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 /** Java port of the former core/jvmTest Kotest suite for ClaudeService; behavior unchanged. */
 class ClaudeServiceTest {
@@ -34,6 +39,35 @@ class ClaudeServiceTest {
 
     private static PRReviewRequest fakeRequest() {
         return new PRReviewRequest(fakePr(), "");
+    }
+
+    /** Portable child JVM helper so process-lifecycle tests do not depend on POSIX {@code sh}. */
+    public static final class ChildProcessStub {
+        public static void main(String[] args) throws Exception {
+            String mode = args.length > 0 ? args[0] : "echo";
+            switch (mode) {
+                case "drain-exit" -> {
+                    System.in.readAllBytes();
+                    System.exit(args.length > 1 ? Integer.parseInt(args[1]) : 0);
+                }
+                case "hang" -> Thread.sleep(30_000);
+                default -> {
+                    byte[] input = System.in.readAllBytes();
+                    System.out.write(input);
+                    System.out.flush();
+                }
+            }
+        }
+    }
+
+    private static Process startStubProcess(String... stubArgs) throws IOException {
+        List<String> cmd = new ArrayList<>();
+        cmd.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+        cmd.add("-cp");
+        cmd.add(System.getProperty("java.class.path"));
+        cmd.add(ChildProcessStub.class.getName());
+        cmd.addAll(List.of(stubArgs));
+        return new ProcessBuilder(cmd).start();
     }
 
     /** ClaudeService subclass that returns pre-canned processes instead of spawning real ones. */
@@ -64,8 +98,7 @@ class ClaudeServiceTest {
             if (stdoutFile != null) {
                 Files.writeString(stdoutFile.toPath(), step.ndjson());
             }
-            return new ProcessBuilder("sh", "-c", "cat > /dev/null; exit " + step.exitCode())
-                    .start();
+            return startStubProcess("drain-exit", String.valueOf(step.exitCode()));
         }
     }
 
@@ -94,7 +127,7 @@ class ClaudeServiceTest {
         }
 
         private Process startHangingProcess() throws IOException {
-            spawnedProcess = new ProcessBuilder("sh", "-c", "sleep 30").start();
+            spawnedProcess = startStubProcess("hang");
             return spawnedProcess;
         }
     }
@@ -106,7 +139,7 @@ class ClaudeServiceTest {
 
         @Override
         Process buildProcess(String... extraArgs) throws IOException {
-            return new ProcessBuilder("sh", "-c", "cat").start();
+            return startStubProcess("echo");
         }
     }
 
@@ -124,7 +157,7 @@ class ClaudeServiceTest {
         @Override
         Process buildProcess(String... extraArgs) throws IOException {
             boolean hang = allHang || processes.isEmpty();
-            Process process = new ProcessBuilder("sh", "-c", hang ? "sleep 30" : "cat").start();
+            Process process = startStubProcess(hang ? "hang" : "echo");
             processes.add(process);
             if (hang) hanging.countDown();
             return process;
@@ -229,7 +262,8 @@ class ClaudeServiceTest {
                                     () -> {
                                         allStreamTasksStarted.countDown();
                                         try {
-                                            if (!allStreamTasksStarted.await(2, TimeUnit.SECONDS)) {
+                                            if (!allStreamTasksStarted.await(
+                                                    15, TimeUnit.SECONDS)) {
                                                 throw new AssertionError(
                                                         "stream tasks did not start concurrently");
                                             }
@@ -250,9 +284,9 @@ class ClaudeServiceTest {
                 Future<String> secondResult =
                         callers.submit(() -> second.chatWithPrompt("second", ignored -> {}));
 
-                assertThat(allStreamTasksStarted.await(2, TimeUnit.SECONDS)).isTrue();
-                assertThat(firstResult.get(2, TimeUnit.SECONDS)).isEqualTo("first");
-                assertThat(secondResult.get(2, TimeUnit.SECONDS)).isEqualTo("second");
+                assertThat(allStreamTasksStarted.await(15, TimeUnit.SECONDS)).isTrue();
+                assertThat(firstResult.get(15, TimeUnit.SECONDS)).isEqualTo("first");
+                assertThat(secondResult.get(15, TimeUnit.SECONDS)).isEqualTo("second");
             } finally {
                 callers.shutdownNow();
                 ioThreads.shutdownNow();
@@ -440,6 +474,110 @@ class ClaudeServiceTest {
                     .doesNotContain("Write")
                     .doesNotContain("Edit")
                     .doesNotContain("WebFetch");
+        }
+
+        @Test
+        void prepareCommandWrapsBatchShimsWithCmdCallAndReplacesInlineMcpJson() throws Exception {
+            Path mcpFile = Files.createTempFile("claude-mcp-test-", ".json");
+            try {
+                String spacedShim = "C:\\Program Files (x86)\\Node Tools\\claude.cmd";
+                List<String> cmd =
+                        ClaudeService.prepareCommand(
+                                spacedShim,
+                                true,
+                                "C:\\Windows\\System32\\cmd.exe",
+                                40,
+                                ClaudeService.SAFE_CLI_ARGS,
+                                mcpFile,
+                                "--output-format",
+                                "stream-json");
+                assertThat(cmd)
+                        .startsWith(
+                                "C:\\Windows\\System32\\cmd.exe",
+                                "/d",
+                                "/c",
+                                "call",
+                                spacedShim,
+                                "--print")
+                        .containsSequence("--mcp-config", mcpFile.toAbsolutePath().toString())
+                        .doesNotContain("{\"mcpServers\":{}}");
+            } finally {
+                Files.deleteIfExists(mcpFile);
+            }
+        }
+
+        @Test
+        void validateBatchShimAndCliOptionsEnforceSafeTokens() throws Exception {
+            ClaudeService.validateBatchShimPath("C:\\Program Files (x86)\\nodejs\\claude.cmd");
+            ClaudeService.validateBatchShimPath(
+                    "C:\\Users\\Jane (Contractor)\\AppData\\Roaming\\npm\\claude.cmd");
+            ClaudeService.validateCliOptionValue("claude-sonnet-4-6", "model");
+
+            for (String unsafe :
+                    List.of(
+                            "C:\\tools\\bad&calc.cmd",
+                            "C:\\tools\\bad|calc.cmd",
+                            "C:\\tools\\bad%PATH%.cmd",
+                            "C:\\tools\\bad!var!.bat")) {
+                assertThatThrownBy(() -> ClaudeService.validateBatchShimPath(unsafe))
+                        .isInstanceOf(IOException.class)
+                        .hasMessageContaining("unsafe path characters");
+            }
+            assertThatThrownBy(
+                            () ->
+                                    ClaudeService.prepareCommand(
+                                            "C:\\Program Files (x86)\\nodejs\\claude.cmd",
+                                            true,
+                                            "cmd.exe",
+                                            40,
+                                            List.of(),
+                                            null,
+                                            "--model",
+                                            "bad&calc"))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("unsafe argument characters");
+            for (String badOpt : List.of("--evil-flag", "-p", "bad\nmodel", " ")) {
+                assertThatThrownBy(() -> ClaudeService.validateCliOptionValue(badOpt, "model"))
+                        .isInstanceOf(IOException.class)
+                        .hasMessageContaining("Invalid Claude CLI model value");
+            }
+        }
+
+        @Test
+        @EnabledOnOs(OS.WINDOWS)
+        void windowsSpacedCmdShimCanReadTempMcpConfigDuringRun() throws Exception {
+            Path tempRoot = Files.createTempDirectory("claude spaced ");
+            Path mcpFile = tempRoot.resolve("mcp (x86) config.json");
+            try {
+                Files.writeString(mcpFile, "{\"mcpServers\":{}}");
+                Path shimDir = Files.createDirectories(tempRoot.resolve("dir (x86) with spaces"));
+                Path shim = shimDir.resolve("claude.cmd");
+                Files.writeString(
+                        shim,
+                        "@echo off\r\n"
+                                + ":loop\r\n"
+                                + "if \"%~1\"==\"\" goto fail\r\n"
+                                + "if \"%~1\"==\"--mcp-config\" (\r\n"
+                                + "  type \"%~2\"\r\n"
+                                + "  exit /b 0\r\n"
+                                + ")\r\n"
+                                + "shift\r\n"
+                                + "goto loop\r\n"
+                                + ":fail\r\n"
+                                + "exit /b 2\r\n");
+                List<String> cmd =
+                        ClaudeService.prepareCommand(
+                                shim.toString(), 40, ClaudeService.SAFE_CLI_ARGS, mcpFile);
+                Process proc = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+                String out =
+                        new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
+                                .trim();
+                assertThat(proc.waitFor(10, TimeUnit.SECONDS)).isTrue();
+                assertThat(proc.exitValue()).isZero();
+                assertThat(out).isEqualTo("{\"mcpServers\":{}}");
+            } finally {
+                PathUtils.deleteDirectory(tempRoot);
+            }
         }
     }
 }

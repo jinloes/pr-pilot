@@ -108,10 +108,8 @@ Full semantics of the persisted settings summarized in
   of 500 characters) — extra guidance paths or globs, for repositories whose review rules live
   outside the built-in locations (for example `.review/ai-agent/*.md`). The resolved value (the
   active profile's list, else this default) is sent to the engine as `guidanceGlobs`, which reads
-  matching files from the PR's base commit only, never the PR worktree. The VS Code settings view
-  edits it as "Repository guidance files", one entry per line. **IntelliJ lag:** `PluginSettings`
-  stores and sends it, but the IntelliJ settings page does not lay out its text area yet
-  (`ReviewGuidanceEditor.guidanceGlobsArea()` has no caller), so IntelliJ users cannot edit it.
+  matching files from the PR's base commit only, never the PR worktree. Both hosts edit it as
+  "Repository guidance files", one entry per line (both default and profile-scoped).
 
 ## Guidance profiles
 

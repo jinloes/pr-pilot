@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URISyntaxException;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,6 +18,10 @@ import org.slf4j.LoggerFactory;
 final class WebviewResourceServer {
 
     private static final Logger log = LoggerFactory.getLogger(WebviewResourceServer.class);
+    static final String HTML_CONTENT_SECURITY_POLICY =
+            "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+                    + " img-src 'self' data:; font-src 'self' data:; connect-src 'none';"
+                    + " frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
     private volatile HttpServer server;
 
@@ -66,6 +71,11 @@ final class WebviewResourceServer {
             byte[] bytes = in.readAllBytes();
             exchange.getResponseHeaders().add("Content-Type", mimeFor(resource));
             exchange.getResponseHeaders().add("Cache-Control", "no-store");
+            exchange.getResponseHeaders().add("X-Content-Type-Options", "nosniff");
+            if (resource.endsWith(".html")) {
+                exchange.getResponseHeaders()
+                        .add("Content-Security-Policy", HTML_CONTENT_SECURITY_POLICY);
+            }
             exchange.sendResponseHeaders(200, bytes.length);
             try (var out = exchange.getResponseBody()) {
                 out.write(bytes);
@@ -75,16 +85,30 @@ final class WebviewResourceServer {
 
     /**
      * Maps a request path to a classpath resource path under {@code /webview/}, or returns null if
-     * the request would escape that root.
+     * the request is malformed or would escape that root.
      */
     static String resolveResourcePath(String requestPath) {
-        if (StringUtils.isBlank(requestPath) || !requestPath.startsWith("/")) {
+        if (StringUtils.isBlank(requestPath)
+                || !requestPath.startsWith("/")
+                || requestPath.indexOf('\\') >= 0
+                || requestPath.indexOf('?') >= 0
+                || requestPath.indexOf('#') >= 0
+                || requestPath.indexOf(' ') >= 0
+                || requestPath.indexOf(';') >= 0
+                || requestPath.chars().anyMatch(Character::isISOControl)) {
             return null;
         }
         String path = "/".equals(requestPath) ? "/index.html" : requestPath;
         String candidate = "/webview" + path;
-        String normalized = URI.create(candidate).normalize().getPath();
-        if (!normalized.startsWith("/webview/")) {
+        String normalized;
+        try {
+            normalized = new URI(null, null, candidate, null).normalize().getPath();
+        } catch (URISyntaxException | IllegalArgumentException malformed) {
+            return null;
+        }
+        if (normalized == null
+                || !normalized.startsWith("/webview/")
+                || normalized.contains("/..")) {
             return null;
         }
         return normalized;

@@ -11,6 +11,8 @@ VS Code host integration. All GitHub and review generation routes through the Ja
   selection/refresh/instructions/deep review, and for review generation/drafts/submission/chat.
   `extensionTypes.ts` holds shared state types.
 - `src/worktree.ts` - Worktree lifecycle (`resolveWorkingDir`/`clearWorktree`).
+- `src/openFile.ts` - Confined `workspace-checkout-first` file/line editor navigation (`openFile`),
+  with read-only preview fallback for PR-worktree-only files. Tests: `openFile.test.ts`.
 - `src/notificationPoller.ts` - `PRNotificationPoller`.
 - `src/copilotModel.ts` - `selectCopilotModel` command.
 - `src/draftRecovery.ts` - Token-free `globalState` snapshots used until GitHub confirms a draft
@@ -22,7 +24,7 @@ VS Code host integration. All GitHub and review generation routes through the Ja
   declarations and parsers, DTOs, framing, and JAR resolution.
 - `src/models.ts` - Host-neutral PR/review view models.
 - `src/claude.ts` - Claude binary discovery and preflight.
-- `src/copilot.ts` - Copilot model discovery and binary preflight.
+- `src/copilot.ts` - Copilot model-list caching (`reviews/listCopilotModels`) and binary preflight.
 - `src/codeIntelligence.ts` - Host-neutral read-only lookup tools (path confinement, symbol
   location, bounded formatting) over a `CodeIntelligenceBackend`. `codeIntelligenceServer.ts`
   serves them as a per-request loopback MCP server (`withCodeIntelligenceServer`), and

@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { LineComment } from '@/bridge/types'
 import { AUTOSAVE_DEBOUNCE_MS } from '@/lib/autosave'
 import { withAttachedPatch } from '@/lib/attachPatch'
+import { normalizeOpenableFilePath } from '../ReviewPane/OrphanComments'
 import { DELETE_COMMENT_DESCRIPTION, DiffViewer } from './DiffViewer'
 
 const diff = `diff --git a/src/auth.ts b/src/auth.ts
@@ -539,5 +540,68 @@ describe('DiffViewer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'src/ui/button.tsx' }))
     expect(navBody).toHaveAttribute('data-compact-collapsed', 'true')
+  })
+
+  it('invokes onOpenFile from non-deleted file headers and inline findings using resolved display paths', () => {
+    const onOpenFile = vi.fn()
+    const mixedDiff = `${diff}diff --git a/src/deleted.ts b/src/deleted.ts
+deleted file mode 100644
+--- a/src/deleted.ts
++++ /dev/null
+@@ -1,1 +0,0 @@
+-export const obsolete = true
+diff --git a/src/empty-deleted.ts b/src/empty-deleted.ts
+deleted file mode 100644
+index e69de29..0000000
+`
+    render(
+      <DiffViewer
+        diff={mixedDiff}
+        comments={[
+          { file: 'auth.ts', line: 2, type: 'issue', body: 'Anchored via suffix match.' },
+        ]}
+        onOpenFile={onOpenFile}
+        readOnly
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Open in editor: src/deleted.ts' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open in editor: src/empty-deleted.ts' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open in editor: src/auth.ts' }))
+    expect(onOpenFile).toHaveBeenLastCalledWith('src/auth.ts')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open in editor: src/auth.ts line 2' }))
+    expect(onOpenFile).toHaveBeenLastCalledWith('src/auth.ts', 2)
+  })
+
+  it('normalizes orphan file paths fail-closed against verified diff entries', () => {
+    expect(normalizeOpenableFilePath('./b/src/auth.ts', ['src/auth.ts'])).toBe('src/auth.ts')
+    expect(normalizeOpenableFilePath('button.tsx', ['src/auth.ts', 'src/ui/button.tsx'])).toBe('src/ui/button.tsx')
+    expect(normalizeOpenableFilePath('b/foo.ts', ['packages/b/foo.ts', 'foo.ts'])).toBe('packages/b/foo.ts')
+    expect(normalizeOpenableFilePath('b/foo.ts', ['b/foo.ts', 'foo.ts'])).toBe('b/foo.ts')
+    expect(normalizeOpenableFilePath('src/auth.ts', [])).toBeNull()
+    expect(normalizeOpenableFilePath('src/not-in-diff.ts', ['src/auth.ts'])).toBeNull()
+    expect(normalizeOpenableFilePath('src\\auth.ts', ['src/auth.ts'])).toBeNull()
+    expect(
+      normalizeOpenableFilePath('src/deleted.ts', [
+        { path: 'src/auth.ts', deleted: false },
+        { path: 'src/deleted.ts', deleted: true },
+      ]),
+    ).toBeNull()
+    expect(
+      normalizeOpenableFilePath('deleted.ts', [
+        { path: 'src/deleted.ts', deleted: true },
+      ]),
+    ).toBeNull()
+    expect(
+      normalizeOpenableFilePath('foo.ts', [
+        { path: 'old/foo.ts', deleted: true },
+        { path: 'new/foo.ts', deleted: false },
+      ]),
+    ).toBeNull()
+    expect(normalizeOpenableFilePath('../secret.txt', ['src/auth.ts'])).toBeNull()
+    expect(normalizeOpenableFilePath('/etc/passwd', ['src/auth.ts'])).toBeNull()
+    expect(normalizeOpenableFilePath('C:\\Windows\\win.ini', ['src/auth.ts'])).toBeNull()
   })
 })

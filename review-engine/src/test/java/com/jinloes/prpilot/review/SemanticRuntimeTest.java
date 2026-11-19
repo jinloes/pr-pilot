@@ -29,6 +29,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 class SemanticRuntimeTest {
     private Path root;
@@ -50,7 +52,9 @@ class SemanticRuntimeTest {
             return Path.of(System.getProperty("java.io.tmpdir"));
         }
         Path base = Files.createDirectories(Path.of(configured));
-        Files.setPosixFilePermissions(base, PosixFilePermissions.fromString("rwx------"));
+        if (base.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+            Files.setPosixFilePermissions(base, PosixFilePermissions.fromString("rwx------"));
+        }
         return base;
     }
 
@@ -63,6 +67,7 @@ class SemanticRuntimeTest {
 
     @Nested
     class PackagedWorker {
+        @EnabledOnOs({OS.LINUX, OS.MAC})
         @Test
         void isolatedEngineJarHasMatchingWorkerAndManifest() throws Exception {
             try (var loader =
@@ -77,8 +82,10 @@ class SemanticRuntimeTest {
                         .isEqualTo(
                                 Files.readAllBytes(
                                         Path.of(System.getProperty("sourceInventory.workerJar"))));
-                assertThat(Files.getPosixFilePermissions(worker))
-                        .isEqualTo(PosixFilePermissions.fromString("rw-------"));
+                if (worker.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+                    assertThat(Files.getPosixFilePermissions(worker))
+                            .isEqualTo(PosixFilePermissions.fromString("rw-------"));
+                }
                 assertThatThrownBy(() -> SemanticRuntime.extract(loader, root))
                         .isInstanceOf(java.nio.file.FileAlreadyExistsException.class);
             }
@@ -124,6 +131,10 @@ class SemanticRuntimeTest {
         }
     }
 
+    @EnabledOnOs(
+            value = {OS.LINUX, OS.MAC},
+            disabledReason =
+                    "Trusted semantic launch configuration requires POSIX rwx------ ownership and shell shims")
     @Nested
     class TrustedConfiguration {
         private Path config(String nodeVersion, String ijctlVersion) throws Exception {

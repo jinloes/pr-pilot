@@ -817,7 +817,8 @@ public final class ReviewPipelineService {
                         InspectionManifest.fromDiff(followUpRequest.getDiff());
                 String raw =
                         provider.complete(
-                                ReviewPrompts.buildPrompt(followUpRequest, followUpManifest),
+                                ReviewSupervisorPrompts.followUpPrompt(
+                                        followUpRequest, followUpManifest, directives),
                                 FOLLOW_UP_TIMEOUT_MS,
                                 true,
                                 false,

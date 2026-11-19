@@ -238,10 +238,17 @@ export function openSettings(
 
     const refreshModels = async (quiet: boolean) => {
         const previous = copilot.cachedModels();
-        const discovered = await copilot.listModels(true).catch(() => []);
+        const result = await copilot.discoverModels(sidecar, true);
         try {
             void current.webview.postMessage(
-                buildModelsMessage(discovered, previous, readState().reviewModelCopilot, quiet),
+                buildModelsMessage(
+                    result.models,
+                    previous,
+                    readState().reviewModelCopilot,
+                    quiet,
+                    result.source,
+                    result.failureReason,
+                ),
             );
         } catch {
             // The panel was closed while the probe was running; the next open refreshes again.

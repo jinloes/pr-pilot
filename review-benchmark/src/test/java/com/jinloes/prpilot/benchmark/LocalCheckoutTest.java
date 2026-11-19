@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.apache.commons.io.file.PathUtils;
+import org.apache.commons.io.file.StandardDeleteOption;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -48,7 +49,7 @@ class LocalCheckoutTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        PathUtils.deleteDirectory(root);
+        PathUtils.deleteDirectory(root, StandardDeleteOption.OVERRIDE_READ_ONLY);
     }
 
     @Nested
@@ -68,7 +69,8 @@ class LocalCheckoutTest {
                         .contains("diff --git a/A.java b/A.java")
                         .contains("+class A { int x; }");
             }
-            assertThat(git(clone.toPath(), "worktree", "list")).doesNotContain(worktree.getPath());
+            assertThat(git(clone.toPath(), "worktree", "list").replace('\\', '/'))
+                    .doesNotContain(worktree.getPath().replace('\\', '/'));
         }
 
         @Test
@@ -126,6 +128,8 @@ class LocalCheckoutTest {
                 new ArrayList<>(
                         List.of(
                                 "git",
+                                "-c",
+                                "core.autocrlf=false",
                                 "-c",
                                 "user.name=t",
                                 "-c",

@@ -11,6 +11,19 @@ final class StdioFrameCodec {
     static final int MAX_HEADER_BYTES = 8 * 1024;
     static final int MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 
+    static final class FrameTooLargeException extends IOException {
+        private final int payloadLength;
+
+        FrameTooLargeException(int payloadLength) {
+            super("JSON-RPC payload exceeds the maximum size");
+            this.payloadLength = payloadLength;
+        }
+
+        int payloadLength() {
+            return payloadLength;
+        }
+    }
+
     byte[] readFrame(InputStream input) throws IOException {
         byte[] header = readHeader(input);
         if (header == null) {
@@ -27,7 +40,7 @@ final class StdioFrameCodec {
 
     void writeFrame(OutputStream output, byte[] payload) throws IOException {
         if (payload.length > MAX_MESSAGE_BYTES) {
-            throw new IOException("JSON-RPC payload exceeds the maximum size");
+            throw new FrameTooLargeException(payload.length);
         }
 
         String header = "Content-Length: " + payload.length + "\r\n\r\n";

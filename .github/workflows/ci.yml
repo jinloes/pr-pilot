@@ -466,7 +466,7 @@ jobs:
           cache-provider: basic
 
       - name: Verify provider binary and worktree path handling
-        run: node scripts/run-gradle.mjs :review-engine:test --tests '*BinaryLocatorTest' --tests '*GitWorktreeServiceTest'
+        run: node scripts/run-gradle.mjs :review-engine:test --tests '*BinaryLocatorTest' --tests '*GitWorktreeServiceTest' --no-daemon
 
       - name: Install webview and VS Code extension dependencies
         run: |
@@ -481,6 +481,9 @@ jobs:
 
       - name: Package VS Code extension
         working-directory: vscode-extension
+        env:
+          GRADLE_OPTS: -Dorg.gradle.daemon=false
+          JAVA_TOOL_OPTIONS: -Dorg.gradle.daemon=false
         run: npm run package:vsix -- --out pr-pilot-host-check.vsix
 
       - name: Smoke check packaged extension
@@ -524,7 +527,7 @@ jobs:
           cache-provider: basic
 
       - name: Gradle check
-        run: node scripts/run-gradle.mjs check --continue "-Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64"
+        run: node scripts/run-gradle.mjs check --continue --no-daemon "-Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64"
 
       - name: Webview unit tests
         if: success() || failure()

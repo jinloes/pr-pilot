@@ -30,6 +30,7 @@ public interface ReviewEngineApi {
                     Map.entry("cancel", "reviews/cancel"),
                     Map.entry("recordOutcome", "reviews/recordOutcome"),
                     Map.entry("readGuidelines", "reviews/readGuidelines"),
+                    Map.entry("listCopilotModels", "reviews/listCopilotModels"),
                     Map.entry("findGitRoot", "reviews/findGitRoot"),
                     Map.entry("createWorktree", "reviews/createWorktree"),
                     Map.entry("prepareDeepReview", "reviews/prepareDeepReview"),
@@ -717,6 +718,15 @@ public interface ReviewEngineApi {
     /** Result of {@link #readGuidelines}: the concatenated, size-capped guidance text. */
     record GuidelinesResult(String guidelines) {}
 
+    /** Request for {@link #listCopilotModels}. */
+    record ListCopilotModelsParams(boolean forceRefresh) {}
+
+    /**
+     * Result of {@link #listCopilotModels}: discovered model IDs plus provenance ({@code ACCOUNT},
+     * {@code CLI_HELP}, or {@code NONE}) and an optional user-facing failure reason.
+     */
+    record CopilotModelsResult(List<String> models, String source, String failureReason) {}
+
     /**
      * Result of {@link #findGitRoot}: the repository root, or blank when {@code startDir} is not in
      * one.
@@ -804,4 +814,12 @@ public interface ReviewEngineApi {
 
     /** Removes a worktree created by {@link #createWorktree}. Never throws. */
     WorktreeRemovalResult removeWorktree(RemoveWorktreeParams params);
+
+    /**
+     * Lists Copilot model IDs available to the signed-in account, serving the cached list unless
+     * {@code params.forceRefresh()} is set or nothing is cached yet.
+     */
+    default CopilotModelsResult listCopilotModels(ListCopilotModelsParams params) {
+        return new CopilotModelsResult(List.of(), "NONE", "Model discovery unavailable");
+    }
 }
