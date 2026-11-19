@@ -163,20 +163,20 @@ function OrphanRow({
         </span>
         {!editing && ((onOpenFile && openTargetPath) || onEdit || onDelete) && (
           <div className="flex flex-wrap items-center gap-1">
-            {onOpenFile && openTargetPath && (
+            {onOpenFile && openTargetPath && isValidEditorLine(orphan.line) && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-6 px-1.5 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
-                onClick={() => onOpenFile(openTargetPath, isValidEditorLine(orphan.line) ? orphan.line : undefined)}
-                aria-label={
-                  isValidEditorLine(orphan.line)
-                    ? `Open in editor: ${openTargetPath} line ${orphan.line}`
-                    : `Open in editor: ${openTargetPath}`
-                }
+                disabled={'reviewedVersionAvailable' in onOpenFile && onOpenFile.reviewedVersionAvailable === false}
+                onClick={() => onOpenFile(openTargetPath, orphan.line)}
+                aria-label={'reviewedVersionAvailable' in onOpenFile && onOpenFile.reviewedVersionAvailable === false
+                  ? 'Reviewed version unavailable'
+                  : `Open reviewed version (read-only): ${openTargetPath} line ${orphan.line}`}
               >
                 <FileCode2 className="w-3 h-3" />
-                Open in editor
+                {'reviewedVersionAvailable' in onOpenFile && onOpenFile.reviewedVersionAvailable === false
+                  ? 'Reviewed version unavailable' : 'Open reviewed version'}
               </Button>
             )}
             {onEdit && (

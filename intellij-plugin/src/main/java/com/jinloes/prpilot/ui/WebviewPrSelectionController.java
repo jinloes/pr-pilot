@@ -137,6 +137,7 @@ final class WebviewPrSelectionController {
                                     CompletableFuture.supplyAsync(
                                             () -> {
                                                 try {
+                                                    detailFuture.join();
                                                     return panel.ghSvc.loadPRDiff(
                                                             owner,
                                                             repo,
@@ -164,6 +165,7 @@ final class WebviewPrSelectionController {
                                             CompletableFuture.supplyAsync(
                                                     () -> {
                                                         try {
+                                                            detailFuture.join();
                                                             return panel.ghSvc.loadPRDiff(
                                                                     owner,
                                                                     repo,
@@ -233,6 +235,23 @@ final class WebviewPrSelectionController {
                                     StringUtils.isNotBlank(fetchedValidationDiff)
                                             ? fetchedValidationDiff
                                             : fetchedDiff;
+                            IntellijGitHubService.PRRevisions reviewedRevisions = null;
+                            if (localSource != null) {
+                                reviewedRevisions =
+                                        new IntellijGitHubService.PRRevisions(
+                                                localSource.headSha(), localSource.baseSha());
+                            } else if (StringUtils.isNotBlank(fetchedDiff)
+                                    && detail != null
+                                    && detail.head() != null
+                                    && StringUtils.isNotBlank(detail.baseSha())
+                                    && StringUtils.isNotBlank(detail.head().sha())) {
+                                var before =
+                                        new IntellijGitHubService.PRRevisions(
+                                                detail.head().sha(), detail.baseSha());
+                                if (before.equals(panel.reviewMetadata(owner, repo, number))) {
+                                    reviewedRevisions = before;
+                                }
+                            }
                             ProviderReadinessDto providerReadiness =
                                     panel.currentProviderReadiness();
 
@@ -243,6 +262,7 @@ final class WebviewPrSelectionController {
                                 panel.activePR = hydratedPr;
                                 panel.prefetchedDiff = fetchedDiff;
                                 panel.prefetchedLocalDiffSource = localSource;
+                                panel.prefetchedReviewedRevisions = reviewedRevisions;
                                 panel.prefetchedValidationDiff = effectiveValidationDiff;
                                 panel.prefetchedExistingReviews = fetchedReviews;
                             }
@@ -337,6 +357,16 @@ final class WebviewPrSelectionController {
                                         recovery != null ? recovery.result() : pending.result();
                                 String reviewId = pending != null ? pending.id() : null;
                                 ReviewResultDto dto = ReviewMapper.INSTANCE.toDto(restored);
+                                var reviewed =
+                                        reviewedRevisions != null
+                                                        && recovery == null
+                                                        && pending != null
+                                                        && reviewedRevisions
+                                                                .headSha()
+                                                                .equals(pending.commitId())
+                                                ? WebviewPanel.ReviewedFile.forCommit(
+                                                        pending.commitId())
+                                                : null;
                                 synchronized (panel) {
                                     if (!panel.isCurrentSelectionLocked(key, revision)) {
                                         return;
@@ -345,6 +375,7 @@ final class WebviewPrSelectionController {
                                     panel.pendingReviewKey =
                                             StringUtils.isNotBlank(reviewId) ? key : null;
                                     panel.lastResult = restored;
+                                    panel.reviewedFile = reviewed;
                                 }
                                 panel.publishIfCurrentSelection(
                                         key,
@@ -370,8 +401,8 @@ final class WebviewPrSelectionController {
                                                         : "Loaded pending draft review.",
                                                 providerReadiness,
                                                 panel.intellijAssistedEnabled.getAsBoolean(),
-                                                panel.rememberedRepositoryInstructions(
-                                                        owner, repo)));
+                                                panel.rememberedRepositoryInstructions(owner, repo),
+                                                reviewed == null ? null : reviewed.token()));
                                 return;
                             }
 

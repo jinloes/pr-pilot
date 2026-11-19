@@ -67,6 +67,7 @@ final class BridgeMessageValidator {
             case "openFile" ->
                     hasValidPrIdentity(node)
                             && validRepoRelativeFile(node.get("file"))
+                            && optionalText(node.get("reviewedFileToken"), 128)
                             && optionalPositiveLine(node.get("line"));
             case "webviewLayoutChanged" -> boundedText(node.get("reason"), 4_096);
             case "askClaude" ->

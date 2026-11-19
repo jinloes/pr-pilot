@@ -426,13 +426,15 @@ describe('narrow review footer', () => {
         },
         diff: diffWithFiles(1),
         validationDiff: fullDiff,
+        reviewedFileToken: 'reviewed-token',
       })
     })
 
     expect(screen.queryByRole('button', { name: /Open in editor: src\/unrelated\.ts/ })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Open in editor: src/omitted.ts line 12' }))
+    await user.click(screen.getByRole('button', { name: 'Open reviewed version (read-only): src/omitted.ts line 12' }))
     expect(outgoingOf(cefQuery, 'openFile')).toEqual([
-      { protocolVersion: 1, type: 'openFile', number: 42, owner: 'acme', repo: 'widget', file: 'src/omitted.ts', line: 12 },
+      { protocolVersion: 1, type: 'openFile', number: 42, owner: 'acme', repo: 'widget', file: 'src/omitted.ts', line: 12,
+        reviewedFileToken: 'reviewed-token' },
     ])
   })
 })

@@ -35,6 +35,7 @@ export function createWorktreeOperations(deps: WorktreeDependencies): {
         const wt = state.worktreeDir;
         const root = state.gitRoot;
         state.worktreeDir = null;
+        state.worktreeHead = undefined;
         state.gitRoot = null;
         state.worktreeKey = null;
         state.worktreeEpoch++;
@@ -120,6 +121,7 @@ export function createWorktreeOperations(deps: WorktreeDependencies): {
             }
 
             state.worktreeDir = created.worktreeDir;
+            state.worktreeHead = head.sha ?? undefined;
             state.gitRoot = gitRoot;
             state.worktreeKey = key;
             return created.worktreeDir;

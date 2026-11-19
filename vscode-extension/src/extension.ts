@@ -42,6 +42,7 @@ import type { ActivePR, HandlerDependencies, Provider, ProviderReadiness, Review
 // Node extension process, so missing Java/jar or transport failures surface as setup errors.
 let sidecarClient: SidecarClient;
 const worktreePreviewPaths = new Map<string, string>();
+const reviewedBlobPreviews = new Map<string, { text: string; count: number }>();
 let worktreePreviewDidChange: vscode.EventEmitter<vscode.Uri> | undefined;
 
 function registerReadOnlyWorktreePreviewUri({
@@ -139,6 +140,8 @@ export function activate(context: vscode.ExtensionContext) {
             onDidChange: worktreePreviewDidChange.event,
             provideTextDocumentContent: async (uri) => {
                 const mapKey = uri.query ? `${uri.path}?${uri.query}` : uri.path;
+                const blob = reviewedBlobPreviews.get(uri.toString());
+                if (blob) return blob.text;
                 const target = worktreePreviewPaths.get(mapKey) ?? worktreePreviewPaths.get(uri.path);
                 if (!target) throw new Error('PR worktree preview is no longer available.');
                 return fs.promises.readFile(target, 'utf8');
@@ -611,6 +614,7 @@ function handleOpenFile(state: ViewState, msg: Record<string, unknown>): Promise
             repo: msg.repo as string,
             file: msg.file as string,
             line: typeof msg.line === 'number' ? msg.line : undefined,
+            reviewedFileToken: typeof msg.reviewedFileToken === 'string' ? msg.reviewedFileToken : undefined,
         },
         {
             vscode,
@@ -619,6 +623,30 @@ function handleOpenFile(state: ViewState, msg: Record<string, unknown>): Promise
             detectRepo: (startDir) => sidecarClient.detectRepo(startDir),
             resolveWorkingDir: worktreeOperations.resolveWorkingDir,
             toReadOnlyWorktreeUri: registerReadOnlyWorktreePreviewUri,
+            openReviewedBlob: async (gitRoot, commit, file, line, isCurrent) => {
+                const text = await sidecarClient.readReviewedBlob(gitRoot, commit, file, line);
+                if (!isCurrent()) return;
+                const uri = vscode.Uri.from({
+                    scheme: WORKTREE_PREVIEW_SCHEME,
+                    path: buildReadOnlyWorktreeUriKey(msg.owner as string, msg.repo as string, msg.number as number, file),
+                    query: `commit=${commit}`,
+                });
+                const key = uri.toString();
+                const entry = reviewedBlobPreviews.get(key) ?? { text, count: 0 };
+                entry.count++;
+                reviewedBlobPreviews.set(key, entry);
+                try {
+                    await vscode.workspace.openTextDocument(uri);
+                    if (!isCurrent()) return;
+                    await vscode.window.showTextDocument(uri, {
+                        viewColumn: vscode.ViewColumn.Beside,
+                        preview: true,
+                        selection: new vscode.Range(line - 1, 0, line - 1, 0),
+                    });
+                } finally {
+                    if (--entry.count === 0) reviewedBlobPreviews.delete(key);
+                }
+            },
         },
     );
 }

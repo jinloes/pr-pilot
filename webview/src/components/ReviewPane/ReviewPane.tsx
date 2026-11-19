@@ -143,17 +143,19 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
       onReanchor={actions.reanchorDraft}
       onOpenSettings={actions.openSettings}
       onOpenAuthGuide={actions.openAuthGuide}
-      onOpenFile={(file, line) => {
+      onOpenFile={Object.assign((file: string, line?: number) => {
         if (!isSafeRelativePath(file)) return
+        const reviewedFileToken = model.state.reviewedFileToken
+        if (line !== undefined && (!isValidEditorLine(line) || !reviewedFileToken)) return
         sendToHost({
           type: 'openFile',
           number: pr.number,
           owner: pr.owner,
           repo: pr.repo,
           file,
-          ...(isValidEditorLine(line) ? { line } : {}),
+          ...(line !== undefined ? { line, reviewedFileToken } : {}),
         })
-      }}
+      }, { reviewedVersionAvailable: !!model.state.reviewedFileToken })}
     />
   )
 

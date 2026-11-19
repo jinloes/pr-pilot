@@ -1,4 +1,5 @@
 import * as claude from './claude';
+import { randomUUID } from 'crypto';
 import * as copilot from './copilot';
 import { composeCustomInstructions } from './repositoryInstructions';
 import { GitHubOperationError, LocalPrDiffError, providerNotInstalledMessage, toUserFacingError } from './userFacingError';
@@ -12,7 +13,7 @@ import type { OutcomeComment } from './sidecar';
 import type { HandlerDependencies, Provider, ViewState } from './extensionTypes';
 import type { SidecarChatAttachment, SidecarChatContext, SidecarChatResult, SidecarPrDetailResult, SidecarPrDiffResult } from './sidecarTypes';
 import type { PreparedDeepReview } from './deepReview';
-import { diffRevisions, recoverOversizedDiff } from './prDiffFallback';
+import { diffRevisions, recoverOversizedDiff, sameDiffRevisions } from './prDiffFallback';
 
 export interface ReviewHandlerApi {
     handleGenerateReview: (
@@ -93,6 +94,10 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         let oversizedDiff: SidecarPrDiffResult | undefined;
         let localDetail: SidecarPrDetailResult | undefined;
         const cachedRevisions = state.localDiffRevisions;
+        let reviewedRevisions = state.reviewedDiffRevisions ?? cachedRevisions;
+        if (requestedDiff && requestedDiff !== state.activeDiff && requestedDiff !== state.activeValidationDiff) {
+            reviewedRevisions = null;
+        }
         if (cachedRevisions && diff && !deep) {
             localDetail = await deps.client().getPullRequestDetail(base, owner, repo, number)
                 .catch(() => undefined);
@@ -103,6 +108,9 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             }
         }
         if (!diff) {
+            const before = !deep
+                ? await deps.client().getPullRequestDetail(base, owner, repo, number).catch(() => undefined)
+                : undefined;
             const remote = await deps.client().getPullRequestDiff(base, owner, repo, number, 'review');
             if (!isCurrentGeneration()) return;
             if (remote?.status === 'diff_too_large' && !deep) {
@@ -122,6 +130,14 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             if (!isCurrentGeneration()) return;
             state.activeDiff = diff;
             state.localDiffRevisions = localDetail ? diffRevisions(localDetail) : null;
+            const after = !deep && !localDetail
+                ? await deps.client().getPullRequestDetail(base, owner, repo, number).catch(() => undefined)
+                : undefined;
+            if (!isCurrentGeneration()) return;
+            const afterRevisions = after ? diffRevisions(after) : null;
+            reviewedRevisions = state.localDiffRevisions ?? (
+                sameDiffRevisions(before && diffRevisions(before), afterRevisions) ? afterRevisions : null);
+            state.reviewedDiffRevisions = reviewedRevisions ?? null;
         }
         // The incremental diff only feeds the model: activeDiff and every diff published to the
         // webview stay PR diffs so anchoring, validation and publishing are unchanged.
@@ -138,6 +154,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             }
             if (!isCurrentGeneration()) return;
             if (incremental.scope === 'incremental') {
+                if (incremental.headSha !== reviewedRevisions?.headSha) reviewedRevisions = null;
                 modelDiff = incremental.diff;
                 incrementalBaselineSha = incremental.baselineSha;
                 reviewScope = { kind: 'incremental', baselineSha: incremental.baselineSha };
@@ -155,15 +172,29 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                     .catch(() => diff)
                 : cachedRevisions && !deep
                     ? Promise.resolve(diff)
-                    : deps.client().getPullRequestDiff(base, owner, repo, number, 'validation')
-                .then((result) => result?.status === 'ok' && result.diff !== null ? result.diff : diff)
-                .catch(() => diff);
+                    : (async () => {
+                        const client = deps.client();
+                        const beforeValidation = reviewedRevisions && await client.getPullRequestDetail(base, owner, repo, number);
+                        const result = await client.getPullRequestDiff(base, owner, repo, number, 'validation');
+                        if (result?.status !== 'ok' || result.diff === null || result.diff === diff) return diff;
+                        if (reviewedRevisions) {
+                            const after = await client.getPullRequestDetail(base, owner, repo, number);
+                            if (!sameDiffRevisions(beforeValidation ? diffRevisions(beforeValidation) : null, reviewedRevisions)
+                                || !sameDiffRevisions(diffRevisions(after), reviewedRevisions)) {
+                                reviewedRevisions = null;
+                                if (isCurrentGeneration()) state.reviewedDiffRevisions = null;
+                                if (isCurrentGeneration() && reviewResultPublished) state.reviewedFile = undefined;
+                            }
+                        }
+                        return result.diff;
+                    })().catch(() => diff);
         void validationDiffPromise.then((fullDiff) => {
             if (!isCurrentGeneration()) return;
             resolvedValidationDiff = fullDiff;
             state.activeValidationDiff = fullDiff;
             if (reviewResultPublished) {
-                deps.push(state, { type: 'validationDiffUpdated', prKey: key, validationDiff: fullDiff });
+                deps.push(state, { type: 'validationDiffUpdated', prKey: key, validationDiff: fullDiff,
+                    reviewedFileToken: state.reviewedFile?.token });
             }
         });
 
@@ -318,6 +349,12 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             return;
         }
         state.activeReviewResult = result;
+        const reviewedHead = deep
+            ? !resolvedValidationDiff || resolvedValidationDiff === deep.pending.diff ? deep.pending.preparation.head : undefined
+            : reviewedRevisions?.headSha === state.worktreeHead ? state.worktreeHead : undefined;
+        state.reviewedFile = reviewedHead && /^[0-9a-f]{40}$/.test(reviewedHead)
+            ? { token: randomUUID(), commit: reviewedHead }
+            : undefined;
         state.generatedReviews.set(key, {
             result,
             editedResult: null,
@@ -333,6 +370,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             result,
             diff,
             validationDiff: resolvedValidationDiff ?? diff,
+            reviewedFileToken: state.reviewedFile?.token,
             ...(reviewScope ? { reviewScope } : {}),
         });
         reviewResultPublished = true;

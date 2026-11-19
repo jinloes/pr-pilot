@@ -132,6 +132,7 @@ export function isValidBridgeRequest(msg: AnyMessage | null | undefined): msg is
     case 'openFile':
       return hasValidPrIdentity(msg)
         && isValidRepoRelativeFile(msg.file)
+        && (msg.reviewedFileToken === undefined || isOperationId(msg.reviewedFileToken))
         && (msg.line === undefined
           || (typeof msg.line === 'number'
             && Number.isInteger(msg.line)

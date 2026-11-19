@@ -158,6 +158,7 @@ export function parseIncomingMessage(value: unknown): IncomingMessage | null {
     case 'draftLoaded':
       valid = ['NO_DRAFT', 'DRAFT_PRESENT', 'MERGED'].includes(value.prState as string)
         && isOptionalString(value.reviewId, 256)
+        && isOptionalString(value.reviewedFileToken, 128)
         && (value.result === undefined || isReviewResult(value.result))
         && isOptionalString(value.diff, MAX_DIFF)
         && isOptionalString(value.validationDiff, MAX_DIFF)
@@ -207,6 +208,7 @@ export function parseIncomingMessage(value: unknown): IncomingMessage | null {
       valid = isReviewResult(value.result)
         && isString(value.diff, MAX_DIFF)
         && isOptionalString(value.validationDiff, MAX_DIFF)
+        && isOptionalString(value.reviewedFileToken, 128)
       if (valid && value.reviewScope !== undefined && !isReviewScope(value.reviewScope)) {
         // A malformed scope only loses its banner; the review itself is still usable.
         const { reviewScope: _dropped, ...rest } = value
@@ -214,7 +216,7 @@ export function parseIncomingMessage(value: unknown): IncomingMessage | null {
       }
       break
     case 'validationDiffUpdated':
-      valid = isString(value.validationDiff, MAX_DIFF)
+      valid = isString(value.validationDiff, MAX_DIFF) && isOptionalString(value.reviewedFileToken, 128)
       break
     case 'draftSaved':
       valid = isString(value.reviewId, 256)

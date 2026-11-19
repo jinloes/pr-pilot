@@ -25,7 +25,7 @@ export type GeneratingState = {
   generationElapsedSec?: number
 }
 
-export type PaneState =
+export type PaneState = (
   | { kind: 'idle' }
   | { kind: 'draftLoading' }
   | { kind: 'noDraft'; diff?: string; validationDiff?: string; providerReadiness?: ProviderReadiness }
@@ -52,6 +52,7 @@ export type PaneState =
   | { kind: 'saveError'; message: string; result: ReviewResult | null; diff: string; validationDiff: string }
   | { kind: 'submitError'; message: string; result: ReviewResult | null; diff: string; validationDiff: string }
   | { kind: 'deleteError'; message: string; draft: DraftPresentState }
+) & { reviewedFileToken?: string }
 
 export type ReviewStateEvent =
   | { type: 'restoreBeforeDeepPause'; previous: PaneState }
@@ -62,6 +63,7 @@ export type ReviewStateEvent =
       prState: 'NO_DRAFT' | 'DRAFT_PRESENT' | 'MERGED'
       result?: ReviewResult
       reviewId?: string
+      reviewedFileToken?: string
       staleCommits?: boolean
       importedFromGitHub?: boolean
       diff: string
@@ -76,9 +78,10 @@ export type ReviewStateEvent =
       validationDiff: string
       generationElapsedSec?: number
       reviewScope?: ReviewScope
+      reviewedFileToken?: string
     }
   | { type: 'reviewError'; message: string }
-  | { type: 'validationDiffUpdated'; validationDiff: string }
+  | { type: 'validationDiffUpdated'; validationDiff: string; reviewedFileToken?: string }
   | { type: 'draftSaved'; reviewId: string }
   | { type: 'saveError'; message: string }
   | { type: 'reviewSubmitted' }
@@ -201,6 +204,7 @@ export function reviewReducer(state: PaneState, event: ReviewStateEvent): PaneSt
           kind: 'draftPresent',
           result: event.result,
           reviewId: event.reviewId ?? '',
+          reviewedFileToken: event.reviewedFileToken,
           staleCommits: event.staleCommits ?? false,
           importedFromGitHub: event.importedFromGitHub ?? false,
           diff: event.diff,
@@ -223,6 +227,7 @@ export function reviewReducer(state: PaneState, event: ReviewStateEvent): PaneSt
         diff: event.diff || event.validationDiff,
         validationDiff: event.validationDiff,
         generationElapsedSec: event.generationElapsedSec,
+        reviewedFileToken: event.reviewedFileToken,
         ...(event.reviewScope ? { reviewScope: event.reviewScope } : {}),
       }
 
@@ -240,7 +245,7 @@ export function reviewReducer(state: PaneState, event: ReviewStateEvent): PaneSt
     case 'validationDiffUpdated': {
       const validationDiff = event.validationDiff
       if (state.kind === 'draftPresent' || state.kind === 'reviewUnsaved') {
-        return { ...state, validationDiff, result: normalizeReviewResult(state.result, validationDiff) }
+        return { ...state, validationDiff, reviewedFileToken: event.reviewedFileToken, result: normalizeReviewResult(state.result, validationDiff) }
       }
       if (state.kind === 'generating') {
         return {
@@ -267,6 +272,7 @@ export function reviewReducer(state: PaneState, event: ReviewStateEvent): PaneSt
         kind: 'draftPresent',
         result: saved,
         reviewId: event.reviewId,
+        reviewedFileToken: state.reviewedFileToken,
         staleCommits: false,
         importedFromGitHub: false,
         diff: diffOf(state),

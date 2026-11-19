@@ -39,6 +39,7 @@ sequenceDiagram
         Host->>GitHubEngine: Verify cached base and head against fresh PR metadata
         Note over UI,Host: Mismatch or unavailable metadata requires reopening the PR before review.
     end
+    Note over UI,Host: A result with a verified revision carries a host-issued token for read-only finding navigation.
     opt Explicit IntelliJ-assisted opt-in
         Host->>GitHubEngine: Refetch remote head and bounded 1 MB validation diff
         Host->>ReviewEngine: prepareDeepReview(exact head)

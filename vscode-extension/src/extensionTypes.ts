@@ -53,6 +53,9 @@ export interface ViewState {
     activePR: ActivePR | null;
     activeDiff: string;
     localDiffRevisions: { headSha: string; baseSha: string } | null;
+    reviewedDiffRevisions?: { headSha: string; baseSha: string } | null;
+    reviewedFile?: { token: string; commit: string };
+    worktreeHead?: string;
     activeValidationDiff: string;
     activeReviewResult: ReviewResult | null;
     pendingReviewId: string | null;

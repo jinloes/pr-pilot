@@ -232,6 +232,16 @@ export class SidecarReviewClient extends SidecarGitHubClient {
     }
 
     /** Removes a worktree created by {@link createWorktree}. Cleanup failure is logged, never thrown. */
+    async readReviewedBlob(gitRoot: string, commit: string, file: string, line: number): Promise<string> {
+        const value = await this.request('reviews/readReviewedBlob', { gitRoot, commit, file, line });
+        if (value && typeof value === 'object') {
+            const result = value as Record<string, unknown>;
+            if (typeof result.text === 'string' && result.error == null) return result.text;
+            if (typeof result.error === 'string') throw new Error(result.error);
+        }
+        throw new Error('Invalid reviewed file response.');
+    }
+
     async removeWorktree(gitRoot: string, worktreeDir: string): Promise<boolean> {
         try {
             const value = await this.request('reviews/removeWorktree', { gitRoot, worktreeDir }) as { removed?: unknown };

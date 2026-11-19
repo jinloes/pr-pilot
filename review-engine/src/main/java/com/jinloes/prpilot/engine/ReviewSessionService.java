@@ -17,6 +17,7 @@ import com.jinloes.prpilot.review.ReviewChatPrompts;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
 import com.jinloes.prpilot.review.ReviewPipelineService;
 import com.jinloes.prpilot.review.ReviewPrompts;
+import com.jinloes.prpilot.review.ReviewedBlobReader;
 import com.jinloes.prpilot.review.SemanticReviewService;
 import com.jinloes.prpilot.review.SemanticWorktreeStore;
 import java.io.File;
@@ -487,6 +488,23 @@ public class ReviewSessionService implements ReviewEngineApi {
                     new CiAnnotation(param.file(), param.line(), param.level(), param.message()));
         }
         return annotations;
+    }
+
+    @Override
+    public ReviewedBlobResult readReviewedBlob(ReviewedBlobParams params) {
+        try {
+            return new ReviewedBlobResult(
+                    new ReviewedBlobReader()
+                            .read(params.gitRoot(), params.commit(), params.file(), params.line()),
+                    null);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return new ReviewedBlobResult(null, "Reviewed file lookup was interrupted.");
+        } catch (java.io.IOException
+                | java.util.concurrent.TimeoutException
+                | java.nio.file.InvalidPathException failure) {
+            return new ReviewedBlobResult(null, failure.getMessage());
+        }
     }
 
     @Override

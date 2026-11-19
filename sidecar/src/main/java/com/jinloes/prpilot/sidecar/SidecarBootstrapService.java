@@ -60,6 +60,7 @@ final class SidecarBootstrapService {
                             Set.of(
                                     "reviews/findGitRoot",
                                     "reviews/createWorktree",
+                                    "reviews/readReviewedBlob",
                                     "reviews/removeWorktree")),
                     Map.entry(
                             "reviewGeneration",

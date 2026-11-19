@@ -198,6 +198,8 @@ final class WebviewReviewController {
                             String snapshotDiff;
                             String snapshotValidationDiff;
                             PrDiffService.LocalSource localSource;
+                            IntellijGitHubService.PRRevisions reviewedRevisions;
+                            IntellijGitHubService.PRRevisions beforeDiff = null;
                             String snapshotReviews;
                             long worktreeEpoch;
                             WebviewPanel.PrefetchedPrContext snapshotContext;
@@ -211,6 +213,7 @@ final class WebviewReviewController {
                                 snapshotDiff = panel.prefetchedDiff;
                                 snapshotValidationDiff = panel.prefetchedValidationDiff;
                                 localSource = deep == null ? panel.prefetchedLocalDiffSource : null;
+                                reviewedRevisions = panel.prefetchedReviewedRevisions;
                                 snapshotReviews = panel.prefetchedExistingReviews;
                                 snapshotContext = panel.prefetchedPrContext;
                                 worktreeEpoch = panel.worktreeManager.epoch();
@@ -243,6 +246,10 @@ final class WebviewReviewController {
                             String diff;
                             if (StringUtils.isNotBlank(overrideDiff)) {
                                 diff = overrideDiff;
+                                if (!overrideDiff.equals(snapshotDiff)
+                                        && !overrideDiff.equals(snapshotValidationDiff)) {
+                                    reviewedRevisions = null;
+                                }
                             } else if (StringUtils.isNotBlank(snapshotDiff)) {
                                 diff = snapshotDiff;
                             } else {
@@ -253,6 +260,8 @@ final class WebviewReviewController {
                                         new ReviewGeneratingMsg(
                                                 "reviewGenerating", key, "Fetching diff…"));
                                 try {
+                                    if (deep == null)
+                                        beforeDiff = panel.reviewMetadata(owner, repo, number);
                                     var loaded =
                                             panel.ghSvc.loadPRDiff(
                                                     owner,
@@ -296,7 +305,10 @@ final class WebviewReviewController {
                                 try {
                                     validationDiff =
                                             localSource == null
-                                                    ? panel.ghSvc.getPRDiffFull(owner, repo, number)
+                                                    ? reviewedRevisions != null
+                                                            ? diff
+                                                            : panel.ghSvc.getPRDiffFull(
+                                                                    owner, repo, number)
                                                     : panel.ghSvc.loadLocalPRDiff(
                                                             owner, repo, number, true, localSource);
                                 } catch (Exception e) {
@@ -305,6 +317,19 @@ final class WebviewReviewController {
                                             e.getMessage());
                                     validationDiff = diff;
                                 }
+                            }
+
+                            if (localSource != null
+                                    && (StringUtils.isBlank(overrideDiff)
+                                            || overrideDiff.equals(snapshotDiff)
+                                            || overrideDiff.equals(snapshotValidationDiff))) {
+                                reviewedRevisions =
+                                        new IntellijGitHubService.PRRevisions(
+                                                localSource.headSha(), localSource.baseSha());
+                            } else if (beforeDiff != null
+                                    && beforeDiff.equals(
+                                            panel.reviewMetadata(owner, repo, number))) {
+                                reviewedRevisions = beforeDiff;
                             }
 
                             // The incremental diff only feeds the model: the published diff and
@@ -511,6 +536,30 @@ final class WebviewReviewController {
                                     reviewInput.incrementalBaselineSha();
                             final ReviewScopeDto finalReviewScope = reviewInput.reviewScope();
                             final String finalValidationDiff = validationDiff;
+                            var worktree = panel.worktreeManager.activeValueForPr(promptPr);
+                            var reviewedFile =
+                                    WebviewPanel.ReviewedFile.forCommit(
+                                            deep != null
+                                                    ? java.util.Objects.equals(
+                                                                    finalValidationDiff, finalDiff)
+                                                            ? deep.pending().preparation().head()
+                                                            : null
+                                                    : reviewedRevisions != null
+                                                                    && worktree != null
+                                                                    && reviewedRevisions
+                                                                            .headSha()
+                                                                            .equals(
+                                                                                    worktree
+                                                                                            .headSha())
+                                                                    && (reviewInput.reviewScope()
+                                                                                    == null
+                                                                            || "full"
+                                                                                    .equals(
+                                                                                            reviewInput
+                                                                                                    .reviewScope()
+                                                                                                    .kind()))
+                                                            ? reviewedRevisions.headSha()
+                                                            : null);
                             final String finalExisting = existingReviews;
                             java.io.File guidelinesDir;
                             ReviewResult priorResult;
@@ -637,6 +686,7 @@ final class WebviewReviewController {
                                             panel.activeReviewOperationId = null;
                                             panel.activeReviewProvider = ReviewProvider.CLAUDE;
                                             panel.lastResult = result;
+                                            panel.reviewedFile = reviewedFile;
                                             panel.generatedReviews.put(
                                                     key,
                                                     new GeneratedReview(
@@ -662,7 +712,10 @@ final class WebviewReviewController {
                                                         ReviewMapper.INSTANCE.toDto(result),
                                                         finalDiff,
                                                         finalValidationDiff,
-                                                        finalReviewScope));
+                                                        finalReviewScope,
+                                                        reviewedFile == null
+                                                                ? null
+                                                                : reviewedFile.token()));
                                     },
                                     err -> {
                                         synchronized (panel) {

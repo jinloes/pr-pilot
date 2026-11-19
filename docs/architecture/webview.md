@@ -219,14 +219,12 @@ that pairing may change: a body edit, a verifier "revise", a `validateComments` 
 `reanchorDraft`. Both bridges bound it at 1,000 characters to match the codec limit.
 
 ### Opening diff files and findings in the IDE editor
-Non-deleted `DiffViewer` file headers, inline findings, and normalized unanchored findings emit
-`openFile` (`{ type: 'openFile', number, owner, repo, file, line? }`). Both bridges require PR
-identity, a clean `/` repository-relative `file` (no leading/trailing `/`, `\`, drive prefix, `.`,
-or `..`), and optional 1-based `line`. Both hosts verify the active PR and matching `owner/repo`
-checkout, then resolve targets `workspace-checkout-first` with `toRealPath`/`realpath` confinement:
-existing workspace files open editable, while files present only in the PR-head worktree open
-read-only (`Document.setReadOnly(true)` in IntelliJ; repo+PR-scoped `pr-pilot-worktree:` URIs in
-VS Code) so worktree cleanup never mutates disk attributes or discards user edits.
+`openFile` requires active PR identity, a matching checkout and a confined repository-relative
+path. File headers open editable workspace files first, with a read-only worktree fallback.
+Finding lines require a token issued by the host for the displayed result, never a SHA chosen
+by the webview. The engine reads the verified commit's regular UTF-8 blob for a read-only
+preview identified by commit and path. Unverified results (including unversioned recovered
+drafts), missing blobs and invalid lines never fall back to another revision.
 
 ### VS Code webview surfaces
 The VS Code host exposes PR Pilot as an editor-tab `WebviewPanel` opened by `pr-pilot.open`. The

@@ -343,8 +343,10 @@ function HunkRows({
                 onVerify={onVerifyComment ? () => onVerifyComment(comment) : undefined}
                 onSuggestFix={onSuggestFixComment ? () => onSuggestFixComment(comment) : undefined}
                 onOpenInEditor={
-                  onOpenFile && isSafeRelativePath(filePath)
-                    ? () => onOpenFile(filePath, isValidEditorLine(comment.line) ? comment.line : undefined)
+                  onOpenFile && isSafeRelativePath(filePath) && isValidEditorLine(comment.line)
+                    ? Object.assign(() => onOpenFile(filePath, comment.line), {
+                        unavailable: 'reviewedVersionAvailable' in onOpenFile && onOpenFile.reviewedVersionAvailable === false,
+                      })
                     : undefined
                 }
                 readOnly={readOnly}
@@ -413,7 +415,7 @@ interface InlineCommentRowProps {
   anchoredLineText?: string
   onVerify?: () => void
   onSuggestFix?: () => void
-  onOpenInEditor?: () => void
+  onOpenInEditor?: (() => void) & { unavailable?: boolean }
   readOnly: boolean
 }
 
@@ -512,17 +514,19 @@ function InlineCommentRow({
                         size="sm"
                         className="diff-comment__ai-action text-muted-foreground hover:text-foreground"
                         onClick={onOpenInEditor}
+                        disabled={onOpenInEditor.unavailable}
                         aria-label={
-                          isValidEditorLine(comment.line)
-                            ? `Open in editor: ${filePath} line ${comment.line}`
-                            : `Open in editor: ${filePath}`
+                          onOpenInEditor.unavailable
+                            ? 'Reviewed version unavailable'
+                            : `Open reviewed version (read-only): ${filePath} line ${comment.line}`
                         }
                       >
                         <FileCode2 className="w-3.5 h-3.5" />
-                        <span className="diff-comment__action-label">Open in editor</span>
+                        <span className="diff-comment__action-label">{onOpenInEditor.unavailable
+                          ? 'Reviewed version unavailable' : 'Open reviewed version'}</span>
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="top">Open in editor</TooltipContent>
+                    <TooltipContent side="top">Open reviewed version (read-only)</TooltipContent>
                   </Tooltip>
                 )}
                 {onVerify && (

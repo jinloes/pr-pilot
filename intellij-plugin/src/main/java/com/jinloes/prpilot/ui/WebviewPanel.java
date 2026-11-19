@@ -19,6 +19,7 @@ import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.ui.jcef.JBCefBrowser;
 import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
@@ -31,6 +32,7 @@ import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.ProviderSetupProbe;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
+import com.jinloes.prpilot.review.ReviewedBlobReader;
 import com.jinloes.prpilot.review.SemanticReviewService;
 import com.jinloes.prpilot.review.SemanticWorktreeStore;
 import com.jinloes.prpilot.services.DraftRecoveryStore;
@@ -197,6 +199,17 @@ public class WebviewPanel implements Disposable {
     final Object draftMutationLock = new Object();
     volatile String prefetchedDiff = null;
     PrDiffService.LocalSource prefetchedLocalDiffSource;
+    IntellijGitHubService.PRRevisions prefetchedReviewedRevisions;
+
+    record ReviewedFile(String token, String commit) {
+        static ReviewedFile forCommit(String commit) {
+            return commit != null && commit.matches("[0-9a-f]{40}")
+                    ? new ReviewedFile(java.util.UUID.randomUUID().toString(), commit)
+                    : null;
+        }
+    }
+
+    volatile ReviewedFile reviewedFile;
     volatile String prefetchedValidationDiff = null;
     volatile String prefetchedExistingReviews = null;
     volatile PrefetchedPrContext prefetchedPrContext = null;
@@ -497,6 +510,15 @@ public class WebviewPanel implements Disposable {
                         directory.getPath(), detail.baseSha(), detail.head().sha());
     }
 
+    IntellijGitHubService.PRRevisions reviewMetadata(String owner, String repo, int number) {
+        try {
+            return ghSvc.getPRRevisions(owner, repo, number);
+        } catch (IOException failure) {
+            log.debug("Could not verify reviewed file revision for PR #{}", number, failure);
+            return null;
+        }
+    }
+
     private FreshDeepPr freshDeepPr(int number, String owner, String repo) throws Exception {
         var before = ghSvc.getPRHeadInfo(owner, repo, number);
         String diff = ghSvc.getPRDiffFull(owner, repo, number);
@@ -612,11 +634,13 @@ public class WebviewPanel implements Disposable {
         reviewController.handleDeleteDraft(number, owner, repo);
     }
 
-    void handleOpenFile(int number, String owner, String repo, String file, int line) {
+    void handleOpenFile(
+            int number, String owner, String repo, String file, int line, String token) {
         final PullRequest pr;
         final long expectedRevision;
         final String expectedKey;
         final long expectedEpoch;
+        final ReviewedFile reviewed;
         synchronized (this) {
             pr = activePR;
             if (disposed
@@ -627,6 +651,7 @@ public class WebviewPanel implements Disposable {
             expectedRevision = selectionRevision;
             expectedKey = bridgePrKey(pr.getNumber(), pr.getOwner(), pr.getRepo());
             expectedEpoch = worktreeManager.epoch();
+            reviewed = reviewedFile;
         }
         getApplication()
                 .executeOnPooledThread(
@@ -665,6 +690,21 @@ public class WebviewPanel implements Disposable {
                                                 + " in the IDE to jump to pull request files in the editor.");
                                 return;
                             }
+                            if (line > 0) {
+                                if (reviewed == null || !reviewed.token().equals(token)) {
+                                    notifyEditorOpenInfo(
+                                            "The exact reviewed revision is unavailable for this finding.");
+                                    return;
+                                }
+                                openReviewedFile(
+                                        gitRoot,
+                                        file,
+                                        line,
+                                        reviewed,
+                                        expectedKey,
+                                        expectedRevision);
+                                return;
+                            }
                             WebviewPanelSupport.ResolvedEditorTarget target;
                             try {
                                 target =
@@ -690,7 +730,7 @@ public class WebviewPanel implements Disposable {
                                                     }
                                                 },
                                                 file,
-                                                line);
+                                                1);
                             } catch (IOException failure) {
                                 log.warn(
                                         "Failed to resolve editor target for {}: {}",
@@ -751,6 +791,51 @@ public class WebviewPanel implements Disposable {
                                                         .navigate(true);
                                             });
                         });
+    }
+
+    private void openReviewedFile(
+            File root,
+            String file,
+            int line,
+            ReviewedFile reviewed,
+            String expectedKey,
+            long expectedRevision) {
+        try {
+            String content =
+                    new ReviewedBlobReader().read(root.getPath(), reviewed.commit(), file, line);
+            getApplication()
+                    .invokeLater(
+                            () -> {
+                                if (!project.isDisposed()
+                                        && reviewedFile == reviewed
+                                        && isCurrentSelection(expectedKey, expectedRevision)) {
+                                    LightVirtualFile preview =
+                                            new LightVirtualFile(
+                                                    file
+                                                            + " ["
+                                                            + reviewed.commit().substring(0, 8)
+                                                            + "]",
+                                                    com.intellij
+                                                            .openapi
+                                                            .fileTypes
+                                                            .FileTypeManager
+                                                            .getInstance()
+                                                            .getFileTypeByFileName(file),
+                                                    content);
+                                    preview.setWritable(false);
+                                    new OpenFileDescriptor(project, preview, line - 1, 0)
+                                            .navigate(true);
+                                }
+                            });
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        } catch (IOException | java.util.concurrent.TimeoutException failure) {
+            if (reviewedFile == reviewed && isCurrentSelection(expectedKey, expectedRevision)) {
+                notifyEditorOpenInfo(
+                        "Could not open the reviewed file: "
+                                + StringEscapeUtils.escapeHtml4(failure.getMessage()));
+            }
+        }
     }
 
     private void notifyEditorOpenInfo(String content) {

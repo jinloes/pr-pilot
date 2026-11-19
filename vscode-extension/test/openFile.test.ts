@@ -142,7 +142,7 @@ test('buildReadOnlyWorktreeUriKey scopes by owner/repo/PR and handleOpenFileInEd
         selectionRevision: 1,
         activePR: { number: 7, owner: 'acme', repo: 'widgets', title: 'T', body: '' },
       } as unknown as import('../src/extensionTypes').ViewState,
-      { number: 7, owner: 'acme', repo: 'widgets', file: 'src/app.ts', line: 1 },
+      { number: 7, owner: 'acme', repo: 'widgets', file: 'src/app.ts' },
       {
         vscode: fakeVscode,
         workingDir: () => root,
@@ -159,6 +159,21 @@ test('buildReadOnlyWorktreeUriKey scopes by owner/repo/PR and handleOpenFileInEd
       selectionRevision: 2,
       activePR: { number: 7, owner: 'acme', repo: 'widgets', title: 'T', body: '' },
     } as unknown as import('../src/extensionTypes').ViewState;
+    state.reviewedFile = { token: 'current', commit: 'a'.repeat(40) };
+    const calls: unknown[] = [];
+    for (const token of ['outdated', 'current']) {
+      await handleOpenFileInEditor(state,
+        { number: 7, owner: 'acme', repo: 'widgets', file: 'src/app.ts', line: 1, reviewedFileToken: token },
+        { vscode: fakeVscode, workingDir: () => root, findGitRoot: async () => root,
+          detectRepo: async () => 'acme/widgets', resolveWorkingDir: async () => root,
+          openReviewedBlob: async (_root, commit, file, line, isCurrent) => {
+            calls.push([commit, file, line, isCurrent()]);
+          },
+        });
+    }
+    assert.deepEqual(calls, [['a'.repeat(40), 'src/app.ts', 1, true]]);
+    assert.deepEqual(messages, ['The exact reviewed revision is unavailable for this finding.']);
+    messages.length = 0;
     await handleOpenFileInEditor(
       state,
       { number: 7, owner: 'acme', repo: 'widgets', file: 'src/app.ts', line: 1 },

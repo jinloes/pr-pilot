@@ -8,6 +8,13 @@ export function diffRevisions(metadata: SidecarPrDetailResult) {
     return metadata.status === 'ok' && headSha && baseSha ? { headSha, baseSha } : null;
 }
 
+export function sameDiffRevisions(
+    left: ReturnType<typeof diffRevisions> | undefined,
+    right: ReturnType<typeof diffRevisions> | undefined,
+): boolean {
+    return !!left && !!right && left.headSha === right.headSha && left.baseSha === right.baseSha;
+}
+
 export async function recoverOversizedDiff(
     result: SidecarPrDiffResult,
     deps: HandlerDependencies,

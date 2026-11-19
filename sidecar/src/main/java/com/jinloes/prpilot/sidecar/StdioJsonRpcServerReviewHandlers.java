@@ -27,6 +27,7 @@ final class StdioJsonRpcServerReviewHandlers {
         handlers.put("reviews/findGitRoot", this::findGitRoot);
         handlers.put("reviews/recordOutcome", this::recordReviewOutcome);
         handlers.put("reviews/createWorktree", this::createWorktree);
+        handlers.put("reviews/readReviewedBlob", this::readReviewedBlob);
         handlers.put("reviews/removeWorktree", this::removeWorktree);
     }
 
@@ -158,6 +159,26 @@ final class StdioJsonRpcServerReviewHandlers {
                                 params.path("branch").textValue(),
                                 params.path("headSha").asText(""),
                                 params.path("forkCloneUrl").asText(""))));
+    }
+
+    private ObjectNode readReviewedBlob(JsonNode request) {
+        JsonNode params = request.path("params");
+        if (!params.isObject()
+                || !support.hasOnlyFields(params, Set.of("gitRoot", "commit", "file", "line"))
+                || !params.path("gitRoot").isTextual()
+                || !params.path("commit").isTextual()
+                || !params.path("file").isTextual()
+                || !params.path("line").isInt()) {
+            return support.error(support.requestId(request), -32602, "Invalid params");
+        }
+        return support.result(
+                support.requestId(request),
+                review.readReviewedBlob(
+                        new ReviewEngineApi.ReviewedBlobParams(
+                                params.path("gitRoot").textValue(),
+                                params.path("commit").textValue(),
+                                params.path("file").textValue(),
+                                params.path("line").intValue())));
     }
 
     private ObjectNode removeWorktree(JsonNode request) {

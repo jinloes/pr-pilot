@@ -125,6 +125,7 @@ export interface OpenFileHostDependencies {
     detectRepo: (startDir: string) => Promise<string | null>;
     resolveWorkingDir: (state: ViewState, pr: ActivePR, emitStatus: boolean) => Promise<string>;
     toReadOnlyWorktreeUri?: (params: ReadOnlyWorktreeUriParams) => vscodeTypes.Uri;
+    openReviewedBlob?: (gitRoot: string, commit: string, file: string, line: number, isCurrent: () => boolean) => Promise<void>;
 }
 
 function matchesActivePr(active: ActivePR | null, number: number, owner: string, repo: string): active is ActivePR {
@@ -136,7 +137,7 @@ function matchesActivePr(active: ActivePR | null, number: number, owner: string,
 
 export async function handleOpenFileInEditor(
     state: ViewState,
-    msg: { number: number; owner: string; repo: string; file: string; line?: number },
+    msg: { number: number; owner: string; repo: string; file: string; line?: number; reviewedFileToken?: string },
     deps: OpenFileHostDependencies,
 ): Promise<void> {
     const pr = state.activePR;
@@ -177,6 +178,23 @@ export async function handleOpenFileInEditor(
         void deps.vscode.window.showInformationMessage(
             `Open ${msg.owner}/${msg.repo} in VS Code to jump to pull request files in the editor.`,
         );
+        return;
+    }
+
+    if (msg.line !== undefined) {
+        const reviewed = state.reviewedFile;
+        if (!reviewed || reviewed.token !== msg.reviewedFileToken || !deps.openReviewedBlob) {
+            void deps.vscode.window.showInformationMessage('The exact reviewed revision is unavailable for this finding.');
+            return;
+        }
+        const isCurrent = () => isStillSelected() && state.reviewedFile === reviewed;
+        try {
+            await deps.openReviewedBlob(gitRoot, reviewed.commit, msg.file, msg.line, isCurrent);
+        } catch (error) {
+            if (isCurrent()) void deps.vscode.window.showInformationMessage(
+                error instanceof Error ? error.message : 'Could not open the reviewed file.',
+            );
+        }
         return;
     }
 

@@ -40,6 +40,8 @@ final class WebviewPanelLifecycle {
         }
         panel.prefetchedDiff = null;
         panel.prefetchedLocalDiffSource = null;
+        panel.prefetchedReviewedRevisions = null;
+        panel.reviewedFile = null;
         panel.prefetchedValidationDiff = null;
         panel.prefetchedExistingReviews = null;
         panel.prefetchedPrContext = null;

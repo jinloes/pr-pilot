@@ -88,7 +88,7 @@ final class WebviewWorktreeManager {
                 worktreeService.createWorktree(detectedRoot, headInfo.ref(), headInfo.sha(), wt);
             }
 
-            PrWorktree created = new PrWorktree(wt, detectedRoot);
+            PrWorktree created = new PrWorktree(wt, detectedRoot, headInfo.sha());
             if (worktrees.install(lease, created)) {
                 log.info("Using worktree {} for PR #{}", wt, pr.getNumber());
                 return serviceForWorktree(created.directory());

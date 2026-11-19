@@ -172,6 +172,7 @@ export function useReviewHostMessages({
             prState: message.prState,
             result: normalizedResult,
             reviewId: message.reviewId,
+            reviewedFileToken: message.reviewedFileToken,
             staleCommits: message.staleCommits,
             importedFromGitHub: message.importedFromGitHub,
             diff,
@@ -231,6 +232,7 @@ export function useReviewHostMessages({
             diff,
             validationDiff,
             generationElapsedSec,
+            reviewedFileToken: message.reviewedFileToken,
             ...(message.reviewScope ? { reviewScope: message.reviewScope } : {}),
           })
           break
@@ -255,7 +257,8 @@ export function useReviewHostMessages({
               message.validationDiff,
             )
           }
-          dispatch({ type: 'validationDiffUpdated', validationDiff: message.validationDiff })
+          dispatch({ type: 'validationDiffUpdated', validationDiff: message.validationDiff,
+            reviewedFileToken: message.reviewedFileToken })
           break
 
         case 'draftSaved': {

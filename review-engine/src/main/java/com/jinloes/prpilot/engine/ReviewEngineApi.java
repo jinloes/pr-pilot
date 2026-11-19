@@ -33,6 +33,7 @@ public interface ReviewEngineApi {
                     Map.entry("listCopilotModels", "reviews/listCopilotModels"),
                     Map.entry("findGitRoot", "reviews/findGitRoot"),
                     Map.entry("createWorktree", "reviews/createWorktree"),
+                    Map.entry("readReviewedBlob", "reviews/readReviewedBlob"),
                     Map.entry("prepareDeepReview", "reviews/prepareDeepReview"),
                     Map.entry("listDeepReviews", "reviews/listDeepReviews"),
                     Map.entry("cleanupDeepReview", "reviews/cleanupDeepReview"),
@@ -755,6 +756,10 @@ public interface ReviewEngineApi {
     /** Request for {@link #removeWorktree}. */
     record RemoveWorktreeParams(String gitRoot, String worktreeDir) {}
 
+    record ReviewedBlobParams(String gitRoot, String commit, String file, int line) {}
+
+    record ReviewedBlobResult(String text, String error) {}
+
     /** Result of {@link #removeWorktree}. Cleanup failure is reported, never thrown. */
     record WorktreeRemovalResult(boolean removed) {}
 
@@ -811,6 +816,8 @@ public interface ReviewEngineApi {
      * lifecycle: caching the returned directory and removing it when the active PR changes.
      */
     WorktreeResult createWorktree(CreateWorktreeParams params);
+
+    ReviewedBlobResult readReviewedBlob(ReviewedBlobParams params);
 
     /** Removes a worktree created by {@link #createWorktree}. Never throws. */
     WorktreeRemovalResult removeWorktree(RemoveWorktreeParams params);

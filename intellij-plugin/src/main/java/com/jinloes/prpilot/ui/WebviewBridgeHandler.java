@@ -71,7 +71,8 @@ final class WebviewBridgeHandler {
                                 owner,
                                 repo,
                                 node.path("file").asText(),
-                                node.has("line") ? node.path("line").asInt(1) : 1);
+                                node.path("line").asInt(0),
+                                node.path("reviewedFileToken").textValue());
                 case "openSettings" ->
                         getApplication()
                                 .invokeLater(

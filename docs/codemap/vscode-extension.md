@@ -13,8 +13,9 @@ VS Code host integration. All GitHub and review generation routes through the Ja
   when the remote diff exceeds GitHub's limit.
   `extensionTypes.ts` holds shared state types.
 - `src/worktree.ts` - Worktree lifecycle (`resolveWorkingDir`/`clearWorktree`).
-- `src/openFile.ts` - Confined `workspace-checkout-first` file/line editor navigation (`openFile`),
-  with read-only preview fallback for PR-worktree-only files. Tests: `openFile.test.ts`.
+- `src/openFile.ts` - Workspace-first header navigation and result-token checks for finding lines.
+  `src/extension.ts` opens the bounded Git-blob response in a read-only commit preview.
+  Tests: `openFile.test.ts`, `hostHandlers.test.ts`.
 - `src/notificationPoller.ts` - `PRNotificationPoller`.
 - `src/copilotModel.ts` - `selectCopilotModel` command.
 - `src/draftRecovery.ts` - Token-free `globalState` snapshots used until GitHub confirms a draft

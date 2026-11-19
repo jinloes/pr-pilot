@@ -130,6 +130,11 @@ with `localSource: {worktreeDir, baseSha, headSha}` to use the verified local co
 instead of requesting the GitHub diff again. The stdio JSON-RPC frame ceiling is 8 MiB in both Java and
 TypeScript so an escaped validation diff remains bounded while fitting safely in a response.
 
+The worktree capability also exposes `reviews/readReviewedBlob`. The host supplies the matching
+checkout root, its own verified commit, a repository-relative path, and a one-based line. The
+engine reads a regular UTF-8 Git blob (up to 1 MiB) without consulting mutable files, fetching, or
+running content filters. Invalid, unavailable, or unsupported locations return an error.
+
 The sidecar's `prs/getIncrementalDiff` capability (logical capability `prIncrementalDiff`) returns
 the bounded diff of commits pushed since the viewer's latest submitted review. It returns `ok` with
 `scope: "incremental"` (with `baselineSha`, `headSha` and `diff`) or `scope: "full"` (with a

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { hasStaleCommits } from './draftState';
 import { classifySetupAuthError } from './authError';
 import { GitHubOperationError, toUserFacingError } from './userFacingError';
@@ -15,7 +15,7 @@ import {
 import type { PreparedDeepReview } from './deepReview';
 import type { PRSearchScope, ReviewResult } from './models';
 import type { HandlerDependencies, ViewState } from './extensionTypes';
-import { diffRevisions, recoverOversizedDiff } from './prDiffFallback';
+import { diffRevisions, recoverOversizedDiff, sameDiffRevisions } from './prDiffFallback';
 
 export interface PrHandlerApi {
     handleRefreshPRs: (state: ViewState, msg: Record<string, unknown>) => Promise<void>;
@@ -142,6 +142,8 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
     state.activePR = { number, owner, repo, title, body, author };
     state.activeDiff = '';
     state.localDiffRevisions = null;
+    state.reviewedDiffRevisions = null;
+    state.reviewedFile = undefined;
     state.activeValidationDiff = '';
     state.activeReviewResult = null;
     state.pendingReviewId = null;
@@ -151,11 +153,18 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         const base = deps.githubBaseUrl();
         const readiness = deps.providerReadiness();
 
-        const [remoteDiff, detailResult, draftResult] = await Promise.all([
-            deps.client().getPullRequestDiff(base, owner, repo, number, 'review'),
-            deps.client().getPullRequestDetail(base, owner, repo, number),
+        const [source, draftResult] = await Promise.all([
+            (async () => {
+                const before = await deps.client().getPullRequestDetail(base, owner, repo, number);
+                const remoteDiff = await deps.client().getPullRequestDiff(base, owner, repo, number, 'review');
+                const detailResult = remoteDiff.status === 'ok'
+                    ? await deps.client().getPullRequestDetail(base, owner, repo, number)
+                    : before;
+                return { before, remoteDiff, detailResult };
+            })(),
             deps.client().getDraftReview(base, owner, repo, number),
         ]);
+        const { before, remoteDiff, detailResult } = source;
         const isCurrent = () => !state.disposed && deps.prKey(state.activePR) === key
             && state.selectionRevision === selectionRevision;
         if (!isCurrent()) return;
@@ -199,6 +208,9 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         };
         state.activeDiff = diff;
         state.localDiffRevisions = remoteDiff.status === 'diff_too_large' ? diffRevisions(detailResult) : null;
+        const revisions = diffRevisions(detailResult);
+        state.reviewedDiffRevisions = state.localDiffRevisions
+            ?? (sameDiffRevisions(diffRevisions(before), revisions) ? revisions : null);
         state.activeValidationDiff = validationDiff;
         state.activeReviewResult = draft?.result ?? null;
         state.pendingReviewId = draft?.id || null;
@@ -212,6 +224,9 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
                 repositoryInstructions: deps.rememberedRepositoryInstructions(owner, repo) });
         } else if (draft) {
             const staleCommits = hasStaleCommits(draft.commitId, detail.head?.sha ?? '');
+            if (!draft.recoveryPending && draft.commitId && draft.commitId === state.reviewedDiffRevisions?.headSha) {
+                state.reviewedFile = { token: randomUUID(), commit: draft.commitId };
+            }
             deps.push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: true });
             deps.push(state, {
                 type: 'draftLoaded',
@@ -224,6 +239,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
                 staleCommits,
                 importedFromGitHub: draft.importedFromGitHub,
                 recoveryPending: draft.recoveryPending,
+                reviewedFileToken: state.reviewedFile?.token,
                 providerReadiness: readiness,
                 intellijAssistedEnabled: deps.intellijAssistedEnabled(),
                 repositoryInstructions: deps.rememberedRepositoryInstructions(owner, repo),
@@ -275,16 +291,24 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         // until this optional fetch completes.
         const fullDiff = remoteDiff.status === 'diff_too_large'
             ? recoverOversizedDiff(remoteDiff, deps, state, pr, base, 'validation', isCurrent, detailResult)
-            : deps.client().getPullRequestDiff(base, owner, repo, number, 'validation');
+            : (async () => {
+                const client = deps.client();
+                const beforeValidation = await client.getPullRequestDetail(base, owner, repo, number);
+                const full = await client.getPullRequestDiff(base, owner, repo, number, 'validation');
+                const afterValidation = await client.getPullRequestDetail(base, owner, repo, number);
+                return sameDiffRevisions(diffRevisions(beforeValidation), revisions)
+                    && sameDiffRevisions(diffRevisions(afterValidation), revisions) ? full : null;
+            })();
         void fullDiff
             .then((fullResult) => {
-                if (fullResult.status !== 'ok' || fullResult.diff === null) return;
+                if (!fullResult || fullResult.status !== 'ok' || fullResult.diff === null) return;
                 if (deps.prKey(state.activePR) === key && state.selectionRevision === selectionRevision) {
                     state.activeValidationDiff = fullResult.diff || diff;
                     deps.push(state, {
                         type: 'validationDiffUpdated',
                         prKey: key,
                         validationDiff: state.activeValidationDiff,
+                        reviewedFileToken: state.reviewedFile?.token,
                     });
                 }
             })

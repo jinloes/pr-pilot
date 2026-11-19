@@ -62,7 +62,41 @@ final class WebviewBridgeMessages {
             String status,
             @JsonProperty("providerReadiness") ProviderReadinessDto providerReadiness,
             @JsonProperty("intellijAssistedEnabled") boolean intellijAssistedEnabled,
-            @JsonProperty("repositoryInstructions") String repositoryInstructions) {}
+            @JsonProperty("repositoryInstructions") String repositoryInstructions,
+            String reviewedFileToken) {
+        DraftLoadedMsg(
+                String type,
+                String prKey,
+                String prState,
+                String reviewId,
+                ReviewResultDto result,
+                String diff,
+                String validationDiff,
+                boolean staleCommits,
+                boolean importedFromGitHub,
+                boolean recoveryPending,
+                String status,
+                ProviderReadinessDto providerReadiness,
+                boolean intellijAssistedEnabled,
+                String repositoryInstructions) {
+            this(
+                    type,
+                    prKey,
+                    prState,
+                    reviewId,
+                    result,
+                    diff,
+                    validationDiff,
+                    staleCommits,
+                    importedFromGitHub,
+                    recoveryPending,
+                    status,
+                    providerReadiness,
+                    intellijAssistedEnabled,
+                    repositoryInstructions,
+                    null);
+        }
+    }
 
     record RepositoryInstructionsSavedMsg(
             String type, @JsonProperty("prKey") String prKey, String instructions) {}
@@ -79,7 +113,18 @@ final class WebviewBridgeMessages {
             String diff,
             @JsonProperty("validationDiff") String validationDiff,
             @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("reviewScope")
-                    ReviewScopeDto reviewScope) {}
+                    ReviewScopeDto reviewScope,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String reviewedFileToken) {
+        ReviewResultMsg(
+                String type,
+                String prKey,
+                ReviewResultDto result,
+                String diff,
+                String validationDiff,
+                ReviewScopeDto reviewScope) {
+            this(type, prKey, result, diff, validationDiff, reviewScope, null);
+        }
+    }
 
     /**
      * Mirrors {@code ReviewScope} in {@code webview/src/bridge/types.ts}; present only when the
@@ -162,5 +207,9 @@ final class WebviewBridgeMessages {
     record GeneratedReview(
             long generationId, ReviewResult result, ReviewOutcomeLog.Metadata metadata) {}
 
-    record PrWorktree(java.io.File directory, java.io.File gitRoot) {}
+    record PrWorktree(java.io.File directory, java.io.File gitRoot, String headSha) {
+        PrWorktree(java.io.File directory, java.io.File gitRoot) {
+            this(directory, gitRoot, null);
+        }
+    }
 }

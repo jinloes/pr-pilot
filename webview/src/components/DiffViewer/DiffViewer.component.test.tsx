@@ -571,7 +571,7 @@ index e69de29..0000000
     fireEvent.click(screen.getByRole('button', { name: 'Open in editor: src/auth.ts' }))
     expect(onOpenFile).toHaveBeenLastCalledWith('src/auth.ts')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open in editor: src/auth.ts line 2' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open reviewed version (read-only): src/auth.ts line 2' }))
     expect(onOpenFile).toHaveBeenLastCalledWith('src/auth.ts', 2)
   })
 

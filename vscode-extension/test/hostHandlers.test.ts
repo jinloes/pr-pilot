@@ -419,12 +419,12 @@ test('openFile opens editable workspace file first and read-only preview scheme 
     h.state.worktreeDir = wt;
     h.state.worktreeKey = 'acme/widget#42';
 
-    await h.api.openFile(h.state, { type: 'openFile', number: 42, owner: 'acme', repo: 'widget', file: 'src/app.ts', line: 7 });
+    await h.api.openFile(h.state, { type: 'openFile', number: 42, owner: 'acme', repo: 'widget', file: 'src/app.ts' });
     assert.equal(h.openedDocs.length, 1);
     assert.equal(h.openedDocs[0].uri.scheme, 'file');
-    assert.equal((h.openedDocs[0].options.selection as { startLine: number }).startLine, 6);
+    assert.equal((h.openedDocs[0].options.selection as { startLine: number }).startLine, 0);
 
-    await h.api.openFile(h.state, { type: 'openFile', number: 42, owner: 'acme', repo: 'widget', file: 'src/newInPr.ts', line: 2 });
+    await h.api.openFile(h.state, { type: 'openFile', number: 42, owner: 'acme', repo: 'widget', file: 'src/newInPr.ts' });
     assert.equal(h.openedDocs.length, 2);
     assert.equal(h.openedDocs[1].uri.scheme, 'pr-pilot-worktree');
     assert.equal(h.openedDocs[1].uri.path, '/acme/widget/PR-42/src/newInPr.ts');

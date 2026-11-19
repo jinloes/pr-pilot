@@ -36,6 +36,7 @@ export interface DraftLoadedMessage {
   prKey?: string
   prState: 'NO_DRAFT' | 'DRAFT_PRESENT' | 'MERGED'
   reviewId?: string
+  reviewedFileToken?: string
   result?: ReviewResult
   diff?: string
   validationDiff?: string
@@ -92,6 +93,7 @@ export type ReviewScope =
   | { kind: 'full'; fallbackReason: IncrementalFallbackReason }
 
 export interface ReviewResultMessage {
+  reviewedFileToken?: string
   type: 'reviewResult'
   prKey?: string
   result: ReviewResult
@@ -102,6 +104,7 @@ export interface ReviewResultMessage {
 
 export interface ValidationDiffUpdatedMessage {
   type: 'validationDiffUpdated'
+  reviewedFileToken?: string
   prKey: string
   validationDiff: string
 }
@@ -395,6 +398,7 @@ export interface OpenUrlRequest {
 
 export interface OpenFileRequest {
   type: 'openFile'
+  reviewedFileToken?: string
   number: number
   owner: string
   repo: string

@@ -39,6 +39,8 @@ Shared Vite/React/TypeScript UI used by both IDE hosts.
   review-generation lifecycle/tool activity state and its expandable, privacy-safe timeline.
 - `src/components/ReviewPane/ReviewOverrides.tsx`, `ReviewQuality.tsx`, `ReviewContent.tsx`,
   `ReviewFooter.tsx`, and `OrphanComments.tsx` - Feature-private review presentation modules.
+  `DiffViewerRows.tsx` and `OrphanComments.tsx` distinguish editable header navigation from
+  reviewed-commit finding previews; `ReviewPane.tsx` forwards the result token.
 - `src/components/ReviewPane/publishBody.ts` - Publish-dialog preview model (general notes,
   unanchored comments, inline count) and the fallback bodies mirrored from
   `DraftReviewMutationService`; tested by `publishBody.test.ts`.
