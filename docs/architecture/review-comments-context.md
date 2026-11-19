@@ -93,8 +93,9 @@ fetches the PR diff (validation size), drops compare file sections the PR diff d
 inside shared files keeps only hunks whose new-side range overlaps a PR hunk. Both diffs end at the
 head commit, so new-side line numbers agree. It removes only what it can prove is absent: a file the
 PR diff may have omitted (listed in its coverage trailer, unlisted paths, or an incomplete scan) is
-kept, and when the PR diff cannot be loaded the compare diff is used unchanged. Base-only paths are
-also removed from the compare diff's own coverage trailer. If nothing remains, the result is the
+kept. If the scoping diff cannot be loaded or is blank, the host reviews the normal PR diff instead
+of sending the unfiltered compare diff to the model. Base-only paths are also removed from the
+compare diff's own coverage trailer. If nothing remains, the result is the
 `empty_incremental_diff` fallback.
 
 Anything that makes the incremental diff untrustworthy falls back to a full review with a
@@ -103,10 +104,12 @@ Anything that makes the incremental diff untrustworthy falls back to a full revi
 - `baseline_not_in_history`: a force-push or rebase dropped the reviewed commit.
 - `baseline_unavailable`: compare returned 404 or 422.
 - `empty_incremental_diff`.
+- `pr_scope_unavailable`: the validation-size PR diff was unavailable or had no diff text.
 - `incremental_diff_too_large`: compare returned 406.
 
-Real GitHub failures (auth, rate limit, network, other API errors) return a non-`ok` status with no
-scope. The host reports these as `reviewError`, just as it reports a failed PR diff fetch.
+Baseline or compare request failures (auth, rate limit, network, other API errors) can return a
+non-`ok` status with no scope. The host reports these as `reviewError`, just as it reports a failed
+PR diff fetch.
 
 The incremental diff feeds only the model. The host still loads the PR review diff and validation
 diff, and `activeDiff`, the published `reviewResult` `diff` and `validationDiff` are always PR

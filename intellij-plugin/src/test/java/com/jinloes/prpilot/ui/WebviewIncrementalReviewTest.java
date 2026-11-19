@@ -79,7 +79,7 @@ class WebviewIncrementalReviewTest {
                             () ->
                                     ok(
                                             IncrementalDiffResult.SCOPE_FULL,
-                                            IncrementalDiffResult.BASELINE_NOT_IN_HISTORY,
+                                            IncrementalDiffResult.PR_SCOPE_UNAVAILABLE,
                                             null));
 
             assertThat(input.modelDiff()).isEqualTo(PR_DIFF);
@@ -87,7 +87,7 @@ class WebviewIncrementalReviewTest {
             assertThat(input.reviewScope())
                     .isEqualTo(
                             new WebviewBridgeMessages.ReviewScopeDto(
-                                    "full", null, IncrementalDiffResult.BASELINE_NOT_IN_HISTORY));
+                                    "full", null, IncrementalDiffResult.PR_SCOPE_UNAVAILABLE));
         }
 
         @Test

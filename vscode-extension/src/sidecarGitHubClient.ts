@@ -96,9 +96,12 @@ export class SidecarGitHubClient extends SidecarTransport {
         repo: string,
         number: number,
         mode: 'review' | 'validation' = 'review',
+        localSource?: { worktreeDir: string; baseSha: string; headSha: string },
     ): Promise<SidecarPrDiffResult> {
         return this.parseResult('PR diff', parsePrDiffResult,
-            await this.request('prs/getDiff', { githubBaseUrl, owner, repo, number, mode }));
+            await this.request('prs/getDiff', {
+                githubBaseUrl, owner, repo, number, mode, ...(localSource ? { localSource } : {}),
+            }));
     }
 
     /** Changes since the caller's last submitted review, or the reason to review the full PR. */

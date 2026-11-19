@@ -348,6 +348,9 @@ test('parseIncrementalDiffResult accepts incremental, fallback and failure resul
   assert.deepEqual(parseIncrementalDiffResult({ status: 'ok', message: 'Falling back.', scope: 'full',
     fallbackReason: 'up_to_date', baselineSha, headSha, diff: null, truncated: false, limitBytes: 250000 }),
   { status: 'ok', message: 'Falling back.', scope: 'full', fallbackReason: 'up_to_date', limitBytes: 250000 });
+  assert.deepEqual(parseIncrementalDiffResult({ status: 'ok', message: 'Falling back.', scope: 'full',
+   fallbackReason: 'pr_scope_unavailable', baselineSha, headSha, diff: null, truncated: false, limitBytes: 250000 }),
+  { status: 'ok', message: 'Falling back.', scope: 'full', fallbackReason: 'pr_scope_unavailable', limitBytes: 250000 });
   assert.deepEqual(parseIncrementalDiffResult({ status: 'not_authenticated', message: 'Log in.', scope: null,
     fallbackReason: null, baselineSha: null, headSha: null, diff: null, truncated: false, limitBytes: 250000 }),
   { status: 'not_authenticated', message: 'Log in.', limitBytes: 250000 });

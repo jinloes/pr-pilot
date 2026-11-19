@@ -49,6 +49,71 @@ class IntellijGitHubServiceTest {
         return new IntellijGitHubService(engine, () -> BASE_URL);
     }
 
+    @Nested
+    class OversizedDiff {
+        @Test
+        void retriesWithLocalSourceOnlyWhenGitHubRefusesTheDiff() throws Exception {
+            var source = new PrDiffService.LocalSource("worktree", "a".repeat(40), "b".repeat(40));
+            List<PrDiffService.Params> calls = new ArrayList<>();
+            var service =
+                    serviceOver(
+                            new StubEngine() {
+                                @Override
+                                public PrDiffResult getPullRequestDiff(
+                                        PrDiffService.Params params) {
+                                    calls.add(params);
+                                    return params.localSource() == null
+                                            ? new PrDiffResult(
+                                                    PrDiffResult.STATUS_DIFF_TOO_LARGE,
+                                                    "Too large",
+                                                    null,
+                                                    false,
+                                                    0)
+                                            : new PrDiffResult(
+                                                    "ok",
+                                                    "Loaded",
+                                                    "local patch",
+                                                    false,
+                                                    1_000_000);
+                                }
+                            });
+            assertThat(service.getPRDiff("acme", "widgets", 42, true, () -> source))
+                    .isEqualTo("local patch");
+            assertThat(calls)
+                    .containsExactly(
+                            new PrDiffService.Params(BASE_URL, "acme", "widgets", 42, "validation"),
+                            new PrDiffService.Params(
+                                    BASE_URL, "acme", "widgets", 42, "validation", source));
+        }
+
+        @Test
+        void leavesNonSizeFailuresOnTheRemotePath() {
+            var service =
+                    serviceOver(
+                            new StubEngine() {
+                                @Override
+                                public PrDiffResult getPullRequestDiff(
+                                        PrDiffService.Params params) {
+                                    return new PrDiffResult(
+                                            "rate_limited", "Slow down", null, false, 0);
+                                }
+                            });
+            assertThatThrownBy(
+                            () ->
+                                    service.getPRDiff(
+                                            "acme",
+                                            "widgets",
+                                            42,
+                                            false,
+                                            () -> {
+                                                throw new AssertionError(
+                                                        "Should not prepare a worktree");
+                                            }))
+                    .isInstanceOf(IOException.class)
+                    .hasMessage("Slow down");
+        }
+    }
+
     /**
      * Base stub for the engine surface. Every method throws unless a test overrides it, so a test
      * cannot accidentally pass by exercising a call it did not mean to make.

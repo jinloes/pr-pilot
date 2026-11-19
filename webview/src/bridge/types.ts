@@ -83,6 +83,7 @@ export type IncrementalFallbackReason =
   | 'baseline_not_in_history'
   | 'baseline_unavailable'
   | 'empty_incremental_diff'
+  | 'pr_scope_unavailable'
   | 'incremental_diff_too_large'
 
 /** Present on a result only when the user asked to review changes since their last review. */

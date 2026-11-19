@@ -132,6 +132,30 @@ public final class IntellijGitHubService {
         return getDiff(owner, repo, prNumber, "validation");
     }
 
+    @FunctionalInterface
+    public interface LocalDiffSource {
+        PrDiffService.LocalSource resolve() throws IOException;
+    }
+
+    public String getPRDiff(
+            String owner, String repo, int number, boolean validation, LocalDiffSource source)
+            throws IOException {
+        String mode = validation ? "validation" : "review";
+        try {
+            return validation ? getPRDiffFull(owner, repo, number) : getPRDiff(owner, repo, number);
+        } catch (GitHubOperationException error) {
+            if (!PrDiffResult.STATUS_DIFF_TOO_LARGE.equals(error.status())) throw error;
+            PrDiffService.LocalSource local = source.resolve();
+            if (local == null) throw error;
+            PrDiffResult result =
+                    engine.getPullRequestDiff(
+                            new PrDiffService.Params(baseUrl(), owner, repo, number, mode, local));
+            if (!"ok".equals(result.status()))
+                throw new LocalDiffUnavailableException(result.message());
+            return result.diff();
+        }
+    }
+
     /**
      * Diff of commits pushed since the viewer's latest submitted review, or a full-review fallback
      * reason. A non-{@code ok} status throws, like {@link #getPRDiff}.
@@ -377,6 +401,12 @@ public final class IntellijGitHubService {
 
         String status() {
             return status;
+        }
+    }
+
+    static final class LocalDiffUnavailableException extends IOException {
+        LocalDiffUnavailableException(String message) {
+            super(message);
         }
     }
 

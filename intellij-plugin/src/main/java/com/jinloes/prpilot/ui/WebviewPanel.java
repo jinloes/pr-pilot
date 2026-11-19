@@ -39,6 +39,8 @@ import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.services.PendingReviewIndex;
 import com.jinloes.prpilot.services.PendingReviewIndexNotifications;
 import com.jinloes.prpilot.settings.PluginSettings;
+import com.jinloes.prpilot.sidecar.pr.PrDetail;
+import com.jinloes.prpilot.sidecar.pr.PrDiffService;
 import com.jinloes.prpilot.ui.DeepReviewController.DeepInvocation;
 import com.jinloes.prpilot.ui.DeepReviewController.DeepPending;
 import com.jinloes.prpilot.ui.DeepReviewController.DeepReviewIo;
@@ -480,6 +482,18 @@ public class WebviewPanel implements Disposable {
                 List.copyOf(settings.getResolvedReviewGuidanceGlobs()),
                 settings.getReviewRulesDirectory(),
                 settings.isReviewBuiltInRules());
+    }
+
+    PrDiffService.LocalSource localDiffSource(PullRequest pr, long expectedEpoch, PrDetail detail)
+            throws IOException {
+        if (pr == null || worktreeManager.epoch() != expectedEpoch) return null;
+        if (detail == null) detail = ghSvc.getPRDetail(pr.getOwner(), pr.getRepo(), pr.getNumber());
+        if (detail == null || detail.head() == null) return null;
+        File directory = worktreeManager.resolveDirectory(pr, expectedEpoch);
+        return directory == null
+                ? null
+                : new PrDiffService.LocalSource(
+                        directory.getPath(), detail.baseSha(), detail.head().sha());
     }
 
     private FreshDeepPr freshDeepPr(int number, String owner, String repo) throws Exception {

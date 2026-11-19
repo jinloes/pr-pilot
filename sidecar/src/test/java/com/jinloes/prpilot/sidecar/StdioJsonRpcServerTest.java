@@ -18,6 +18,34 @@ import org.junit.jupiter.api.Test;
 
 class StdioJsonRpcServerTest extends StdioJsonRpcServerTestBase {
     @Test
+    void routesLocalDiffParametersAndRejectsAnIncompleteSource() throws Exception {
+        var request = rpcRequest(8, "prs/getDiff");
+        var params =
+                request.putObject("params")
+                        .put("githubBaseUrl", "https://github.com")
+                        .put("owner", "acme")
+                        .put("repo", "widgets")
+                        .put("number", 42)
+                        .put("mode", "review");
+        var source =
+                params.putObject("localSource").put("worktreeDir", "unused").put("baseSha", "HEAD");
+        assertThat(
+                        server.handle(objectMapper.writeValueAsBytes(request))
+                                .path("error")
+                                .path("code")
+                                .asInt())
+                .isEqualTo(-32602);
+
+        source.put("headSha", "a".repeat(40));
+        assertThat(
+                        server.handle(objectMapper.writeValueAsBytes(request))
+                                .path("result")
+                                .path("status")
+                                .asText())
+                .isEqualTo("invalid_request");
+    }
+
+    @Test
     void handlesInitializeAndWritesOnlyAFramedResponse() throws IOException {
         ByteArrayOutputStream input = new ByteArrayOutputStream();
         frameCodec.writeFrame(

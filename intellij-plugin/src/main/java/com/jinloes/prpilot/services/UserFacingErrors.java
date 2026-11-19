@@ -83,6 +83,7 @@ public final class UserFacingErrors {
     }
 
     public static String forGitHub(Exception e, String operation) {
+        if (e instanceof IntellijGitHubService.LocalDiffUnavailableException) return e.getMessage();
         String msg = normalize(e);
         String op = StringUtils.defaultIfBlank(operation, "complete this GitHub operation");
 

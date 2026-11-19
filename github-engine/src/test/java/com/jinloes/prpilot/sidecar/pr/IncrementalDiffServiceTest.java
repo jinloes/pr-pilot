@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class IncrementalDiffServiceTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -24,10 +26,12 @@ class IncrementalDiffServiceTest {
 
         @Test
         void returnsTheBaselineToHeadDiffWhenTheBaselineIsInHistory() throws Exception {
+            String diff = "diff --git a/x b/x\n";
             Fixture fixture =
                     new Fixture(
                             page(HEAD, BASELINE, List.of(BASELINE, HEAD)),
-                            compare(PrDiffService.Response.ok("diff --git a/x b/x\n", true), 200));
+                            compare(PrDiffService.Response.ok(diff, false), 200));
+            fixture.pullRequestDiff = PrDiffService.Response.ok(diff, false);
 
             IncrementalDiffResult result = fixture.get();
 
@@ -40,8 +44,8 @@ class IncrementalDiffServiceTest {
                                     null,
                                     BASELINE,
                                     HEAD,
-                                    "diff --git a/x b/x\n",
-                                    true,
+                                    diff,
+                                    false,
                                     PrDiffService.REVIEW_LIMIT_BYTES));
             assertThat(fixture.compareCalls)
                     .containsExactly(
@@ -215,17 +219,33 @@ class IncrementalDiffServiceTest {
         }
 
         @Test
-        void keepsTheCompareDiffUnchangedWhenThePrDiffCannotBeLoaded() throws Exception {
+        void fallsBackToFullReviewWhenThePrDiffCannotBeLoaded() throws Exception {
             Fixture fixture =
                     new Fixture(
                             page(HEAD, BASELINE, List.of(BASELINE, HEAD)),
                             compare(PrDiffService.Response.ok(FEATURE + FROM_BASE, true), 200));
             fixture.pullRequestDiff = PrDiffService.Response.of(PrDiffService.Status.TOO_LARGE);
 
-            IncrementalDiffResult result = fixture.get();
+            assertScopeUnavailable(fixture.get());
+        }
 
-            assertThat(result.diff()).isEqualTo(FEATURE + FROM_BASE);
-            assertThat(result.truncated()).isTrue();
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = " \n")
+        void fallsBackToFullReviewWhenThePrDiffHasNoText(String diff) throws Exception {
+            Fixture fixture =
+                    new Fixture(
+                            page(HEAD, BASELINE, List.of(BASELINE, HEAD)),
+                            compare(PrDiffService.Response.ok(FEATURE + FROM_BASE, false), 200));
+            fixture.pullRequestDiff = PrDiffService.Response.ok(diff, false);
+
+            assertScopeUnavailable(fixture.get());
+        }
+
+        private static void assertScopeUnavailable(IncrementalDiffResult result) {
+            assertFullFallback(result, "pr_scope_unavailable");
+            assertThat(result.baselineSha()).isEqualTo(BASELINE);
+            assertThat(result.truncated()).isFalse();
         }
     }
 

@@ -76,11 +76,11 @@ void test('keeps a well-formed review scope on a result', () => {
     prKey: 'acme/platform#42',
     result: review,
     diff: 'diff',
-    reviewScope: { kind: 'full', fallbackReason: 'baseline_not_in_history' },
+    reviewScope: { kind: 'full', fallbackReason: 'pr_scope_unavailable' },
   })
 
   assert.deepEqual(incremental?.type === 'reviewResult' && incremental.reviewScope, { kind: 'incremental', baselineSha: sha })
-  assert.deepEqual(full?.type === 'reviewResult' && full.reviewScope, { kind: 'full', fallbackReason: 'baseline_not_in_history' })
+  assert.deepEqual(full?.type === 'reviewResult' && full.reviewScope, { kind: 'full', fallbackReason: 'pr_scope_unavailable' })
 })
 
 void test('drops a malformed review scope but keeps the result', () => {

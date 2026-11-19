@@ -1,7 +1,6 @@
 # PR Pilot Architecture
 
-IntelliJ and VS Code extension that lists GitHub Pull Requests and generates AI-powered code reviews
-using a local AI CLI/runtime (Claude Code or GitHub Copilot, selected per-host in settings).
+PR Pilot reviews GitHub pull requests in IntelliJ and VS Code using Claude Code or GitHub Copilot.
 
 ## Scope
 
@@ -24,11 +23,7 @@ Visual references:
 
 ## Key design decisions
 
-Only decisions that encode active constraints future code must respect and are not obvious from
-source.
-
-Add a new decision as a `###` section in the matching `docs/architecture/*.md` file and an index
-line here.
+Index non-obvious active constraints here; record each as a `###` section in the matching topic file.
 
 **Semantic review** ([semantic-review.md](docs/architecture/semantic-review.md))
 
@@ -89,6 +84,7 @@ line here.
 
 - [Diff acquisition model](docs/architecture/review-diff-coverage.md#diff-acquisition-model)
 - [Complete review diff coverage](docs/architecture/review-diff-coverage.md#complete-review-diff-coverage)
+- [GitHub size-limit fallback uses pinned Git objects](docs/architecture/review-diff-coverage.md#github-size-limit-fallback-uses-pinned-git-objects)
 - [Large diff visibility](docs/architecture/review-diff-coverage.md#large-diff-visibility)
 - [Review quality gate and chunked review mode](docs/architecture/review-diff-coverage.md#review-quality-gate-and-chunked-review-mode)
 - [Bounded review supervision](docs/architecture/review-diff-coverage.md#bounded-review-supervision)

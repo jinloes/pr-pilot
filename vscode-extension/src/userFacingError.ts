@@ -43,6 +43,8 @@ export class GitHubOperationError extends Error {
     }
 }
 
+export class LocalPrDiffError extends Error {}
+
 function messageOf(err: unknown): string {
     return (err instanceof Error ? err.message : String(err)).trim().toLowerCase();
 }
@@ -123,11 +125,13 @@ export function toUserFacingError(err: unknown, context: ErrorContext): string {
 }
 
 function mapError(err: unknown, context: ErrorContext): string {
+    if (err instanceof LocalPrDiffError) return err.message;
     const msg = messageOf(err);
 
     if (err instanceof GitHubOperationError && err.status === 'not_found_or_inaccessible') {
         return template('github_not_found_or_inaccessible', {});
     }
+
     if (err instanceof GitHubOperationError && err.status === 'diff_too_large') {
         return template('github_diff_too_large', {});
     }

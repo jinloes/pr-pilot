@@ -22,6 +22,7 @@ public record IncrementalDiffResult(
     public static final String BASELINE_NOT_IN_HISTORY = "baseline_not_in_history";
     public static final String BASELINE_UNAVAILABLE = "baseline_unavailable";
     public static final String EMPTY_INCREMENTAL_DIFF = "empty_incremental_diff";
+    public static final String PR_SCOPE_UNAVAILABLE = "pr_scope_unavailable";
     public static final String INCREMENTAL_DIFF_TOO_LARGE = "incremental_diff_too_large";
 
     static IncrementalDiffResult incremental(

@@ -15,6 +15,7 @@ import {
 import type { PreparedDeepReview } from './deepReview';
 import type { PRSearchScope, ReviewResult } from './models';
 import type { HandlerDependencies, ViewState } from './extensionTypes';
+import { recoverOversizedDiff } from './prDiffFallback';
 
 export interface PrHandlerApi {
     handleRefreshPRs: (state: ViewState, msg: Record<string, unknown>) => Promise<void>;
@@ -149,11 +150,19 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         const base = deps.githubBaseUrl();
         const readiness = deps.providerReadiness();
 
-        const [diffResult, detailResult, draftResult] = await Promise.all([
+        const [remoteDiff, detailResult, draftResult] = await Promise.all([
             deps.client().getPullRequestDiff(base, owner, repo, number, 'review'),
             deps.client().getPullRequestDetail(base, owner, repo, number),
             deps.client().getDraftReview(base, owner, repo, number),
         ]);
+        const isCurrent = () => !state.disposed && deps.prKey(state.activePR) === key
+            && state.selectionRevision === selectionRevision;
+        if (!isCurrent()) return;
+        const pr = { number, owner, repo, title, body, author };
+        const diffResult = await recoverOversizedDiff(
+            remoteDiff, deps, state, pr, base, 'review', isCurrent, detailResult,
+        );
+        if (!isCurrent()) return;
         if (diffResult.status !== 'ok' || diffResult.diff === null) {
             throw new GitHubOperationError(diffResult.status, diffResult.message);
         }
@@ -262,7 +271,10 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         // Comment-position validation benefits from an untruncated diff, but it must not block the
         // draft status UI on a large or slow response. The bounded review diff above is sufficient
         // until this optional fetch completes.
-        void deps.client().getPullRequestDiff(base, owner, repo, number, 'validation')
+        const fullDiff = remoteDiff.status === 'diff_too_large'
+            ? recoverOversizedDiff(remoteDiff, deps, state, pr, base, 'validation', isCurrent, detailResult)
+            : deps.client().getPullRequestDiff(base, owner, repo, number, 'validation');
+        void fullDiff
             .then((fullResult) => {
                 if (fullResult.status !== 'ok' || fullResult.diff === null) return;
                 if (deps.prKey(state.activePR) === key && state.selectionRevision === selectionRevision) {

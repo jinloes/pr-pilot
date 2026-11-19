@@ -125,14 +125,17 @@ The sidecar's `prs/getDiff` supports both review mode (250,000-byte budget) and 
 position validation, and draft anchoring). Both modes run the same `PrDiffService.bound` selection
 described under "Complete review diff coverage": whole files only, never a byte cut, with an
 engine-authored `DiffCoverage` trailer whenever a file is omitted. GitHub HTTP 406 maps to the
-non-retryable `diff_too_large` status. The stdio JSON-RPC frame ceiling is 8 MiB in both Java and
+non-retryable `diff_too_large` status. For ordinary review, hosts can then send the same method
+with `localSource: {worktreeDir, baseSha, headSha}` to use the verified local commit comparison
+instead of requesting the GitHub diff again. The stdio JSON-RPC frame ceiling is 8 MiB in both Java and
 TypeScript so an escaped validation diff remains bounded while fitting safely in a response.
 
 The sidecar's `prs/getIncrementalDiff` capability (logical capability `prIncrementalDiff`) returns
 the bounded diff of commits pushed since the viewer's latest submitted review. It returns `ok` with
 `scope: "incremental"` (with `baselineSha`, `headSha` and `diff`) or `scope: "full"` (with a
-`fallbackReason` when the incremental diff cannot be trusted). On real GitHub failures it returns a
-token-free failure status (`invalid_request`, `invalid_base_url`, `not_installed`,
+`fallbackReason` when the incremental diff cannot be trusted, including `pr_scope_unavailable`
+when the PR diff needed to scope the comparison cannot be used). On baseline or compare failures
+that do not fall back, it returns a token-free failure status (`invalid_request`, `invalid_base_url`, `not_installed`,
 `not_authenticated`, `rate_limited`, `network_error`, `api_failed`, `not_found_or_inaccessible`)
 with no scope. See [Incremental review since the last submitted
 review](review-comments-context.md#incremental-review-since-the-last-submitted-review).

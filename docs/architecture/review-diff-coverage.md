@@ -52,11 +52,20 @@ requires the summary to state the unreviewed count; the posted review body is no
 deterministically. Comments the model still places on omitted files become orphans through the
 normal validation path.
 
-GitHub answers HTTP 406 when a diff exceeds its own size limits. The engine attempts that request
-once and returns `diff_too_large`, which both hosts render as non-retryable "Pull request diff is
-too large" copy rather than a generic retry. There is no files-API or local `git diff` fallback.
 Chat lists the omitted files and reads them from the PR worktree, and the display keeps the 250 KB
 review diff; the banner and chat label describe those limits instead of claiming a full diff.
+
+### GitHub size-limit fallback uses pinned Git objects
+
+The engine attempts GitHub's diff once on HTTP 406 and returns `diff_too_large`. For ordinary
+review, both hosts recover by resolving the existing PR-head worktree and requesting a local diff
+with the GitHub-reported base and head commit IDs. The engine checks the worktree root and HEAD,
+fetches the exact base from `origin` if missing, and compares merge base to PR head, not the
+working files or the base branch tip. Local rendering disables external diff and text conversion
+and reuses the same review/validation caps and coverage trailer. Unavailable revisions or Git
+failures report an error rather than evaluating an unrelated checkout. Locally validated anchors
+still need GitHub acceptance at publish time; the existing draft body fallback remains in place.
+Explicit IntelliJ-assisted preparation retains its separate GitHub-diff/semantic readiness checks.
 
 ### Large diff visibility
 The review diff is bounded to 250 KB by whole files (see "Complete review diff coverage"). When its

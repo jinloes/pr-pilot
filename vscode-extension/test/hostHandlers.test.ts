@@ -184,15 +184,19 @@ async function generate(options: {
     incremental?: boolean;
     incrementalResult?: Record<string, unknown>;
     validationFails?: boolean;
+    oversized?: boolean;
     settings?: Record<string, unknown>;
 }) {
     const h = host(options.settings ?? {});
     const incrementalCalls: unknown[][] = [];
     const generateCalls: Record<string, unknown>[] = [];
+    const localSources: unknown[] = [];
     h.api.setClient({
         cancelReview: async () => {},
-        getPullRequestDiff: async (_base: string, _owner: string, _repo: string, _number: number, mode: string) => {
+        getPullRequestDiff: async (_base: string, _owner: string, _repo: string, _number: number, mode: string, localSource?: unknown) => {
             if (mode === 'validation' && options.validationFails) throw new Error('network down');
+            if (options.oversized && !localSource) return { status: 'diff_too_large', message: 'Too large.', diff: null };
+            if (localSource) localSources.push(localSource);
             return { status: 'ok', message: 'ok', diff: mode === 'validation' ? 'pr-validation-diff' : 'pr-diff',
                 truncated: false, limitBytes: 250000 };
         },
@@ -224,8 +228,19 @@ async function generate(options: {
     };
     const result = find('reviewResult');
     const error = find('reviewError');
-    return { state: h.state, incrementalCalls, generateCalls, result, error };
+    return { state: h.state, incrementalCalls, generateCalls, localSources, result, error };
 }
+
+test('ordinary review uses the exact local PR comparison when GitHub refuses the diff', async () => {
+    const run = await generate({ oversized: true });
+
+    assert.deepEqual(plain(run.localSources), Array(2).fill({
+        worktreeDir: '/fixture/wt', baseSha: 'd'.repeat(40), headSha: 'c'.repeat(40),
+    }));
+    assert.equal(run.generateCalls[0].diff, 'pr-diff');
+    assert.equal(run.result?.validationDiff, 'pr-validation-diff');
+    assert.equal(run.error, undefined);
+});
 
 test('incremental generation reviews only new changes but publishes PR diffs', async () => {
     const run = await generate({ incremental: true, incrementalResult: { status: 'ok', message: 'ok',
@@ -251,14 +266,14 @@ test('incremental generation falls back to the PR diff when the validation fetch
     assert.equal(run.result?.validationDiff, 'pr-diff');
 });
 
-test('incremental generation runs a full review when the engine falls back', async () => {
+test('incremental generation runs a full review when PR scoping is unavailable', async () => {
     const run = await generate({ incremental: true, incrementalResult: { status: 'ok', message: 'Falling back.',
-        scope: 'full', fallbackReason: 'baseline_not_in_history', limitBytes: 250000 } });
+        scope: 'full', fallbackReason: 'pr_scope_unavailable', limitBytes: 250000 } });
 
     assert.equal(run.generateCalls[0].diff, 'pr-diff');
     assert.equal(run.generateCalls[0].incrementalBaselineSha, undefined);
     assert.equal(run.result?.diff, 'pr-diff');
-    assert.deepEqual(run.result?.reviewScope, { kind: 'full', fallbackReason: 'baseline_not_in_history' });
+    assert.deepEqual(run.result?.reviewScope, { kind: 'full', fallbackReason: 'pr_scope_unavailable' });
 });
 
 test('incremental generation reports a non-ok status as a review error', async () => {

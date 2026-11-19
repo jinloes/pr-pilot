@@ -100,17 +100,8 @@ public final class IncrementalDiffService {
                     yield fallback(
                             IncrementalDiffResult.EMPTY_INCREMENTAL_DIFF, baselineSha, headSha);
                 }
-                IncrementalDiffScope.Restricted scoped =
-                        restrictToPullRequest(base, token.token(), params, response);
-                yield scoped.diff().isBlank()
-                        ? fallback(
-                                IncrementalDiffResult.EMPTY_INCREMENTAL_DIFF, baselineSha, headSha)
-                        : IncrementalDiffResult.incremental(
-                                baselineSha,
-                                headSha,
-                                scoped.diff(),
-                                scoped.truncated(),
-                                LIMIT_BYTES);
+                yield restrictToPullRequest(
+                        base, token.token(), params, response, baselineSha, headSha);
             }
             case UNAUTHENTICATED -> notAuthenticated();
             case RATE_LIMITED ->
@@ -127,12 +118,13 @@ public final class IncrementalDiffService {
         };
     }
 
-    /**
-     * Drops base-branch changes a merge brought into the compare range. Without the pull request's
-     * own diff nothing can be proven base-only, so the compare diff is returned unchanged.
-     */
-    private IncrementalDiffScope.Restricted restrictToPullRequest(
-            GitHubApiBase base, String token, Params params, PrDiffService.Response compare) {
+    private IncrementalDiffResult restrictToPullRequest(
+            GitHubApiBase base,
+            String token,
+            Params params,
+            PrDiffService.Response compare,
+            String baselineSha,
+            String headSha) {
         PrDiffService.Response pullRequest =
                 diffService.pullRequestDiff(
                         base.apiBaseUrl(),
@@ -141,17 +133,24 @@ public final class IncrementalDiffService {
                         params.repo(),
                         params.number(),
                         PrDiffService.VALIDATION_LIMIT_BYTES);
-        if (pullRequest.status() != PrDiffService.Status.OK || pullRequest.diff() == null) {
+        if (pullRequest.status() != PrDiffService.Status.OK
+                || pullRequest.diff() == null
+                || pullRequest.diff().isBlank()) {
             log.warn(
-                    "Bypassing incremental diff PR-scope filter for {}/{}#{}: pullRequestDiff status={}",
+                    "Falling back to full PR review for {}/{}#{}: scoping diff unavailable (status={})",
                     params.owner(),
                     params.repo(),
                     params.number(),
                     pullRequest.status());
-            return new IncrementalDiffScope.Restricted(compare.diff(), compare.truncated(), 0);
+            return fallback(IncrementalDiffResult.PR_SCOPE_UNAVAILABLE, baselineSha, headSha);
         }
-        return IncrementalDiffScope.restrict(
-                compare.diff(), compare.truncated(), pullRequest.diff());
+        IncrementalDiffScope.Restricted scoped =
+                IncrementalDiffScope.restrict(
+                        compare.diff(), compare.truncated(), pullRequest.diff());
+        return scoped.diff().isBlank()
+                ? fallback(IncrementalDiffResult.EMPTY_INCREMENTAL_DIFF, baselineSha, headSha)
+                : IncrementalDiffResult.incremental(
+                        baselineSha, headSha, scoped.diff(), scoped.truncated(), LIMIT_BYTES);
     }
 
     private static IncrementalDiffResult fallback(

@@ -10,8 +10,9 @@ import {
 import type { LineComment, ReviewResult } from './models';
 import type { OutcomeComment } from './sidecar';
 import type { HandlerDependencies, Provider, ViewState } from './extensionTypes';
-import type { SidecarChatAttachment, SidecarChatContext, SidecarChatResult } from './sidecarTypes';
+import type { SidecarChatAttachment, SidecarChatContext, SidecarChatResult, SidecarPrDetailResult, SidecarPrDiffResult } from './sidecarTypes';
 import type { PreparedDeepReview } from './deepReview';
+import { recoverOversizedDiff } from './prDiffFallback';
 
 export interface ReviewHandlerApi {
     handleGenerateReview: (
@@ -88,8 +89,19 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
 
         const requestedDiff = typeof msg.diff === 'string' && msg.diff.trim() ? msg.diff : undefined;
         let diff = requestedDiff ?? state.activeDiff;
+        const pr = activePr ?? { number, owner, repo, title: '', body: '' };
+        let oversizedDiff: SidecarPrDiffResult | undefined;
+        let localDetail: SidecarPrDetailResult | undefined;
         if (!diff) {
-            const result = await deps.client().getPullRequestDiff(base, owner, repo, number, 'review');
+            const remote = await deps.client().getPullRequestDiff(base, owner, repo, number, 'review');
+            if (!isCurrentGeneration()) return;
+            if (remote?.status === 'diff_too_large' && !deep) {
+                oversizedDiff = remote;
+                localDetail = await deps.client().getPullRequestDetail(base, owner, repo, number);
+            }
+            const result = remote && !deep
+                ? await recoverOversizedDiff(remote, deps, state, pr, base, 'review', isCurrentGeneration, localDetail)
+                : remote;
             if (!result || result.status !== 'ok' || result.diff === null) {
                 throw new GitHubOperationError(
                     result?.status ?? 'invalid_response',
@@ -126,7 +138,9 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         let reviewResultPublished = false;
         const validationDiffPromise = resolvedValidationDiff
             ? Promise.resolve(resolvedValidationDiff)
-            : deps.client().getPullRequestDiff(base, owner, repo, number, 'validation')
+            : (oversizedDiff && !deep
+                ? recoverOversizedDiff(oversizedDiff, deps, state, pr, base, 'validation', isCurrentGeneration, localDetail)
+                : deps.client().getPullRequestDiff(base, owner, repo, number, 'validation'))
                 .then((result) => result?.status === 'ok' && result.diff !== null ? result.diff : diff)
                 .catch(() => diff);
         void validationDiffPromise.then((fullDiff) => {
@@ -146,8 +160,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             deep?.pending.preparation.worktree
                 ? Promise.resolve(deep.pending.preparation.worktree)
                 : deps.resolveWorkingDir(state, { number, owner, repo, title, body }, true, key),
-            deps.client()
-                .getPullRequestDetail(base, owner, repo, number)
+            (localDetail ? Promise.resolve(localDetail) : deps.client().getPullRequestDetail(base, owner, repo, number))
                 .then((d) => (d.status === 'ok'
                     ? { headSha: d.detail?.head?.sha ?? '', baseSha: d.detail?.baseSha ?? '' }
                     : { headSha: '', baseSha: '' }))

@@ -21,7 +21,13 @@ sequenceDiagram
     GitHub-->>GitHubEngine: PR metadata, diffs, and draft
     GitHubEngine->>GitHubEngine: Bound each diff by whole files (review 250 KB, validation 1 MB, 250 KB per file)
     GitHubEngine-->>Host: Token-free results, with a DiffCoverage trailer appended only when a diff omits files or its scan is incomplete
-    Note over GitHubEngine,Host: A complete diff is returned byte-identical with no trailer.<br/>The trailer declares omitted/listed counts, the budget, scan completeness, and up to 200 omitted paths.<br/>HTTP 406 from GitHub becomes diff_too_large with non-retryable size-limit copy.
+    Note over GitHubEngine,Host: A complete diff is returned with no trailer.<br/>The trailer declares omitted/listed counts, the budget, scan completeness, and up to 200 omitted paths.
+    opt GitHub refuses the diff with HTTP 406
+        Host->>Worktree: Resolve the selected PR-head worktree
+        Worktree-->>Host: Worktree or failure
+        Host->>GitHubEngine: Render local diff for exact base and head
+        GitHubEngine-->>Host: Bounded merge-base-to-head diff or failure
+    end
     Host->>Worktree: Find repository root and warm PR-head worktree (plus commits and linked-issue prefetch keyed by headSha)
     Worktree-->>Host: Exact or failed worktree result
     Note over Host,Worktree: IntelliJ calls in-process while VS Code routes these calls through the sidecar.<br/>Immutable per-SHA commits and linked issues are prefetched in the background after draftLoaded.

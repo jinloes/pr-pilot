@@ -190,6 +190,7 @@ final class WebviewReviewController {
                             String snapshotDiff;
                             String snapshotValidationDiff;
                             String snapshotReviews;
+                            long worktreeEpoch;
                             WebviewPanel.PrefetchedPrContext snapshotContext;
                             PullRequest promptPr;
                             synchronized (panel) {
@@ -202,6 +203,7 @@ final class WebviewReviewController {
                                 snapshotValidationDiff = panel.prefetchedValidationDiff;
                                 snapshotReviews = panel.prefetchedExistingReviews;
                                 snapshotContext = panel.prefetchedPrContext;
+                                worktreeEpoch = panel.worktreeManager.epoch();
                             }
 
                             // Reuse prefetched diff; fall back to live fetch only if stale.
@@ -218,7 +220,23 @@ final class WebviewReviewController {
                                         new ReviewGeneratingMsg(
                                                 "reviewGenerating", key, "Fetching diff…"));
                                 try {
-                                    diff = panel.ghSvc.getPRDiff(owner, repo, number);
+                                    diff =
+                                            panel.ghSvc.getPRDiff(
+                                                    owner,
+                                                    repo,
+                                                    number,
+                                                    false,
+                                                    () ->
+                                                            deep == null
+                                                                            && panel
+                                                                                    .isCurrentSelection(
+                                                                                            key,
+                                                                                            reviewRevision)
+                                                                    ? panel.localDiffSource(
+                                                                            promptPr,
+                                                                            worktreeEpoch,
+                                                                            null)
+                                                                    : null);
                                 } catch (Exception e) {
                                     panel.publishIfCurrentGeneration(
                                             key,
@@ -238,7 +256,23 @@ final class WebviewReviewController {
                                 validationDiff = snapshotValidationDiff;
                             } else {
                                 try {
-                                    validationDiff = panel.ghSvc.getPRDiffFull(owner, repo, number);
+                                    validationDiff =
+                                            panel.ghSvc.getPRDiff(
+                                                    owner,
+                                                    repo,
+                                                    number,
+                                                    true,
+                                                    () ->
+                                                            deep == null
+                                                                            && panel
+                                                                                    .isCurrentSelection(
+                                                                                            key,
+                                                                                            reviewRevision)
+                                                                    ? panel.localDiffSource(
+                                                                            promptPr,
+                                                                            worktreeEpoch,
+                                                                            null)
+                                                                    : null);
                                 } catch (Exception e) {
                                     log.warn(
                                             "getPRDiffFull failed; falling back to truncated diff: {}",

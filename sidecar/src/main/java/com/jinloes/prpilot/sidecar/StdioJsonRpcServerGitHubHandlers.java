@@ -115,15 +115,24 @@ final class StdioJsonRpcServerGitHubHandlers {
 
     private ObjectNode getPullRequestDiff(JsonNode request) {
         JsonNode params = request.get("params");
+        JsonNode local = params == null ? null : params.get("localSource");
         if (params == null
                 || !params.isObject()
                 || !support.hasOnlyFields(
-                        params, Set.of("githubBaseUrl", "owner", "repo", "number", "mode"))
+                        params,
+                        Set.of("githubBaseUrl", "owner", "repo", "number", "mode", "localSource"))
                 || !params.path("githubBaseUrl").isTextual()
                 || !params.path("owner").isTextual()
                 || !params.path("repo").isTextual()
                 || !params.path("number").isInt()
-                || !params.path("mode").isTextual())
+                || !params.path("mode").isTextual()
+                || (local != null
+                        && (!local.isObject()
+                                || !support.hasOnlyFields(
+                                        local, Set.of("worktreeDir", "baseSha", "headSha"))
+                                || !local.path("worktreeDir").isTextual()
+                                || !local.path("baseSha").isTextual()
+                                || !local.path("headSha").isTextual())))
             return support.error(support.requestId(request), -32602, "Invalid params");
         return support.result(
                 support.requestId(request),
@@ -133,7 +142,13 @@ final class StdioJsonRpcServerGitHubHandlers {
                                 params.path("owner").textValue(),
                                 params.path("repo").textValue(),
                                 params.path("number").intValue(),
-                                params.path("mode").textValue())));
+                                params.path("mode").textValue(),
+                                local == null
+                                        ? null
+                                        : new PrDiffService.LocalSource(
+                                                local.path("worktreeDir").textValue(),
+                                                local.path("baseSha").textValue(),
+                                                local.path("headSha").textValue()))));
     }
 
     private ObjectNode getIncrementalDiff(JsonNode request) {

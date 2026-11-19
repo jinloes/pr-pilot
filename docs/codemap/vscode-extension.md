@@ -9,6 +9,8 @@ VS Code host integration. All GitHub and review generation routes through the Ja
   lifecycle.
 - `src/prHandlers.ts` and `reviewHandlers.ts` - Bridge handlers for PR
   selection/refresh/instructions/deep review, and for review generation/drafts/submission/chat.
+- `src/prDiffFallback.ts` - Resolves the selected worktree and requests the shared local PR diff
+  when the remote diff exceeds GitHub's limit.
   `extensionTypes.ts` holds shared state types.
 - `src/worktree.ts` - Worktree lifecycle (`resolveWorkingDir`/`clearWorktree`).
 - `src/openFile.ts` - Confined `workspace-checkout-first` file/line editor navigation (`openFile`),

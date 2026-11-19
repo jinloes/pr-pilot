@@ -105,6 +105,7 @@ const FALLBACK_REASON_TEXT: Record<IncrementalFallbackReason, string> = {
   baseline_not_in_history: "the commit you last reviewed is no longer in this pull request's history",
   baseline_unavailable: "GitHub couldn't compare against the commit you last reviewed",
   empty_incremental_diff: 'the changes since your last review have no diff',
+  pr_scope_unavailable: 'could not tell which new changes belong to this pull request',
   incremental_diff_too_large: 'the changes since your last review are too large to compare',
 }
 

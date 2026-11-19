@@ -69,6 +69,7 @@ final class WebviewPrSelectionController {
         }
         panel.finishLifecycleTransition(transition);
         long revision = transition.selectionRevision();
+        long worktreeEpoch = panel.worktreeManager.epoch();
 
         getApplication()
                 .invokeLater(
@@ -137,7 +138,19 @@ final class WebviewPrSelectionController {
                                             () -> {
                                                 try {
                                                     return panel.ghSvc.getPRDiff(
-                                                            owner, repo, number);
+                                                            owner,
+                                                            repo,
+                                                            number,
+                                                            false,
+                                                            () ->
+                                                                    panel.isCurrentSelection(
+                                                                                    key, revision)
+                                                                            ? panel.localDiffSource(
+                                                                                    pr,
+                                                                                    worktreeEpoch,
+                                                                                    detailFuture
+                                                                                            .join())
+                                                                            : null);
                                                 } catch (Exception e) {
                                                     log.warn(
                                                             "getPRDiff prefetch failed: {}",
@@ -150,8 +163,20 @@ final class WebviewPrSelectionController {
                                     CompletableFuture.supplyAsync(
                                             () -> {
                                                 try {
-                                                    return panel.ghSvc.getPRDiffFull(
-                                                            owner, repo, number);
+                                                    return panel.ghSvc.getPRDiff(
+                                                            owner,
+                                                            repo,
+                                                            number,
+                                                            true,
+                                                            () ->
+                                                                    panel.isCurrentSelection(
+                                                                                    key, revision)
+                                                                            ? panel.localDiffSource(
+                                                                                    pr,
+                                                                                    worktreeEpoch,
+                                                                                    detailFuture
+                                                                                            .join())
+                                                                            : null);
                                                 } catch (Exception e) {
                                                     log.warn(
                                                             "getPRDiffFull prefetch failed: {}",

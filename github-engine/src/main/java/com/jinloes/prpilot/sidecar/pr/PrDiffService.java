@@ -124,6 +124,9 @@ public final class PrDiffService {
         if (base == null)
             return PrDiffResult.failure(
                     "invalid_base_url", "GitHub base URL must be an HTTPS origin.");
+        if (params.localSource() != null) {
+            return LocalPrDiff.render(params.localSource(), params.mode());
+        }
         GitHubAuthService.TokenResolution token = tokenResolver.resolve(base.hostnameArgument());
         if (token.status() == GitHubAuthService.TokenStatus.NOT_INSTALLED)
             return PrDiffResult.failure("not_installed", "GitHub CLI is not installed.");
@@ -167,7 +170,18 @@ public final class PrDiffService {
     }
 
     public record Params(
-            String githubBaseUrl, String owner, String repo, int number, String mode) {}
+            String githubBaseUrl,
+            String owner,
+            String repo,
+            int number,
+            String mode,
+            LocalSource localSource) {
+        public Params(String githubBaseUrl, String owner, String repo, int number, String mode) {
+            this(githubBaseUrl, owner, repo, number, mode, null);
+        }
+    }
+
+    public record LocalSource(String worktreeDir, String baseSha, String headSha) {}
 
     interface DiffClient {
         Response get(

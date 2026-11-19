@@ -112,6 +112,7 @@ export const INCREMENTAL_FALLBACK_REASONS = [
   'baseline_not_in_history',
   'baseline_unavailable',
   'empty_incremental_diff',
+  'pr_scope_unavailable',
   'incremental_diff_too_large',
 ] as const
 

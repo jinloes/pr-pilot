@@ -27,6 +27,7 @@ receive GitHub tokens.
   the PR diff contains, so base-branch changes from a merge are not reviewed.
 - `sidecar/pr/PrDiffService.java` - Whole-file, UTF-8-safe review/validation diff bounding
   (smallest-first, 250 KB per file, coverage trailer) and HTTP 406 as `diff_too_large`.
+- `sidecar/pr/LocalPrDiff.java` - Bounded merge-base-to-head Git fallback for an exact PR worktree.
 - `sidecar/pr/DraftReviewService.java` - Pending-review lookup and decoding.
 - `sidecar/pr/DraftReviewCodec.java` - PR Pilot review metadata encoding/decoding, and
   `visibleBody`, which strips hidden metadata from a pending body before publishing.
