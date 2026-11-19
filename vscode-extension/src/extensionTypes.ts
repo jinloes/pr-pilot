@@ -52,6 +52,7 @@ export interface ViewState {
     searchScope: PRSearchScope;
     activePR: ActivePR | null;
     activeDiff: string;
+    localDiffRevisions: { headSha: string; baseSha: string } | null;
     activeValidationDiff: string;
     activeReviewResult: ReviewResult | null;
     pendingReviewId: string | null;

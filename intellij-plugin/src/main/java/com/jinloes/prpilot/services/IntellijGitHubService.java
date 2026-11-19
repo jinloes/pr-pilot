@@ -140,20 +140,47 @@ public final class IntellijGitHubService {
     public String getPRDiff(
             String owner, String repo, int number, boolean validation, LocalDiffSource source)
             throws IOException {
-        String mode = validation ? "validation" : "review";
+        return loadPRDiff(owner, repo, number, validation, source).diff();
+    }
+
+    public record LoadedDiff(String diff, PrDiffService.LocalSource localSource) {}
+
+    public LoadedDiff loadPRDiff(
+            String owner, String repo, int number, boolean validation, LocalDiffSource source)
+            throws IOException {
         try {
-            return validation ? getPRDiffFull(owner, repo, number) : getPRDiff(owner, repo, number);
+            return new LoadedDiff(
+                    validation
+                            ? getPRDiffFull(owner, repo, number)
+                            : getPRDiff(owner, repo, number),
+                    null);
         } catch (GitHubOperationException error) {
             if (!PrDiffResult.STATUS_DIFF_TOO_LARGE.equals(error.status())) throw error;
             PrDiffService.LocalSource local = source.resolve();
             if (local == null) throw error;
-            PrDiffResult result =
-                    engine.getPullRequestDiff(
-                            new PrDiffService.Params(baseUrl(), owner, repo, number, mode, local));
-            if (!"ok".equals(result.status()))
-                throw new LocalDiffUnavailableException(result.message());
-            return result.diff();
+            return new LoadedDiff(loadLocalPRDiff(owner, repo, number, validation, local), local);
         }
+    }
+
+    public String loadLocalPRDiff(
+            String owner,
+            String repo,
+            int number,
+            boolean validation,
+            PrDiffService.LocalSource source)
+            throws IOException {
+        PrDiffResult result =
+                engine.getPullRequestDiff(
+                        new PrDiffService.Params(
+                                baseUrl(),
+                                owner,
+                                repo,
+                                number,
+                                validation ? "validation" : "review",
+                                source));
+        if (!"ok".equals(result.status()))
+            throw new LocalDiffUnavailableException(result.message());
+        return result.diff();
     }
 
     /**

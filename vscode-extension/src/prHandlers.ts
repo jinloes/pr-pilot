@@ -15,7 +15,7 @@ import {
 import type { PreparedDeepReview } from './deepReview';
 import type { PRSearchScope, ReviewResult } from './models';
 import type { HandlerDependencies, ViewState } from './extensionTypes';
-import { recoverOversizedDiff } from './prDiffFallback';
+import { diffRevisions, recoverOversizedDiff } from './prDiffFallback';
 
 export interface PrHandlerApi {
     handleRefreshPRs: (state: ViewState, msg: Record<string, unknown>) => Promise<void>;
@@ -141,6 +141,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
     state.prefetchedPrContext = null;
     state.activePR = { number, owner, repo, title, body, author };
     state.activeDiff = '';
+    state.localDiffRevisions = null;
     state.activeValidationDiff = '';
     state.activeReviewResult = null;
     state.pendingReviewId = null;
@@ -197,6 +198,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
             author,
         };
         state.activeDiff = diff;
+        state.localDiffRevisions = remoteDiff.status === 'diff_too_large' ? diffRevisions(detailResult) : null;
         state.activeValidationDiff = validationDiff;
         state.activeReviewResult = draft?.result ?? null;
         state.pendingReviewId = draft?.id || null;

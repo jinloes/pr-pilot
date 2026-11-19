@@ -35,6 +35,10 @@ sequenceDiagram
     Reviewer->>UI: Generate review with per-review overrides
     UI->>Host: generateReview(prKey, options)
     Host->>Host: Snapshot generation ID, settings, provider, and guidance
+    opt Reuse a locally rendered diff, including chunked review
+        Host->>GitHubEngine: Verify cached base and head against fresh PR metadata
+        Note over UI,Host: Mismatch or unavailable metadata requires reopening the PR before review.
+    end
     opt Explicit IntelliJ-assisted opt-in
         Host->>GitHubEngine: Refetch remote head and bounded 1 MB validation diff
         Host->>ReviewEngine: prepareDeepReview(exact head)

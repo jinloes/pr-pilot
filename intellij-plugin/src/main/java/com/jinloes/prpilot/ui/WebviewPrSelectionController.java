@@ -133,11 +133,11 @@ final class WebviewPrSelectionController {
                                                                     panel.ghSvc.loadDraftReview(
                                                                             owner, repo, number)));
 
-                            CompletableFuture<String> diffFuture =
+                            CompletableFuture<IntellijGitHubService.LoadedDiff> diffFuture =
                                     CompletableFuture.supplyAsync(
                                             () -> {
                                                 try {
-                                                    return panel.ghSvc.getPRDiff(
+                                                    return panel.ghSvc.loadPRDiff(
                                                             owner,
                                                             repo,
                                                             number,
@@ -159,31 +159,35 @@ final class WebviewPrSelectionController {
                                                 }
                                             });
 
-                            CompletableFuture<String> validationDiffFuture =
-                                    CompletableFuture.supplyAsync(
-                                            () -> {
-                                                try {
-                                                    return panel.ghSvc.getPRDiff(
-                                                            owner,
-                                                            repo,
-                                                            number,
-                                                            true,
-                                                            () ->
-                                                                    panel.isCurrentSelection(
-                                                                                    key, revision)
-                                                                            ? panel.localDiffSource(
-                                                                                    pr,
-                                                                                    worktreeEpoch,
-                                                                                    detailFuture
-                                                                                            .join())
-                                                                            : null);
-                                                } catch (Exception e) {
-                                                    log.warn(
-                                                            "getPRDiffFull prefetch failed: {}",
-                                                            e.getMessage());
-                                                    return null;
-                                                }
-                                            });
+                            CompletableFuture<IntellijGitHubService.LoadedDiff>
+                                    validationDiffFuture =
+                                            CompletableFuture.supplyAsync(
+                                                    () -> {
+                                                        try {
+                                                            return panel.ghSvc.loadPRDiff(
+                                                                    owner,
+                                                                    repo,
+                                                                    number,
+                                                                    true,
+                                                                    () ->
+                                                                            panel
+                                                                                            .isCurrentSelection(
+                                                                                                    key,
+                                                                                                    revision)
+                                                                                    ? panel
+                                                                                            .localDiffSource(
+                                                                                                    pr,
+                                                                                                    worktreeEpoch,
+                                                                                                    detailFuture
+                                                                                                            .join())
+                                                                                    : null);
+                                                        } catch (Exception e) {
+                                                            log.warn(
+                                                                    "getPRDiffFull prefetch failed: {}",
+                                                                    e.getMessage());
+                                                            return null;
+                                                        }
+                                                    });
 
                             CompletableFuture<String> reviewsFuture =
                                     CompletableFuture.supplyAsync(
@@ -205,8 +209,21 @@ final class WebviewPrSelectionController {
                             boolean merged = detail != null && detail.merged();
                             WebviewPanel.PendingReviewLoad pendingLoad = pendingFuture.join();
                             IntellijGitHubService.PendingReview pending = pendingLoad.review();
-                            String fetchedDiff = diffFuture.join();
-                            String fetchedValidationDiff = validationDiffFuture.join();
+                            var loadedDiff = diffFuture.join();
+                            var loadedValidation = validationDiffFuture.join();
+                            String fetchedDiff = loadedDiff == null ? null : loadedDiff.diff();
+                            String fetchedValidationDiff =
+                                    loadedValidation == null ? null : loadedValidation.diff();
+                            var localSource = loadedDiff == null ? null : loadedDiff.localSource();
+                            var validationSource =
+                                    loadedValidation == null
+                                            ? null
+                                            : loadedValidation.localSource();
+                            if (localSource != null || validationSource != null) {
+                                if (localSource == null || !localSource.equals(validationSource)) {
+                                    fetchedValidationDiff = null;
+                                }
+                            }
                             String fetchedReviews = reviewsFuture.join();
                             String currentHeadSha =
                                     detail != null && detail.head() != null
@@ -225,6 +242,7 @@ final class WebviewPrSelectionController {
                                 }
                                 panel.activePR = hydratedPr;
                                 panel.prefetchedDiff = fetchedDiff;
+                                panel.prefetchedLocalDiffSource = localSource;
                                 panel.prefetchedValidationDiff = effectiveValidationDiff;
                                 panel.prefetchedExistingReviews = fetchedReviews;
                             }

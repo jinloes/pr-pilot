@@ -19,6 +19,7 @@ import com.jinloes.prpilot.services.UserFacingErrors;
 import com.jinloes.prpilot.settings.PluginSettings;
 import com.jinloes.prpilot.settings.RepositoryReviewInstructions;
 import com.jinloes.prpilot.sidecar.pr.IncrementalDiffResult;
+import com.jinloes.prpilot.sidecar.pr.PrDiffService;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftSaveErrorMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftSavedMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ErrorMsg;
@@ -39,6 +40,13 @@ import org.slf4j.LoggerFactory;
 
 /** Runs provider-backed review generation and draft mutations. */
 final class WebviewReviewController {
+    static boolean matchesLocalDiff(
+            PrDiffService.LocalSource source, IntellijGitHubService.PRRevisions revisions) {
+        return revisions != null
+                && source.headSha().equals(revisions.headSha())
+                && source.baseSha().equals(revisions.baseSha());
+    }
+
     private static final Logger log = LoggerFactory.getLogger(WebviewReviewController.class);
     private final WebviewPanel panel;
 
@@ -189,6 +197,7 @@ final class WebviewReviewController {
                             // races with a concurrent handleSelectPR on the JCEF bridge thread.
                             String snapshotDiff;
                             String snapshotValidationDiff;
+                            PrDiffService.LocalSource localSource;
                             String snapshotReviews;
                             long worktreeEpoch;
                             WebviewPanel.PrefetchedPrContext snapshotContext;
@@ -201,9 +210,33 @@ final class WebviewReviewController {
                                 promptPr = panel.activePR;
                                 snapshotDiff = panel.prefetchedDiff;
                                 snapshotValidationDiff = panel.prefetchedValidationDiff;
+                                localSource = deep == null ? panel.prefetchedLocalDiffSource : null;
                                 snapshotReviews = panel.prefetchedExistingReviews;
                                 snapshotContext = panel.prefetchedPrContext;
                                 worktreeEpoch = panel.worktreeManager.epoch();
+                            }
+
+                            if (localSource != null) {
+                                IntellijGitHubService.PRRevisions fresh = null;
+                                try {
+                                    fresh = panel.ghSvc.getPRRevisions(owner, repo, number);
+                                } catch (Exception e) {
+                                    log.warn(
+                                            "Could not verify local diff revision for PR #{}",
+                                            number,
+                                            e);
+                                }
+                                if (!matchesLocalDiff(localSource, fresh)) {
+                                    panel.publishIfCurrentGeneration(
+                                            key,
+                                            reviewRevision,
+                                            generationId,
+                                            new ErrorMsg(
+                                                    "reviewError",
+                                                    key,
+                                                    "Could not confirm the local diff still matches this pull request. Reopen the pull request and try again."));
+                                    return;
+                                }
                             }
 
                             // Reuse prefetched diff; fall back to live fetch only if stale.
@@ -220,8 +253,8 @@ final class WebviewReviewController {
                                         new ReviewGeneratingMsg(
                                                 "reviewGenerating", key, "Fetching diff…"));
                                 try {
-                                    diff =
-                                            panel.ghSvc.getPRDiff(
+                                    var loaded =
+                                            panel.ghSvc.loadPRDiff(
                                                     owner,
                                                     repo,
                                                     number,
@@ -237,6 +270,11 @@ final class WebviewReviewController {
                                                                             worktreeEpoch,
                                                                             null)
                                                                     : null);
+                                    diff = loaded.diff();
+                                    if (loaded.localSource() != null) {
+                                        localSource = loaded.localSource();
+                                        snapshotValidationDiff = null;
+                                    }
                                 } catch (Exception e) {
                                     panel.publishIfCurrentGeneration(
                                             key,
@@ -257,22 +295,10 @@ final class WebviewReviewController {
                             } else {
                                 try {
                                     validationDiff =
-                                            panel.ghSvc.getPRDiff(
-                                                    owner,
-                                                    repo,
-                                                    number,
-                                                    true,
-                                                    () ->
-                                                            deep == null
-                                                                            && panel
-                                                                                    .isCurrentSelection(
-                                                                                            key,
-                                                                                            reviewRevision)
-                                                                    ? panel.localDiffSource(
-                                                                            promptPr,
-                                                                            worktreeEpoch,
-                                                                            null)
-                                                                    : null);
+                                            localSource == null
+                                                    ? panel.ghSvc.getPRDiffFull(owner, repo, number)
+                                                    : panel.ghSvc.loadLocalPRDiff(
+                                                            owner, repo, number, true, localSource);
                                 } catch (Exception e) {
                                     log.warn(
                                             "getPRDiffFull failed; falling back to truncated diff: {}",
@@ -352,19 +378,24 @@ final class WebviewReviewController {
                                                     });
 
                             CompletableFuture<IntellijGitHubService.PRRevisions> revisionsFuture =
-                                    CompletableFuture.supplyAsync(
-                                            () -> {
-                                                try {
-                                                    return panel.ghSvc.getPRRevisions(
-                                                            owner, repo, number);
-                                                } catch (Exception e) {
-                                                    log.warn(
-                                                            "getPRRevisions failed: {}",
-                                                            e.getMessage());
-                                                    return new IntellijGitHubService.PRRevisions(
-                                                            "", "");
-                                                }
-                                            });
+                                    localSource != null
+                                            ? CompletableFuture.completedFuture(
+                                                    new IntellijGitHubService.PRRevisions(
+                                                            localSource.headSha(),
+                                                            localSource.baseSha()))
+                                            : CompletableFuture.supplyAsync(
+                                                    () -> {
+                                                        try {
+                                                            return panel.ghSvc.getPRRevisions(
+                                                                    owner, repo, number);
+                                                        } catch (Exception e) {
+                                                            log.warn(
+                                                                    "getPRRevisions failed: {}",
+                                                                    e.getMessage());
+                                                            return new IntellijGitHubService
+                                                                    .PRRevisions("", "");
+                                                        }
+                                                    });
 
                             CompletableFuture<IntellijGitHubService.CheckContext> checksFuture =
                                     revisionsFuture.thenApplyAsync(

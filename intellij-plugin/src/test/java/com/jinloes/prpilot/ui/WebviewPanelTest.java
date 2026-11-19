@@ -10,6 +10,7 @@ import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.services.IntellijGitHubService;
+import com.jinloes.prpilot.sidecar.pr.PrDiffService;
 import java.awt.BorderLayout;
 import java.awt.Rectangle;
 import java.io.File;
@@ -320,6 +321,26 @@ class WebviewPanelTest {
 
     @Nested
     class GenerationMetadata {
+        @Test
+        void localDiffRequiresBothLiveRevisionsToMatch() {
+            String head = "a".repeat(40);
+            String base = "b".repeat(40);
+            String moved = "c".repeat(40);
+            var source = new PrDiffService.LocalSource("worktree", base, head);
+            assertThat(
+                            WebviewReviewController.matchesLocalDiff(
+                                    source, new IntellijGitHubService.PRRevisions(head, base)))
+                    .isTrue();
+            assertThat(
+                            WebviewReviewController.matchesLocalDiff(
+                                    source, new IntellijGitHubService.PRRevisions(moved, base)))
+                    .isFalse();
+            assertThat(
+                            WebviewReviewController.matchesLocalDiff(
+                                    source, new IntellijGitHubService.PRRevisions(head, moved)))
+                    .isFalse();
+            assertThat(WebviewReviewController.matchesLocalDiff(source, null)).isFalse();
+        }
 
         @Test
         void capturesGenerationTimeProviderAndModel() {

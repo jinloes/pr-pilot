@@ -1,7 +1,7 @@
 import * as claude from './claude';
 import * as copilot from './copilot';
 import { composeCustomInstructions } from './repositoryInstructions';
-import { GitHubOperationError, providerNotInstalledMessage, toUserFacingError } from './userFacingError';
+import { GitHubOperationError, LocalPrDiffError, providerNotInstalledMessage, toUserFacingError } from './userFacingError';
 import {
     canPersistDraft,
     invalidateChatAndCancel,
@@ -12,7 +12,7 @@ import type { OutcomeComment } from './sidecar';
 import type { HandlerDependencies, Provider, ViewState } from './extensionTypes';
 import type { SidecarChatAttachment, SidecarChatContext, SidecarChatResult, SidecarPrDetailResult, SidecarPrDiffResult } from './sidecarTypes';
 import type { PreparedDeepReview } from './deepReview';
-import { recoverOversizedDiff } from './prDiffFallback';
+import { diffRevisions, recoverOversizedDiff } from './prDiffFallback';
 
 export interface ReviewHandlerApi {
     handleGenerateReview: (
@@ -92,6 +92,16 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         const pr = activePr ?? { number, owner, repo, title: '', body: '' };
         let oversizedDiff: SidecarPrDiffResult | undefined;
         let localDetail: SidecarPrDetailResult | undefined;
+        const cachedRevisions = state.localDiffRevisions;
+        if (cachedRevisions && diff && !deep) {
+            localDetail = await deps.client().getPullRequestDetail(base, owner, repo, number)
+                .catch(() => undefined);
+            if (!isCurrentGeneration()) return;
+            const fresh = localDetail && diffRevisions(localDetail);
+            if (fresh?.headSha !== cachedRevisions.headSha || fresh?.baseSha !== cachedRevisions.baseSha) {
+                throw new LocalPrDiffError('Could not confirm the local diff still matches this pull request. Reopen the pull request and try again.');
+            }
+        }
         if (!diff) {
             const remote = await deps.client().getPullRequestDiff(base, owner, repo, number, 'review');
             if (!isCurrentGeneration()) return;
@@ -111,6 +121,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             diff = result.diff;
             if (!isCurrentGeneration()) return;
             state.activeDiff = diff;
+            state.localDiffRevisions = localDetail ? diffRevisions(localDetail) : null;
         }
         // The incremental diff only feeds the model: activeDiff and every diff published to the
         // webview stay PR diffs so anchoring, validation and publishing are unchanged.
@@ -134,13 +145,17 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 reviewScope = { kind: 'full', fallbackReason: incremental.fallbackReason };
             }
         }
-        let resolvedValidationDiff = state.activeValidationDiff;
+        let resolvedValidationDiff = oversizedDiff ? '' : state.activeValidationDiff;
         let reviewResultPublished = false;
         const validationDiffPromise = resolvedValidationDiff
             ? Promise.resolve(resolvedValidationDiff)
-            : (oversizedDiff && !deep
+            : oversizedDiff && !deep
                 ? recoverOversizedDiff(oversizedDiff, deps, state, pr, base, 'validation', isCurrentGeneration, localDetail)
-                : deps.client().getPullRequestDiff(base, owner, repo, number, 'validation'))
+                    .then((result) => result.diff ?? diff)
+                    .catch(() => diff)
+                : cachedRevisions && !deep
+                    ? Promise.resolve(diff)
+                    : deps.client().getPullRequestDiff(base, owner, repo, number, 'validation')
                 .then((result) => result?.status === 'ok' && result.diff !== null ? result.diff : diff)
                 .catch(() => diff);
         void validationDiffPromise.then((fullDiff) => {

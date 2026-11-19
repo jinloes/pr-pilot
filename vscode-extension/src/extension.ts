@@ -240,6 +240,7 @@ class ClaudeReviewsViewProvider {
             searchScope: 'currentRepo',
             activePR: null,
             activeDiff: '',
+            localDiffRevisions: null,
             activeValidationDiff: '',
             activeReviewResult: null,
             pendingReviewId: null,

@@ -185,6 +185,11 @@ async function generate(options: {
     incrementalResult?: Record<string, unknown>;
     validationFails?: boolean;
     oversized?: boolean;
+    cachedLocal?: boolean;
+    currentHead?: string;
+    currentBase?: string;
+    metadataUnavailable?: boolean;
+    chunked?: boolean;
     settings?: Record<string, unknown>;
 }) {
     const h = host(options.settings ?? {});
@@ -205,7 +210,12 @@ async function generate(options: {
             return options.incrementalResult;
         },
         getExistingReviews: async () => ({ status: 'ok', summary: '' }),
-        getPullRequestDetail: async () => ({ status: 'ok', detail: { head: { sha: 'c'.repeat(40) }, baseSha: 'd'.repeat(40) } }),
+        getPullRequestDetail: async () => options.metadataUnavailable
+            ? { status: 'api_failed' }
+            : { status: 'ok', detail: {
+                head: { sha: options.currentHead ?? 'c'.repeat(40) },
+                baseSha: options.currentBase ?? 'd'.repeat(40),
+            } },
         getCommits: async () => ({ summary: '', closingIssueNumbers: [] }),
         getCheckStatus: async () => ({ summary: '', annotations: [] }),
         getLinkedIssues: async () => '',
@@ -219,9 +229,14 @@ async function generate(options: {
         activePR: { number: 42, owner: 'acme', repo: 'widget', title: 'Test', body: '' },
         activeDiff: '', activeValidationDiff: '', activeReviewResult: null, generatedReviews: new Map(),
         worktreeDir: '/fixture/wt', worktreeKey: 'acme/widget#42',
+        ...(options.cachedLocal ? {
+            activeDiff: 'cached-local', activeValidationDiff: 'cached-validation',
+            localDiffRevisions: { headSha: 'c'.repeat(40), baseSha: 'd'.repeat(40) },
+        } : {}),
     });
     await h.api.generate(h.state, { type: 'generateReview', operationId: 'op-1', number: 42, owner: 'acme',
-        repo: 'widget', ...(options.incremental ? { incremental: true } : {}) });
+        repo: 'widget', ...(options.incremental ? { incremental: true } : {}),
+        ...(options.chunked ? { chunkedReview: true, diff: 'cached-validation' } : {}) });
     const find = (type: string) => {
         const message = h.messages.find((m) => m.type === type);
         return message === undefined ? undefined : plain(message) as Record<string, unknown>;
@@ -230,6 +245,20 @@ async function generate(options: {
     const error = find('reviewError');
     return { state: h.state, incrementalCalls, generateCalls, localSources, result, error };
 }
+
+test('cached local diff requires matching fresh revisions before starting a review', async () => {
+    const unchanged = await generate({ cachedLocal: true });
+    assert.equal(unchanged.generateCalls[0]?.diff, 'cached-local');
+    for (const options of [
+        { currentHead: 'e'.repeat(40) },
+        { currentBase: 'e'.repeat(40), chunked: true },
+        { metadataUnavailable: true },
+    ]) {
+        const run = await generate({ cachedLocal: true, ...options });
+        assert.equal(run.generateCalls.length, 0);
+        assert.match(String(run.error?.message), /reopen the pull request/i);
+    }
+});
 
 test('ordinary review uses the exact local PR comparison when GitHub refuses the diff', async () => {
     const run = await generate({ oversized: true });

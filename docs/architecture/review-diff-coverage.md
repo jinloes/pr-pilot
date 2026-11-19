@@ -65,6 +65,9 @@ working files or the base branch tip. Local rendering disables external diff and
 and reuses the same review/validation caps and coverage trailer. Unavailable revisions or Git
 failures report an error rather than evaluating an unrelated checkout. Locally validated anchors
 still need GitHub acceptance at publish time; the existing draft body fallback remains in place.
+Both hosts retain the verified base and head for a locally rendered diff. Before generation
+reuses that diff (including a chunked override), both revisions must still match GitHub's PR
+metadata. If either changed or cannot be verified, reopen the PR to load the new revisions.
 Explicit IntelliJ-assisted preparation retains its separate GitHub-diff/semantic readiness checks.
 
 ### Large diff visibility

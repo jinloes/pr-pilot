@@ -196,6 +196,7 @@ public class WebviewPanel implements Disposable {
 
     final Object draftMutationLock = new Object();
     volatile String prefetchedDiff = null;
+    PrDiffService.LocalSource prefetchedLocalDiffSource;
     volatile String prefetchedValidationDiff = null;
     volatile String prefetchedExistingReviews = null;
     volatile PrefetchedPrContext prefetchedPrContext = null;
