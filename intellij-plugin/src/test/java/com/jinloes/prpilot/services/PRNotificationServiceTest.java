@@ -250,6 +250,64 @@ class PRNotificationServiceTest {
         }
 
         @Test
+        void capsIndividualNotificationsAtThreeAndSummarizesOverflowWhileMarkingAllSeen() {
+            FakeSourceClient source = new FakeSourceClient();
+            source.reviewRequested =
+                    List.of(
+                            pr("acme", "review", 1),
+                            pr("acme", "review", 2),
+                            pr("acme", "review", 3),
+                            pr("acme", "review", 4));
+            source.starredRepos = List.of("acme/starred");
+            source.starred = List.of(pr("acme", "starred", 5), pr("acme", "starred", 6));
+            SeenPRSet seenSet = new SeenPRSet(tempDir.resolve("burst-seen-prs.json"));
+            seenSet.markSeeded();
+            seenSet.save();
+            List<Integer> individualNumbers = new ArrayList<>();
+            List<String> summaries = new ArrayList<>();
+            PRNotificationService service =
+                    new PRNotificationService(
+                            () -> new NotificationSettings(true, true, true),
+                            source,
+                            seenSet,
+                            new PendingReviewIndex(tempDir.resolve("burst-pending-prs.json")),
+                            (pullRequest, ignored) ->
+                                    individualNumbers.add(pullRequest.getNumber()),
+                            (index, result) -> {},
+                            overflow ->
+                                    summaries.add(
+                                            PRNotificationService.formatOverflowSummary(overflow)));
+
+            service.pollNow();
+
+            assertThat(individualNumbers).containsExactly(1, 2, 3);
+            assertThat(summaries)
+                    .containsExactly(
+                            "+3 more new pull requests (1 review requested, \u2605 2 starred repos)");
+            for (PullRequest item : source.reviewRequested) {
+                assertThat(seenSet.contains(item)).isTrue();
+            }
+            for (PullRequest item : source.starred) {
+                assertThat(seenSet.contains(item)).isTrue();
+            }
+
+            // A subsequent poll with <= 3 unseen PRs emits individual notifications with no
+            // summary.
+            individualNumbers.clear();
+            summaries.clear();
+            source.reviewRequested =
+                    List.of(
+                            pr("acme", "review", 1),
+                            pr("acme", "review", 2),
+                            pr("acme", "review", 3),
+                            pr("acme", "review", 4),
+                            pr("acme", "review", 7));
+            service.pollNow();
+            assertThat(individualNumbers).containsExactly(7);
+            assertThat(summaries).isEmpty();
+        }
+
+        @Test
         void restartDuringRunningPollCoalescesOneSerializedFollowUp() throws Exception {
             CountDownLatch firstPollEntered = new CountDownLatch(1);
             CountDownLatch releaseFirstPoll = new CountDownLatch(1);
@@ -308,6 +366,63 @@ class PRNotificationServiceTest {
                 releaseFirstPoll.countDown();
                 service.stopPolling();
                 initialPoll.join(5_000);
+            }
+        }
+
+        @Test
+        void pollNowWaitsForCoalescedCompletionWhenTriggeredDuringInFlightPoll() throws Exception {
+            CountDownLatch firstPollEntered = new CountDownLatch(1);
+            CountDownLatch releaseFirstPoll = new CountDownLatch(1);
+            AtomicInteger calls = new AtomicInteger();
+            NotificationSourceClient source =
+                    new NotificationSourceClient() {
+                        @Override
+                        public List<PullRequest> searchPRs(String query) throws Exception {
+                            int invocation = calls.incrementAndGet();
+                            if (invocation == 1) {
+                                firstPollEntered.countDown();
+                                assertThat(releaseFirstPoll.await(5, TimeUnit.SECONDS)).isTrue();
+                            }
+                            return List.of();
+                        }
+
+                        @Override
+                        public List<String> getStarredRepos() {
+                            return List.of();
+                        }
+                    };
+            PRNotificationService service =
+                    new PRNotificationService(
+                            () -> new NotificationSettings(true, true, false),
+                            source,
+                            new SeenPRSet(tempDir.resolve("pollnow-seen-prs.json")),
+                            new PendingReviewIndex(tempDir.resolve("pollnow-pending-prs.json")),
+                            (pullRequest, notificationSource) -> {});
+            Thread initialPoll = new Thread(service::poll);
+            CountDownLatch retryReturned = new CountDownLatch(1);
+            Thread manualRetry =
+                    new Thread(
+                            () -> {
+                                service.pollNow();
+                                retryReturned.countDown();
+                            });
+
+            try {
+                initialPoll.start();
+                assertThat(firstPollEntered.await(5, TimeUnit.SECONDS)).isTrue();
+
+                manualRetry.start();
+                assertThat(retryReturned.await(150, TimeUnit.MILLISECONDS)).isFalse();
+
+                releaseFirstPoll.countDown();
+                assertThat(retryReturned.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(calls).hasValue(2);
+                assertThat(service.getLastPollStatus()).startsWith("Last polled:");
+            } finally {
+                releaseFirstPoll.countDown();
+                service.stopPolling();
+                initialPoll.join(5_000);
+                manualRetry.join(5_000);
             }
         }
     }

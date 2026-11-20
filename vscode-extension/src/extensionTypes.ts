@@ -2,6 +2,7 @@ import type * as vscode from 'vscode';
 import type { ChatMessage } from './claude';
 import type { PreparedDeepReview } from './deepReview';
 import type { DraftRecoveryStore } from './draftRecovery';
+import type { PendingDraftIndex } from './pendingDraftIndex';
 import type { SidecarClient, SidecarPrDetailResult } from './sidecar';
 import type { SidecarHostCodeIntelligence } from './sidecarTypes';
 import type { ResolvedReviewGuidance } from './reviewGuidanceProfiles';
@@ -104,6 +105,7 @@ export interface HandlerDependencies {
     formatPriorReview: (result: ReviewResult | null) => string;
     prKey: (pr: ActivePR | null) => string | null;
     prKeyFromParts: (number: number, owner: string, repo: string) => string;
+    pendingDraftIndex?: () => PendingDraftIndex;
     push: (state: ViewState, message: object) => void;
     enqueueMutation: (state: ViewState, action: () => Promise<void>) => Promise<void>;
     clearWorktree: (state: ViewState) => void;

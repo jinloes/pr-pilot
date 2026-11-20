@@ -25,6 +25,7 @@ import com.jinloes.prpilot.settings.PluginSettingsConfigurable;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.swing.JLabel;
@@ -104,6 +105,18 @@ public class PRToolWindowFactory implements ToolWindowFactory {
         }
     }
 
+    /** Activates the first open PR Pilot tool window without changing PR selection. */
+    public static void activateToolWindow() {
+        for (Project project : ProjectManager.getInstance().getOpenProjects()) {
+            if (project.isDisposed()) continue;
+            ToolWindow toolWindow =
+                    ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID);
+            if (toolWindow == null) continue;
+            toolWindow.activate(null, true);
+            return;
+        }
+    }
+
     private static final class ReloadAction extends AnAction {
         private final WebviewPanel webviewPanel;
 
@@ -160,6 +173,50 @@ public class PRToolWindowFactory implements ToolWindowFactory {
         }
     }
 
+    /** Resolved setup screen reason, user-facing detail, and GitHub CLI login command. */
+    public record SetupFailure(String reason, String detail, String ghAuthCommand) {}
+
+    /**
+     * Maps a pull-request discovery failure to its {@code setupRequired} reason, detail copy, and
+     * host-aware {@code gh auth login} command so GitHub CLI install/auth recovery works on both
+     * {@code github.com} and GitHub Enterprise.
+     */
+    public static SetupFailure classifySetupFailure(Exception e, String rawBaseUrl) {
+        String ghAuthCommand = WebviewPanel.buildGhAuthLoginCommand(rawBaseUrl);
+        String msg =
+                e != null && e.getMessage() != null ? e.getMessage().toLowerCase(Locale.ROOT) : "";
+        if (msg.contains("not installed")
+                || msg.contains("no such file")
+                || msg.contains("error=2")
+                || msg.contains("command not found")
+                || msg.contains("enoent")) {
+            return new SetupFailure(
+                    "gh_not_installed",
+                    "The 'gh' CLI was not found. Install it from https://cli.github.com, then run '"
+                            + ghAuthCommand
+                            + "' in a terminal and click Refresh.",
+                    ghAuthCommand);
+        }
+        if (msg.contains("gh auth")
+                || msg.contains("not signed in")
+                || msg.contains("not authenticated")
+                || msg.contains("auth token")
+                || msg.contains("bad credentials")
+                || msg.contains("unauthorized")
+                || msg.contains("forbidden")
+                || msg.contains(" 401")
+                || msg.contains(" 403")) {
+            return new SetupFailure(
+                    "gh_not_authenticated",
+                    "Run '"
+                            + ghAuthCommand
+                            + "' in a terminal to authenticate, then click Refresh.",
+                    ghAuthCommand);
+        }
+        return new SetupFailure(
+                "load_failed", UserFacingErrors.forGitHub(e, "load pull requests"), ghAuthCommand);
+    }
+
     static void wireWebviewLoading(Project project, WebviewPanel webviewPanel) {
         webviewPanel.setOnPageReady(
                 () ->
@@ -172,21 +229,22 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                                                 log.warn(
                                                         "Webview PR load failed: {}",
                                                         e.getMessage());
+                                                String baseUrl =
+                                                        ApplicationManager.getApplication() != null
+                                                                ? PluginSettings.getInstance()
+                                                                        .getGithubBaseUrl()
+                                                                : "https://github.com";
+                                                SetupFailure failure =
+                                                        classifySetupFailure(e, baseUrl);
                                                 ApplicationManager.getApplication()
                                                         .invokeLater(
                                                                 () ->
                                                                         webviewPanel
                                                                                 .pushSetupRequired(
-                                                                                        "load_failed",
-                                                                                        "Couldn't load pull"
-                                                                                                + " requests."
-                                                                                                + " Check"
-                                                                                                + " connectivity"
-                                                                                                + " and retry."
-                                                                                                + " If auth"
-                                                                                                + " is stale,"
-                                                                                                + " run 'gh auth"
-                                                                                                + " login'."));
+                                                                                        failure
+                                                                                                .reason(),
+                                                                                        failure
+                                                                                                .detail()));
                                             }
                                         }));
     }
@@ -237,9 +295,16 @@ public class PRToolWindowFactory implements ToolWindowFactory {
                             });
         } catch (Exception e) {
             log.warn("Failed to load PR list for webview: {}", e.getMessage());
-            String detail = UserFacingErrors.forGitHub(e, "load pull requests");
+            String baseUrl =
+                    ApplicationManager.getApplication() != null
+                            ? PluginSettings.getInstance().getGithubBaseUrl()
+                            : "https://github.com";
+            SetupFailure failure = classifySetupFailure(e, baseUrl);
             ApplicationManager.getApplication()
-                    .invokeLater(() -> webviewPanel.pushSetupRequired("load_failed", detail));
+                    .invokeLater(
+                            () ->
+                                    webviewPanel.pushSetupRequired(
+                                            failure.reason(), failure.detail()));
         }
     }
 }

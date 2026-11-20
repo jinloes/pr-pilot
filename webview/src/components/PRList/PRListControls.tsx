@@ -49,52 +49,50 @@ export function PRListControls({
 }: Props) {
   return (
     <>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <ToggleGroup
-          type="single"
-          value={stateFilter}
-          onValueChange={onStateFilter}
-          className="min-w-0 max-w-full flex-wrap justify-start gap-1"
-          aria-label="Pull request state"
-        >
-          {(['open', 'closed', 'all'] as StateFilter[]).map((state) => (
-            <ToggleGroupItem
-              key={state}
-              value={state}
-              className="h-6 px-2 text-[11px] uppercase tracking-wide data-[state=on]:border-primary/40 data-[state=on]:bg-primary/20 data-[state=on]:text-foreground"
-            >
-              {state}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-
-        <div className="flex min-w-32 flex-1 items-center gap-1">
-          <Select value={searchScope} onValueChange={onSearchScope}>
-            <SelectTrigger
-              className="h-7 min-w-0 flex-1 border-border bg-background text-xs"
-              aria-label="Pull request scope"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="currentRepo" className="text-xs">Current repo</SelectItem>
-              <SelectItem value="reviewRequested" className="text-xs">Review requested</SelectItem>
-              <SelectItem value="assigned" className="text-xs">Assigned to me</SelectItem>
-              <SelectItem value="authored" className="text-xs">Authored by me</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 shrink-0 gap-1 px-1.5 text-xs text-muted-foreground"
-            onClick={onToggleScopeHelp}
-            aria-expanded={scopeHelpVisible}
-            aria-controls="pr-scope-help"
+      <ToggleGroup
+        type="single"
+        value={stateFilter}
+        onValueChange={onStateFilter}
+        className="flex min-w-0 max-w-full flex-wrap justify-start gap-1"
+        aria-label="Pull request state"
+      >
+        {(['open', 'closed', 'all'] as StateFilter[]).map((state) => (
+          <ToggleGroupItem
+            key={state}
+            value={state}
+            className="h-6 px-2 text-[11px] uppercase tracking-wide data-[state=on]:border-primary/40 data-[state=on]:bg-primary/20 data-[state=on]:text-foreground"
           >
-            <Info className="h-3 w-3" aria-hidden="true" />
-            Why?
-          </Button>
-        </div>
+            {state}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+
+      <div className="flex min-w-0 items-center gap-1.5">
+        <Select value={searchScope} onValueChange={onSearchScope}>
+          <SelectTrigger
+            className="h-7 min-w-0 flex-1 border-border bg-background text-xs"
+            aria-label="Pull request scope"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="currentRepo" className="text-xs">Current repo</SelectItem>
+            <SelectItem value="reviewRequested" className="text-xs">Review requested</SelectItem>
+            <SelectItem value="assigned" className="text-xs">Assigned to me</SelectItem>
+            <SelectItem value="authored" className="text-xs">Authored by me</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 shrink-0 gap-1 px-1.5 text-xs text-muted-foreground"
+          onClick={onToggleScopeHelp}
+          aria-expanded={scopeHelpVisible}
+          aria-controls="pr-scope-help"
+        >
+          <Info className="h-3 w-3" aria-hidden="true" />
+          Why?
+        </Button>
       </div>
 
       {listStatus && scopeHelpVisible && (

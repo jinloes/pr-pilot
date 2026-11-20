@@ -563,6 +563,7 @@ test('longest risky-submit dialog stays inside a 320x568 viewport and traps focu
   await openLongestRiskySubmit(page)
 
   const dialog = page.getByRole('alertdialog')
+  const dialogBody = dialog.getByTestId('publish-dialog-body')
   const title = page.getByRole('heading', { name: 'Publish review' })
   const cancel = page.getByRole('button', { name: 'Cancel' })
   const submit = page.getByRole('button', { name: 'Publish as Comment' })
@@ -574,18 +575,22 @@ test('longest risky-submit dialog stays inside a 320x568 viewport and traps focu
       y: box.y,
       right: box.right,
       bottom: box.bottom,
-      clientHeight: element.clientHeight,
-      scrollHeight: element.scrollHeight,
-      scrollTop: element.scrollTop,
     }
   })
+  const bodyScroll = await dialogBody.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    scrollTop: element.scrollTop,
+  }))
   expect(geometry.x).toBeGreaterThanOrEqual(16)
   expect(geometry.y).toBeGreaterThanOrEqual(16)
   expect(geometry.right).toBeLessThanOrEqual(304)
   expect(geometry.bottom).toBeLessThanOrEqual(552)
-  expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight)
-  expect(geometry.scrollTop).toBe(0)
+  expect(bodyScroll.scrollHeight).toBeGreaterThan(bodyScroll.clientHeight)
+  expect(bodyScroll.scrollTop).toBe(0)
   await expect(title).toBeInViewport()
+  await expect(cancel).toBeInViewport()
+  await expect(submit).toBeInViewport()
   await expect(page).toHaveScreenshot('risky-submit-narrow-dark.png')
 
   await page.getByRole('checkbox', { name: /I reviewed these unresolved trust risks/ }).check()
@@ -782,10 +787,8 @@ test('Verify with AI keeps review, chat, and footer usable in a constrained view
   await expect(body).toBeVisible()
   await expect(savedStatus).toBeVisible()
   await expect(page.getByRole('textbox', { name: 'Ask about this pull request' })).toBeVisible()
-  await expect(page.getByTestId('chat-messages')).toContainText('Verify whether the draft review comment is supported by the pull-request evidence.')
-  await expect(page.getByTestId('chat-messages')).toContainText('"verdict":"valid|invalid|unclear"')
-  await expect(page.getByTestId('chat-messages')).toContainText('"evidence":["relative/path:line or symbol"]')
-  await expect(page.getByTestId('chat-messages')).toContainText('"action":"keep|revise|delete"')
+  await expect(page.getByTestId('chat-messages')).toContainText('Verify comment on src/auth.ts:2')
+  await expect(page.getByTestId('chat-messages')).not.toContainText('"verdict":"valid|invalid|unclear"')
   await expect(chat).toContainText('Context: draft comment, diff excerpt, PR worktree (read-only)')
 
   const geometry = await Promise.all([body.boundingBox(), chatPanel.boundingBox(), savedStatus.boundingBox()])

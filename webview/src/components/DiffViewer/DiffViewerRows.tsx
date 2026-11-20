@@ -712,13 +712,25 @@ function SuggestedChangePreview({
         )}
       </div>
       {before !== undefined && (
-        <pre className={cn(SUGGESTION_CODE_CLASS, 'bg-[hsl(var(--diff-delete-background))]')} data-testid="suggested-change-before">
+        <pre
+          className={cn(
+            SUGGESTION_CODE_CLASS,
+            'bg-[hsl(var(--diff-delete-background))] [.high-contrast_&]:border-l-[3px] [.high-contrast_&]:border-dashed [.high-contrast_&]:border-[hsl(var(--diff-delete-border))]',
+          )}
+          data-testid="suggested-change-before"
+        >
           <span className="sr-only">Before: </span>
           <span aria-hidden="true" className="select-none font-bold text-[hsl(var(--diff-delete-foreground))]">- </span>
           {before}
         </pre>
       )}
-      <pre className={cn(SUGGESTION_CODE_CLASS, 'bg-[hsl(var(--diff-add-background))]')} data-testid="suggested-change-after">
+      <pre
+        className={cn(
+          SUGGESTION_CODE_CLASS,
+          'bg-[hsl(var(--diff-add-background))] [.high-contrast_&]:border-l-[3px] [.high-contrast_&]:border-solid [.high-contrast_&]:border-[hsl(var(--diff-add-border))]',
+        )}
+        data-testid="suggested-change-after"
+      >
         <span className="sr-only">After: </span>
         <span aria-hidden="true" className="select-none font-bold text-[hsl(var(--diff-add-foreground))]">+ </span>
         {after}

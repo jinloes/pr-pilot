@@ -205,6 +205,7 @@ export const ReviewPane = forwardRef<ReviewPaneHandle, Props>(function ReviewPan
                 variant={model.chatVisible ? 'secondary' : 'ghost'}
                 size="sm"
                 className="h-6 px-2 text-xs shrink-0 gap-1.5"
+                aria-pressed={model.chatVisible}
                 onClick={actions.toggleChat}
                 title={model.chatVisible ? 'Collapse chat' : 'Open chat'}
               >

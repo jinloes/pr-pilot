@@ -13,7 +13,9 @@ import com.jinloes.prpilot.sidecar.github.CheckAuthResult;
 import java.awt.Component;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -28,6 +30,8 @@ import javax.swing.JSpinner;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeEvent;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.text.StringEscapeUtils;
 
 public class PluginSettingsComponent {
 
@@ -77,7 +81,7 @@ public class PluginSettingsComponent {
     private final JCheckBox experimentalIntellijAssistedBox =
             new JCheckBox("Enable IntelliJ-assisted review (experimental)");
     private final JCheckBox notificationsEnabledBox =
-            new JCheckBox("Enable background PR notifications (experimental)");
+            new JCheckBox("Enable background PR notifications");
     private final JCheckBox notifyReviewRequestedBox =
             new JCheckBox("Notify when a review is requested from me");
     private final JCheckBox notifyStarredReposBox =
@@ -85,9 +89,12 @@ public class PluginSettingsComponent {
     private final JSpinner pollIntervalSpinner = new JSpinner(new SpinnerNumberModel(5, 1, 60, 1));
     private final JLabel statusLabel = new JBLabel("Checking…");
     private final JButton checkButton = new JButton("Check connection");
+    private final JButton retryPollButton = new JButton("Retry notification poll");
     private final JLabel pollStatusLabel = new JBLabel(" ");
     private final AuthCheckCoordinator authChecks;
     private final Supplier<String> pollStatusSupplier;
+    private final BooleanSupplier canRetryAppliedPoll;
+    private final Runnable pollRetryAction;
     private final Function<String, CheckAuthResult> authChecker;
     private final Consumer<Runnable> backgroundExecutor;
     private final Consumer<Runnable> uiExecutor;
@@ -149,15 +156,44 @@ public class PluginSettingsComponent {
             Supplier<String> pollStatusSupplier,
             ProfileNamePrompt profileNamePrompt,
             CopilotModelCatalog copilotModelCatalog) {
+        this(
+                authChecker,
+                backgroundExecutor,
+                uiExecutor,
+                pollStatusSupplier,
+                profileNamePrompt,
+                copilotModelCatalog,
+                null,
+                null);
+    }
+
+    PluginSettingsComponent(
+            Function<String, CheckAuthResult> authChecker,
+            Consumer<Runnable> backgroundExecutor,
+            Consumer<Runnable> uiExecutor,
+            Supplier<String> pollStatusSupplier,
+            ProfileNamePrompt profileNamePrompt,
+            CopilotModelCatalog copilotModelCatalog,
+            BooleanSupplier canRetryAppliedPoll,
+            Runnable pollRetryAction) {
         this.authChecker = authChecker;
         this.backgroundExecutor = backgroundExecutor;
         this.uiExecutor = uiExecutor;
         this.pollStatusSupplier = pollStatusSupplier;
+        this.canRetryAppliedPoll =
+                canRetryAppliedPoll != null
+                        ? canRetryAppliedPoll
+                        : this::isNotificationConfigAppliedAndEnabled;
+        this.pollRetryAction =
+                pollRetryAction != null
+                        ? pollRetryAction
+                        : () -> PRNotificationService.getInstance().pollNow();
         this.authChecks = new AuthCheckCoordinator(authChecker, backgroundExecutor, uiExecutor);
         this.guidance = new ReviewGuidanceEditor(profileNamePrompt, () -> mainPanel);
         this.copilot =
                 new CopilotModelSelector(copilotModelCatalog, backgroundExecutor, uiExecutor);
         checkButton.addActionListener(e -> checkStatus());
+        retryPollButton.addActionListener(e -> retryNotificationPoll());
         mainPanel = createMainPanel();
     }
 
@@ -166,8 +202,15 @@ public class PluginSettingsComponent {
                 SettingsUi.hintLabel(
                         "<html><small>Authentication uses the <b>gh</b> CLI. Run <code>gh auth login</code>"
                                 + " if needed. Change the base URL for GitHub Enterprise.</small></html>");
-        JPanel statusPanel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
-        statusPanel.add(checkButton);
+        JPanel checkButtonRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        checkButtonRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        checkButtonRow.add(checkButton);
+        statusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        statusLabel.setBorder(JBUI.Borders.emptyTop(4));
+        JPanel statusPanel = new JPanel();
+        statusPanel.setLayout(new BoxLayout(statusPanel, BoxLayout.Y_AXIS));
+        statusPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        statusPanel.add(checkButtonRow);
         statusPanel.add(statusLabel);
 
         JPanel pollPanel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
@@ -175,11 +218,15 @@ public class PluginSettingsComponent {
         pollPanel.add(pollIntervalSpinner);
         pollPanel.add(new JBLabel("minutes"));
 
+        JPanel retryPanel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 2));
+        retryPanel.add(retryPollButton);
+
         notifSubPanel = new JPanel();
         notifSubPanel.setLayout(new BoxLayout(notifSubPanel, BoxLayout.Y_AXIS));
         notifSubPanel.add(notifyReviewRequestedBox);
         notifSubPanel.add(notifyStarredReposBox);
         notifSubPanel.add(pollPanel);
+        notifSubPanel.add(retryPanel);
         notifSubPanel.add(pollStatusLabel);
         notificationsEnabledBox.addChangeListener(
                 (ChangeEvent e) -> updateNotificationSubOptions());
@@ -383,7 +430,6 @@ public class PluginSettingsComponent {
                         .addComponent(notifSubPanel, 1)
                         .addComponentFillVertically(new JPanel(), 0)
                         .getPanel();
-        refreshPollStatus();
         refreshPollStatus();
         return main;
     }
@@ -652,12 +698,13 @@ public class PluginSettingsComponent {
     private void checkStatus() {
         long checkId = authChecks.begin();
         checkButton.setEnabled(false);
+        statusLabel.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
         statusLabel.setText("Checking…");
         String baseUrl;
         try {
             baseUrl = GithubBaseUrlValidator.normalize(baseUrlField.getText());
         } catch (IllegalArgumentException e) {
-            statusLabel.setText("<html><font color='red'>" + e.getMessage() + "</font></html>");
+            setErrorLabel(statusLabel, e.getMessage());
             checkButton.setEnabled(true);
             return;
         }
@@ -666,25 +713,105 @@ public class PluginSettingsComponent {
                 baseUrl,
                 result -> {
                     if ("authenticated".equals(result.status()) && result.username() != null) {
+                        statusLabel.setForeground(JBUI.CurrentTheme.Label.foreground());
                         statusLabel.setText("Signed in as @" + result.username());
                     } else {
-                        statusLabel.setText(
-                                "<html><font color='red'>" + result.message() + "</font></html>");
+                        setErrorLabel(statusLabel, result.message());
                     }
                     checkButton.setEnabled(true);
                 });
     }
 
+    private void retryNotificationPoll() {
+        if (!canRetryAppliedPoll.getAsBoolean()) {
+            pollStatusLabel.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
+            pollStatusLabel.setText(
+                    SettingsUi.boundedHintHtml(
+                            "<small>Apply notification settings first to run a poll.</small>"));
+            return;
+        }
+        retryPollButton.setEnabled(false);
+        pollStatusLabel.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
+        pollStatusLabel.setText("Retrying…");
+        backgroundExecutor.accept(
+                () -> {
+                    try {
+                        pollRetryAction.run();
+                    } finally {
+                        uiExecutor.accept(
+                                () -> {
+                                    retryPollButton.setEnabled(true);
+                                    refreshPollStatus();
+                                });
+                    }
+                });
+    }
+
+    private boolean isNotificationConfigAppliedAndEnabled() {
+        if (ApplicationManager.getApplication() == null) {
+            return false;
+        }
+        PluginSettings settings = PluginSettings.getInstance();
+        return isNotificationConfigAppliedAndEnabled(
+                settings.isNotificationsEnabled(),
+                notificationsEnabledBox.isSelected(),
+                settings.isNotifyReviewRequested(),
+                notifyReviewRequestedBox.isSelected(),
+                settings.isNotifyStarredRepos(),
+                notifyStarredReposBox.isSelected(),
+                settings.getGithubBaseUrl(),
+                baseUrlField.getText());
+    }
+
+    static boolean isNotificationConfigAppliedAndEnabled(
+            boolean persistedEnabled,
+            boolean formEnabled,
+            boolean persistedReviewRequested,
+            boolean formReviewRequested,
+            boolean persistedStarredRepos,
+            boolean formStarredRepos,
+            String persistedBaseUrl,
+            String formBaseUrl) {
+        if (!persistedEnabled || !formEnabled) {
+            return false;
+        }
+        String normalizedFormUrl;
+        String normalizedPersistedUrl;
+        try {
+            normalizedFormUrl = GithubBaseUrlValidator.normalize(formBaseUrl);
+            normalizedPersistedUrl = GithubBaseUrlValidator.normalize(persistedBaseUrl);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        return persistedReviewRequested == formReviewRequested
+                && persistedStarredRepos == formStarredRepos
+                && Objects.equals(normalizedPersistedUrl, normalizedFormUrl);
+    }
+
     private void refreshPollStatus() {
         String status = pollStatusSupplier.get();
         if (status == null) {
+            pollStatusLabel.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
             pollStatusLabel.setText(" ");
             return;
         }
         boolean isError = status.contains("Error:");
-        String color = isError ? "red" : "gray";
+        pollStatusLabel.setForeground(
+                isError
+                        ? JBUI.CurrentTheme.Label.errorForeground()
+                        : JBUI.CurrentTheme.ContextHelp.FOREGROUND);
         pollStatusLabel.setText(
-                "<html><font color='" + color + "'><small>" + status + "</small></font></html>");
+                SettingsUi.boundedHintHtml(
+                        "<small>" + StringEscapeUtils.escapeHtml4(status) + "</small>"));
+    }
+
+    private static void setErrorLabel(JLabel label, String message) {
+        label.setForeground(JBUI.CurrentTheme.Label.errorForeground());
+        label.setText(
+                SettingsUi.boundedHintHtml(
+                        "<small>"
+                                + StringEscapeUtils.escapeHtml4(StringUtils.defaultString(message))
+                                + "</small>"));
     }
 
     void refreshAuthStatus() {

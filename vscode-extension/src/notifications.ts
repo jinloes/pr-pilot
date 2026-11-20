@@ -4,6 +4,8 @@ import type { PR } from './models';
 export type NotifySource = 'reviewRequested' | 'starredRepo';
 const NOTIFICATION_SOURCES: readonly NotifySource[] = ['reviewRequested', 'starredRepo'];
 
+export const MAX_INDIVIDUAL_NOTIFICATIONS_PER_POLL = 3;
+
 export interface NotificationHealth {
     status: 'never' | 'healthy' | 'degraded' | 'error';
     lastAttemptAt?: number;
@@ -118,6 +120,43 @@ export function notificationMessage(pr: PR, source: NotifySource): string {
     return `${notifySourceLabel(source)} · ${pr.owner}/${pr.repo} #${pr.number}: ${pr.title}`;
 }
 
+export function formatOverflowSummary(
+    overflow: ReadonlyArray<{ pr: PR; source: NotifySource }>,
+): string {
+    let reviewRequestedCount = 0;
+    let starredCount = 0;
+    for (const item of overflow) {
+        if (item.source === 'starredRepo') starredCount++;
+        else reviewRequestedCount++;
+    }
+    const clauses: string[] = [];
+    if (reviewRequestedCount > 0) clauses.push(`${reviewRequestedCount} review requested`);
+    if (starredCount > 0) {
+        clauses.push(`★ ${starredCount} starred ${starredCount === 1 ? 'repo' : 'repos'}`);
+    }
+    return `+${overflow.length} more new pull requests (${clauses.join(', ')})`;
+}
+
+export function summaryNotificationMessage(
+    overflow: ReadonlyArray<{ pr: PR; source: NotifySource }>,
+): string {
+    return `PR Pilot · ${formatOverflowSummary(overflow)}`;
+}
+
+export function partitionNotificationBurst(
+    notifications: ReadonlyArray<{ pr: PR; source: NotifySource }>,
+    limit = MAX_INDIVIDUAL_NOTIFICATIONS_PER_POLL,
+): {
+    individual: Array<{ pr: PR; source: NotifySource }>;
+    overflow: Array<{ pr: PR; source: NotifySource }>;
+} {
+    const cap = Math.max(0, limit);
+    return {
+        individual: notifications.slice(0, cap),
+        overflow: notifications.slice(cap),
+    };
+}
+
 /**
  * Merges review-requested and starred-repo results, deduped by PR. Review-requested wins when a PR
  * appears in both sources so its more actionable label is shown. Order is preserved
@@ -195,6 +234,7 @@ export function planNotificationPoll(
     seededSources: ReadonlySet<NotifySource>,
     seen: ReadonlySet<string>,
     results: NotificationSourceResults,
+    hasPendingDraft: (pr: PR) => boolean = (pr) => pr.hasReviewDraft === true,
 ): NotificationPollPlan {
     const message = results.failures
         .map(({ source, message: failure }) => `${source}: ${failure}`)
@@ -237,7 +277,9 @@ export function planNotificationPoll(
         const key = prNotificationKey(candidate.pr);
         if (nextSeen.has(key)) continue;
         nextSeen.add(key);
-        notifications.push(candidate);
+        if (!hasPendingDraft(candidate.pr)) {
+            notifications.push(candidate);
+        }
     }
     for (const { pr } of seedOnly) nextSeen.add(prNotificationKey(pr));
 

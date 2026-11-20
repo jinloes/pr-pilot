@@ -29,6 +29,18 @@ export const MIRRORS = [
     ],
   },
   {
+    what: 'saved-draft pull request index (badge persistence and notification suppression)',
+    sides: [
+      [
+        `intellij-plugin/${JAVA}/services/PendingReviewIndex.java`,
+        `intellij-plugin/${JAVA}/ui/WebviewPrListController.java`,
+        `intellij-plugin/${JAVA}/ui/WebviewReviewController.java`,
+      ],
+      [`${VSCODE}/pendingDraftIndex.ts`, `${VSCODE}/prHandlers.ts`, `${VSCODE}/reviewHandlers.ts`],
+    ],
+    extra: 'Each host stores its own token-free index (~/.pr-pilot/pending-prs.json vs VS Code globalState).',
+  },
+  {
     what: 'CLI binary-probing candidates',
     sides: [
       [`review-engine/${JAVA}/review/BinaryLocator.java`],

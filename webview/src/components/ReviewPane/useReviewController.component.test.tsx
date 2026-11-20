@@ -440,7 +440,9 @@ describe('useReviewController', () => {
     expect(result.current.model.activity.outcome).toBe('cancelled')
   })
 
-  it('labels verify requests with their read-only worktree context', () => {
+  it('labels verify and suggest-fix requests with concise display text and preserves author on cancel and reload', () => {
+    const cefQuery = vi.fn()
+    ;(window as unknown as { cefQuery?: typeof cefQuery }).cefQuery = cefQuery
     const { result } = renderHook(() => useReviewController({ pr }))
     act(() => {
       hostMessage({
@@ -456,10 +458,29 @@ describe('useReviewController', () => {
 
     act(() => result.current.actions.verifyComment(review.lineComments[0]))
 
+    expect(result.current.model.pendingChatMessage?.displayText).toBe('Verify comment on src/value.ts:1')
     expect(result.current.model.pendingChatMessage?.contextSummary).toEqual([
       'draft comment',
       'diff excerpt',
       'PR worktree (read-only)',
+    ])
+
+    act(() => result.current.actions.suggestFixComment(review.lineComments[0]))
+    expect(result.current.model.pendingChatMessage?.displayText).toBe('Suggest a fix for src/value.ts:1')
+
+    act(() => result.current.actions.verifyComment({ file: '', line: 1, type: 'note', body: 'General note.' }))
+    expect(result.current.model.pendingChatMessage?.displayText).toBe('Verify draft comment')
+
+    cefQuery.mockClear()
+    act(() => result.current.actions.generate())
+    act(() => result.current.actions.cancel())
+    act(() => result.current.actions.reloadDraft())
+    const selects = cefQuery.mock.calls
+      .map(([arg]) => JSON.parse(arg.request) as Record<string, unknown>)
+      .filter((message) => message.type === 'selectPR')
+    expect(selects).toEqual([
+      expect.objectContaining({ type: 'selectPR', number: 42, owner: 'acme', repo: 'widget', author: 'octocat' }),
+      expect.objectContaining({ type: 'selectPR', number: 42, owner: 'acme', repo: 'widget', author: 'octocat' }),
     ])
   })
 

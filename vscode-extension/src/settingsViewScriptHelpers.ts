@@ -41,9 +41,69 @@ export function buildSettingsScriptHelpers(baseUrlError: string, profileNameErro
   }
   let nextSaveRequestId = 0;
   let latestSaveRequestId = 0;
+  let activeSaveError = '';
   let profileDialogMode = 'add';
   let profileDialogTargetId = '';
   let profileDialogReturnFocus = null;
+  let acknowledgedRepoInstructions = {};
+  const pendingInputTimers = new Map();
+  const lastSavedPayloads = new Map();
+  const acknowledgedPayloads = new Map();
+  const inFlightSaves = new Map();
+
+  function cancelFieldSave(fieldId) {
+    const entry = pendingInputTimers.get(fieldId);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    pendingInputTimers.delete(fieldId);
+  }
+
+  function scheduleFieldSave(fieldId, delayMs, run) {
+    cancelFieldSave(fieldId);
+    const timer = setTimeout(() => {
+      pendingInputTimers.delete(fieldId);
+      run();
+    }, delayMs);
+    pendingInputTimers.set(fieldId, { timer, flush: run });
+  }
+
+  function flushFieldSave(fieldId, fallbackRun) {
+    const entry = pendingInputTimers.get(fieldId);
+    if (entry) {
+      clearTimeout(entry.timer);
+      pendingInputTimers.delete(fieldId);
+      entry.flush();
+      return;
+    }
+    if (fallbackRun) fallbackRun();
+  }
+
+  function flushAllPendingSaves() {
+    const entries = [...pendingInputTimers.values()];
+    for (const key of [...pendingInputTimers.keys()]) {
+      const item = pendingInputTimers.get(key);
+      if (item) clearTimeout(item.timer);
+      pendingInputTimers.delete(key);
+    }
+    for (const entry of entries) entry.flush();
+  }
+
+  function cancelAllPendingSaves() {
+    for (const key of [...pendingInputTimers.keys()]) cancelFieldSave(key);
+  }
+
+  function normalizeValidBaseUrlOrNull(raw) {
+    try {
+      let candidate = String(raw || '').trim();
+      while (candidate.endsWith('/')) candidate = candidate.slice(0, -1);
+      if (candidate.endsWith(':')) return null;
+      const url = candidate ? new URL(candidate) : new URL('https://github.com');
+      if (url.protocol !== 'https:' || url.username || url.password || url.port || url.pathname !== '/' || url.search || url.hash) return null;
+      return url.origin;
+    } catch {
+      return null;
+    }
+  }
 
   function setStatus(message, kind = '') {
     const el = $('status');
@@ -139,31 +199,47 @@ export function buildSettingsScriptHelpers(baseUrlError: string, profileNameErro
     return sel === CLI_DEFAULT ? '' : sel;
   }
 
+  const DEDUPE_TEXT_KEYS = new Set([
+    'copilotConfigDir', 'reviewRulesDirectory', 'githubBaseUrl',
+    'reviewFocusAreas', 'reviewCustomInstructions', 'reviewGuidanceGlobs',
+    'repositoryReviewInstructions',
+  ]);
+
   function save(key, value) {
     if (key === 'githubBaseUrl') {
-      try {
-        let candidate = String(value || '').trim();
-        while (candidate.endsWith('/')) candidate = candidate.slice(0, -1);
-        if (candidate.endsWith(':')) throw new Error();
-        const url = candidate ? new URL(candidate) : new URL('https://github.com');
-        if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error();
-        value = url.origin;
-      } catch {
+      const normalized = normalizeValidBaseUrlOrNull(value);
+      if (!normalized) {
         showBaseUrlError();
         return;
       }
+      value = normalized;
       clearBaseUrlError();
     }
+    const cacheKey = 'setting:' + key;
+    const serialized = JSON.stringify(value);
+    const current = lastSavedPayloads.get(cacheKey);
+    if (DEDUPE_TEXT_KEYS.has(key) && current && current.serialized === serialized) return;
+    activeSaveError = '';
     setStatus('Saving…');
     const requestId = ++nextSaveRequestId;
     latestSaveRequestId = requestId;
+    lastSavedPayloads.set(cacheKey, { requestId, serialized });
+    inFlightSaves.set(requestId, {
+      cacheKey,
+      serialized,
+      repoSnapshot: key === 'repositoryReviewInstructions' ? { ...value } : null,
+    });
     vscode.postMessage({ type: 'update', requestId, key, value });
   }
 
   function saveGuidanceState() {
+    const serialized = JSON.stringify({ profiles: guidanceProfiles, activeProfileId: activeGuidanceProfileId });
+    activeSaveError = '';
     setStatus('Saving…');
     const requestId = ++nextSaveRequestId;
     latestSaveRequestId = requestId;
+    lastSavedPayloads.set('guidanceState', { requestId, serialized });
+    inFlightSaves.set(requestId, { cacheKey: 'guidanceState', serialized, repoSnapshot: null });
     vscode.postMessage({
       type: 'updateReviewGuidanceState',
       requestId,
@@ -222,14 +298,79 @@ export function buildSettingsScriptHelpers(baseUrlError: string, profileNameErro
     const values = guidanceValues();
     const profile = activeGuidanceProfile();
     if (profile) {
+      const nextProfiles = guidanceProfiles.map((candidate) =>
+        candidate.id === profile.id ? { ...candidate, ...values } : candidate);
+      const serialized = JSON.stringify({ profiles: nextProfiles, activeProfileId: activeGuidanceProfileId });
+      const currentGuidance = lastSavedPayloads.get('guidanceState');
+      if (currentGuidance && currentGuidance.serialized === serialized) return;
       Object.assign(profile, values);
       saveGuidanceState();
       return;
     }
-    if (defaultKey === 'reviewFocusAreas') state.reviewFocusAreas = values.focusAreas;
-    if (defaultKey === 'reviewCustomInstructions') state.reviewCustomInstructions = values.customInstructions;
-    if (defaultKey === 'reviewGuidanceGlobs') state.reviewGuidanceGlobs = values.guidanceGlobs;
-    save(defaultKey, state[defaultKey]);
+    const nextValue = defaultKey === 'reviewFocusAreas'
+      ? values.focusAreas
+      : defaultKey === 'reviewCustomInstructions'
+        ? values.customInstructions
+        : values.guidanceGlobs;
+    const currentSetting = lastSavedPayloads.get('setting:' + defaultKey);
+    if (currentSetting && currentSetting.serialized === JSON.stringify(nextValue)) return;
+    if (state) state[defaultKey] = nextValue;
+    save(defaultKey, nextValue);
+  }
+
+  function seedSavedPayloads() {
+    if (!state) return;
+    lastSavedPayloads.clear();
+    acknowledgedPayloads.clear();
+    inFlightSaves.clear();
+    activeSaveError = '';
+    acknowledgedRepoInstructions = { ...repositoryInstructions };
+    const entries = [
+      ['setting:githubBaseUrl', JSON.stringify(normalizeValidBaseUrlOrNull(state.githubBaseUrl) || state.githubBaseUrl)],
+      ['setting:copilotConfigDir', JSON.stringify((state.copilotConfigDir || '').trim())],
+      ['setting:reviewRulesDirectory', JSON.stringify((state.reviewRulesDirectory || '').trim())],
+      ['setting:reviewFocusAreas', JSON.stringify((state.reviewFocusAreas || '').trim())],
+      ['setting:reviewCustomInstructions', JSON.stringify((state.reviewCustomInstructions || '').trim())],
+      ['setting:reviewGuidanceGlobs', JSON.stringify(state.reviewGuidanceGlobs || [])],
+      ['setting:repositoryReviewInstructions', JSON.stringify(repositoryInstructions)],
+      ['guidanceState', JSON.stringify({ profiles: guidanceProfiles, activeProfileId: activeGuidanceProfileId })],
+    ];
+    for (const [k, v] of entries) {
+      acknowledgedPayloads.set(k, v);
+      lastSavedPayloads.set(k, { requestId: 0, serialized: v });
+    }
+  }
+
+  function handleSaveResult(msg) {
+    const reqId = typeof msg.requestId === 'number' ? msg.requestId : null;
+    const inFlight = reqId !== null ? inFlightSaves.get(reqId) : null;
+    if (reqId !== null) inFlightSaves.delete(reqId);
+    const fallbackKey = msg.key === 'reviewGuidanceState'
+      ? 'guidanceState'
+      : typeof msg.key === 'string' ? 'setting:' + msg.key : null;
+    const cacheKey = inFlight ? inFlight.cacheKey : fallbackKey;
+    if (msg.ok) {
+      if (inFlight) {
+        acknowledgedPayloads.set(inFlight.cacheKey, inFlight.serialized);
+        if (inFlight.repoSnapshot) acknowledgedRepoInstructions = { ...inFlight.repoSnapshot };
+      }
+      if (typeof msg.requestId === 'number' && msg.requestId !== latestSaveRequestId) return;
+      if (!activeSaveError) setStatus(msg.message || 'Saved.', 'ok');
+      return;
+    }
+    if (cacheKey) {
+      const current = lastSavedPayloads.get(cacheKey);
+      if (!current || reqId === null || current.requestId === reqId) {
+        const ack = acknowledgedPayloads.get(cacheKey);
+        if (ack !== undefined) lastSavedPayloads.set(cacheKey, { requestId: 0, serialized: ack });
+        else lastSavedPayloads.delete(cacheKey);
+        if (cacheKey === 'setting:repositoryReviewInstructions') {
+          repositoryInstructions = { ...acknowledgedRepoInstructions };
+        }
+      }
+    }
+    activeSaveError = msg.message || 'Could not save setting.';
+    setStatus(activeSaveError, 'error');
   }
 
   function closeProfileDialog(id) {

@@ -27,6 +27,7 @@ const COPILOT_AUTH_URL = 'https://docs.github.com/en/copilot/how-tos/copilot-cli
 export function setupRecoveryAction(
   reason: SetupReason,
   provider?: ProviderReadiness,
+  ghAuthCommand?: string,
 ): SetupRecoveryAction {
   switch (reason) {
     case 'gh_not_installed':
@@ -40,7 +41,7 @@ export function setupRecoveryAction(
       return {
         kind: 'authenticate',
         label: 'Authenticate GitHub CLI',
-        command: 'gh auth login',
+        command: ghAuthCommand || 'gh auth login',
         guideLabel: 'Open GitHub CLI authentication guide',
         guideUrl: GH_AUTH_URL,
         canRunInHost: true,

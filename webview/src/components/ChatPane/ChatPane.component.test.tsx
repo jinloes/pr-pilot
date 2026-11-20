@@ -97,6 +97,32 @@ describe('ChatPane', () => {
     expect(JSON.parse(cefQuery.mock.calls[0][0].request)).not.toHaveProperty('contextLocation')
   })
 
+  it('displays concise displayText in the user bubble while sending the full prompt question to the host', async () => {
+    const cefQuery = vi.fn()
+    Object.assign(window, { cefQuery })
+    const rawPrompt = 'Verify whether the draft review comment is supported. {"verdict":"valid|invalid|unclear"}'
+
+    render(
+      <ChatPane
+        pr={pr}
+        pendingMessage={{
+          q: rawPrompt,
+          displayText: 'Verify comment on src/A.ts:7',
+          ctx: '<draft_comment>x</draft_comment>',
+          id: 789,
+        }}
+      />,
+    )
+
+    await waitFor(() => expect(cefQuery).toHaveBeenCalledTimes(1))
+    expect(screen.getByText('Verify comment on src/A.ts:7')).toBeVisible()
+    expect(screen.queryByText(/verdict.*valid\|invalid\|unclear/)).not.toBeInTheDocument()
+    expect(JSON.parse(cefQuery.mock.calls[0][0].request)).toMatchObject({
+      type: 'askClaude',
+      question: rawPrompt,
+    })
+  })
+
   it('sends each pending verification message only once', async () => {
     const cefQuery = vi.fn()
     Object.assign(window, { cefQuery })

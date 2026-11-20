@@ -33,6 +33,7 @@ export interface ChatSelection {
 
 export interface PendingChatMessage {
   q: string
+  displayText?: string
   ctx: string
   /** Where `ctx` came from in the diff, when known. */
   location?: ChatContextLocation

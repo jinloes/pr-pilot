@@ -449,12 +449,17 @@
   min-width: 44px;
   padding: 1px 6px;
   text-align: right;
-  color: hsl(var(--muted-foreground) / 0.4);
+  color: hsl(var(--muted-foreground));
   user-select: none;
   vertical-align: top;
   border-right: 1px solid hsl(var(--border));
   font-size: 11px;
   line-height: 1.6;
+}
+
+html.high-contrast .diff-line--normal .diff-gutter,
+html.high-contrast .diff-hunk-header .diff-gutter {
+  color: hsl(var(--foreground));
 }
 
 .diff-gutter--clickable {
@@ -482,10 +487,12 @@
 .diff-gutter--clickable::after {
   content: '+';
   position: absolute;
-  inset: 0;
+  inset: 2px;
+  border-radius: 2px;
   display: grid;
   place-items: center;
-  color: hsl(var(--muted-foreground) / 0.2);
+  opacity: 0;
+  color: hsl(var(--foreground));
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
@@ -494,25 +501,39 @@
   pointer-events: none;
 }
 
-.diff-gutter--clickable:hover {
-  background: hsl(var(--primary) / 0.08);
+@media (hover: hover) and (pointer: fine) {
+  .diff-gutter--clickable:hover {
+    background: hsl(var(--primary) / 0.08);
+  }
+
+  .diff-gutter--clickable:hover::after {
+    opacity: 1;
+    background: hsl(var(--accent));
+    color: hsl(var(--foreground));
+  }
+
+  html.high-contrast .diff-gutter--clickable:hover::after {
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
 }
 
-.diff-gutter--clickable:focus-visible {
+.diff-gutter--clickable:focus-within {
   outline: 2px solid hsl(var(--ring));
   outline-offset: -2px;
   background: hsl(var(--primary) / 0.12);
-  color: hsl(var(--primary));
+  color: hsl(var(--foreground));
 }
 
-.diff-gutter--clickable:hover::after {
-  background: hsl(var(--primary) / 0.12);
-  color: hsl(var(--primary));
+.diff-gutter--clickable:focus-within::after {
+  opacity: 1;
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
 }
 
-.diff-gutter--clickable:focus-visible::after {
-  background: hsl(var(--primary) / 0.16);
-  color: hsl(var(--primary));
+html.high-contrast .diff-gutter--clickable:focus-within::after {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
 }
 
 .diff-prefix {
@@ -565,6 +586,16 @@
 .diff-line--delete .diff-prefix {
   color: hsl(var(--diff-delete-foreground));
   font-weight: 700;
+}
+
+html.high-contrast .diff-line--insert > .diff-gutter:first-child {
+  border-left: 3px solid hsl(var(--diff-add-border));
+  padding-left: 3px;
+}
+
+html.high-contrast .diff-line--delete > .diff-gutter:first-child {
+  border-left: 3px dashed hsl(var(--diff-delete-border));
+  padding-left: 3px;
 }
 
 /* ── Inline comment rows ─────────────────────────────── */

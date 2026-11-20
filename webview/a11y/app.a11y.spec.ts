@@ -129,6 +129,8 @@ for (const width of [220, 280, 320, 396, 520]) {
       for (const element of [nav, coach, page.getByTestId('pr-list-repository'), rows.first(), rows.nth(1)]) {
         expect(await element.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true)
       }
+      const scopeWidth = (await nav.getByRole('combobox', { name: 'Pull request scope' }).boundingBox())!.width
+      expect(scopeWidth).toBeGreaterThanOrEqual(width === 220 ? 120 : 170)
       await expectNoViolations(page, 'nav')
       const dismiss = coach.getByRole('button', { name: 'Dismiss readiness message' })
       if (width === 220) {
@@ -333,8 +335,13 @@ test('longest risky submit dialog is accessible, viewport-safe, and requires ack
   })
   await page.getByRole('button', { name: 'Submit review…' }).click()
   const dialog = page.getByRole('alertdialog')
+  const title = dialog.getByRole('heading', { name: 'Publish review' })
+  const cancel = dialog.getByRole('button', { name: 'Cancel' })
   const submit = page.getByRole('button', { name: 'Publish as Comment' })
   await expect(dialog).toContainText('3 unresolved trust risks')
+  await expect(title).toBeInViewport()
+  await expect(cancel).toBeInViewport()
+  await expect(submit).toBeInViewport()
   await expect(submit).toBeDisabled()
   const box = await dialog.boundingBox()
   expect(box).not.toBeNull()

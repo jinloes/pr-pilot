@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import {
   Check,
   CloudUpload,
@@ -74,16 +74,20 @@ function RegenerateDialogContent({
   regenerationOptions?: ReactNode
 }) {
   return (
-    <AlertDialogContent className="max-h-[85vh] overflow-y-auto">
-      <AlertDialogHeader>
+    <AlertDialogContent className="flex flex-col gap-0 overflow-hidden p-0">
+      <AlertDialogHeader className="shrink-0 px-6 pt-5 pb-3">
         <AlertDialogTitle>Regenerate review?</AlertDialogTitle>
         <AlertDialogDescription>
           PR Pilot will generate a new review. When it finishes, it replaces this draft on GitHub, including comments
           you edited or added. The current draft stays visible until then.
         </AlertDialogDescription>
       </AlertDialogHeader>
-      {regenerationOptions}
-      <AlertDialogFooter>
+      {regenerationOptions && (
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2">
+          {regenerationOptions}
+        </div>
+      )}
+      <AlertDialogFooter className="shrink-0 border-t border-border bg-background px-6 py-3">
         <AlertDialogCancel>Keep draft</AlertDialogCancel>
         <AlertDialogAction onClick={onRegenerate}>Regenerate</AlertDialogAction>
       </AlertDialogFooter>
@@ -134,6 +138,7 @@ export function ReviewFooter({
 }: ReviewFooterProps) {
   const t = useI18n()
   const narrow = useNarrowFooter()
+  const riskDescriptionId = useId()
   const [menuDialog, setMenuDialog] = useState<'regenerate' | 'delete' | null>(null)
   if (state.kind === 'generating') return null
 
@@ -183,6 +188,11 @@ export function ReviewFooter({
           data-testid="review-footer"
           className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-t border-border bg-card"
         >
+          {qualityRiskCount > 0 && (
+            <span id={riskDescriptionId} className="sr-only">
+              {qualityRiskLabel}
+            </span>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -190,6 +200,8 @@ export function ReviewFooter({
                 size="sm"
                 className="relative h-8 w-8 shrink-0 p-0"
                 aria-label="More review actions"
+                aria-describedby={qualityRiskCount > 0 ? riskDescriptionId : undefined}
+                title={qualityRiskCount > 0 ? qualityRiskLabel : undefined}
                 disabled={busy}
               >
                 <MoreHorizontal className="w-4 h-4" />
@@ -526,78 +538,83 @@ function SubmitReviewButton({
           : submitting ? 'Submitting…' : 'Submit review…'}
       </Button>
       <AlertDialog open={open} onOpenChange={(nextOpen) => !nextOpen && closeDialog()}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
+        <AlertDialogContent className="flex flex-col gap-0 overflow-hidden p-0">
+          <AlertDialogHeader className="shrink-0 px-4 pt-4 pb-2 sm:px-6 sm:pt-5 sm:pb-3">
             <AlertDialogTitle>Publish review</AlertDialogTitle>
             <AlertDialogDescription>
               This will publish the pending GitHub review with {inlineCommentCount} inline
               comment{inlineCommentCount === 1 ? '' : 's'}.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="flex flex-col gap-1.5">
-            <p id="publish-verdict-label" className="text-sm font-medium">Verdict</p>
-            <div role="radiogroup" aria-labelledby="publish-verdict-label" className="flex flex-col gap-1">
-              {VERDICT_OPTIONS.map((option) => (
-                <label key={option} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name="publish-verdict"
-                    value={option}
-                    checked={selectedVerdict === option}
-                    onChange={() => setSelectedVerdict(option)}
-                  />
-                  <span>{VERDICT_LABELS[option]}{option === verdict ? ' (suggested)' : ''}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          {riskCount > 0 && (
-            <div className="rounded border border-status-issue/50 bg-status-issue/10 p-3 text-xs">
-              <p className="font-semibold">
-                {riskCount} unresolved trust {riskCount === 1 ? 'risk' : 'risks'}
-              </p>
-              <ul className="mt-2 list-disc space-y-1 pl-5">
-                {qualityReport?.issues.map((issue) => (
-                  <li key={issue.id}>{issue.title}: {issue.count}. {issue.description}</li>
+          <div
+            data-testid="publish-dialog-body"
+            className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-2 sm:px-6"
+          >
+            <div className="flex flex-col gap-1.5">
+              <p id="publish-verdict-label" className="text-sm font-medium">Verdict</p>
+              <div role="radiogroup" aria-labelledby="publish-verdict-label" className="flex flex-col gap-1">
+                {VERDICT_OPTIONS.map((option) => (
+                  <label key={option} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="publish-verdict"
+                      value={option}
+                      checked={selectedVerdict === option}
+                      onChange={() => setSelectedVerdict(option)}
+                    />
+                    <span>{VERDICT_LABELS[option]}{option === verdict ? ' (suggested)' : ''}</span>
+                  </label>
                 ))}
-                {diffUnavailable && (
-                  <li>The diff could not be rendered. Review the raw diff before publishing.</li>
-                )}
-              </ul>
-              <label className="mt-3 flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  checked={risksAcknowledged}
-                  onChange={(event) => setRisksAcknowledged(event.target.checked)}
-                />
-                <span>{t('quality.acknowledge')}</span>
-              </label>
+              </div>
             </div>
-          )}
-          <div className="flex flex-col gap-1">
-            <label htmlFor="final-review-body" className="text-sm font-medium">{t('review.finalBody')}</label>
-            <p id="final-review-body-help" className="text-xs text-muted-foreground">{t('review.finalBodyHelp')}</p>
-            <textarea
-              id="final-review-body"
-              aria-describedby="final-review-body-help"
-              className="min-h-[96px] max-h-48 resize-y w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-ring"
-              value={comment}
-              onChange={(event) => setComment(event.target.value)}
-            />
-            {!showPublishedAlso && comment.trim().length === 0 && (
-              <p role="status" className="text-xs text-muted-foreground">
-                {t('review.publishFallback', { text: FALLBACK_REVIEW_BODY[selectedVerdict] })}
-              </p>
+            {riskCount > 0 && (
+              <div className="rounded border border-status-issue/50 bg-status-issue/10 p-3 text-xs">
+                <p className="font-semibold">
+                  {riskCount} unresolved trust {riskCount === 1 ? 'risk' : 'risks'}
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {qualityReport?.issues.map((issue) => (
+                    <li key={issue.id}>{issue.title}: {issue.count}. {issue.description}</li>
+                  ))}
+                  {diffUnavailable && (
+                    <li>The diff could not be rendered. Review the raw diff before publishing.</li>
+                  )}
+                </ul>
+                <label className="mt-3 flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={risksAcknowledged}
+                    onChange={(event) => setRisksAcknowledged(event.target.checked)}
+                  />
+                  <span>{t('quality.acknowledge')}</span>
+                </label>
+              </div>
+            )}
+            <div className="flex flex-col gap-1">
+              <label htmlFor="final-review-body" className="text-sm font-medium">{t('review.finalBody')}</label>
+              <p id="final-review-body-help" className="text-xs text-muted-foreground">{t('review.finalBodyHelp')}</p>
+              <textarea
+                id="final-review-body"
+                aria-describedby="final-review-body-help"
+                className="min-h-[96px] max-h-48 resize-y w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-ring"
+                value={comment}
+                onChange={(event) => setComment(event.target.value)}
+              />
+              {!showPublishedAlso && comment.trim().length === 0 && (
+                <p role="status" className="text-xs text-muted-foreground">
+                  {t('review.publishFallback', { text: FALLBACK_REVIEW_BODY[selectedVerdict] })}
+                </p>
+              )}
+            </div>
+            {showPublishedAlso && (
+              <PublishedAlsoRegion
+                publishSections={publishSections}
+                importedFromGitHub={importedFromGitHub}
+                commentsMovedToBody={commentsMovedToBody}
+              />
             )}
           </div>
-          {showPublishedAlso && (
-            <PublishedAlsoRegion
-              publishSections={publishSections}
-              importedFromGitHub={importedFromGitHub}
-              commentsMovedToBody={commentsMovedToBody}
-            />
-          )}
-          <AlertDialogFooter>
+          <AlertDialogFooter className="shrink-0 border-t border-border bg-background px-4 py-3 sm:px-6">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               disabled={submitting || disabled || (riskCount > 0 && !risksAcknowledged)}

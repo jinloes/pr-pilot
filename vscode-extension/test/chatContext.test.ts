@@ -72,3 +72,11 @@ test('chatAttachment reads the location and drops invalid lines', () => {
         { text: 'x', file: undefined, startLine: undefined, endLine: undefined, oldSide: false },
     );
 });
+
+test('buildChatContext preserves author when ActivePR carries author from selectPR', () => {
+    const selected = state({
+        activePR: { number: 42, owner: 'acme', repo: 'widgets', title: 'Preserve author', body: '', author: 'octocat' },
+    });
+    assert.equal(buildChatContext(selected)?.author, 'octocat');
+});
+

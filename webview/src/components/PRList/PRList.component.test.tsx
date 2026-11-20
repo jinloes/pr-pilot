@@ -216,7 +216,13 @@ describe('PRList', () => {
     load(searchPrs)
     const results = screen.getByRole('list', { name: 'Pull request results' })
     await user.click(within(results).getByRole('button', { name: /Improve pull request discovery/ }))
-    expect(sendToHost).toHaveBeenCalledWith({ type: 'selectPR', number: 2322, owner: 'acme', repo: 'platform' })
+    expect(sendToHost).toHaveBeenCalledWith({
+      type: 'selectPR',
+      number: 2322,
+      owner: 'acme',
+      repo: 'platform',
+      author: 'octocat',
+    })
     sendToHost.mockClear()
 
     const input = screen.getByRole('textbox', { name: 'Filter pull requests' })

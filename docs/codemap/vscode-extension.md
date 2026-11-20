@@ -20,6 +20,9 @@ VS Code host integration. All GitHub and review generation routes through the Ja
 - `src/copilotModel.ts` - `selectCopilotModel` command.
 - `src/draftRecovery.ts` - Token-free `globalState` snapshots used until GitHub confirms a draft
   save.
+- `src/pendingDraftIndex.ts` - Token-free `globalState` index of pull requests with saved GitHub
+  review drafts (`hasReviewDraft` badges and notification suppression). Tests:
+  `pendingDraftIndex.test.ts`, `hostDraftIndex.test.ts`.
 - `src/sidecar.ts` - Re-export facade for the mandatory JSON-RPC client (`SidecarClient`).
 - `src/sidecarGitHubClient.ts` and `sidecarReviewClient.ts` - Client methods per engine.
 - `src/sidecarTransport.ts` - Process lifecycle, recovery, and notification dispatch.
@@ -33,7 +36,9 @@ VS Code host integration. All GitHub and review generation routes through the Ja
   serves them as a per-request loopback MCP server (`withCodeIntelligenceServer`), and
   `codeIntelligenceVscode.ts` answers them through VS Code's language-service commands. Tests:
   `codeIntelligence.test.ts`, `codeIntelligenceServer.test.ts`.
-- `src/providerSetup.ts` - Conservative Claude authentication probe classification for onboarding.
+- `src/providerSetup.ts` - Conservative Claude authentication probe classification and GitHub CLI
+  login command construction (`--hostname` for GitHub Enterprise) for onboarding. Tests:
+  `providerSetup.test.ts`.
 - `src/settings.ts` and `settingsView.ts` - Settings controller, and the settings state, model
   options, and pure normalization/validation helpers. `settingsViewHtml.ts` renders the webview
   document from `settingsViewStyles.ts` and the inline script that `settingsViewScript.ts`

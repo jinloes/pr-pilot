@@ -10,11 +10,19 @@ interface SetupScreenProps {
   reason: SetupReason
   detail: string
   providerReadiness?: ProviderReadiness
+  ghAuthCommand?: string
   refreshing: boolean
   onRefresh: () => void
 }
 
-export function SetupScreen({ reason, detail, providerReadiness, refreshing, onRefresh }: SetupScreenProps) {
+export function SetupScreen({
+  reason,
+  detail,
+  providerReadiness,
+  ghAuthCommand,
+  refreshing,
+  onRefresh,
+}: SetupScreenProps) {
   const draftIndexUnavailable = reason === 'draft_index_unavailable'
   const title = draftIndexUnavailable
     ? 'Draft index needs attention'
@@ -27,7 +35,7 @@ export function SetupScreen({ reason, detail, providerReadiness, refreshing, onR
     ? 'VS Code'
     : 'IntelliJ'
   const steps = setupSteps(reason, providerReadiness)
-  const recovery = setupRecoveryAction(reason, providerReadiness)
+  const recovery = setupRecoveryAction(reason, providerReadiness, ghAuthCommand)
   const guideUrl = recovery.guideUrl
   const [copyLabel, setCopyLabel] = useState<'copy' | 'copied' | 'failed'>('copy')
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null)
@@ -36,7 +44,6 @@ export function SetupScreen({ reason, detail, providerReadiness, refreshing, onR
 
   const authCommand = recovery.command
   const canRunInHost = host === 'VS Code' && recovery.canRunInHost === true
-  const providerFailure = reason === 'provider_not_installed' || reason === 'provider_not_authenticated'
 
   useEffect(() => {
     if (prevRefreshingRef.current && !refreshing) {
@@ -84,21 +91,27 @@ export function SetupScreen({ reason, detail, providerReadiness, refreshing, onR
           <p className="break-words text-xs text-muted-foreground leading-relaxed">{detail}</p>
           <p className="text-[11px] text-muted-foreground">Detected host: {host}</p>
         </div>
-        <div className="w-full max-w-72 rounded border border-border bg-card text-left">
+        <ol
+          aria-label="Setup checklist"
+          className="m-0 w-full max-w-72 list-none rounded border border-border bg-card p-0 text-left"
+        >
           {steps.map((step) => (
-            <div key={step.label} className="flex items-start gap-2 border-b border-border last:border-b-0 px-3 py-2">
+            <li key={step.label} className="flex items-start gap-2 border-b border-border last:border-b-0 px-3 py-2">
               {step.done ? (
-                <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-status-approve shrink-0" />
+                <CheckCircle2 aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 text-status-approve shrink-0" />
               ) : (
-                <Circle className="mt-0.5 h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <Circle aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 text-muted-foreground shrink-0" />
               )}
               <div className="min-w-0">
-                <p className="text-xs text-foreground">{step.label}</p>
+                <p className="text-xs text-foreground">
+                  <span className="sr-only">{step.done ? 'Completed: ' : 'Incomplete: '}</span>
+                  {step.label}
+                </p>
                 <p className="text-[11px] text-muted-foreground leading-snug">{step.detail}</p>
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ol>
         {authCommand && (
           <div className="w-full max-w-72 rounded border border-border bg-muted/20 px-3 py-2.5 text-left space-y-2">
             <p className="text-[11px] font-semibold text-foreground">{recovery.label}</p>
@@ -109,20 +122,29 @@ export function SetupScreen({ reason, detail, providerReadiness, refreshing, onR
                 : 'Copy the command, run it in your terminal, then re-check status.'}
             </p>
             <div className="flex flex-wrap items-center gap-2">
+              {canRunInHost && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-[11px] gap-1.5"
+                  onClick={runAuthFlow}
+                >
+                  <Terminal className="w-3 h-3" />
+                  Run gh auth login
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-6 px-2 text-[11px] gap-1.5"
-                onClick={runAuthFlow}
+                onClick={() => void handleCopyAuthCommand()}
               >
-                {canRunInHost ? <Terminal className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                {canRunInHost
-                  ? 'Run gh auth login'
-                  : copyLabel === 'copied'
-                    ? 'Copied'
-                    : copyLabel === 'failed'
-                      ? 'Copy failed'
-                      : 'Copy auth command'}
+                <Copy className="w-3 h-3" />
+                {copyLabel === 'copied'
+                  ? 'Copied'
+                  : copyLabel === 'failed'
+                    ? 'Copy failed'
+                    : 'Copy auth command'}
               </Button>
             </div>
           </div>
@@ -134,17 +156,15 @@ export function SetupScreen({ reason, detail, providerReadiness, refreshing, onR
         )}
         <LiveStatus message={liveAnnouncement} />
         <div className="flex flex-wrap items-center justify-center gap-2">
-          {providerFailure && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-xs"
-              onClick={() => sendToHost({ type: 'openSettings' })}
-            >
-              <Settings2 className="w-3.5 h-3.5" />
-              Open Settings
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={() => sendToHost({ type: 'openSettings' })}
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            Open Settings
+          </Button>
           {guideUrl && (
             <Button
               variant="outline"

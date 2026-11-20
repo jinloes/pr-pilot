@@ -15,7 +15,8 @@ import { buildErrorHtml, buildMainWebviewHtml } from './webviewHtml';
 import { classifyHostTheme, type HostTheme } from './hostTheme';
 import { SidecarClient, resolveSidecarJarPath } from './sidecar';
 import { DraftRecoveryStore } from './draftRecovery';
-import { probeClaudeAuthentication } from './providerSetup';
+import { PendingDraftIndex } from './pendingDraftIndex';
+import { buildGhAuthLoginCommand, probeClaudeAuthentication } from './providerSetup';
 import type { PR, ReviewResult } from './models';
 import { cancelThenCleanup, invalidateChatAndCancel, invalidateGenerationAndCancel } from './operationCorrelation';
 import { normalizeRepositoryInstructions, repositoryKey } from './repositoryInstructions';
@@ -41,6 +42,7 @@ import type { ActivePR, HandlerDependencies, Provider, ProviderReadiness, Review
 // Process-wide, lazily-started Java engine host. GitHub operations are never performed in the
 // Node extension process, so missing Java/jar or transport failures surface as setup errors.
 let sidecarClient: SidecarClient;
+let pendingDraftIndex = new PendingDraftIndex();
 const worktreePreviewPaths = new Map<string, string>();
 const reviewedBlobPreviews = new Map<string, { text: string; count: number }>();
 let worktreePreviewDidChange: vscode.EventEmitter<vscode.Uri> | undefined;
@@ -125,6 +127,7 @@ export function activate(context: vscode.ExtensionContext) {
                 : new Error('PR Pilot Java sidecar failed to start.'),
         );
     });
+    pendingDraftIndex = new PendingDraftIndex(context.globalState);
     const viewProvider = new ClaudeReviewsViewProvider(context.extensionUri, new DraftRecoveryStore(context.globalState));
     const notificationPoller = new PRNotificationPoller(
         context,
@@ -132,6 +135,8 @@ export function activate(context: vscode.ExtensionContext) {
         config,
         githubBaseUrl,
         (pr) => viewProvider.openPullRequest(pr),
+        pendingDraftIndex,
+        () => viewProvider.openPanel(),
     );
     worktreePreviewDidChange = new vscode.EventEmitter<vscode.Uri>();
     context.subscriptions.push(
@@ -225,7 +230,11 @@ class ClaudeReviewsViewProvider {
     }
 
     openPullRequest(pr: PR): void {
-        this.pendingActivation = { pr, source: 'notification' };
+        const enrichedPr = {
+            ...pr,
+            hasReviewDraft: pr.hasReviewDraft || pendingDraftIndex.has(pr.owner, pr.repo, pr.number),
+        };
+        this.pendingActivation = { pr: enrichedPr, source: 'notification' };
         const hadLiveState = Boolean(this.state);
         this.openPanel();
         if (hadLiveState) this.flushPendingActivation();
@@ -381,7 +390,7 @@ export function mapHostThemeKind(kind: vscode.ColorThemeKind): HostTheme {
 function runAuthLoginInTerminal(): void {
     const terminal = vscode.window.createTerminal({ name: 'PR Pilot Setup' });
     terminal.show(true);
-    terminal.sendText('gh auth login', true);
+    terminal.sendText(buildGhAuthLoginCommand(githubBaseUrl()), true);
 }
 
 function providerReadiness(): ProviderReadiness {
@@ -543,6 +552,7 @@ const handlerDependencies: HandlerDependencies = {
     formatPriorReview,
     prKey,
     prKeyFromParts,
+    pendingDraftIndex: () => pendingDraftIndex,
     push,
     enqueueMutation,
     clearWorktree: worktreeOperations.clearWorktree,

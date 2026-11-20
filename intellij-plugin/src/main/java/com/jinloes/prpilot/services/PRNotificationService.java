@@ -18,6 +18,7 @@ import java.util.Set;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -43,6 +44,7 @@ public final class PRNotificationService implements Disposable {
     static final String NOTIFICATION_GROUP = "PR Pilot";
     static final String AUTH_MISSING_ERROR = "Not signed in — run 'gh auth login'.";
     static final String REVIEW_REQUESTED_QUERY = "is:open is:pr draft:false review-requested:@me";
+    static final int MAX_INDIVIDUAL_NOTIFICATIONS_PER_POLL = 3;
 
     private record PollStatus(long epochMs, String error) {}
 
@@ -52,11 +54,13 @@ public final class PRNotificationService implements Disposable {
     private volatile long scheduleGeneration;
     private boolean pollRunning;
     private long pendingPollGeneration = -1;
+    private long completedPollSequence;
     private final Supplier<NotificationSettings> settingsSupplier;
     private final NotificationSourceClient sourceClient;
     private final SeenPRSet seenSet;
     private final PendingReviewIndex pendingIndex;
     private final BiConsumer<PullRequest, NotificationSource> notificationSink;
+    private final Consumer<List<Candidate>> summaryNotificationSink;
     private final BiConsumer<PendingReviewIndex, PendingReviewIndex.LoadResult>
             pendingIndexHealthObserver;
 
@@ -67,7 +71,8 @@ public final class PRNotificationService implements Disposable {
                 new SeenPRSet(),
                 new PendingReviewIndex(),
                 null,
-                PendingReviewIndexNotifications::observe);
+                PendingReviewIndexNotifications::observe,
+                null);
     }
 
     PRNotificationService(
@@ -82,7 +87,8 @@ public final class PRNotificationService implements Disposable {
                 seenSet,
                 pendingIndex,
                 notificationSink,
-                PendingReviewIndexNotifications::observe);
+                PendingReviewIndexNotifications::observe,
+                null);
     }
 
     PRNotificationService(
@@ -93,6 +99,25 @@ public final class PRNotificationService implements Disposable {
             BiConsumer<PullRequest, NotificationSource> notificationSink,
             BiConsumer<PendingReviewIndex, PendingReviewIndex.LoadResult>
                     pendingIndexHealthObserver) {
+        this(
+                settingsSupplier,
+                sourceClient,
+                seenSet,
+                pendingIndex,
+                notificationSink,
+                pendingIndexHealthObserver,
+                null);
+    }
+
+    PRNotificationService(
+            Supplier<NotificationSettings> settingsSupplier,
+            NotificationSourceClient sourceClient,
+            SeenPRSet seenSet,
+            PendingReviewIndex pendingIndex,
+            BiConsumer<PullRequest, NotificationSource> notificationSink,
+            BiConsumer<PendingReviewIndex, PendingReviewIndex.LoadResult>
+                    pendingIndexHealthObserver,
+            Consumer<List<Candidate>> summaryNotificationSink) {
         this.settingsSupplier = settingsSupplier;
         this.sourceClient = sourceClient;
         this.seenSet = seenSet;
@@ -100,6 +125,10 @@ public final class PRNotificationService implements Disposable {
         this.notificationSink =
                 notificationSink != null ? notificationSink : this::fireNotification;
         this.pendingIndexHealthObserver = pendingIndexHealthObserver;
+        this.summaryNotificationSink =
+                summaryNotificationSink != null
+                        ? summaryNotificationSink
+                        : this::fireSummaryNotification;
     }
 
     public static PRNotificationService getInstance() {
@@ -113,7 +142,10 @@ public final class PRNotificationService implements Disposable {
     public synchronized void startPolling(int intervalMinutes) {
         stopPolling();
         long delay = Math.max(1, intervalMinutes);
-        long generation = ++scheduleGeneration;
+        final long generation;
+        synchronized (pollGuard) {
+            generation = ++scheduleGeneration;
+        }
         scheduledTask =
                 AppExecutorUtil.getAppScheduledExecutorService()
                         .scheduleWithFixedDelay(
@@ -121,9 +153,10 @@ public final class PRNotificationService implements Disposable {
     }
 
     public synchronized void stopPolling() {
-        scheduleGeneration++;
         synchronized (pollGuard) {
+            scheduleGeneration++;
             pendingPollGeneration = -1;
+            pollGuard.notifyAll();
         }
         if (scheduledTask != null) {
             scheduledTask.cancel(false);
@@ -138,6 +171,38 @@ public final class PRNotificationService implements Disposable {
     public boolean isPolling() {
         ScheduledFuture<?> task = scheduledTask;
         return task != null && !task.isCancelled();
+    }
+
+    /**
+     * Runs a single notification poll immediately using persisted settings, waiting if a poll is
+     * already in flight so callers observe the completed coalesced poll status.
+     */
+    public void pollNow() {
+        long generation;
+        long targetSequence = -1;
+        synchronized (pollGuard) {
+            generation = scheduleGeneration;
+            if (pollRunning) {
+                pendingPollGeneration = generation;
+                targetSequence = completedPollSequence + 2;
+            } else {
+                pollRunning = true;
+            }
+            if (targetSequence >= 0) {
+                while (pollRunning
+                        && scheduleGeneration == generation
+                        && completedPollSequence < targetSequence) {
+                    try {
+                        pollGuard.wait();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+                return;
+            }
+        }
+        runPollLoop();
     }
 
     /**
@@ -185,7 +250,10 @@ public final class PRNotificationService implements Disposable {
             }
             pollRunning = true;
         }
+        runPollLoop();
+    }
 
+    private void runPollLoop() {
         while (true) {
             RuntimeException failure = null;
             try {
@@ -196,6 +264,7 @@ public final class PRNotificationService implements Disposable {
 
             boolean runAgain;
             synchronized (pollGuard) {
+                completedPollSequence++;
                 runAgain =
                         failure == null
                                 && pendingPollGeneration == scheduleGeneration
@@ -204,6 +273,7 @@ public final class PRNotificationService implements Disposable {
                 if (!runAgain) {
                     pollRunning = false;
                 }
+                pollGuard.notifyAll();
             }
             if (failure != null) {
                 throw failure;
@@ -272,15 +342,28 @@ public final class PRNotificationService implements Disposable {
                         .map(entry -> entry.owner() + "/" + entry.repo() + "#" + entry.number())
                         .collect(Collectors.toSet());
 
-        // Notify about PRs that weren't seen before and have no in-progress draft
+        // Notify about PRs that weren't seen before and have no in-progress draft, capping
+        // individual notifications per poll so post-offline bursts do not flood the IDE.
+        List<Candidate> eligible = new ArrayList<>();
         for (Candidate c : candidates) {
             PullRequest pr = c.pr();
             if (!seenSet.contains(pr)) {
                 seenSet.add(pr);
                 if (!draftKeys.contains(prKey(pr))) {
-                    notificationSink.accept(pr, c.source());
+                    eligible.add(c);
                 }
             }
+        }
+        int individualCount = Math.min(eligible.size(), MAX_INDIVIDUAL_NOTIFICATIONS_PER_POLL);
+        for (int i = 0; i < individualCount; i++) {
+            Candidate c = eligible.get(i);
+            notificationSink.accept(c.pr(), c.source());
+        }
+        if (eligible.size() > MAX_INDIVIDUAL_NOTIFICATIONS_PER_POLL) {
+            summaryNotificationSink.accept(
+                    List.copyOf(
+                            eligible.subList(
+                                    MAX_INDIVIDUAL_NOTIFICATIONS_PER_POLL, eligible.size())));
         }
         // Keep previously seen keys so limited result windows don't cause duplicate notifications
         // when older open PRs fall in/out of the top-N search page.
@@ -341,6 +424,34 @@ public final class PRNotificationService implements Disposable {
         return source.label() + " · " + pr.getOwner() + "/" + pr.getRepo() + " #" + pr.getNumber();
     }
 
+    static String formatOverflowSummary(List<Candidate> overflow) {
+        int reviewRequestedCount = 0;
+        int starredCount = 0;
+        for (Candidate item : overflow) {
+            if (item.source() == NotificationSource.STARRED_REPO) {
+                starredCount++;
+            } else {
+                reviewRequestedCount++;
+            }
+        }
+        List<String> clauses = new ArrayList<>();
+        if (reviewRequestedCount > 0) {
+            clauses.add(reviewRequestedCount + " review requested");
+        }
+        if (starredCount > 0) {
+            clauses.add(
+                    "\u2605 "
+                            + starredCount
+                            + " starred "
+                            + (starredCount == 1 ? "repo" : "repos"));
+        }
+        return "+"
+                + overflow.size()
+                + " more new pull requests ("
+                + String.join(", ", clauses)
+                + ")";
+    }
+
     static String buildStarredReposQuery(String repoQ) {
         return "is:open is:pr draft:false " + repoQ;
     }
@@ -386,6 +497,28 @@ public final class PRNotificationService implements Disposable {
                                             () ->
                                                     PRToolWindowFactory.activatePrFromNotification(
                                                             pr)));
+                            notification.notify(null);
+                        });
+    }
+
+    private void fireSummaryNotification(List<Candidate> overflow) {
+        if (overflow.isEmpty()) return;
+        String content = formatOverflowSummary(overflow);
+
+        ApplicationManager.getApplication()
+                .invokeLater(
+                        () -> {
+                            Notification notification =
+                                    NotificationGroupManager.getInstance()
+                                            .getNotificationGroup(NOTIFICATION_GROUP)
+                                            .createNotification(
+                                                    NOTIFICATION_GROUP,
+                                                    content,
+                                                    NotificationType.INFORMATION);
+                            notification.addAction(
+                                    NotificationAction.createSimple(
+                                            "Open PR Pilot",
+                                            PRToolWindowFactory::activateToolWindow));
                             notification.notify(null);
                         });
     }

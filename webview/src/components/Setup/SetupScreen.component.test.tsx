@@ -162,4 +162,65 @@ describe('setup recovery actions', () => {
       url: 'https://code.claude.com/docs/en/authentication',
     })
   })
+
+  it('exposes Open Settings on every setup reason and renders semantic checklist status', async () => {
+    const user = userEvent.setup()
+    const cefQuery = vi.fn()
+    ;(window as unknown as { cefQuery?: typeof cefQuery }).cefQuery = cefQuery
+    const reasons = [
+      'gh_not_installed',
+      'gh_not_authenticated',
+      'provider_not_installed',
+      'provider_not_authenticated',
+      'load_failed',
+      'draft_index_unavailable',
+    ] as const
+    const { rerender } = render(createElement(SetupScreen, {
+      reason: reasons[0],
+      detail: 'Setup needed.',
+      providerReadiness: claude,
+      refreshing: false,
+      onRefresh: vi.fn(),
+    }))
+
+    for (const reason of reasons) {
+      rerender(createElement(SetupScreen, {
+        reason,
+        detail: 'Setup needed.',
+        providerReadiness: claude,
+        refreshing: false,
+        onRefresh: vi.fn(),
+      }))
+      const checklist = screen.getByRole('list', { name: 'Setup checklist' })
+      expect(checklist.tagName).toBe('OL')
+      expect(checklist.textContent).toMatch(/Completed:|Incomplete:/)
+      await user.click(screen.getByRole('button', { name: 'Open Settings' }))
+      const lastCall = cefQuery.mock.calls[cefQuery.mock.calls.length - 1]
+      expect(JSON.parse(lastCall[0].request)).toMatchObject({ type: 'openSettings' })
+    }
+  })
+
+  it('renders both Run gh auth login and Copy auth command with custom hostname in VS Code', async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    ;(window as unknown as { acquireVsCodeApi?: () => object }).acquireVsCodeApi = () => ({ postMessage: vi.fn() })
+
+    render(createElement(SetupScreen, {
+      reason: 'gh_not_authenticated',
+      detail: 'Sign in to GitHub Enterprise.',
+      ghAuthCommand: 'gh auth login --hostname github.example.com',
+      providerReadiness: claude,
+      refreshing: false,
+      onRefresh: vi.fn(),
+    }))
+
+    expect(screen.getByText('gh auth login --hostname github.example.com')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Run gh auth login' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Copy auth command' }))
+    expect(writeText).toHaveBeenCalledWith('gh auth login --hostname github.example.com')
+  })
 })

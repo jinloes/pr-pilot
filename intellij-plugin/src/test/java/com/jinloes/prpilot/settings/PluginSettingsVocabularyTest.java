@@ -201,7 +201,8 @@ class PluginSettingsVocabularyTest {
         button(panel, "Notify for new PRs in starred repositories");
         button(panel, "Save as…");
         button(panel, "Check connection");
-        button(panel, "Enable background PR notifications (experimental)");
+        button(panel, "Enable background PR notifications");
+        button(panel, "Retry notification poll");
         List<String> buttons =
                 descendants(panel).stream()
                         .filter(AbstractButton.class::isInstance)
@@ -210,6 +211,7 @@ class PluginSettingsVocabularyTest {
                         .toList();
         assertThat(buttons)
                 .doesNotContain(
+                        "Enable background PR notifications (experimental)",
                         "Allow MCP tools for untrusted PR content",
                         "Notify when a new PR is opened on a starred repo",
                         "Check Status",

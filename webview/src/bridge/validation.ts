@@ -247,6 +247,10 @@ export function parseIncomingMessage(value: unknown): IncomingMessage | null {
       valid = ['gh_not_installed', 'gh_not_authenticated', 'provider_not_installed', 'provider_not_authenticated', 'load_failed', 'draft_index_unavailable'].includes(value.reason as string)
         && isString(value.detail)
         && (value.providerReadiness === undefined || isProviderReadiness(value.providerReadiness))
+      if (valid && value.ghAuthCommand !== undefined && !isString(value.ghAuthCommand, 512)) {
+        const { ghAuthCommand: _dropped, ...rest } = value
+        return rest as unknown as IncomingMessage
+      }
       break
     case 'themeChanged':
       valid = ['light', 'dark', 'highContrastLight', 'highContrastDark'].includes(value.theme as string)

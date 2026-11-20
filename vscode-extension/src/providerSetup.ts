@@ -1,4 +1,27 @@
+import { normalizeGithubBaseUrl } from './settingsView';
+
 export type ProviderAuthenticationStatus = 'ready' | 'unavailable' | 'unverified';
+
+const MAX_DNS_HOSTNAME_LENGTH = 253;
+const SAFE_HOSTNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+
+export function buildGhAuthLoginCommand(rawBaseUrl: string): string {
+    try {
+        const normalized = normalizeGithubBaseUrl(rawBaseUrl);
+        const hostname = new URL(normalized).hostname.toLowerCase();
+        if (
+            hostname
+            && hostname.length <= MAX_DNS_HOSTNAME_LENGTH
+            && hostname !== 'github.com'
+            && SAFE_HOSTNAME_PATTERN.test(hostname)
+        ) {
+            return `gh auth login --hostname ${hostname}`;
+        }
+    } catch {
+        // Invalid base URLs fall back to the default GitHub CLI login command.
+    }
+    return 'gh auth login';
+}
 
 export type ClaudeAuthProbeRunner = (
     complete: (error: Error | null, stdout: string, stderr: string) => void,

@@ -67,21 +67,36 @@ function runSettingsScript() {
     const elements = new Map<string, FakeElement>();
     const posted: Array<Record<string, unknown>> = [];
     const messageListeners: Array<(event: { data: unknown }) => void> = [];
+    const docListeners = new Map<string, Array<() => void>>();
+    let nextTimerId = 1;
+    const timers = new Map<number, { delay: number; fn: () => void }>();
     const element = (id: string) => {
         if (!elements.has(id)) elements.set(id, fakeElement(id));
         return elements.get(id)!;
     };
-    const context = {
-        document: {
-            getElementById: element,
-            createElement: () => fakeElement(''),
-            addEventListener: () => undefined,
-            activeElement: null,
+    const documentObj = {
+        visibilityState: 'visible',
+        getElementById: element,
+        createElement: () => fakeElement(''),
+        addEventListener: (type: string, listener: () => void) => {
+            docListeners.set(type, [...(docListeners.get(type) ?? []), listener]);
         },
+        activeElement: null,
+    };
+    const context = {
+        document: documentObj,
         window: {
             addEventListener: (type: string, listener: (event: { data: unknown }) => void) => {
                 if (type === 'message') messageListeners.push(listener);
             },
+        },
+        setTimeout: (fn: () => void, delay = 0) => {
+            const id = nextTimerId++;
+            timers.set(id, { delay, fn });
+            return id;
+        },
+        clearTimeout: (id: number) => {
+            timers.delete(id);
         },
         acquireVsCodeApi: () => ({ postMessage: (message: Record<string, unknown>) => posted.push(message) }),
         URL,
@@ -91,7 +106,17 @@ function runSettingsScript() {
     };
     runInNewContext(script, context);
     const deliver = (data: unknown) => { for (const listener of messageListeners) listener({ data }); };
-    return { element, posted, deliver };
+    const runTimers = () => {
+        for (const [id, entry] of [...timers.entries()]) {
+            timers.delete(id);
+            entry.fn();
+        }
+    };
+    const hideDocument = () => {
+        documentObj.visibilityState = 'hidden';
+        for (const listener of docListeners.get('visibilitychange') ?? []) listener();
+    };
+    return { element, posted, deliver, runTimers, hideDocument };
 }
 
 test('an invalid base URL shows an error attached to its field and is never saved', () => {
@@ -316,3 +341,57 @@ test('the repository instructions editor edits, clears, and forgets the selected
     assert.deepEqual(updates[updates.length - 1], {});
     assert.equal(element('repositoryInstructionsText').disabled, true);
 });
+
+test('debounced input autosaves text fields without blur, avoids duplicate blur saves, and flushes on tab hide', () => {
+    const { element, posted, deliver, runTimers, hideDocument } = runSettingsScript();
+    deliver({ type: 'init', state: initState({ 'acme/widget': 'Rule A', 'acme/api': 'Rule B' }) });
+
+    const instructions = element('customInstructions');
+    instructions.value = 'Check nullability';
+    instructions.dispatch('input');
+    assert.equal(posted.filter((m) => m.type === 'update').length, 0);
+    runTimers();
+    const savedCustom = posted.filter((m) => m.type === 'update' && m.key === 'reviewCustomInstructions');
+    assert.equal(savedCustom.length, 1);
+    assert.equal(savedCustom[0].value, 'Check nullability');
+
+    // Subsequent blur with the same value does not post a duplicate update.
+    instructions.dispatch('change');
+    assert.equal(posted.filter((m) => m.type === 'update' && m.key === 'reviewCustomInstructions').length, 1);
+
+    // Momentarily empty repository instructions during typing do not delete or switch the selected repo.
+    const repoText = element('repositoryInstructionsText');
+    assert.equal(element('repositoryInstructionsRepo').value, 'acme/api');
+    repoText.value = '';
+    repoText.dispatch('input');
+    runTimers();
+    assert.equal(element('repositoryInstructionsRepo').value, 'acme/api');
+    assert.equal(repoText.disabled, false);
+
+    // Trailing space while typing is preserved in the live textarea and flushed immediately on visibilitychange.
+    repoText.value = 'Keep API stable ';
+    repoText.dispatch('input');
+    hideDocument();
+    assert.equal(repoText.value, 'Keep API stable ');
+    assert.deepEqual(postedUpdates(posted).pop(), { 'acme/widget': 'Rule A', 'acme/api': 'Keep API stable' });
+
+    // Failed saveResult evicts unacknowledged dedupe entries so subsequent blur/hide retries the save.
+    const failedCustom = savedCustom[0] as { requestId: number };
+    deliver({ type: 'saveResult', requestId: failedCustom.requestId, ok: false, key: 'reviewCustomInstructions', message: 'Write failed' });
+    assert.equal(element('status').textContent, 'Write failed');
+    instructions.dispatch('change');
+    assert.equal(posted.filter((m) => m.type === 'update' && m.key === 'reviewCustomInstructions').length, 2);
+
+    const lastRepoSave = posted.filter((m) => m.type === 'update' && m.key === 'repositoryReviewInstructions').pop() as { requestId: number };
+    deliver({ type: 'saveResult', requestId: lastRepoSave.requestId, ok: false, key: 'repositoryReviewInstructions', message: 'Repo write failed' });
+    repoText.dispatch('change');
+    assert.equal(posted.filter((m) => m.type === 'update' && m.key === 'repositoryReviewInstructions').length, 2);
+
+    // Partial baseUrl typing does not flash an error until blur.
+    const baseUrl = element('baseUrl');
+    baseUrl.value = 'https://git';
+    baseUrl.dispatch('input');
+    runTimers();
+    assert.equal(element('baseUrlError').hidden, true);
+});
+

@@ -14,6 +14,7 @@ import { attachPatchBlocker, MAX_ATTACHED_PATCH_CHARS } from '@/lib/attachPatch'
 interface Message {
   role: 'user' | 'assistant'
   content: string
+  displayText?: string
   isError?: boolean
   /** The user stopped this turn before the provider answered. */
   stopped?: boolean
@@ -34,6 +35,7 @@ interface Props {
   onContextUsed?: () => void
   pendingMessage?: {
     q: string
+    displayText?: string
     ctx: string
     location?: ChatContextLocation
     id: number
@@ -162,7 +164,7 @@ export function ChatPane({
 
   useEffect(() => {
     if (!pendingMessage || busy || sentPendingMessageIdRef.current === pendingMessage.id) return
-    const { q, ctx, location, id, token } = pendingMessage
+    const { q, displayText, ctx, location, id, token } = pendingMessage
     const requestContextSummary = pendingMessage.contextSummary ?? contextSummary
     sentPendingMessageIdRef.current = id
     pendingTokenRef.current = token
@@ -171,6 +173,7 @@ export function ChatPane({
     setMessages((prev) => [...prev, {
       role: 'user',
       content: q,
+      displayText,
       contextSummary: requestContextSummary,
     }])
     setBusy(true)
@@ -348,7 +351,7 @@ export function ChatPane({
                           ? '[&_code]:bg-primary-foreground/20 [&_pre]:bg-primary-foreground/20 [&_blockquote]:border-primary-foreground/40 [&_a]:text-primary-foreground'
                           : '[&_code]:bg-background/50 [&_pre]:bg-background/50 [&_blockquote]:border-muted-foreground/40',
                       )}>
-                        {m.content}
+                        {m.role === 'user' ? (m.displayText ?? m.content) : m.content}
                       </MarkdownContent>
                     )}
                   </div>

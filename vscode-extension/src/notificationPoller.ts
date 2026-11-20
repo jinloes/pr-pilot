@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { PR } from './models';
+import type { PendingDraftIndex } from './pendingDraftIndex';
 import type { SidecarClient } from './sidecar';
 import {
     EMPTY_NOTIFICATION_HEALTH,
@@ -7,11 +8,13 @@ import {
     normalizeNotificationSeedSources,
     notificationMessage,
     notificationWarningMessage,
+    partitionNotificationBurst,
     planNotificationPoll,
     recordNotificationDegraded,
     recordNotificationFailure,
     recordNotificationSuccess,
     settleNotificationSources,
+    summaryNotificationMessage,
     type NotifySource,
     type NotificationSourceRequest,
     shouldWarnAboutNotificationFailure,
@@ -33,6 +36,9 @@ export class PRNotificationPoller implements vscode.Disposable {
     private timer: NodeJS.Timeout | null = null;
     private readonly seededSources: Set<NotifySource>;
     private readonly seen: Set<string>;
+    private generation = 0;
+    private pendingPollGeneration: number | null = null;
+    private activePollPromise: Promise<void> | null = null;
     private running = false;
     private health: NotificationHealth;
 
@@ -42,6 +48,8 @@ export class PRNotificationPoller implements vscode.Disposable {
         private readonly getConfig: () => vscode.WorkspaceConfiguration,
         private readonly getGithubBaseUrl: () => string,
         private readonly onOpenPr: (pr: PR) => void,
+        private readonly pendingDraftIndex?: Pick<PendingDraftIndex, 'has'>,
+        private readonly onOpenPanel?: () => void,
     ) {
         const saved = context.globalState.get<SeenState>(NOTIFY_STATE_KEY);
         this.seededSources = new Set(
@@ -58,17 +66,25 @@ export class PRNotificationPoller implements vscode.Disposable {
     syncFromSettings(): void {
         this.stop();
         if (!this.getConfig().get<boolean>('notificationsEnabled', false)) return;
+        const generation = this.generation;
         const minutes = Math.max(1, this.getConfig().get<number>('notificationPollMinutes', 5));
-        void this.poll();
-        this.timer = setInterval(() => void this.poll(), minutes * 60_000);
+        void this.requestPoll(generation);
+        this.timer = setInterval(() => void this.requestPoll(generation), minutes * 60_000);
     }
 
     /** Clears the seed and restarts so a scope/host change re-seeds silently instead of flooding. */
     resetAndSync(): void {
+        this.stop();
         this.seededSources.clear();
         this.seen.clear();
-        void this.persist();
-        this.syncFromSettings();
+        this.health = { ...EMPTY_NOTIFICATION_HEALTH };
+        void Promise.resolve(this.persist()).catch(() => undefined);
+        void Promise.resolve(this.persistHealth()).catch(() => undefined);
+        if (!this.getConfig().get<boolean>('notificationsEnabled', false)) return;
+        const generation = this.generation;
+        const minutes = Math.max(1, this.getConfig().get<number>('notificationPollMinutes', 5));
+        void this.requestPoll(generation);
+        this.timer = setInterval(() => void this.requestPoll(generation), minutes * 60_000);
     }
 
     dispose(): void {
@@ -80,10 +96,12 @@ export class PRNotificationPoller implements vscode.Disposable {
     }
 
     retry(): Promise<void> {
-        return this.poll();
+        return this.requestPoll(this.generation);
     }
 
     private stop(): void {
+        this.generation++;
+        this.pendingPollGeneration = null;
         if (this.timer) clearInterval(this.timer);
         this.timer = null;
     }
@@ -125,9 +143,41 @@ export class PRNotificationPoller implements vscode.Disposable {
         });
     }
 
-    private async poll(): Promise<void> {
-        if (this.running) return;
+    private requestPoll(generation: number): Promise<void> {
+        if (generation !== this.generation) return Promise.resolve();
+        if (this.running) {
+            this.pendingPollGeneration = generation;
+            return this.activePollPromise ?? Promise.resolve();
+        }
         this.running = true;
+        const loopPromise = this.runPollLoop(generation).finally(() => {
+            this.running = false;
+            this.activePollPromise = null;
+        });
+        this.activePollPromise = loopPromise;
+        return loopPromise;
+    }
+
+    private async runPollLoop(initialGeneration: number): Promise<void> {
+        let currentGeneration: number | null = initialGeneration;
+        while (currentGeneration !== null) {
+            if (currentGeneration === this.generation) {
+                await this.pollOnce(currentGeneration);
+            }
+            if (
+                this.pendingPollGeneration !== null
+                && this.pendingPollGeneration === this.generation
+            ) {
+                currentGeneration = this.pendingPollGeneration;
+                this.pendingPollGeneration = null;
+            } else {
+                this.pendingPollGeneration = null;
+                currentGeneration = null;
+            }
+        }
+    }
+
+    private async pollOnce(generation: number): Promise<void> {
         try {
             const requests: NotificationSourceRequest[] = [];
             const baseUrl = this.getGithubBaseUrl();
@@ -139,7 +189,10 @@ export class PRNotificationPoller implements vscode.Disposable {
                         const result = await this.sidecarClient.searchPullRequests(
                             baseUrl, 'is:open is:pr draft:false review-requested:@me', 50);
                         if (result.status !== 'ok') throw new Error(result.message);
-                        return result.prs.map((pr) => ({ ...pr, hasReviewDraft: false }));
+                        return result.prs.map((pr) => ({
+                            ...pr,
+                            hasReviewDraft: this.pendingDraftIndex?.has(pr.owner, pr.repo, pr.number) ?? false,
+                        }));
                     },
                 });
             }
@@ -156,13 +209,23 @@ export class PRNotificationPoller implements vscode.Disposable {
                         const result = await this.sidecarClient.searchPullRequests(
                             baseUrl, `is:open is:pr draft:false ${repoQ}`, 50);
                         if (result.status !== 'ok') throw new Error(result.message);
-                        return result.prs.map((pr) => ({ ...pr, hasReviewDraft: false }));
+                        return result.prs.map((pr) => ({
+                            ...pr,
+                            hasReviewDraft: this.pendingDraftIndex?.has(pr.owner, pr.repo, pr.number) ?? false,
+                        }));
                     },
                 });
             }
 
             const sourceResults = await settleNotificationSources(requests);
-            const plan = planNotificationPoll(this.seededSources, this.seen, sourceResults);
+            if (generation !== this.generation) return;
+
+            const plan = planNotificationPoll(
+                this.seededSources,
+                this.seen,
+                sourceResults,
+                (pr) => pr.hasReviewDraft || (this.pendingDraftIndex?.has(pr.owner, pr.repo, pr.number) ?? false),
+            );
             if (plan.status === 'failed') {
                 throw new Error(plan.message || 'All notification sources failed');
             }
@@ -171,7 +234,8 @@ export class PRNotificationPoller implements vscode.Disposable {
             this.seen.clear();
             for (const key of plan.seen) this.seen.add(key);
 
-            for (const { pr, source } of plan.notifications) {
+            const { individual, overflow } = partitionNotificationBurst(plan.notifications);
+            for (const { pr, source } of individual) {
                 void vscode.window.showInformationMessage(
                     notificationMessage(pr, source),
                     'Open in PR Pilot',
@@ -179,21 +243,32 @@ export class PRNotificationPoller implements vscode.Disposable {
                     if (choice === 'Open in PR Pilot') this.onOpenPr(pr);
                 });
             }
+            if (overflow.length > 0) {
+                void vscode.window.showInformationMessage(
+                    summaryNotificationMessage(overflow),
+                    'Open PR Pilot',
+                ).then((choice) => {
+                    if (choice === 'Open PR Pilot') {
+                        if (this.onOpenPanel) this.onOpenPanel();
+                        else void vscode.commands.executeCommand('pr-pilot.open');
+                    }
+                });
+            }
             trimSeenSet(this.seen, MAX_SEEN_NOTIFICATION_PRS);
             await this.persist();
+            if (generation !== this.generation) return;
             if (plan.status === 'degraded') {
                 await this.recordDegraded(plan.message || 'One notification source failed');
             } else {
                 await this.recordSuccess();
             }
         } catch (err) {
+            if (generation !== this.generation) return;
             const message = err instanceof Error ? err.message : String(err);
             console.warn('[pr-pilot] PR notification poll failed:', message);
             this.health = recordNotificationFailure(this.health, message);
             this.warnIfNeeded();
             await Promise.resolve(this.persistHealth()).catch(() => undefined);
-        } finally {
-            this.running = false;
         }
     }
 }

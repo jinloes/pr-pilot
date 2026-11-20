@@ -189,6 +189,7 @@ export interface SetupRequiredMessage {
   reason: 'gh_not_installed' | 'gh_not_authenticated' | 'provider_not_installed' | 'provider_not_authenticated' | 'load_failed' | 'draft_index_unavailable'
   detail: string
   providerReadiness?: ProviderReadiness
+  ghAuthCommand?: string
 }
 
 export type HostTheme = 'light' | 'dark' | 'highContrastLight' | 'highContrastDark'

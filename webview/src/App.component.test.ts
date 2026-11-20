@@ -93,4 +93,31 @@ describe('setup overlay routing', () => {
       expect(screen.queryByRole('main', { name: 'PR Pilot setup' })).not.toBeInTheDocument()
     }
   })
+
+  it('forwards custom GitHub Enterprise auth commands to SetupScreen and exposes aria-pressed on narrow pane buttons', () => {
+    const previousWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 360 })
+    try {
+      renderApp()
+      hostMessage({ type: 'prListLoaded', prs: [pr] })
+      const showList = screen.getAllByRole('button', { name: 'Show pull requests' })[0]
+      const showReview = screen.getByRole('button', { name: 'Show review' })
+      expect(showList).toHaveAttribute('aria-pressed', 'true')
+      expect(showReview).toHaveAttribute('aria-pressed', 'false')
+
+      act(() => showReview.click())
+      expect(showList).toHaveAttribute('aria-pressed', 'false')
+      expect(showReview).toHaveAttribute('aria-pressed', 'true')
+
+      hostMessage({
+        type: 'setupRequired',
+        reason: 'gh_not_authenticated',
+        detail: 'Sign in to GitHub Enterprise.',
+        ghAuthCommand: 'gh auth login --hostname github.example.com',
+      })
+      expect(screen.getByText('gh auth login --hostname github.example.com')).toBeVisible()
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: previousWidth })
+    }
+  })
 })

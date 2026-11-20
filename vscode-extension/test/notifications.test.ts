@@ -1,14 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import * as path from 'node:path';
+import { runInNewContext } from 'node:vm';
 
 import {
   EMPTY_NOTIFICATION_HEALTH,
+  formatOverflowSummary,
   markNotificationWarningShown,
+  MAX_INDIVIDUAL_NOTIFICATIONS_PER_POLL,
   mergeBySource,
   normalizeNotificationSeedSources,
   notificationMessage,
   notificationWarningMessage,
   notifySourceLabel,
+  partitionNotificationBurst,
   planNotificationPoll,
   prNotificationKey,
   recordNotificationDegraded,
@@ -16,6 +22,7 @@ import {
   recordNotificationSuccess,
   settleNotificationSources,
   shouldWarnAboutNotificationFailure,
+  summaryNotificationMessage,
 } from '../src/notifications';
 import type { PR } from '../src/models';
 
@@ -210,6 +217,54 @@ test('per-source seed restoration validates values and supports the legacy globa
   assert.deepEqual(normalizeNotificationSeedSources([], true), []);
 });
 
+test('planNotificationPoll marks drafted PRs seen while suppressing duplicate notifications', () => {
+  const drafted = { ...pr('acme', 'widgets', 10), hasReviewDraft: true };
+  const undrafted = pr('acme', 'widgets', 11);
+  const plan = planNotificationPoll(
+    new Set(['reviewRequested']),
+    new Set(),
+    {
+      reviewRequested: [drafted, undrafted],
+      starred: [],
+      successfulSources: ['reviewRequested'],
+      failures: [],
+    },
+  );
+
+  assert.deepEqual(plan.seen, ['acme/widgets#10', 'acme/widgets#11']);
+  assert.deepEqual(plan.notifications.map((item) => item.pr.number), [11]);
+});
+
+test('partitionNotificationBurst caps individual notifications at 3 and formats overflow summary', () => {
+  const small = [
+    { pr: pr('acme', 'a', 1), source: 'reviewRequested' as const },
+    { pr: pr('acme', 'a', 2), source: 'starredRepo' as const },
+    { pr: pr('acme', 'a', 3), source: 'starredRepo' as const },
+  ];
+  assert.equal(MAX_INDIVIDUAL_NOTIFICATIONS_PER_POLL, 3);
+  assert.deepEqual(partitionNotificationBurst(small), { individual: small, overflow: [] });
+
+  const burst = [
+    { pr: pr('acme', 'a', 1), source: 'reviewRequested' as const },
+    { pr: pr('acme', 'a', 2), source: 'reviewRequested' as const },
+    { pr: pr('acme', 'a', 3), source: 'reviewRequested' as const },
+    { pr: pr('acme', 'a', 4), source: 'reviewRequested' as const },
+    { pr: pr('acme', 'b', 5), source: 'starredRepo' as const },
+    { pr: pr('acme', 'c', 6), source: 'starredRepo' as const },
+  ];
+  const { individual, overflow } = partitionNotificationBurst(burst);
+  assert.deepEqual(individual.map((item) => item.pr.number), [1, 2, 3]);
+  assert.deepEqual(overflow.map((item) => item.pr.number), [4, 5, 6]);
+  assert.equal(
+    formatOverflowSummary(overflow),
+    '+3 more new pull requests (1 review requested, ★ 2 starred repos)',
+  );
+  assert.equal(
+    summaryNotificationMessage([overflow[1]]),
+    'PR Pilot · +1 more new pull requests (★ 1 starred repo)',
+  );
+});
+
 test('notification warning is suppressed until its cooldown expires', () => {
   const failedTwice = recordNotificationFailure(
     recordNotificationFailure(EMPTY_NOTIFICATION_HEALTH, 'down', 1_000),
@@ -221,4 +276,117 @@ test('notification warning is suppressed until its cooldown expires', () => {
   assert.match(notificationWarningMessage(failedTwice), /not working/);
   assert.equal(shouldWarnAboutNotificationFailure(warned, 2_000 + 29 * 60_000), false);
   assert.equal(shouldWarnAboutNotificationFailure(warned, 2_000 + 30 * 60_000), true);
+});
+
+test('PRNotificationPoller.resetAndSync fences stale in-flight polls, coalesces a fresh silent seed, and resets failure counts', async () => {
+  const infoMessages: string[] = [];
+  const warningMessages: string[] = [];
+  const vscodeStub = {
+    window: {
+      showInformationMessage: async (message: string) => {
+        infoMessages.push(message);
+        return undefined;
+      },
+      showWarningMessage: async (message: string) => {
+        warningMessages.push(message);
+        return undefined;
+      },
+    },
+    commands: { executeCommand: async () => undefined },
+  };
+  const cache = new Map<string, { exports: Record<string, unknown> }>();
+  function load(file: string): Record<string, unknown> {
+    const cached = cache.get(file);
+    if (cached) return cached.exports;
+    const mod = { exports: {} as Record<string, unknown> };
+    cache.set(file, mod);
+    const requireLocal = (name: string): unknown => {
+      if (name === 'vscode') return vscodeStub;
+      if (name.startsWith('.')) {
+        const target = path.resolve(path.dirname(file), `${name}.js`);
+        if (existsSync(target)) return load(target);
+      }
+      return require(name);
+    };
+    runInNewContext(readFileSync(file, 'utf8'), {
+      module: mod, exports: mod.exports, require: requireLocal,
+      __dirname: path.dirname(file), __filename: file,
+      console, process, Buffer, Date, setInterval: () => ({ unref: () => undefined }), clearInterval: () => undefined,
+    }, { filename: file });
+    return mod.exports;
+  }
+
+  const { PRNotificationPoller } = load(require.resolve('../src/notificationPoller')) as {
+    PRNotificationPoller: new (...args: unknown[]) => {
+      resetAndSync: () => void;
+      retry: () => Promise<void>;
+      dispose: () => void;
+      getHealth: () => { status: string; consecutiveFailures: number };
+    };
+  };
+
+  const stateStore = new Map<string, unknown>();
+  let currentBaseUrl = 'https://github.com';
+  let releaseGithubCom!: () => void;
+  const githubComGate = new Promise<void>((resolve) => { releaseGithubCom = resolve; });
+  let failRequests = false;
+
+  const sidecarStub = {
+    searchPullRequests: async (baseUrl: string) => {
+      if (failRequests) throw new Error(`Unreachable ${baseUrl}`);
+      if (baseUrl === 'https://github.com') {
+        await githubComGate;
+        return { status: 'ok', prs: [pr('acme', 'pub', 1)] };
+      }
+      return { status: 'ok', prs: [pr('acme', 'ghe', 99)] };
+    },
+    listStarredRepositories: async () => ({ status: 'ok', repositories: [] }),
+  };
+
+  const poller = new PRNotificationPoller(
+    {
+      globalState: {
+        get: (key: string) => stateStore.get(key),
+        update: async (key: string, value: unknown) => { stateStore.set(key, value); },
+      },
+    },
+    sidecarStub,
+    () => ({
+      get: (key: string, fallback: unknown) => {
+        if (key === 'notificationsEnabled') return true;
+        if (key === 'notifyReviewRequested') return true;
+        if (key === 'notifyStarredRepos') return false;
+        return fallback;
+      },
+    }),
+    () => currentBaseUrl,
+    () => undefined,
+  );
+
+  // Start first resetAndSync against github.com (blocks on githubComGate), then switch to GHE and resetAndSync.
+  poller.resetAndSync();
+  await new Promise((resolve) => setImmediate(resolve));
+  currentBaseUrl = 'https://ghe.example.com';
+  poller.resetAndSync();
+  releaseGithubCom();
+  await poller.retry();
+
+  // Existing GHE PR #99 was silently seeded (no retroactive toast), and a subsequent poll does not re-notify #99.
+  assert.deepEqual(infoMessages, []);
+  const savedSeen = stateStore.get('pr-pilot.notifications.seenState') as { seen: string[] };
+  assert.deepEqual(Array.from(savedSeen.seen), ['acme/ghe#99']);
+
+  // Two mid-typing base-URL changes that each fail once reset consecutiveFailures instead of warning.
+  failRequests = true;
+  currentBaseUrl = 'https://ghe-prefix-1.example';
+  poller.resetAndSync();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(poller.getHealth().consecutiveFailures, 1);
+
+  currentBaseUrl = 'https://ghe-prefix-2.example';
+  poller.resetAndSync();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(poller.getHealth().consecutiveFailures, 1);
+  assert.deepEqual(warningMessages, []);
+  poller.dispose();
 });

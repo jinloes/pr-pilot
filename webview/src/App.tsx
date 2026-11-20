@@ -113,6 +113,7 @@ export default function App() {
     reason: SetupReason
     detail: string
     providerReadiness?: import('./bridge/types').ProviderReadiness
+    ghAuthCommand?: string
   } | null>(null)
   const [setupRefreshing, setSetupRefreshing] = useState(false)
   const [toastTheme, setToastTheme] = useState<'light' | 'dark' | 'system'>('system')
@@ -196,7 +197,12 @@ export default function App() {
     if (msg.type === 'setupRequired') {
       setSetupRefreshing(false)
       if (msg.reason === 'load_failed' && listLoadedRef.current) return
-      setSetup({ reason: msg.reason, detail: msg.detail, providerReadiness: msg.providerReadiness })
+      setSetup({
+        reason: msg.reason,
+        detail: msg.detail,
+        providerReadiness: msg.providerReadiness,
+        ghAuthCommand: msg.ghAuthCommand,
+      })
     } else if (msg.type === 'prLoading') {
       setSetupRefreshing(true)
     } else if (msg.type === 'prListLoaded') {
@@ -299,6 +305,7 @@ export default function App() {
           reason={setup.reason}
           detail={setup.detail}
           providerReadiness={setup.providerReadiness}
+          ghAuthCommand={setup.ghAuthCommand}
           refreshing={setupRefreshing}
           onRefresh={() => {
             setSetupRefreshing(true)
@@ -318,6 +325,7 @@ export default function App() {
             size="sm"
             variant={activePane === 'list' ? 'default' : 'ghost'}
             className="min-w-0 flex-1"
+            aria-pressed={activePane === 'list'}
             title={t('app.showPrList')}
             onClick={() => setActivePane('list')}
           >
@@ -327,6 +335,7 @@ export default function App() {
             size="sm"
             variant={activePane === 'review' ? 'default' : 'ghost'}
             className="min-w-0 flex-1"
+            aria-pressed={activePane === 'review'}
             title={t('app.showReview')}
             onClick={() => setActivePane('review')}
           >

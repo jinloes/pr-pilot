@@ -88,7 +88,10 @@ scope. The seen-PR set is persisted across reloads/restarts (IntelliJ via `SeenP
 extension `globalState`) so PRs that appear while the editor is closed are still announced on the
 next poll rather than silently absorbed by a re-seed. Changing the notification scope
 (enable/disable, review-requested, starred repos, or GitHub base URL) re-seeds silently so existing
-in-scope PRs are not announced retroactively.
+in-scope PRs are not announced retroactively. To prevent toast storms when reopening the IDE after
+offline activity, each poll emits at most three individual PR notifications (review-requested first)
+and summarizes any remaining unseen PRs into a single overflow notification with an action to open
+PR Pilot, while recording all unseen candidates in the persisted seen set.
 
 ### Security constraints
 `githubBaseUrl` must be an HTTPS origin without credentials, an explicit port, path, query, or

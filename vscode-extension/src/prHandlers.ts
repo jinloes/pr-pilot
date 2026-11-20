@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { createHash, randomUUID } from 'crypto';
 import { hasStaleCommits } from './draftState';
 import { classifySetupAuthError } from './authError';
+import { PendingDraftIndex } from './pendingDraftIndex';
+import { buildGhAuthLoginCommand } from './providerSetup';
 import { GitHubOperationError, toUserFacingError } from './userFacingError';
 import {
     normalizeRepositoryInstructions,
@@ -33,6 +35,8 @@ export interface PrHandlerApi {
 }
 
 export function createPrHandlers(deps: HandlerDependencies): PrHandlerApi {
+const fallbackPendingDraftIndex = new PendingDraftIndex();
+const pendingDraftIndex = () => deps.pendingDraftIndex?.() ?? fallbackPendingDraftIndex;
 
 async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>): Promise<void> {
     const refreshRevision = ++state.refreshRevision;
@@ -55,20 +59,16 @@ async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>):
             baseUrl, prStateFilter, searchScope, currentRepo ?? undefined);
         if (state.refreshRevision !== refreshRevision || state.disposed) return;
         if (found.status !== 'ok') throw new Error(found.message);
-        const prs = found.prs.map((item) => ({ ...item, hasReviewDraft: false })).map((pr) => {
-            if (!state.activePR || !state.pendingReviewId) return pr;
-            return pr.number === state.activePR.number && pr.owner === state.activePR.owner && pr.repo === state.activePR.repo
-                ? { ...pr, hasReviewDraft: true }
-                : pr;
-        });
-        prs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        const ghAuthCommand = buildGhAuthLoginCommand(baseUrl);
         const readiness = await deps.providerSetupReadiness();
+        if (state.refreshRevision !== refreshRevision || state.disposed) return;
         if (!readiness.available) {
             deps.push(state, {
                 type: 'setupRequired',
                 reason: 'provider_not_installed',
                 detail: readiness.detail,
                 providerReadiness: readiness,
+                ghAuthCommand,
             });
             return;
         }
@@ -78,9 +78,24 @@ async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>):
                 reason: 'provider_not_authenticated',
                 detail: readiness.detail,
                 providerReadiness: readiness,
+                ghAuthCommand,
             });
             return;
         }
+        const draftIndex = pendingDraftIndex();
+        const prs = found.prs.map((pr) => {
+            const isActivePending = Boolean(
+                state.activePR && state.pendingReviewId
+                && pr.number === state.activePR.number
+                && pr.owner === state.activePR.owner
+                && pr.repo === state.activePR.repo,
+            );
+            return {
+                ...pr,
+                hasReviewDraft: draftIndex.has(pr.owner, pr.repo, pr.number) || isActivePending,
+            };
+        });
+        prs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         deps.push(state, {
             type: 'prListLoaded',
             prs,
@@ -98,16 +113,18 @@ async function handleRefreshPRs(state: ViewState, msg: Record<string, unknown>):
     } catch (err) {
         if (state.refreshRevision !== refreshRevision || state.disposed) return;
         const reason = classifySetupAuthError(err);
+        const ghAuthCommand = buildGhAuthLoginCommand(deps.githubBaseUrl());
         const detail = reason === 'gh_not_installed'
-            ? "The 'gh' CLI was not found. Install it from https://cli.github.com, then run 'gh auth login' in a terminal and click Refresh."
+            ? `The 'gh' CLI was not found. Install it from https://cli.github.com, then run '${ghAuthCommand}' in a terminal and click Refresh.`
             : reason === 'gh_not_authenticated'
-                ? "Run 'gh auth login' in a terminal to authenticate, then click Refresh."
+                ? `Run '${ghAuthCommand}' in a terminal to authenticate, then click Refresh.`
                 : toUserFacingError(err, 'load pull requests');
         deps.push(state, {
             type: 'setupRequired',
             reason,
             detail,
             providerReadiness: deps.providerReadiness(),
+            ghAuthCommand,
         });
     }
 }
@@ -127,7 +144,10 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
     const selectionRevision = ++state.selectionRevision;
     const title = typeof msg.title === 'string' ? msg.title : '';
     const body = typeof msg.body === 'string' ? msg.body : '';
-    const author = typeof msg.author === 'string' && msg.author ? msg.author : undefined;
+    const samePr = deps.prKey(state.activePR) === key;
+    const author = typeof msg.author === 'string' && msg.author
+        ? msg.author
+        : samePr ? state.activePR?.author : undefined;
 
     state.generationRevision++;
     state.chatRevision++;
@@ -196,7 +216,17 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         } : remoteDraft ? { ...remoteDraft, recoveryPending: false } : null;
         const validationDiff = diff;
 
-        if (deps.prKey(state.activePR) !== key || state.selectionRevision !== selectionRevision) return;
+        if (!isCurrent()) return;
+
+        if (detail.merged) {
+            await state.draftRecoveryStore.clear(key);
+            await pendingDraftIndex().remove(owner, repo, number);
+        } else if (remoteDraft) {
+            await pendingDraftIndex().add(owner, repo, number);
+        } else {
+            await pendingDraftIndex().remove(owner, repo, number);
+        }
+        if (!isCurrent()) return;
 
         state.activePR = {
             number,
@@ -217,7 +247,6 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         state.pendingReviewKey = draft?.id ? key : null;
 
         if (detail.merged) {
-            await state.draftRecoveryStore.clear(key);
             deps.push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: false });
             deps.push(state, { type: 'draftLoaded', prKey: key, prState: 'MERGED', diff, validationDiff, providerReadiness: readiness,
                 intellijAssistedEnabled: deps.intellijAssistedEnabled(),
@@ -227,7 +256,7 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
             if (!draft.recoveryPending && draft.commitId && draft.commitId === state.reviewedDiffRevisions?.headSha) {
                 state.reviewedFile = { token: randomUUID(), commit: draft.commitId };
             }
-            deps.push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: true });
+            deps.push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: Boolean(remoteDraft) });
             deps.push(state, {
                 type: 'draftLoaded',
                 prKey: key,

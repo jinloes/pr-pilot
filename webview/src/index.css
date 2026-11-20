@@ -100,14 +100,14 @@
     --border: 0 0% 50%;
     --input: 0 0% 55%;
     --ring: 48 100% 50%;
-    --diff-add-foreground: var(--foreground);
+    --diff-add-foreground: var(--status-approve);
     --diff-add-background: var(--background);
     --diff-add-gutter: var(--background);
-    --diff-add-border: var(--foreground);
-    --diff-delete-foreground: var(--foreground);
+    --diff-add-border: var(--status-approve);
+    --diff-delete-foreground: var(--status-issue);
     --diff-delete-background: var(--background);
     --diff-delete-gutter: var(--background);
-    --diff-delete-border: var(--foreground);
+    --diff-delete-border: var(--status-issue);
   }
 }
 

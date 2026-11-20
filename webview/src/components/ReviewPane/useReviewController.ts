@@ -376,7 +376,13 @@ export function useReviewController({
     activeReviewOperationIdRef.current = null
     generationStartedAtRef.current = null
     dispatch({ type: 'draftLoading' })
-    sendToHost({ type: 'selectPR', number: pr.number, owner: pr.owner, repo: pr.repo })
+    sendToHost({
+      type: 'selectPR',
+      number: pr.number,
+      owner: pr.owner,
+      repo: pr.repo,
+      ...(pr.author ? { author: pr.author } : {}),
+    })
   }
 
   function handleSave() {
@@ -408,7 +414,13 @@ export function useReviewController({
   function handleReloadDraft() {
     if (!pr) return
     dispatch({ type: 'draftLoading' })
-    sendToHost({ type: 'selectPR', number: pr.number, owner: pr.owner, repo: pr.repo })
+    sendToHost({
+      type: 'selectPR',
+      number: pr.number,
+      owner: pr.owner,
+      repo: pr.repo,
+      ...(pr.author ? { author: pr.author } : {}),
+    })
   }
 
   function handleSubmit(verdict: Verdict, comment = '') {
@@ -493,8 +505,12 @@ export function useReviewController({
     const id = Date.now()
     const token = `verify-${id}`
     chatTargetsRef.current.set(token, comment)
+    const targetLabel = comment.file
+      ? comment.line > 0 ? `${comment.file}:${comment.line}` : comment.file
+      : ''
     setPendingChatMessage({
       q: question,
+      displayText: targetLabel ? `Verify comment on ${targetLabel}` : 'Verify draft comment',
       ctx: context,
       location: commentLocation(comment),
       id,
@@ -532,8 +548,12 @@ export function useReviewController({
     const id = Date.now()
     const token = `fix-${id}`
     chatTargetsRef.current.set(token, comment)
+    const targetLabel = comment.file
+      ? comment.line > 0 ? `${comment.file}:${comment.line}` : comment.file
+      : ''
     setPendingChatMessage({
       q: question,
+      displayText: targetLabel ? `Suggest a fix for ${targetLabel}` : 'Suggest a fix for draft comment',
       ctx: context,
       location: commentLocation(comment),
       id,

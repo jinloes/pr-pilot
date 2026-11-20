@@ -145,6 +145,37 @@ for (const theme of ['light', 'dark', 'highContrastLight', 'highContrastDark'] a
       return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05)
     })
     expect(ratio).toBeGreaterThanOrEqual(4.5)
+
+    const gutterMetrics = await page.evaluate(() => {
+      const canvas = document.createElement('canvas')
+      const context = canvas.getContext('2d')!
+      const luminance = (color: string) => {
+        context.fillStyle = color
+        context.fillRect(0, 0, 1, 1)
+        const rgb = Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3)
+        const linear = rgb.map((value) => {
+          const channel = value / 255
+          return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+        })
+        return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+      }
+      const background = luminance(getComputedStyle(document.body).backgroundColor)
+      const gutter = document.querySelector('.diff-line--normal .diff-gutter') ?? document.querySelector('.diff-gutter')!
+      const fg = luminance(getComputedStyle(gutter).color)
+      const clickable = document.querySelector('.diff-gutter--clickable')!
+      return {
+        ratio: (Math.max(background, fg) + 0.05) / (Math.min(background, fg) + 0.05),
+        restingPlusOpacity: getComputedStyle(clickable, '::after').opacity,
+      }
+    })
+    expect(gutterMetrics.ratio).toBeGreaterThanOrEqual(4.5)
+    expect(gutterMetrics.restingPlusOpacity).toBe('0')
+
+    const firstGutterButton = page.locator('.diff-gutter__button').first()
+    await firstGutterButton.focus()
+    expect(
+      await firstGutterButton.evaluate((btn) => getComputedStyle(btn.closest('.diff-gutter--clickable')!, '::after').opacity),
+    ).toBe('1')
   })
 }
 

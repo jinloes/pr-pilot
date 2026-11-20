@@ -33,6 +33,7 @@ describe('publish review body', () => {
     }, { diff, validationDiff: diff })
 
     const dialog = await openPublish(user)
+    expect(within(dialog).getByTestId('publish-dialog-body')).toHaveClass('overflow-y-auto')
     const body = within(dialog).getByRole('textbox', { name: 'Review body' })
     expect(body).toHaveValue('Left 2 comments.')
     expect(body).toHaveAccessibleDescription(

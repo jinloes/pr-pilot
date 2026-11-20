@@ -10,18 +10,40 @@ export function buildSettingsScriptEvents(): string {
   $('effort').addEventListener('change', () => save('reviewEffort', $('effort').value));
   $('inheritMcp').addEventListener('change', () => save('copilotInheritMcp', $('inheritMcp').checked));
   $('reviewAutoEnableMcp').addEventListener('change', () => save('copilotAutoEnableMcpOnReview', $('reviewAutoEnableMcp').checked));
-  $('copilotConfigDir').addEventListener('change', () => save('copilotConfigDir', $('copilotConfigDir').value.trim()));
+  $('copilotConfigDir').addEventListener('input', () => {
+    scheduleFieldSave('copilotConfigDir', 350, () => save('copilotConfigDir', $('copilotConfigDir').value.trim()));
+  });
+  $('copilotConfigDir').addEventListener('change', () => {
+    flushFieldSave('copilotConfigDir', () => save('copilotConfigDir', $('copilotConfigDir').value.trim()));
+  });
   $('vscodeCodeIntelligence').addEventListener('change', () => save('experimentalVsCodeCodeIntelligence', $('vscodeCodeIntelligence').checked));
-  $('reviewRulesDirectory').addEventListener('change', () => save('reviewRulesDirectory', $('reviewRulesDirectory').value.trim()));
-  $('baseUrl').addEventListener('change', () => save('githubBaseUrl', $('baseUrl').value.trim()));
-  $('baseUrl').addEventListener('input', clearBaseUrlError);
+  $('reviewRulesDirectory').addEventListener('input', () => {
+    scheduleFieldSave('reviewRulesDirectory', 350, () => save('reviewRulesDirectory', $('reviewRulesDirectory').value.trim()));
+  });
+  $('reviewRulesDirectory').addEventListener('change', () => {
+    flushFieldSave('reviewRulesDirectory', () => save('reviewRulesDirectory', $('reviewRulesDirectory').value.trim()));
+  });
+  $('baseUrl').addEventListener('change', () => {
+    cancelFieldSave('baseUrl');
+    save('githubBaseUrl', $('baseUrl').value.trim());
+  });
+  $('baseUrl').addEventListener('input', () => {
+    clearBaseUrlError();
+    cancelFieldSave('baseUrl');
+    const normalized = normalizeValidBaseUrlOrNull($('baseUrl').value);
+    if (normalized) {
+      scheduleFieldSave('baseUrl', 500, () => save('githubBaseUrl', $('baseUrl').value.trim()));
+    }
+  });
   $('guidanceProfile').addEventListener('change', () => {
+    flushAllPendingSaves();
     activeGuidanceProfileId = $('guidanceProfile').value;
     saveGuidanceState();
     renderGuidanceProfileOptions();
     loadGuidanceFields();
   });
   $('addGuidanceProfile').addEventListener('click', () => {
+    flushAllPendingSaves();
     openProfileNameDialog('add');
   });
   $('renameGuidanceProfile').addEventListener('click', () => {
@@ -73,27 +95,67 @@ export function buildSettingsScriptEvents(): string {
       keepFocusInDialog($(id), event);
     });
   }
-  $('focusAreas').addEventListener('change', () => saveGuidanceField('reviewFocusAreas'));
-  $('customInstructions').addEventListener('change', () => saveGuidanceField('reviewCustomInstructions'));
-  $('guidanceGlobs').addEventListener('change', () => saveGuidanceField('reviewGuidanceGlobs'));
+  $('focusAreas').addEventListener('input', () => {
+    scheduleFieldSave('focusAreas', 350, () => saveGuidanceField('reviewFocusAreas'));
+  });
+  $('focusAreas').addEventListener('change', () => {
+    flushFieldSave('focusAreas', () => saveGuidanceField('reviewFocusAreas'));
+  });
+  $('customInstructions').addEventListener('input', () => {
+    scheduleFieldSave('customInstructions', 350, () => saveGuidanceField('reviewCustomInstructions'));
+  });
+  $('customInstructions').addEventListener('change', () => {
+    flushFieldSave('customInstructions', () => saveGuidanceField('reviewCustomInstructions'));
+  });
+  $('guidanceGlobs').addEventListener('input', () => {
+    scheduleFieldSave('guidanceGlobs', 350, () => saveGuidanceField('reviewGuidanceGlobs'));
+  });
+  $('guidanceGlobs').addEventListener('change', () => {
+    flushFieldSave('guidanceGlobs', () => saveGuidanceField('reviewGuidanceGlobs'));
+  });
   $('repositoryInstructionsRepo').addEventListener('change', (event) => {
+    flushAllPendingSaves();
     selectedRepository = event.target.value;
     renderRepositoryInstructions();
   });
+  $('repositoryInstructionsText').addEventListener('input', () => {
+    if (!selectedRepository) return;
+    const repo = selectedRepository;
+    scheduleFieldSave('repositoryInstructionsText', 350, () => {
+      if (!repo) return;
+      const trimmed = String($('repositoryInstructionsText').value || '').trim();
+      if (!trimmed) return;
+      const next = { ...repositoryInstructions, [repo]: trimmed };
+      repositoryInstructions = next;
+      save('repositoryReviewInstructions', next);
+    });
+  });
   $('repositoryInstructionsText').addEventListener('change', (event) => {
+    cancelFieldSave('repositoryInstructionsText');
     if (!selectedRepository) return;
     const next = { ...repositoryInstructions };
     const value = String(event.target.value || '').trim();
-    if (value) next[selectedRepository] = value;
-    else delete next[selectedRepository];
-    saveRepositoryInstructions(next);
+    if (value) {
+      next[selectedRepository] = value;
+      repositoryInstructions = next;
+      renderRepositoryInstructions();
+      save('repositoryReviewInstructions', repositoryInstructions);
+    } else if (selectedRepository in next || selectedRepository in acknowledgedRepoInstructions) {
+      delete next[selectedRepository];
+      saveRepositoryInstructions(next);
+    }
   });
   $('forgetRepositoryInstructions').addEventListener('click', () => {
+    cancelFieldSave('repositoryInstructionsText');
     if (!selectedRepository) return;
     const next = { ...repositoryInstructions };
     delete next[selectedRepository];
     saveRepositoryInstructions(next);
   });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushAllPendingSaves();
+  });
+  window.addEventListener('pagehide', flushAllPendingSaves);
   $('reviewSelfCritique').addEventListener('change', () => save('reviewSelfCritique', $('reviewSelfCritique').checked));
   $('reviewSupervisorEnabled').addEventListener('change', () => save('reviewSupervisorEnabled', $('reviewSupervisorEnabled').checked));
   $('reviewBuiltInRules').addEventListener('change', () => save('reviewBuiltInRules', $('reviewBuiltInRules').checked));
@@ -148,6 +210,7 @@ export function buildSettingsScriptEvents(): string {
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if (msg.type === 'init') {
+      cancelAllPendingSaves();
       state = msg.state;
       $('provider').value = state.provider;
       $('claudeModel').value = state.reviewModel;
@@ -179,6 +242,7 @@ export function buildSettingsScriptEvents(): string {
       renderCopilotModels(msg.copilotModels || [], state.reviewModelCopilot, (state.reviewSecondReviewerModel || '').trim());
       if (msg.refreshingModels === true) setModelsRefreshing(true);
       applyProviderVisibility(state.provider);
+      seedSavedPayloads();
     } else if (msg.type === 'models') {
       setModelsRefreshing(false);
       renderCopilotModels(msg.copilotModels || [], copilotModelValue(), secondReviewerValue());
@@ -188,8 +252,7 @@ export function buildSettingsScriptEvents(): string {
         setStatus(msg.message || (msg.ok === false ? 'Could not refresh models.' : 'Model list refreshed.'), msg.ok === false ? 'error' : 'ok');
       }
     } else if (msg.type === 'saveResult') {
-      if (typeof msg.requestId === 'number' && msg.requestId !== latestSaveRequestId) return;
-      setStatus(msg.ok ? (msg.message || 'Saved.') : (msg.message || 'Could not save setting.'), msg.ok ? 'ok' : 'error');
+      handleSaveResult(msg);
     } else if (msg.type === 'testResult') {
       $('testConnection').textContent = 'Check connection';
       setStatus(msg.ok ? (msg.message || 'Connection looks good.') : (msg.message || 'Connection check failed.'), msg.ok ? 'ok' : 'error');

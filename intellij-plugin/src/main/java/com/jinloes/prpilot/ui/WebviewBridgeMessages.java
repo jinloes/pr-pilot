@@ -189,11 +189,18 @@ final class WebviewBridgeMessages {
 
     record ActivatePrMsg(String type, @JsonProperty("pr") WebviewPr pr, String source) {}
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record SetupRequiredMsg(
             String type,
             String reason,
             String detail,
-            @JsonProperty("providerReadiness") ProviderReadinessDto providerReadiness) {}
+            @JsonProperty("providerReadiness") ProviderReadinessDto providerReadiness,
+            @JsonProperty("ghAuthCommand") String ghAuthCommand) {
+        SetupRequiredMsg(
+                String type, String reason, String detail, ProviderReadinessDto providerReadiness) {
+            this(type, reason, detail, providerReadiness, null);
+        }
+    }
 
     record ReviewGenerationSettings(
             IntellijClaudeService.ReviewRuntimeSettings runtime,

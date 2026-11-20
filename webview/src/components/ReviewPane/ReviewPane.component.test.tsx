@@ -406,6 +406,32 @@ describe('narrow review footer', () => {
     expect(outgoingOf(cefQuery, 'deleteDraft')).toHaveLength(1)
   })
 
+  it('exposes aria-pressed on the Chat toggle and accessible risk description on narrow More review actions', async () => {
+    const previousWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 360 })
+    try {
+      const user = userEvent.setup()
+      installHost()
+      render(<ReviewPane pr={pr} />)
+      loadDraftPresent({
+        summary: 'Summary.',
+        verdict: 'COMMENT',
+        lineComments: [{ file: 'src/missing.ts', line: 99, type: 'issue', body: 'Unanchored risk.', severity: 'major' }],
+      })
+
+      const chatButton = screen.getByRole('button', { name: 'Chat' })
+      expect(chatButton).toHaveAttribute('aria-pressed', 'false')
+      await user.click(chatButton)
+      expect(chatButton).toHaveAttribute('aria-pressed', 'true')
+
+      const moreActions = screen.getByRole('button', { name: 'More review actions' })
+      expect(moreActions).toHaveAccessibleDescription('1 risk')
+      expect(moreActions.getAttribute('title')).toBe('1 risk')
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: previousWidth })
+    }
+  })
+
   it('opens orphan targets from validationDiff or coverage paths and hides unverified paths', async () => {
     const user = userEvent.setup()
     const cefQuery = installHost()

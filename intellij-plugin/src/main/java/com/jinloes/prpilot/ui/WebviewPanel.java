@@ -56,11 +56,14 @@ import com.jinloes.prpilot.ui.WebviewBridgeMessages.SetupRequiredMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.WebviewPr;
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -1025,7 +1028,48 @@ public class WebviewPanel implements Disposable {
     }
 
     void pushSetupRequired(String reason, String detail, ProviderReadinessDto providerReadiness) {
-        pushMessage(new SetupRequiredMsg("setupRequired", reason, detail, providerReadiness));
+        String baseUrl =
+                getApplication() != null
+                        ? PluginSettings.getInstance().getGithubBaseUrl()
+                        : "https://github.com";
+        pushMessage(
+                new SetupRequiredMsg(
+                        "setupRequired",
+                        reason,
+                        detail,
+                        providerReadiness,
+                        buildGhAuthLoginCommand(baseUrl)));
+    }
+
+    static String buildGhAuthLoginCommand(String rawBaseUrl) {
+        String candidate = StringUtils.stripEnd(StringUtils.trimToEmpty(rawBaseUrl), "/");
+        if (candidate.isEmpty()) {
+            return "gh auth login";
+        }
+        try {
+            URI uri = new URI(candidate);
+            String authority = uri.getRawAuthority();
+            String host = uri.getHost();
+            if ("https".equalsIgnoreCase(uri.getScheme())
+                    && StringUtils.isNotBlank(host)
+                    && !StringUtils.endsWith(authority, ":")
+                    && uri.getPort() == -1
+                    && uri.getUserInfo() == null
+                    && uri.getQuery() == null
+                    && uri.getFragment() == null
+                    && (StringUtils.isEmpty(uri.getPath()) || "/".equals(uri.getPath()))) {
+                String lowerHost = host.toLowerCase(Locale.ROOT);
+                if (lowerHost.length() <= 253
+                        && !"github.com".equals(lowerHost)
+                        && lowerHost.matches(
+                                "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$")) {
+                    return "gh auth login --hostname " + lowerHost;
+                }
+            }
+        } catch (URISyntaxException ignored) {
+            // Fall back to default login command when base URL is unparseable.
+        }
+        return "gh auth login";
     }
 
     public void activatePr(PullRequest pr, String source) {

@@ -185,7 +185,13 @@ export function PRList({ onSelect, selectedPr }: Props) {
     const accepted = onSelect?.(pr)
     if (accepted === false) return
     setSelected(prKey(pr))
-    sendToHost({ type: 'selectPR', number: pr.number, owner: pr.owner, repo: pr.repo })
+    sendToHost({
+      type: 'selectPR',
+      number: pr.number,
+      owner: pr.owner,
+      repo: pr.repo,
+      ...(pr.author ? { author: pr.author } : {}),
+    })
   }
 
   function fetchWithFilters(

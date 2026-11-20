@@ -121,6 +121,13 @@ for (const [theme, token] of [['light', lightToken], ['dark', darkToken]] as con
     assert.ok(contrastRgb(hslToRgb(token('foreground')), bubble) >= 4.5)
   })
 
+  void test(`${theme} normal diff gutter numbers and hover/focus add-comment affordance meet WCAG AA contrast`, () => {
+    const gutterRatio = contrast(token('muted-foreground'), token('background'))
+    assert.ok(gutterRatio >= 4.5, `${theme} muted-foreground on background is ${gutterRatio.toFixed(2)}:1`)
+    const hoverPlusRatio = contrast(token('foreground'), token('accent'))
+    assert.ok(hoverPlusRatio >= 4.5, `${theme} foreground on accent is ${hoverPlusRatio.toFixed(2)}:1`)
+  })
+
   for (const redToken of ['status-issue', 'status-changes']) {
     void test(`${theme} ${redToken} text keeps WCAG AA contrast on every settled surface it is placed on`, () => {
       const red = token(redToken)
@@ -137,8 +144,14 @@ for (const [theme, token] of [['light', lightToken], ['dark', darkToken]] as con
   }
 }
 
-void test('high-contrast themes inherit the status tokens of their light or dark base', () => {
+void test('high-contrast themes inherit the status tokens of their light or dark base and use them for diff lines', () => {
   const block = indexCss().match(/\.high-contrast\s*\{([\s\S]*?)\n\s*\}/)?.[1]
   assert.ok(block, 'Missing .high-contrast token block')
-  assert.doesNotMatch(block, /--status-/)
+  assert.doesNotMatch(block, /^\s*--status-[a-z-]+:/m)
+  assert.match(block, /--diff-add-foreground:\s*var\(--status-approve\);/)
+  assert.match(block, /--diff-delete-foreground:\s*var\(--status-issue\);/)
+  for (const [theme, token] of [['highContrastLight', lightToken], ['highContrastDark', darkToken]] as const) {
+    assert.ok(contrast(token('status-approve'), token('background')) >= 4.5, `${theme} add foreground contrast`)
+    assert.ok(contrast(token('status-issue'), token('background')) >= 4.5, `${theme} delete foreground contrast`)
+  }
 })

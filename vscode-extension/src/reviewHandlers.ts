@@ -1,6 +1,7 @@
 import * as claude from './claude';
 import { randomUUID } from 'crypto';
 import * as copilot from './copilot';
+import { PendingDraftIndex } from './pendingDraftIndex';
 import { composeCustomInstructions } from './repositoryInstructions';
 import { GitHubOperationError, LocalPrDiffError, providerNotInstalledMessage, toUserFacingError } from './userFacingError';
 import {
@@ -29,6 +30,8 @@ export interface ReviewHandlerApi {
 }
 
 export function createReviewHandlers(deps: HandlerDependencies): ReviewHandlerApi {
+const fallbackPendingDraftIndex = new PendingDraftIndex();
+const pendingDraftIndex = () => deps.pendingDraftIndex?.() ?? fallbackPendingDraftIndex;
 
 async function handleGenerateReview(state: ViewState, msg: Record<string, unknown>,
     deep?: { pending: PreparedDeepReview; server: string }): Promise<void> {
@@ -421,6 +424,10 @@ async function handleSaveDraft(state: ViewState, msg: Record<string, unknown>): 
         if (mutation.status !== 'ok' || !mutation.reviewId) throw new Error(mutation.message);
         const { reviewId, commentsDropped } = mutation;
         await state.draftRecoveryStore.clear(key);
+        await pendingDraftIndex().add(owner, repo, number);
+        if (!state.disposed) {
+            deps.push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: true });
+        }
         const tracked = state.generatedReviews.get(key);
         if (tracked) {
             state.generatedReviews.set(key, {
@@ -434,7 +441,6 @@ async function handleSaveDraft(state: ViewState, msg: Record<string, unknown>): 
         state.pendingReviewId = reviewId;
         state.pendingReviewKey = key;
         deps.push(state, { type: 'draftSaved', prKey: key, saveId, reviewId, commentsDropped });
-        deps.push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: true });
     } catch (err) {
         if (deps.prKey(state.activePR) !== key || state.selectionRevision !== selectionRevision) return;
         deps.push(state, {
@@ -469,6 +475,10 @@ async function handleSubmitReview(state: ViewState, msg: Record<string, unknown>
             deps.githubBaseUrl(), owner, repo, number, reviewId, verdict, comment);
         if (mutation.status !== 'ok') throw new Error(mutation.message);
         await state.draftRecoveryStore.clear(key);
+        await pendingDraftIndex().remove(owner, repo, number);
+        if (!state.disposed) {
+            deps.push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: false });
+        }
         if (deps.prKey(state.activePR) !== key || state.selectionRevision !== selectionRevision) return;
         void recordReviewOutcome(state, key);
         if (state.pendingReviewId === reviewId && state.pendingReviewKey === key) {
@@ -476,7 +486,6 @@ async function handleSubmitReview(state: ViewState, msg: Record<string, unknown>
             state.pendingReviewKey = null;
         }
         deps.push(state, { type: 'reviewSubmitted', prKey: key });
-        deps.push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: false });
     } catch (err) {
         if (deps.prKey(state.activePR) !== key || state.selectionRevision !== selectionRevision) return;
         deps.push(state, {
@@ -541,13 +550,16 @@ async function handleDeleteDraft(state: ViewState, msg: Record<string, unknown>)
         if (mutation.status !== 'ok') throw new Error(mutation.message);
         await state.draftRecoveryStore.clear(key);
         state.generatedReviews.delete(key);
+        await pendingDraftIndex().remove(owner, repo, number);
+        if (!state.disposed) {
+            deps.push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: false });
+        }
         if (deps.prKey(state.activePR) !== key || state.selectionRevision !== selectionRevision) return;
         if (state.pendingReviewId === reviewId && state.pendingReviewKey === key) {
             state.pendingReviewId = null;
             state.pendingReviewKey = null;
         }
         deps.push(state, { type: 'draftDeleted', prKey: key });
-        deps.push(state, { type: 'prDraftStatusUpdated', number, owner, repo, hasReviewDraft: false });
     } catch (err) {
         if (deps.prKey(state.activePR) !== key || state.selectionRevision !== selectionRevision) return;
         deps.push(state, {
