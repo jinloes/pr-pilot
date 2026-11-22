@@ -50,13 +50,13 @@ def secureTraversalJdk = providers.provider {
 // jacocoAggregateReport's XML to diff-cover. Code exercised only inside child JVMs (the
 // review-engine source-inventory and semantic workers) is not measured.
 def coverageEnabled = providers.gradleProperty('coverage').isPresent()
-def jacocoVersion = '0.8.15'
+def jacocoVersion = '0.8.16'
 
 subprojects {
     // Mutation testing runs nightly (.github/workflows/mutation.yml) and is report-only.
     plugins.withId('info.solidsoft.pitest') {
         pitest {
-            pitestVersion = '1.30.1'
+            pitestVersion = '1.30.2'
             junit5PluginVersion = '1.2.3'
             targetClasses = ['com.jinloes.prpilot.*']
             threads = 4
