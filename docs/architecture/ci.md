@@ -150,9 +150,12 @@ cannot read Gradle dependencies from `build.gradle`; `dependency-submission.yml`
 resolved graph on every push. A pull request's own Gradle changes are therefore not reviewed
 before merge; Dependabot alerts cover them once they land. The repository's dependency graph must
 stay enabled, or both the review and the submission jobs fail; enabling Dependabot alerts enables
-it. Submission resolves every configuration, so it excludes the `*_runIdeLocal` ones: they point
-at a local IntelliJ installation and fail without `ideaLocalPath` by design (see "Pinned IntelliJ
-SDK versus local sandbox" in `hosts-and-sidecar.md`).
+it. Submission resolves every configuration, so it excludes `*_runIdeLocal` (points at a local
+IntelliJ installation and fails without `ideaLocalPath` by design; see "Pinned IntelliJ SDK versus
+local sandbox" in `hosts-and-sidecar.md`) and `testUi*` (registered unconditionally by the
+IntelliJ Platform plugin 2.20+ for its unused IDE Starter UI-test harness, whose squashed bundle
+pulls unpatched jars such as abandoned `org.lz4:lz4-java`; `intellij-plugin/build.gradle` also
+disables `testUi` and clears `testUiImplementation`).
 
 ### Transitive security fixes are temporary floors
 

@@ -107,6 +107,18 @@ test {
     enabled = false
 }
 
+// `org.jetbrains.intellij.platform` 2.20+ unconditionally registers a `testUi` source set and
+// injects `com.jetbrains.intellij.tools:ide-starter-squashed` (which pulls unpatched jars including
+// abandoned `org.lz4:lz4-java`). Disable the unused task and clear its lazy dependency hook.
+tasks.named('testUi') {
+    enabled = false
+}
+configurations.named('testUiImplementation') {
+    withDependencies { deps ->
+        deps.clear()
+    }
+}
+
 // ── Webview build ──────────────────────────────────────────────────────────
 
 def webviewSrcDir = "$rootDir/webview"

@@ -39,5 +39,6 @@ jobs:
           cache-provider: basic
           dependency-graph: generate-and-submit
           # runIdeLocal's configurations point at a local IntelliJ install and, by design, fail to
-          # resolve without -PideaLocalPath. They are not published dependencies.
-          dependency-graph-exclude-configurations: '.*_runIdeLocal'
+          # resolve without -PideaLocalPath. testUi* is registered unconditionally by the IntelliJ
+          # Platform plugin for its unused UI-test source set. Neither is a project dependency.
+          dependency-graph-exclude-configurations: '.*_runIdeLocal|testUi.*'
