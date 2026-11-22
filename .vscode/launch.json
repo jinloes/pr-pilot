@@ -1,5 +1,5 @@
 {
-  // VS Code equivalent of the IntelliJ "Run IntelliJ Plugin (runIde)" config.
+  // VS Code equivalent of the IntelliJ "Run IntelliJ Plugin (runIdeLocal)" config.
   // Open the repository root in VS Code and press F5 (or pick one of these configs
   // in the Run and Debug view) to launch an Extension Development Host with PR Pilot loaded.
   //
