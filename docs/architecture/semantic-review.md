@@ -7,7 +7,7 @@ active constraint future code must respect.
 
 The optional 262+ IntelliJ MCP source-inventory prerequisite has an internal Java consumer used by
 the shared opt-in semantic-review collector. Physical coverage and native readiness are separate
-mandatory authorities. The ordinary plugin compiles against 2026.1.4 and loads without MCP; below
+mandatory authorities. The ordinary plugin compiles against 2026.1.5.1 and loads without MCP; below
 262 or on an unknown MCP ABI the inventory tool is not advertised.
 
 Protocol v2 DISCOVER independently enumerates VFS leaves and native per-file source membership,

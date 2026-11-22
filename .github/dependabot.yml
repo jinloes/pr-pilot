@@ -35,8 +35,21 @@ updates:
       webview:
         patterns: ["*"]
         # A Playwright bump also needs the CI container image bumped; keep it in its own PR.
-        exclude-patterns: ["@playwright/test"]
+        # vitest and @vitest/* lock exact matching versions and are grouped below across majors too.
+        exclude-patterns: ["@playwright/test", "vitest", "@vitest/*"]
         update-types: [minor, patch]
+      vitest:
+        patterns: ["vitest", "@vitest/*"]
+        update-types: [major, minor, patch]
+    ignore:
+      # typescript-eslint peers on typescript <6.1.0.
+      - dependency-name: "typescript"
+        versions: [">= 7.0.0"]
+      # eslint-plugin-jsx-a11y peers on eslint ^9.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /vscode-extension
@@ -52,3 +65,6 @@ updates:
       # vsce rejects a declared @types/vscode newer than engines.vscode.
       - dependency-name: "@types/vscode"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # typescript-eslint peers on typescript <6.1.0.
+      - dependency-name: "typescript"
+        versions: [">= 7.0.0"]

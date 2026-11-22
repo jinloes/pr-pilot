@@ -4,15 +4,15 @@
 buildscript {
     dependencies {
         constraints {
-            classpath 'com.fasterxml.jackson.core:jackson-databind:2.22.4'
-            classpath 'org.jsoup:jsoup:1.23.2'
+            classpath 'com.fasterxml.jackson.core:jackson-databind:2.23.0'
+            classpath 'org.jsoup:jsoup:1.24.1'
         }
     }
 }
 
 plugins {
     id 'java'
-    id 'org.jetbrains.intellij.platform' version '2.19.0'
+    id 'org.jetbrains.intellij.platform' version '2.20.1'
 }
 
 group = 'com.jinloes.prpilot'
@@ -39,9 +39,9 @@ dependencies {
     implementation project(':github-engine')
     implementation project(':review-engine')
 
-    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.22.4'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.23.0'
     implementation 'commons-io:commons-io:2.22.0'
-    implementation 'org.apache.commons:commons-lang3:3.21.0'
+    implementation 'org.apache.commons:commons-lang3:3.22.0'
     implementation 'org.apache.commons:commons-text:1.15.0'
     implementation 'org.apache.commons:commons-collections4:4.6.0'
 
@@ -54,7 +54,7 @@ dependencies {
 
     intellijPlatform {
         // Compile against the ordinary-review floor, never a user's running IDE.
-        intellijIdeaUltimate('2026.1.4')
+        intellijIdeaUltimate('2026.1.5.1')
         bundledPlugin('com.intellij.modules.jcef')
         bundledPlugin('com.intellij.mcpServer')
         pluginVerifier()
@@ -105,6 +105,18 @@ check.dependsOn unitTest
 // Unit tests run via `unitTest` instead.
 test {
     enabled = false
+}
+
+// `org.jetbrains.intellij.platform` 2.20+ unconditionally registers a `testUi` source set and
+// injects `com.jetbrains.intellij.tools:ide-starter-squashed` (which pulls unpatched jars including
+// abandoned `org.lz4:lz4-java`). Disable the unused task and clear its lazy dependency hook.
+tasks.named('testUi') {
+    enabled = false
+}
+configurations.named('testUiImplementation') {
+    withDependencies { deps ->
+        deps.clear()
+    }
 }
 
 // ── Webview build ──────────────────────────────────────────────────────────

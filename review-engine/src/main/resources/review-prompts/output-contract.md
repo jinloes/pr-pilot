@@ -15,7 +15,7 @@ Required fields: "summary", "lineComments", and "verdict". The engine-internal "
 Example line comments (they illustrate the field shape — do not copy the content):
 [
   {"file": "src/auth/Session.java", "line": 42, "type": "issue", "severity": "major", "category": "security", "confidence": "high", "body": "Token is compared with equals(), which is not constant-time; use MessageDigest.isEqual to close the timing side channel.", "rationale": "Line 42 compares the secret token with String.equals."},
-  {"file": "src/auth/Session.java", "line": 58, "type": "suggestion", "severity": "minor", "category": "maintainability", "confidence": "medium", "body": "Extract the 900-second TTL into a named constant so it is not duplicated.", "rationale": "The literal 900 appears on lines 58 and 71."}
+  {"file": "src/api/Errors.java", "line": 58, "type": "suggestion", "severity": "minor", "category": "maintainability", "confidence": "medium", "body": "Reuse ErrorCauses.unwrap to remove the duplicate cause-chain traversal while keeping this API's status mapping local.", "rationale": "src/shared/ErrorCauses.java implements the same cycle-safe traversal; only the mapping policy differs."}
 ]
 
 Field constraints:

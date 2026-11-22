@@ -112,7 +112,7 @@ query, fragment, backslash, semicolon, or traversal segments (`404`), and HTML r
 
 ### Pinned IntelliJ SDK versus local sandbox
 
-Compilation, ordinary tests, packaging, CI, and the original `runIde` resolve the 2026.1.4 SDK
+Compilation, ordinary tests, packaging, CI, and the original `runIde` resolve the 2026.1.5.1 SDK
 unconditionally. `ideaLocalPath` is sandbox-only: the separate `intellijPlatformTesting.runIde`
 registration, `runIdeLocal`, owns independent platform/runtime/sandbox configurations. Its
 installed-build selection is lazy, so ordinary build/check must work without an eligible local

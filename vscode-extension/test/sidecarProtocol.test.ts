@@ -15,7 +15,7 @@ import {
   parsePrSearchResult,
   parseStarredReposResult,
 } from '../src/sidecar';
-import { parseReviewResult } from '../src/sidecarProtocol';
+import { parseCopilotModelsResult, parseReviewResult } from '../src/sidecarProtocol';
 import { initializeResult } from './sidecarHarness';
 
 test('supplemental GitHub parsers accept valid token-free results', () => {
@@ -370,8 +370,7 @@ test('parseIncrementalDiffResult rejects malformed results', () => {
   assert.equal(parseIncrementalDiffResult(null), null);
 });
 
-test('parseCopilotModelsResult validates ACCOUNT, CLI_HELP, and NONE payloads', async () => {
-  const { parseCopilotModelsResult } = await import('../src/sidecarProtocol');
+test('parseCopilotModelsResult validates ACCOUNT, CLI_HELP, and NONE payloads', () => {
   assert.deepEqual(
     parseCopilotModelsResult({ models: ['claude-sonnet-4.6', 'gpt-5.5'], source: 'ACCOUNT', failureReason: '' }),
     { models: ['claude-sonnet-4.6', 'gpt-5.5'], source: 'ACCOUNT', failureReason: '' },

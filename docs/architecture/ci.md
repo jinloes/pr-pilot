@@ -62,7 +62,7 @@ synthetic ones (`EngineCapabilityCoverageTest`); otherwise it passes locally and
 neither fits a pull-request time budget and neither enforces a score (no `mutationThreshold`,
 Stryker `break: null`). Stryker runs incrementally from `reports/stryker-incremental.json`, which
 the workflow caches under a per-run key and restores by prefix, so each run starts from the newest
-results. PIT runs a full analysis every night: PIT 1.30.1 fails with "no history plugin has been
+results. PIT runs a full analysis every night: PIT 1.30.2 fails with "no history plugin has been
 installed" when history is enabled, so do not set `enableDefaultIncrementalAnalysis` or
 `withHistory`. PIT skips the review-engine tests that launch real processes, and the classes only
 they cover, because PIT's minions do not receive the `test` task's jar and fixture system
@@ -123,12 +123,17 @@ of the default enhanced provider, which is proprietary. `zizmor` enforces most o
 ### Dependency updates wait a week and arrive grouped
 
 Dependabot opens weekly minor and patch updates grouped per ecosystem, with a 7-day cooldown so a
-release that is yanked or found compromised in its first week is never proposed. Two packages stay
-out of the groups: `@playwright/test` (see "Playwright container image") and `@types/vscode`, whose
-minor and major updates are ignored because `vsce` rejects a declared `@types/vscode` newer than
-`engines.vscode`; bump it together with `engines.vscode`. `vsce` itself is pinned in the `vsce`
-script of `vscode-extension/package.json`, which `package-vsix.mjs` and the release workflow both
-call. Dependabot cannot see a version inside `npm exec`, so bump that pin by hand.
+release that is yanked or found compromised in its first week is never proposed. `@playwright/test`
+stays out of the `webview` group (see "Playwright container image"), while `vitest` and
+`@vitest/*` share their own group across major, minor and patch updates because
+`@vitest/coverage-v8` peers on the exact `vitest` version. `@types/vscode` minor and major updates
+are ignored because `vsce` rejects a declared `@types/vscode` newer than `engines.vscode`; bump it
+together with `engines.vscode`. Peer-blocked majors are ignored until their plugins catch up:
+`typescript` `>= 7.0.0` in both npm packages (`typescript-eslint` peers on `<6.1.0`), and `eslint`
+plus `@eslint/js` majors in `webview` (`eslint-plugin-jsx-a11y` peers on ESLint 9). `vsce` itself
+is pinned in the `vsce` script of `vscode-extension/package.json`, which `package-vsix.mjs` and the
+release workflow both call. Dependabot cannot see a version inside `npm exec`, so bump that pin by
+hand.
 
 ### Dependency review covers npm; Gradle comes from submission
 
@@ -142,9 +147,12 @@ cannot read Gradle dependencies from `build.gradle`; `dependency-submission.yml`
 resolved graph on every push. A pull request's own Gradle changes are therefore not reviewed
 before merge; Dependabot alerts cover them once they land. The repository's dependency graph must
 stay enabled, or both the review and the submission jobs fail; enabling Dependabot alerts enables
-it. Submission resolves every configuration, so it excludes the `*_runIdeLocal` ones: they point
-at a local IntelliJ installation and fail without `ideaLocalPath` by design (see "Pinned IntelliJ
-SDK versus local sandbox" in `hosts-and-sidecar.md`).
+it. Submission resolves every configuration, so it excludes `*_runIdeLocal` (points at a local
+IntelliJ installation and fails without `ideaLocalPath` by design; see "Pinned IntelliJ SDK versus
+local sandbox" in `hosts-and-sidecar.md`) and `testUi*` (registered unconditionally by the
+IntelliJ Platform plugin 2.20+ for its unused IDE Starter UI-test harness, whose squashed bundle
+pulls unpatched jars such as abandoned `org.lz4:lz4-java`; `intellij-plugin/build.gradle` also
+disables `testUi` and clears `testUiImplementation`).
 
 ### Transitive security fixes are temporary floors
 
@@ -160,13 +168,17 @@ highest-version-wins resolution: a patched Jackson, Log4j or Commons Lang declar
 module is downgraded unless `sidecar/build.gradle` raises the matching `ext[...]` BOM property.
 Since Boot 4, `jackson-bom.version` names the Jackson 3 BOM; the Jackson 2 line every module uses is
 `jackson-2-bom.version`, and setting the former to a 2.x version breaks the whole BOM import.
-npm has two floors of its own. `webview` overrides `qs`, because Stryker requires
-`typed-rest-client` 2.3.x, which pins `qs` 6.15.1 exactly. `vscode-extension` overrides
-`serialize-javascript`, because `@vscode/test-cli` requires mocha 11, and every mocha 11 release
-depends on 6.x. Each floor is temporary: remove it once the plugin, BOM or parent package that
-pinned the old version moves past it, after checking what resolves without it
-(`buildEnvironment`, `dependencyInsight` or `npm ls`). Refresh lockfiles by hand with
-`npm update --before=<date a week ago>` so they keep Dependabot's 7-day cooldown.
+npm also floors vulnerable transitive ranges via `overrides`. `webview` overrides `qs` (Stryker's
+`typed-rest-client` 2.3.x pins `qs` 6.15.1), `glob` (`c8`/`test-exclude` depends on 13.x), and
+`minimatch@^10.0.0` (Stryker, `test-exclude`, and `@typescript-eslint/typescript-estree` depend on
+10.x; scoping to `^10.0.0` leaves ESLint 9's CJS `minimatch` 3.x untouched). `vscode-extension`
+overrides `serialize-javascript` and `diff` (`@vscode/test-cli` requires mocha 11, which depends on
+`serialize-javascript` 6.x and `diff` 7.x) plus `glob` and `minimatch` (`mocha`, `test-exclude`,
+`@vscode/test-cli`, and `@typescript-eslint/typescript-estree` depend on 9.x–13.x). Each floor is
+temporary: remove it once the plugin, BOM or parent package that pinned the old version moves past
+it, after checking what resolves without it (`buildEnvironment`, `dependencyInsight` or `npm ls`).
+Refresh lockfiles by hand with `npm update --before=<date a week ago>` so they keep Dependabot's
+7-day cooldown.
 
 ### CodeQL runs as advanced setup
 

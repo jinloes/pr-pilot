@@ -4,8 +4,8 @@
 buildscript {
     dependencies {
         constraints {
-            classpath 'com.fasterxml.jackson.core:jackson-databind:2.22.4'
-            classpath 'org.apache.commons:commons-lang3:3.21.0'
+            classpath 'com.fasterxml.jackson.core:jackson-databind:2.23.0'
+            classpath 'org.apache.commons:commons-lang3:3.22.0'
             classpath 'org.apache.httpcomponents.client5:httpclient5:5.6.5'
             classpath 'org.apache.httpcomponents.core5:httpcore5:5.4.4'
             classpath 'org.apache.httpcomponents.core5:httpcore5-h2:5.4.4'
@@ -15,7 +15,7 @@ buildscript {
 
 plugins {
     id 'idea'
-    id 'com.diffplug.spotless' version '8.10.4' apply false
+    id 'com.diffplug.spotless' version '8.11.0' apply false
     id 'org.springframework.boot' version '4.1.2' apply false
     id 'io.spring.dependency-management' version '1.1.7' apply false
     id 'info.solidsoft.pitest' version '1.19.0' apply false
@@ -50,13 +50,13 @@ def secureTraversalJdk = providers.provider {
 // jacocoAggregateReport's XML to diff-cover. Code exercised only inside child JVMs (the
 // review-engine source-inventory and semantic workers) is not measured.
 def coverageEnabled = providers.gradleProperty('coverage').isPresent()
-def jacocoVersion = '0.8.15'
+def jacocoVersion = '0.8.16'
 
 subprojects {
     // Mutation testing runs nightly (.github/workflows/mutation.yml) and is report-only.
     plugins.withId('info.solidsoft.pitest') {
         pitest {
-            pitestVersion = '1.30.1'
+            pitestVersion = '1.30.2'
             junit5PluginVersion = '1.2.3'
             targetClasses = ['com.jinloes.prpilot.*']
             threads = 4

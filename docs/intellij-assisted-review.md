@@ -10,7 +10,7 @@ user-facing overview.
 `pr_pilot_source_inventory` is an optional, **262+ only** IntelliJ MCP tool with two
 operations: `DISCOVER` and `VERIFY`. It is not deep review, import/index readiness,
 document freshness, or a `READY` signal. Ordinary reviews still compile against
-**2026.1.4 (261)**; `ideaLocalPath` does not select the compile SDK. MCP is optional,
+**2026.1.5.1 (261)**; `ideaLocalPath` does not select the compile SDK. MCP is optional,
 261 advertises no inventory tool, and an unknown MCP constructor ABI disables only
 this tool. No automatic open, trust, import, refresh, document save, or indexing is
 performed.

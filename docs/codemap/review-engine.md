@@ -24,7 +24,13 @@ guidance.
   `ReviewPromptsRecallAndHistoryTest`, sharing `ReviewPromptsTestSupport`.
 - `review/ReviewInstructions.java` and `ReviewOutputContract.java` - First-pass instruction text
   (preamble with claim checks, bug-hunt and security checklists, Pass A/B, recall variant) and the
-  JSON response contract appended by every finding-emitting stage.
+  JSON response contract appended by every finding-emitting stage. The bug-hunt checklist challenges
+  restrictive guards against current producer/domain contracts, not parseability or copied tests;
+  ordinary/recall propagation and evidence/tool limits are covered by `ReviewPromptsTest`.
+  `ReviewReusePolicyPromptsTest` covers policy-ownership counterarguments across Pass A, the
+  built-in `helper-reuse` rule, critique, and the shared output example.
+  `ReviewDownstreamContextPromptsTest` covers transitive identity/result-completeness checks,
+  permitted external contract evidence, chunked propagation, and critique re-verification.
 - `review/ReviewHygienePrompts.java`, `ReviewRulePrompts.java`, and `ReviewCritiquePrompts.java` -
   Recall-mode hygiene pass, review-rule selection and per-rule review, and self-critique (with
   reviewer corroboration, and opt-in drop reasons) prompts. Tests: `ReviewRulePromptsTest`,

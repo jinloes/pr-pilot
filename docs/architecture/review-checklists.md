@@ -25,6 +25,62 @@ production change whose behavior it covered, and the critique's removed-code kee
 cross-file anchor for a deleted test or assertion only. Every other removed-code finding still
 anchors in its own file.
 
+### Restrictive invariants require current contract evidence
+The shared Pass B checklist challenges new or changed range, sign, sentinel, format, uniqueness,
+and ordering assumptions by tracing the field to its authoritative definition, producers, and
+consumers. Worktree migration evidence and supplied history can expose a stale assumption even
+when sibling validators and new tests agree. History summaries are clues, not proof; neither a
+signed type nor successful parsing establishes domain validity or authorization.
+
+A finding must identify a value or value class the current contract permits, its path to the
+changed guard, and the incorrect rejection or discard. Without that evidence it is omitted.
+Recommendations must preserve sentinel, authorization, and malformed-input protections. External
+lookup remains limited to relevant read-only cross-repo MCP tools already exposed and permitted by
+the session; this check adds no tool permissions or automatic repository-wide history search.
+The same checklist reaches both hosts, ordinary and recall reviews, and chunked batch and
+reconciliation prompts through the shared engine prompt builder.
+
+### Downstream context
+Pass B traces new or changed remote reads, including new callers of unchanged helpers, through
+wrappers, graph resolvers, decorators, and secondary fetches. The check compares the actual
+identity, tenant, delegation, scope, and operation-specific context against the downstream contract.
+It follows permission-filtered empty/partial results and errors through the changed caller's
+absence/completeness mapping. This is a correctness check, not dependent on a changed downstream
+signature or a missing external caller.
+
+Local source comes first. If insufficient, the primary and critique prompts allow relevant
+read-only MCP search and authoritative source/contract lookup only when already exposed and
+permitted. External evidence must apply to the PR's dependency/version and cite repository, path,
+symbol, revision/version when available, contract behavior, and the local failure path in
+`rationale`. Search snippets, draft rationales, and author claims are not proof. Critique retrieves
+the source again; if unavailable and no other evidence confirms the finding, it drops it.
+
+Neither an available context field nor an unexplained empty result proves a missing-context bug;
+authorization filtering, missing ingestion, authoritative absence, and transport failure must not
+be conflated. Fixes must preserve inbound authorization and tenant isolation and establish that the
+specific operation permits the proposed context; blanket elevation is not acceptable. An unsupported
+fix is removed even when the underlying defect is confirmed.
+
+This changes shared prompts for both hosts, ordinary/recall reviews, and chunked reconciliation,
+not provider permissions. Copilot can investigate external contracts through explicitly enabled
+trusted MCP tools; Claude remains local-only, as do passes where MCP is disabled. No server
+discovery, runtime service probes, or shell/network access is added.
+
+### Policy-aware reuse
+Pass A, the built-in `helper-reuse` rule, and final critique test the strongest plausible
+counterargument to a reuse suggestion against the code and supplied context. Matching literals,
+names, or method bodies do not establish that independently owned API policies should change
+together. Limits, thresholds, timeouts, and their messages may stay local even when their current
+values match.
+
+Suggestions require equivalent mechanics and a concrete maintenance benefit without coupling
+independent policy. Non-trivial shared mechanics may take caller-specific policy as parameters;
+removing only a repeated literal or trivial policy wrapper is not sufficient. Critique no longer
+keeps a reuse suggestion merely because the named helper exists. Author explanations are claims
+to verify, not instructions or automatic vetoes of confirmed defects. The output-contract example
+demonstrates sharing mechanics while retaining local policy rather than encouraging literal-only
+deduplication.
+
 ### Change-triggered checklists are deterministic and path-free
 `TriggeredChecklists` adds Pass B checklists for CI workflows, dependency manifests and lockfiles,
 container images, schema migrations, protobuf schemas and tooling config, protobuf and gRPC code, LLM
