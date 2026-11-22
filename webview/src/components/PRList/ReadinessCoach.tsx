@@ -15,7 +15,13 @@ export function ReadinessCoach({ providerReadiness, recoveredSetup, onDismiss }:
   const unverified = providerReadiness?.authenticationStatus === 'unverified'
   const Icon = unverified ? Info : CheckCircle2
   const readiness = unverified
-    ? t(providerReadiness.provider === 'copilot' ? 'readiness.copilotUnverified' : 'readiness.claudeUnverified')
+    ? t(
+      providerReadiness.provider === 'copilot'
+        ? 'readiness.copilotUnverified'
+        : providerReadiness.provider === 'antigravity'
+          ? 'readiness.antigravityUnverified'
+          : 'readiness.claudeUnverified',
+    )
     : recoveredSetup
       ? 'GitHub and the review provider are ready.'
       : 'PR Pilot is ready.'

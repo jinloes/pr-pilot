@@ -6,6 +6,7 @@ import com.jinloes.prpilot.model.ChatMessage;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
+import com.jinloes.prpilot.review.AntigravityService;
 import com.jinloes.prpilot.review.ClaudeService;
 import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.ReviewPipelineService;
@@ -20,8 +21,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * IntelliJ adapter that fronts both the Claude and Copilot CLI backends. The active provider is
- * read from {@link PluginSettings} on every call so a settings change takes effect immediately.
+ * IntelliJ adapter that fronts the Claude, Copilot, and Antigravity CLI backends. The active
+ * provider is read from {@link PluginSettings} on every call so a settings change takes effect
+ * immediately.
  *
  * <p>Dispatches all blocking I/O to a pooled thread and marshals callbacks back to the EDT so
  * callers in the UI layer never need to manage threading themselves.
@@ -113,6 +115,7 @@ public class IntellijClaudeService {
 
     private final ClaudeService claude;
     private final CopilotService copilot;
+    private final AntigravityService antigravity;
     private volatile Thread deepThread;
     private volatile Runnable deepProviderCancel = () -> {};
     private final java.util.concurrent.atomic.AtomicBoolean deepCancelled =
@@ -134,11 +137,13 @@ public class IntellijClaudeService {
     public IntellijClaudeService() {
         this.claude = new ClaudeService();
         this.copilot = new CopilotService();
+        this.antigravity = new AntigravityService();
     }
 
     public IntellijClaudeService(String projectDir) {
         this.claude = new ClaudeService(projectDir);
         this.copilot = new CopilotService(projectDir);
+        this.antigravity = new AntigravityService(projectDir);
     }
 
     public void reviewPR(
@@ -196,24 +201,40 @@ public class IntellijClaudeService {
                                                             request)) {
                                         if (deepCancelled.get())
                                             throw new InterruptedException("Review cancelled");
-                                        ReviewPipelineService pipeline;
-                                        if (settings.provider == ReviewProvider.COPILOT) {
-                                            var provider = new CopilotService(execution.worktree());
-                                            deepProviderCancel = provider::cancelCurrentRequest;
-                                            pipeline =
-                                                    ReviewPipelineService.forCopilot(
-                                                            provider,
-                                                            settings.model,
-                                                            settings.effort,
-                                                            false,
-                                                            settings.configDir);
-                                        } else {
-                                            var provider = new ClaudeService(execution.worktree());
-                                            deepProviderCancel = provider::cancelCurrentRequest;
-                                            pipeline =
-                                                    ReviewPipelineService.forClaude(
-                                                            provider, settings.model);
-                                        }
+                                        ReviewPipelineService pipeline =
+                                                switch (settings.provider) {
+                                                    case COPILOT -> {
+                                                        var provider =
+                                                                new CopilotService(
+                                                                        execution.worktree());
+                                                        deepProviderCancel =
+                                                                provider::cancelCurrentRequest;
+                                                        yield ReviewPipelineService.forCopilot(
+                                                                provider,
+                                                                settings.model,
+                                                                settings.effort,
+                                                                false,
+                                                                settings.configDir);
+                                                    }
+                                                    case ANTIGRAVITY -> {
+                                                        var provider =
+                                                                new AntigravityService(
+                                                                        execution.worktree());
+                                                        deepProviderCancel =
+                                                                provider::cancelCurrentRequest;
+                                                        yield ReviewPipelineService.forAntigravity(
+                                                                provider, settings.model);
+                                                    }
+                                                    case CLAUDE -> {
+                                                        var provider =
+                                                                new ClaudeService(
+                                                                        execution.worktree());
+                                                        deepProviderCancel =
+                                                                provider::cancelCurrentRequest;
+                                                        yield ReviewPipelineService.forClaude(
+                                                                provider, settings.model);
+                                                    }
+                                                };
                                         ReviewResult result =
                                                 pipeline.review(
                                                         request,
@@ -267,21 +288,29 @@ public class IntellijClaudeService {
                 onError,
                 () -> {
                     ReviewPipelineService pipeline =
-                            settings.provider == ReviewProvider.COPILOT
-                                    ? ReviewPipelineService.forCopilot(
-                                            copilot,
-                                            settings.model,
-                                            settings.effort,
-                                            resolveReviewInheritMcp(
-                                                    settings.inheritMcp, settings.forceMcpOnReview),
-                                            settings.configDir)
-                                    : ReviewPipelineService.forClaude(claude, settings.model);
+                            switch (settings.provider) {
+                                case COPILOT ->
+                                        ReviewPipelineService.forCopilot(
+                                                copilot,
+                                                settings.model,
+                                                settings.effort,
+                                                resolveReviewInheritMcp(
+                                                        settings.inheritMcp,
+                                                        settings.forceMcpOnReview),
+                                                settings.configDir);
+                                case ANTIGRAVITY ->
+                                        ReviewPipelineService.forAntigravity(
+                                                antigravity, settings.model);
+                                case CLAUDE ->
+                                        ReviewPipelineService.forClaude(claude, settings.model);
+                            };
                     if (StringUtils.isNotBlank(settings.secondReviewerModel)) {
+                        boolean copilotProvider = settings.provider == ReviewProvider.COPILOT;
                         pipeline =
                                 pipeline.withSecondReviewer(
                                         settings.secondReviewerModel,
-                                        settings.secondReviewerEffort(),
-                                        settings.configDir);
+                                        copilotProvider ? settings.secondReviewerEffort() : "",
+                                        copilotProvider ? settings.configDir : "");
                     }
                     return pipeline.review(
                             request,
@@ -336,35 +365,45 @@ public class IntellijClaudeService {
                 "Chat interrupted.",
                 onError,
                 () ->
-                        settings.provider == ReviewProvider.COPILOT
-                                ? copilot.chat(
-                                        context,
-                                        history,
-                                        userMessage,
-                                        settings.effort,
-                                        wrappedChunk,
-                                        settings.inheritMcp,
-                                        settings.configDir)
-                                : claude.chat(context, history, userMessage, wrappedChunk),
+                        switch (settings.provider) {
+                            case COPILOT ->
+                                    copilot.chat(
+                                            context,
+                                            history,
+                                            userMessage,
+                                            settings.effort,
+                                            wrappedChunk,
+                                            settings.inheritMcp,
+                                            settings.configDir);
+                            case ANTIGRAVITY ->
+                                    antigravity.chat(
+                                            context,
+                                            history,
+                                            userMessage,
+                                            settings.model,
+                                            wrappedChunk);
+                            case CLAUDE -> claude.chat(context, history, userMessage, wrappedChunk);
+                        },
                 onDone);
     }
 
-    /** Cancels the currently running request on either backend. */
+    /** Cancels the currently running request on any backend. */
     public void cancelCurrentRequest() {
         cancelDeep();
-        // Cancel both — only one has an active process at any time, but reading the provider
-        // setting here can race with a settings change so we just send the signal to both.
+        // Cancel all — only one has an active process at any time, but reading the provider
+        // setting here can race with a settings change so we just send the signal to all.
         claude.cancelCurrentRequest();
         copilot.cancelCurrentRequest();
+        antigravity.cancelCurrentRequest();
     }
 
     /** Cancels only the backend selected by the operation being retired. */
     public void cancelCurrentRequest(ReviewProvider provider) {
         cancelDeep();
-        if (provider == ReviewProvider.COPILOT) {
-            copilot.cancelCurrentRequest();
-        } else {
-            claude.cancelCurrentRequest();
+        switch (provider == null ? ReviewProvider.CLAUDE : provider) {
+            case COPILOT -> copilot.cancelCurrentRequest();
+            case ANTIGRAVITY -> antigravity.cancelCurrentRequest();
+            case CLAUDE -> claude.cancelCurrentRequest();
         }
     }
 
@@ -404,7 +443,7 @@ public class IntellijClaudeService {
                 settings.getCopilotConfigDir(),
                 settings.isReviewSelfCritique(),
                 settings.isReviewSupervisorEnabled(),
-                settings.getReviewSecondReviewerModel(),
+                settings.getActiveSecondReviewerModel(),
                 settings.getReviewSecondReviewerEffort());
     }
 

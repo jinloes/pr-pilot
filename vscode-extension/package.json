@@ -144,15 +144,22 @@
           ],
           "description": "Review model for the GitHub Copilot CLI. PR Pilot: Open Settings lists models discovered for the signed-in account."
         },
+        "pr-pilot.reviewModelAntigravity": {
+          "type": "string",
+          "default": "",
+          "description": "Review model for the Antigravity CLI (`agy`). Leave empty to use the Antigravity CLI default. PR Pilot: Open Settings lists models discovered via `agy models`."
+        },
         "pr-pilot.reviewProvider": {
           "type": "string",
           "enum": [
             "claude",
-            "copilot"
+            "copilot",
+            "antigravity"
           ],
           "enumDescriptions": [
             "Claude Code (claude CLI)",
-            "GitHub Copilot (copilot CLI)"
+            "GitHub Copilot (copilot CLI)",
+            "Antigravity (agy CLI)"
           ],
           "default": "claude",
           "description": "Backend CLI used to generate reviews and chat replies."
@@ -289,10 +296,32 @@
           "default": true,
           "description": "Run the review rules bundled with PR Pilot (such as helper reuse and telemetry defaults) when their trigger matches. A rules-folder rule with the same name replaces the built-in one, or turns it off with `enabled: false`."
         },
+        "pr-pilot.reviewSecondReviewerModelClaude": {
+          "type": "string",
+          "default": "",
+          "enum": [
+            "",
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-6",
+            "claude-opus-4-7"
+          ],
+          "enumDescriptions": [
+            "Off (disable second reviewer).",
+            "Haiku — fastest.",
+            "Sonnet — balanced.",
+            "Opus — most thorough."
+          ],
+          "description": "Optional Claude model that reviews the same PR in parallel when `pr-pilot.reviewProvider` is `claude`; its findings are cross-validated and merged. Leave blank to disable."
+        },
         "pr-pilot.reviewSecondReviewerModel": {
           "type": "string",
           "default": "",
-          "description": "Optional Copilot model that reviews the same PR in parallel with the primary reviewer; its findings are cross-validated and merged. Leave blank to disable. Requires GitHub Copilot CLI and adds cost."
+          "description": "Optional Copilot model that reviews the same PR in parallel when `pr-pilot.reviewProvider` is `copilot`; its findings are cross-validated and merged. Leave blank to disable."
+        },
+        "pr-pilot.reviewSecondReviewerModelAntigravity": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Antigravity (`agy`) model that reviews the same PR in parallel when `pr-pilot.reviewProvider` is `antigravity`; its findings are cross-validated and merged. Leave blank to disable."
         },
         "pr-pilot.reviewSecondReviewerEffort": {
           "type": "string",
@@ -305,7 +334,7 @@
             "max"
           ],
           "default": "medium",
-          "description": "Reasoning effort for the second reviewer, separate from `pr-pilot.reviewEffort`. The review waits for both reviewers, so a lower effort keeps a slower second model from holding it up. Applies to either primary provider."
+          "description": "Reasoning effort for the Copilot second reviewer, separate from `pr-pilot.reviewEffort`. The review waits for both reviewers, so a lower effort keeps a slower second model from holding it up. Only applied when `pr-pilot.reviewProvider` is `copilot`."
         },
         "pr-pilot.experimentalIntellijAssistedReview": {
           "type": "boolean",

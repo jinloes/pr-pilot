@@ -24,6 +24,7 @@ final class StdioJsonRpcServerReviewHandlers {
     void register(Map<String, StdioJsonRpcServer.MethodHandler> handlers) {
         handlers.put("reviews/readGuidelines", this::readGuidelines);
         handlers.put("reviews/listCopilotModels", this::listCopilotModels);
+        handlers.put("reviews/listAntigravityModels", this::listAntigravityModels);
         handlers.put("reviews/probeProviderSetup", this::probeProviderSetup);
         handlers.put("reviews/findGitRoot", this::findGitRoot);
         handlers.put("reviews/recordOutcome", this::recordReviewOutcome);
@@ -43,7 +44,9 @@ final class StdioJsonRpcServerReviewHandlers {
             return support.error(support.requestId(request), -32602, "Invalid params");
         }
         String provider = params.path("provider").textValue();
-        if (!"claude".equals(provider) && !"copilot".equals(provider)) {
+        if (!"claude".equals(provider)
+                && !"copilot".equals(provider)
+                && !"antigravity".equals(provider)) {
             return support.error(support.requestId(request), -32602, "Invalid params");
         }
         return support.result(
@@ -68,6 +71,23 @@ final class StdioJsonRpcServerReviewHandlers {
                 support.requestId(request),
                 review.listCopilotModels(
                         new ReviewEngineApi.ListCopilotModelsParams(forceRefresh)));
+    }
+
+    private ObjectNode listAntigravityModels(JsonNode request) {
+        JsonNode params = request.get("params");
+        if (params != null && !params.isNull()) {
+            if (!params.isObject()
+                    || !support.hasOnlyFields(params, Set.of("forceRefresh"))
+                    || (params.has("forceRefresh") && !params.path("forceRefresh").isBoolean())) {
+                return support.error(support.requestId(request), -32602, "Invalid params");
+            }
+        }
+        boolean forceRefresh =
+                params != null && params.isObject() && params.path("forceRefresh").asBoolean(false);
+        return support.result(
+                support.requestId(request),
+                review.listAntigravityModels(
+                        new ReviewEngineApi.ListAntigravityModelsParams(forceRefresh)));
     }
 
     /**

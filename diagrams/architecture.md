@@ -5,7 +5,7 @@ flowchart LR
     Reviewer(["Reviewer"])
     GitHub[("GitHub REST and<br/>GraphQL APIs")]
     GhCli["GitHub CLI<br/>token resolution"]
-    Provider["Claude CLI or<br/>Copilot runtime"]
+    Provider["Claude CLI, Copilot runtime,<br/>or Antigravity CLI"]
     Checkout[("Local repository<br/>and detached PR worktree")]
     OutcomeData[("~/.pr-pilot/<br/>review-outcomes.jsonl")]
     HostState[("Host persistence<br/>IntelliJ local files / VS Code globalState")]

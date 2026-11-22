@@ -13,6 +13,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { checkAgentDocs, isAgentDoc } from './agent-docs.mjs'
+import {
+  SOURCE_FILE_MAX_BYTES,
+  TEST_FILE_MAX_BYTES,
+  checkFileBudgets,
+  isSizedCodeFile,
+  isTestCodeFile,
+} from './file-budgets.mjs'
 import { mirrorNotes } from './host-mirrors.mjs'
 import { checkPlaywrightImages, IMAGE_SOURCES, LOCKFILE } from './playwright-image.mjs'
 import { gradleWrapperInvocation, resolveNpmInvocation } from './portable-process.mjs'
@@ -48,37 +55,34 @@ const ROOT_BUILD_FILES = new Set([
 ])
 
 const DOC_ONLY = /\.(md|mmd)$/i
-const SIZED_CODE_FILE = /\.(java|tsx?|m?js|cjs|css|gradle)$/i
-const TEST_PATH = /(?:^|\/)(?:src\/test|test)\/|\.(?:test|spec)\.[^/]+$|Test\.java$/
 
-export const TEST_FILE_MAX_BYTES = 20_000
-export const SOURCE_FILE_MAX_BYTES = 32_000
+export { SOURCE_FILE_MAX_BYTES, TEST_FILE_MAX_BYTES }
 
 /**
- * Flags touched source/test files whose LF-normalized UTF-8 size exceeds single-read budgets so
- * agents split growing files before they require multi-pass reads. Kept separate from pure
- * `planChecks` because synthetic test paths do not exist on disk.
+ * Adds non-blocking advisory reminders for touched source/test files whose LF-normalized UTF-8 size
+ * exceeds single-read targets. Kept separate from pure `planChecks` because synthetic test paths do
+ * not exist on disk.
  */
 export function largeFileNotes(repoRoot, changedPaths) {
   const seen = new Set()
   const notes = []
   for (const rawPath of changedPaths) {
     const file = normalize(rawPath)
-    if (!file || seen.has(file) || isAgentDoc(file) || !SIZED_CODE_FILE.test(file)) continue
+    if (!file || seen.has(file) || !isSizedCodeFile(file)) continue
     seen.add(file)
     const fullPath = path.join(repoRoot, file)
     if (!fs.statSync(fullPath, { throwIfNoEntry: false })?.isFile()) continue
     const lfBytes = Buffer.byteLength(fs.readFileSync(fullPath, 'utf8').replaceAll('\r\n', '\n'), 'utf8')
-    const isTest = TEST_PATH.test(file)
+    const isTest = isTestCodeFile(file)
     if (isTest && lfBytes > TEST_FILE_MAX_BYTES) {
       notes.push(
-        `Large test file: ${file} is ${lfBytes} LF bytes (target <= ${TEST_FILE_MAX_BYTES}); ` +
-          'consider splitting by area so agents can read it in one pass.',
+        `Large test file: ${file} is ${lfBytes} LF bytes (advisory target <= ${TEST_FILE_MAX_BYTES}); ` +
+          'split by area if natural seams exist (keep together if more cohesive; use view_range when reading).',
       )
     } else if (!isTest && lfBytes > SOURCE_FILE_MAX_BYTES) {
       notes.push(
-        `Large source file: ${file} is ${lfBytes} LF bytes (target <= ${SOURCE_FILE_MAX_BYTES}); ` +
-          'consider extracting focused collaborators if growing.',
+        `Large source file: ${file} is ${lfBytes} LF bytes (advisory target <= ${SOURCE_FILE_MAX_BYTES}); ` +
+          'extract cohesive collaborators if natural seams exist (never split artificially; use view_range when reading).',
       )
     }
   }
@@ -94,6 +98,10 @@ const IN_PROCESS = {
   playwrightImage: {
     describe: `Playwright image tags and digests match ${LOCKFILE} (scripts/playwright-image.mjs)`,
     run: (repoRoot) => ({ errors: checkPlaywrightImages(repoRoot), warnings: [] }),
+  },
+  fileBudgets: {
+    describe: 'advisory source/test single-read LF byte targets (scripts/file-budgets.mjs)',
+    run: (repoRoot) => checkFileBudgets(repoRoot),
   },
 }
 
@@ -206,6 +214,9 @@ export function planChecks(changedPaths, options = {}) {
   if (everything || files.some(isAgentDoc)) checks.push({ name: 'agent docs', inProcess: 'docs' })
   if (everything || files.some(isPlaywrightImageInput)) {
     checks.push({ name: 'playwright image pins', inProcess: 'playwrightImage' })
+  }
+  if (everything || files.some(isSizedCodeFile)) {
+    checks.push({ name: 'file budgets', inProcess: 'fileBudgets' })
   }
   if (jvmModules.size > 0) {
     const tasks = JVM_ORDER.filter((module) => jvmModules.has(module)).map((m) => `:${m}:check`)

@@ -9,7 +9,7 @@ import type { ResolvedReviewGuidance } from './reviewGuidanceProfiles';
 import type { DeepReviewFlow } from './deepReview';
 import type { PRSearchScope, ReviewResult } from './models';
 
-export type Provider = 'claude' | 'copilot';
+export type Provider = 'claude' | 'copilot' | 'antigravity';
 
 export interface ActivePR {
     number: number;

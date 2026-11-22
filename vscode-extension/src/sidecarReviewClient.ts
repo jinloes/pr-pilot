@@ -1,6 +1,7 @@
 import * as path from 'path';
 import type { ReviewResult } from './models';
 import {
+    parseAntigravityModelsResult,
     parseChatResult,
     parseCopilotModelsResult,
     parseProviderSetupResult,
@@ -11,6 +12,7 @@ import type {
     DeepReviewPreparation,
     RetainedDeepReview,
     ReviewProvider,
+    SidecarAntigravityModelsResult,
     SidecarChatParams,
     SidecarChatResult,
     SidecarCopilotModelsResult,
@@ -143,6 +145,20 @@ export class SidecarReviewClient extends SidecarGitHubClient {
             { timeoutMs: MODEL_DISCOVERY_TIMEOUT_MS },
         );
         return this.parseResult('Copilot model discovery', parseCopilotModelsResult, value);
+    }
+
+    /**
+     * Discovers the Antigravity model IDs reported by `agy models` via the shared
+     * {@code review-engine} {@code AntigravityModelDiscovery}.
+     */
+    async listAntigravityModels(forceRefresh = false): Promise<SidecarAntigravityModelsResult> {
+        await this.initialize();
+        const value = await this.requestRaw(
+            'reviews/listAntigravityModels',
+            { forceRefresh },
+            { timeoutMs: MODEL_DISCOVERY_TIMEOUT_MS },
+        );
+        return this.parseResult('Antigravity model discovery', parseAntigravityModelsResult, value);
     }
 
     /**

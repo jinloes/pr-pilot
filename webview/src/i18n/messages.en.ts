@@ -8,6 +8,7 @@ export const englishMessages = {
   'filter.state': 'Pull request state',
   'readiness.copilotUnverified': 'Copilot CLI found. Sign-in has not been checked.',
   'readiness.claudeUnverified': 'Claude CLI found. Sign-in has not been checked.',
+  'readiness.antigravityUnverified': 'Antigravity CLI found. Sign-in has not been checked.',
   'review.focusAreas': 'Focus areas',
   'review.customInstructions': 'Custom instructions for this review',
   'review.advanced': 'Advanced review options',

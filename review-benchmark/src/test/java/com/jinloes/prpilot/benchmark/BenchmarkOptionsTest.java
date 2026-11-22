@@ -79,6 +79,7 @@ class BenchmarkOptionsTest {
 
         @Test
         void judgeModelDefaultsToTheReviewModel() {
+            assertThat(parse("--provider", "Antigravity").provider()).isEqualTo("antigravity");
             assertThat(parse("--model", "gpt-x").judgeModel()).isEqualTo("gpt-x");
             assertThat(parse("--model", "gpt-x", "--judge-model", "j").judgeModel()).isEqualTo("j");
         }

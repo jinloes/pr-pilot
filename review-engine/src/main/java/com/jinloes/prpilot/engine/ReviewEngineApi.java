@@ -31,6 +31,7 @@ public interface ReviewEngineApi {
                     Map.entry("recordOutcome", "reviews/recordOutcome"),
                     Map.entry("readGuidelines", "reviews/readGuidelines"),
                     Map.entry("listCopilotModels", "reviews/listCopilotModels"),
+                    Map.entry("listAntigravityModels", "reviews/listAntigravityModels"),
                     Map.entry("probeProviderSetup", "reviews/probeProviderSetup"),
                     Map.entry("findGitRoot", "reviews/findGitRoot"),
                     Map.entry("createWorktree", "reviews/createWorktree"),
@@ -639,7 +640,33 @@ public interface ReviewEngineApi {
             ChatContext context,
             List<ChatMessageParam> history,
             String userMessage,
-            HostCodeIntelligenceParams hostCodeIntelligence) {
+            HostCodeIntelligenceParams hostCodeIntelligence,
+            String model) {
+        public ChatParams(
+                String operationId,
+                String provider,
+                String projectDir,
+                String effort,
+                boolean inheritMcp,
+                String configDir,
+                ChatContext context,
+                List<ChatMessageParam> history,
+                String userMessage,
+                HostCodeIntelligenceParams hostCodeIntelligence) {
+            this(
+                    operationId,
+                    provider,
+                    projectDir,
+                    effort,
+                    inheritMcp,
+                    configDir,
+                    context,
+                    history,
+                    userMessage,
+                    hostCodeIntelligence,
+                    null);
+        }
+
         public ChatParams(
                 String operationId,
                 String provider,
@@ -660,6 +687,7 @@ public interface ReviewEngineApi {
                     context,
                     history,
                     userMessage,
+                    null,
                     null);
         }
     }
@@ -750,6 +778,9 @@ public interface ReviewEngineApi {
     /** Request for {@link #listCopilotModels}. */
     record ListCopilotModelsParams(boolean forceRefresh) {}
 
+    /** Request for {@link #listAntigravityModels}. */
+    record ListAntigravityModelsParams(boolean forceRefresh) {}
+
     /** Request for {@link #probeProviderSetup}. */
     record ProbeProviderSetupParams(String provider, boolean checkAuthentication) {}
 
@@ -758,6 +789,12 @@ public interface ReviewEngineApi {
      * {@code CLI_HELP}, or {@code NONE}) and an optional user-facing failure reason.
      */
     record CopilotModelsResult(List<String> models, String source, String failureReason) {}
+
+    /**
+     * Result of {@link #listAntigravityModels}: discovered model slugs plus provenance ({@code
+     * ACCOUNT} or {@code NONE}) and an optional user-facing failure reason.
+     */
+    record AntigravityModelsResult(List<String> models, String source, String failureReason) {}
 
     /**
      * Result of {@link #findGitRoot}: the repository root, or blank when {@code startDir} is not in
@@ -870,5 +907,13 @@ public interface ReviewEngineApi {
      */
     default CopilotModelsResult listCopilotModels(ListCopilotModelsParams params) {
         return new CopilotModelsResult(List.of(), "NONE", "Model discovery unavailable");
+    }
+
+    /**
+     * Lists Antigravity model slugs available to the signed-in account via {@code agy models},
+     * serving the cached list unless {@code params.forceRefresh()} is set or nothing is cached yet.
+     */
+    default AntigravityModelsResult listAntigravityModels(ListAntigravityModelsParams params) {
+        return new AntigravityModelsResult(List.of(), "NONE", "Model discovery unavailable");
     }
 }

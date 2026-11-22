@@ -296,6 +296,22 @@ describe('regeneration options placement', () => {
     await waitFor(() => expect(Number.parseInt(chatPanel.style.height, 10)).toBeGreaterThanOrEqual(200))
     expect(screen.getByRole('separator', { name: 'Resize chat panel' })).toBeInTheDocument()
   })
+
+  it('shows Antigravity ready when Antigravity is the active ready provider', () => {
+    installHost()
+    render(<ReviewPane pr={pr} />)
+    act(() => {
+      hostMessage({
+        type: 'draftLoaded',
+        prKey: 'acme/widget#42',
+        prState: 'NO_DRAFT',
+        diff: diffWithFiles(1),
+        providerReadiness: { provider: 'antigravity', available: true, detail: 'Ready.' },
+      })
+    })
+
+    expect(screen.getByText('Antigravity ready')).toBeVisible()
+  })
 })
 
 describe('regenerate confirmation', () => {

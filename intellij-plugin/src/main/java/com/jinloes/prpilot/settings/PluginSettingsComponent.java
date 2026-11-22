@@ -6,6 +6,7 @@ import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
 import com.jinloes.prpilot.model.ReviewProvider;
+import com.jinloes.prpilot.review.AntigravityModelDiscovery;
 import com.jinloes.prpilot.review.CopilotModelDiscovery;
 import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.services.PRNotificationService;
@@ -48,6 +49,8 @@ public class PluginSettingsComponent {
 
     static final String PROFILE_NAME_REQUIRED = ReviewGuidanceEditor.PROFILE_NAME_REQUIRED;
     static final String MODELS_LOADING_HINT = CopilotModelSelector.MODELS_LOADING_HINT;
+    static final String ANTIGRAVITY_MODELS_LOADING_HINT =
+            CopilotModelSelector.ANTIGRAVITY_MODELS_LOADING_HINT;
 
     /** Seam over {@link CopilotModelDiscovery} so tests don't spawn the Copilot CLI. */
     interface CopilotModelCatalog {
@@ -65,6 +68,26 @@ public class PluginSettingsComponent {
                     @Override
                     public CopilotModelDiscovery.Result refresh() {
                         return CopilotModelDiscovery.refresh();
+                    }
+                };
+    }
+
+    /** Seam over {@link AntigravityModelDiscovery} so tests don't spawn the Antigravity CLI. */
+    interface AntigravityModelCatalog {
+        AntigravityModelDiscovery.Result cached();
+
+        AntigravityModelDiscovery.Result refresh();
+
+        AntigravityModelCatalog DISCOVERY =
+                new AntigravityModelCatalog() {
+                    @Override
+                    public AntigravityModelDiscovery.Result cached() {
+                        return AntigravityModelDiscovery.cached();
+                    }
+
+                    @Override
+                    public AntigravityModelDiscovery.Result refresh() {
+                        return AntigravityModelDiscovery.refresh();
                     }
                 };
     }
@@ -181,6 +204,28 @@ public class PluginSettingsComponent {
             CopilotModelCatalog copilotModelCatalog,
             BooleanSupplier canRetryAppliedPoll,
             Runnable pollRetryAction) {
+        this(
+                authChecker,
+                backgroundExecutor,
+                uiExecutor,
+                pollStatusSupplier,
+                profileNamePrompt,
+                copilotModelCatalog,
+                AntigravityModelCatalog.DISCOVERY,
+                canRetryAppliedPoll,
+                pollRetryAction);
+    }
+
+    PluginSettingsComponent(
+            Function<String, CheckAuthResult> authChecker,
+            Consumer<Runnable> backgroundExecutor,
+            Consumer<Runnable> uiExecutor,
+            Supplier<String> pollStatusSupplier,
+            ProfileNamePrompt profileNamePrompt,
+            CopilotModelCatalog copilotModelCatalog,
+            AntigravityModelCatalog antigravityModelCatalog,
+            BooleanSupplier canRetryAppliedPoll,
+            Runnable pollRetryAction) {
         this.authChecker = authChecker;
         this.backgroundExecutor = backgroundExecutor;
         this.uiExecutor = uiExecutor;
@@ -196,7 +241,11 @@ public class PluginSettingsComponent {
         this.authChecks = new AuthCheckCoordinator(authChecker, backgroundExecutor, uiExecutor);
         this.guidance = new ReviewGuidanceEditor(profileNamePrompt, () -> mainPanel);
         this.copilot =
-                new CopilotModelSelector(copilotModelCatalog, backgroundExecutor, uiExecutor);
+                new CopilotModelSelector(
+                        copilotModelCatalog,
+                        antigravityModelCatalog,
+                        backgroundExecutor,
+                        uiExecutor);
         checkButton.addActionListener(e -> checkStatus());
         retryPollButton.addActionListener(e -> retryNotificationPoll());
         mainPanel = createMainPanel();
@@ -272,7 +321,22 @@ public class PluginSettingsComponent {
                                 1,
                                 false)
                         .getPanel();
-        copilot.showOnlyForCopilot(effortLabel, effortField, copilotTools);
+        JBLabel secondReviewerEffortLabel =
+                SettingsUi.fieldLabel(
+                        "Second reviewer effort:", copilot.secondReviewerEffortCombo());
+        JPanel secondReviewerEffortField =
+                SettingsUi.fieldWithHint(
+                        copilot.secondReviewerEffortCombo(),
+                        SettingsUi.hintLabel(
+                                "<html><small>Separate from the primary's. The review"
+                                        + " waits for both reviewers, so lower effort"
+                                        + " finishes sooner.</small></html>"));
+        copilot.showOnlyForCopilot(
+                effortLabel,
+                effortField,
+                secondReviewerEffortLabel,
+                secondReviewerEffortField,
+                copilotTools);
 
         JPanel main =
                 FormBuilder.createFormBuilder()
@@ -294,28 +358,18 @@ public class PluginSettingsComponent {
                                 copilot.modelLabel(), copilot.modelComboPanel(), 1, false)
                         .addLabeledComponent(effortLabel, effortField, 1, false)
                         .addLabeledComponent(
-                                SettingsUi.fieldLabel(
-                                        "Second reviewer:", copilot.secondReviewerModelCombo()),
+                                copilot.secondReviewerLabel(),
                                 SettingsUi.fieldWithHint(
-                                        copilot.secondReviewerModelCombo(),
+                                        copilot.secondReviewerComboPanel(),
                                         SettingsUi.hintLabel(
-                                                "<html><small>Optional. Runs a second Copilot model in parallel"
-                                                        + " with either provider; findings are cross-validated."
-                                                        + " Choose Off to disable.</small></html>")),
+                                                "<html><small>Optional. Runs a second model from the"
+                                                        + " selected provider in parallel; findings are"
+                                                        + " cross-validated. Choose Off to"
+                                                        + " disable.</small></html>")),
                                 1,
                                 false)
                         .addLabeledComponent(
-                                SettingsUi.fieldLabel(
-                                        "Second reviewer effort:",
-                                        copilot.secondReviewerEffortCombo()),
-                                SettingsUi.fieldWithHint(
-                                        copilot.secondReviewerEffortCombo(),
-                                        SettingsUi.hintLabel(
-                                                "<html><small>Separate from the primary's. The review"
-                                                        + " waits for both reviewers, so lower effort"
-                                                        + " finishes sooner.</small></html>")),
-                                1,
-                                false)
+                                secondReviewerEffortLabel, secondReviewerEffortField, 1, false)
                         .addComponent(copilotTools, 1)
                         .addSeparator(8)
                         .addComponent(sectionTitle("Review guidance"), 1)
@@ -528,6 +582,14 @@ public class PluginSettingsComponent {
         copilot.setReviewModelCopilot(modelId);
     }
 
+    public String getReviewModelAntigravity() {
+        return copilot.getReviewModelAntigravity();
+    }
+
+    public void setReviewModelAntigravity(String modelId) {
+        copilot.setReviewModelAntigravity(modelId);
+    }
+
     public ReviewProvider getReviewProvider() {
         return copilot.getReviewProvider();
     }
@@ -636,12 +698,28 @@ public class PluginSettingsComponent {
         reviewSelfCritiqueBox.setSelected(value);
     }
 
+    public String getReviewSecondReviewerModelClaude() {
+        return copilot.getReviewSecondReviewerModelClaude();
+    }
+
+    public void setReviewSecondReviewerModelClaude(String value) {
+        copilot.setReviewSecondReviewerModelClaude(value);
+    }
+
     public String getReviewSecondReviewerModel() {
         return copilot.getReviewSecondReviewerModel();
     }
 
     public void setReviewSecondReviewerModel(String value) {
         copilot.setReviewSecondReviewerModel(value);
+    }
+
+    public String getReviewSecondReviewerModelAntigravity() {
+        return copilot.getReviewSecondReviewerModelAntigravity();
+    }
+
+    public void setReviewSecondReviewerModelAntigravity(String value) {
+        copilot.setReviewSecondReviewerModelAntigravity(value);
     }
 
     public String getReviewSecondReviewerEffort() {
@@ -684,6 +762,11 @@ public class PluginSettingsComponent {
         return CopilotModelSelector.copilotModelStatus(result, hasPreviousList);
     }
 
+    static String antigravityModelStatus(
+            AntigravityModelDiscovery.Result result, boolean hasPreviousList) {
+        return CopilotModelSelector.antigravityModelStatus(result, hasPreviousList);
+    }
+
     List<String> getCopilotModelOptions() {
         return copilot.getCopilotModelOptions();
     }
@@ -698,6 +781,22 @@ public class PluginSettingsComponent {
 
     JButton getRefreshModelsButton() {
         return copilot.getRefreshModelsButton();
+    }
+
+    List<String> getAntigravityModelOptions() {
+        return copilot.getAntigravityModelOptions();
+    }
+
+    List<String> getSecondReviewerAntigravityModelOptions() {
+        return copilot.getSecondReviewerAntigravityModelOptions();
+    }
+
+    String getAntigravityModelHintText() {
+        return copilot.getAntigravityModelHintText();
+    }
+
+    JButton getRefreshAntigravityModelsButton() {
+        return copilot.getRefreshAntigravityModelsButton();
     }
 
     private void checkStatus() {

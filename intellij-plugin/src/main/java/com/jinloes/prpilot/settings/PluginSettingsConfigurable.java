@@ -34,6 +34,7 @@ public class PluginSettingsConfigurable implements Configurable {
                 || component.getNotificationPollMinutes() != s.getNotificationPollMinutes()
                 || !component.getReviewModel().equals(s.getReviewModel())
                 || !component.getReviewModelCopilot().equals(s.getReviewModelCopilot())
+                || !component.getReviewModelAntigravity().equals(s.getReviewModelAntigravity())
                 || component.getReviewProvider() != s.getReviewProvider()
                 || !component.getReviewEffort().equals(s.getReviewEffort())
                 || component.isCopilotInheritMcp() != s.isCopilotInheritMcp()
@@ -54,8 +55,14 @@ public class PluginSettingsConfigurable implements Configurable {
                 || component.isReviewSelfCritique() != s.isReviewSelfCritique()
                 || component.isReviewSupervisorEnabled() != s.isReviewSupervisorEnabled()
                 || !component
+                        .getReviewSecondReviewerModelClaude()
+                        .equals(s.getReviewSecondReviewerModelClaude())
+                || !component
                         .getReviewSecondReviewerModel()
                         .equals(s.getReviewSecondReviewerModel())
+                || !component
+                        .getReviewSecondReviewerModelAntigravity()
+                        .equals(s.getReviewSecondReviewerModelAntigravity())
                 || !component
                         .getReviewSecondReviewerEffort()
                         .equals(s.getReviewSecondReviewerEffort())
@@ -94,6 +101,7 @@ public class PluginSettingsConfigurable implements Configurable {
         s.setNotificationPollMinutes(component.getNotificationPollMinutes());
         s.setReviewModel(component.getReviewModel());
         s.setReviewModelCopilot(component.getReviewModelCopilot());
+        s.setReviewModelAntigravity(component.getReviewModelAntigravity());
         s.setReviewProvider(component.getReviewProvider());
         s.setReviewEffort(component.getReviewEffort());
         s.setCopilotInheritMcp(component.isCopilotInheritMcp());
@@ -109,7 +117,10 @@ public class PluginSettingsConfigurable implements Configurable {
         s.setRepositoryReviewInstructions(component.getRepositoryReviewInstructions());
         s.setReviewSelfCritique(component.isReviewSelfCritique());
         s.setReviewSupervisorEnabled(component.isReviewSupervisorEnabled());
+        s.setReviewSecondReviewerModelClaude(component.getReviewSecondReviewerModelClaude());
         s.setReviewSecondReviewerModel(component.getReviewSecondReviewerModel());
+        s.setReviewSecondReviewerModelAntigravity(
+                component.getReviewSecondReviewerModelAntigravity());
         s.setReviewSecondReviewerEffort(component.getReviewSecondReviewerEffort());
         s.setExperimentalIntellijAssistedReview(component.isExperimentalIntellijAssistedReview());
 
@@ -132,6 +143,7 @@ public class PluginSettingsConfigurable implements Configurable {
         component.setNotificationPollMinutes(s.getNotificationPollMinutes());
         component.setReviewModel(s.getReviewModel());
         component.setReviewModelCopilot(s.getReviewModelCopilot());
+        component.setReviewModelAntigravity(s.getReviewModelAntigravity());
         component.setReviewProvider(s.getReviewProvider());
         component.setReviewEffort(s.getReviewEffort());
         component.setCopilotInheritMcp(s.isCopilotInheritMcp());
@@ -147,7 +159,10 @@ public class PluginSettingsConfigurable implements Configurable {
         component.setRepositoryReviewInstructions(s.getRepositoryReviewInstructions());
         component.setReviewSelfCritique(s.isReviewSelfCritique());
         component.setReviewSupervisorEnabled(s.isReviewSupervisorEnabled());
+        component.setReviewSecondReviewerModelClaude(s.getReviewSecondReviewerModelClaude());
         component.setReviewSecondReviewerModel(s.getReviewSecondReviewerModel());
+        component.setReviewSecondReviewerModelAntigravity(
+                s.getReviewSecondReviewerModelAntigravity());
         component.setReviewSecondReviewerEffort(s.getReviewSecondReviewerEffort());
         component.setExperimentalIntellijAssistedReview(s.isExperimentalIntellijAssistedReview());
         loadGithubBaseUrlAndRefresh(

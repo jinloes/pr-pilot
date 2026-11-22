@@ -132,14 +132,23 @@ export function buildSettingsScriptHelpers(baseUrlError: string, profileNameErro
 
   function applyProviderVisibility(provider) {
     const isCopilot = provider === 'copilot';
-    $('claudeModelField').classList.toggle('hidden', isCopilot);
+    const isAntigravity = provider === 'antigravity';
+    $('claudeModelField').classList.toggle('hidden', isCopilot || isAntigravity);
     $('copilotModelField').classList.toggle('hidden', !isCopilot);
+    $('antigravityModelField').classList.toggle('hidden', !isAntigravity);
+    $('secondReviewerClaudeModelField').classList.toggle('hidden', isCopilot || isAntigravity);
+    $('secondReviewerCopilotModelField').classList.toggle('hidden', !isCopilot);
+    $('secondReviewerAntigravityModelField').classList.toggle('hidden', !isAntigravity);
     $('effortField').classList.toggle('hidden', !isCopilot);
     $('copilotToolsSection').classList.toggle('hidden', !isCopilot);
+    applySecondReviewerVisibility();
   }
 
   function applySecondReviewerVisibility() {
-    $('secondReviewerEffortField').classList.toggle('hidden', secondReviewerValue() === '');
+    $('secondReviewerEffortField').classList.toggle(
+      'hidden',
+      $('provider').value !== 'copilot' || secondReviewerValue() === '',
+    );
   }
 
   function applyNotificationVisibility(enabled) {
@@ -196,6 +205,21 @@ export function buildSettingsScriptHelpers(baseUrlError: string, profileNameErro
 
   function copilotModelValue() {
     const sel = $('copilotModel').value;
+    return sel === CLI_DEFAULT ? '' : sel;
+  }
+
+  function renderAntigravityModels(models, current, secondReviewer) {
+    renderModelSelect($('antigravityModel'), models, current, 'CLI default (unset)');
+    renderModelSelect($('reviewSecondReviewerModelAntigravity'), models, secondReviewer, 'Off');
+  }
+
+  function antigravityModelValue() {
+    const sel = $('antigravityModel').value;
+    return sel === CLI_DEFAULT ? '' : sel;
+  }
+
+  function secondReviewerAntigravityValue() {
+    const sel = $('reviewSecondReviewerModelAntigravity').value;
     return sel === CLI_DEFAULT ? '' : sel;
   }
 

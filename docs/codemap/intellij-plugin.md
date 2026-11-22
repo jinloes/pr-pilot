@@ -37,8 +37,10 @@ IntelliJ host integration. Depends directly on `core`, `github-engine`, and `rev
   `vscode-extension/src/repositoryInstructions.ts`).
 - `settings/PluginSettingsComponent.java` - Settings form composition root
   (`PluginSettingsComponentTest`, `PluginSettingsVocabularyTest`, `PluginSettingsCopilotModelsTest`,
-  and `PluginSettingsConfigurableTest`, sharing `PluginSettingsTestSupport` and `UiProbeRunner`).
-- `settings/CopilotModelSelector.java` - Provider-aware Copilot model combo and advanced controls.
+  `PluginSettingsAntigravityModelsTest`, and `PluginSettingsConfigurableTest`, sharing
+  `PluginSettingsTestSupport` and `UiProbeRunner`).
+- `settings/CopilotModelSelector.java` - Provider-aware Copilot/Antigravity model combos and
+  advanced controls.
 - `settings/ReviewGuidanceEditor.java` - Guidance profiles, focus areas, and custom instructions UI.
 - `settings/RepositoryInstructionsEditor.java` - Remembered repository-instructions UI
   (`RepositoryInstructionsEditorTest`, sharing `UiProbeRunner`).

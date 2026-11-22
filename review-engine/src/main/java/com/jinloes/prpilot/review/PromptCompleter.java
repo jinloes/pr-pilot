@@ -19,8 +19,9 @@ public final class PromptCompleter {
     }
 
     /**
-     * Creates a completer for {@code provider} ({@code claude} or {@code copilot}). {@code effort}
-     * and {@code configDir} apply to Copilot only; blank values use provider defaults.
+     * Creates a completer for {@code provider} ({@code claude}, {@code copilot}, or {@code
+     * antigravity}). {@code effort} and {@code configDir} apply to Copilot only; blank values use
+     * provider defaults.
      */
     public static PromptCompleter forProvider(
             String provider, String projectDir, String model, String effort, String configDir) {
@@ -48,6 +49,17 @@ public final class PromptCompleter {
                                     onStatus,
                                     timeoutMillis,
                                     false));
+        }
+        if ("antigravity".equals(provider)) {
+            AntigravityService service = new AntigravityService(projectDir);
+            return new PromptCompleter(
+                    (prompt, timeoutMillis, onStatus) ->
+                            service.completeReviewPrompt(
+                                    prompt,
+                                    StringUtils.trimToNull(model),
+                                    false,
+                                    timeoutMillis,
+                                    onStatus));
         }
         throw new IllegalArgumentException("Unknown provider: " + provider);
     }

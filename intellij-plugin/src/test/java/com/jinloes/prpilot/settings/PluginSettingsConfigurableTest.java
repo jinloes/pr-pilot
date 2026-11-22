@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
+import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.services.PRNotificationService;
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
@@ -119,13 +120,25 @@ class PluginSettingsConfigurableTest {
 
             assertThat(component.isReviewSupervisorEnabled()).isTrue();
             component.setReviewSecondReviewerModel("gpt-5.4");
+            component.setReviewSecondReviewerModelClaude("claude-haiku-4-5-20251001");
+            component.setReviewSecondReviewerModelAntigravity("claude-sonnet-4-6");
             assertThat(configurable.isModified()).isTrue();
             configurable.apply();
             assertThat(settings.getReviewSecondReviewerModel()).isEqualTo("gpt-5.4");
+            assertThat(settings.getReviewSecondReviewerModelClaude())
+                    .isEqualTo("claude-haiku-4-5-20251001");
+            assertThat(settings.getReviewSecondReviewerModelAntigravity())
+                    .isEqualTo("claude-sonnet-4-6");
             assertThat(configurable.isModified()).isFalse();
             component.setReviewSecondReviewerModel("");
+            component.setReviewSecondReviewerModelClaude("");
+            component.setReviewSecondReviewerModelAntigravity("");
             configurable.reset();
             assertThat(component.getReviewSecondReviewerModel()).isEqualTo("gpt-5.4");
+            assertThat(component.getReviewSecondReviewerModelClaude())
+                    .isEqualTo("claude-haiku-4-5-20251001");
+            assertThat(component.getReviewSecondReviewerModelAntigravity())
+                    .isEqualTo("claude-sonnet-4-6");
 
             component.setReviewGuidanceGlobs(".review/ai-agent/*.md\ndocs/rules/*.md");
             assertThat(configurable.isModified()).isTrue();
@@ -138,6 +151,19 @@ class PluginSettingsConfigurableTest {
             configurable.reset();
             assertThat(component.getReviewGuidanceGlobs())
                     .isEqualTo(".review/ai-agent/*.md\ndocs/rules/*.md");
+            assertThat(configurable.isModified()).isFalse();
+
+            component.setReviewProvider(ReviewProvider.ANTIGRAVITY);
+            component.setReviewModelAntigravity("gemini-3.8-flash-high");
+            assertThat(configurable.isModified()).isTrue();
+            configurable.apply();
+            assertThat(settings.getReviewProvider()).isEqualTo(ReviewProvider.ANTIGRAVITY);
+            assertThat(settings.getReviewModelAntigravity()).isEqualTo("gemini-3.8-flash-high");
+            assertThat(configurable.isModified()).isFalse();
+            component.setReviewModelAntigravity("");
+            assertThat(configurable.isModified()).isTrue();
+            configurable.reset();
+            assertThat(component.getReviewModelAntigravity()).isEqualTo("gemini-3.8-flash-high");
             assertThat(configurable.isModified()).isFalse();
 
             PluginSettings.ReviewGuidanceProfile guidanceProfile =

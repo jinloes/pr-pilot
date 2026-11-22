@@ -21,7 +21,7 @@ Plain Java 21 shared models with no host dependencies.
 - `model/DiffCoverage.java` - Engine-authored diff-coverage trailer: omitted/listed counts, budget,
   scan completeness, up to 200 omitted paths, strict end-anchored `split`, and escaped prompt text.
   Pinned with its webview mirror by `core/src/test/resources/diff-coverage/trailer.golden.txt`.
-- `model/ReviewProvider.java` - Claude/Copilot provider enum.
+- `model/ReviewProvider.java` - Claude/Copilot/Antigravity provider enum.
 - `model/SourceInventory.java` - Strict required/nullable wire shapes, canonical identities,
   source manifest digest and shared protocol limits; no READY state.
 - `util/LogRedactor.java` - Redacts tokens, bearer headers, API keys, and URL credentials from log

@@ -86,16 +86,22 @@ public final class ReviewStageReplay {
         Objects.requireNonNull(provider, "provider");
         String dir = workingDir != null ? workingDir.getAbsolutePath() : null;
         ReviewProviderExecutor liveDelegate =
-                provider == ReviewProvider.COPILOT
-                        ? new ReviewProviderExecutor.CopilotExecutor(
-                                new CopilotService(dir),
-                                StringUtils.defaultString(model),
-                                StringUtils.defaultIfBlank(
-                                        effort, CopilotService.DEFAULT_REASONING_EFFORT),
-                                false,
-                                null)
-                        : new ReviewProviderExecutor.ClaudeExecutor(
-                                new ClaudeService(dir), StringUtils.defaultString(model));
+                switch (provider) {
+                    case COPILOT ->
+                            new ReviewProviderExecutor.CopilotExecutor(
+                                    new CopilotService(dir),
+                                    StringUtils.defaultString(model),
+                                    StringUtils.defaultIfBlank(
+                                            effort, CopilotService.DEFAULT_REASONING_EFFORT),
+                                    false,
+                                    null);
+                    case ANTIGRAVITY ->
+                            new ReviewProviderExecutor.AntigravityExecutor(
+                                    new AntigravityService(dir), StringUtils.defaultString(model));
+                    case CLAUDE ->
+                            new ReviewProviderExecutor.ClaudeExecutor(
+                                    new ClaudeService(dir), StringUtils.defaultString(model));
+                };
         ReviewProviderExecutor hybrid = new HybridStageExecutor(frozenPrimaryRawJson, liveDelegate);
         Consumer<String> statusSink = onStatus != null ? onStatus : ignored -> {};
         return new ReviewPipelineService(

@@ -1,10 +1,13 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
+import * as antigravity from './antigravity';
 import * as copilot from './copilot';
 import type { SidecarClient } from './sidecar';
 import {
+    buildAntigravityModelsMessage,
     buildModelsMessage,
     GITHUB_BASE_URL_ERROR,
+    mergeAntigravityModelOptions,
     mergeCopilotModelOptions,
     normalizeGithubBaseUrl,
     normalizeProvider,
@@ -31,6 +34,7 @@ function readState(notificationHealth: NotificationHealth = EMPTY_NOTIFICATION_H
         provider: normalizeProvider(c.get<string>('reviewProvider', 'claude')),
         reviewModel: c.get<string>('reviewModel', ''),
         reviewModelCopilot: c.get<string>('reviewModelCopilot', ''),
+        reviewModelAntigravity: c.get<string>('reviewModelAntigravity', ''),
         reviewEffort: c.get<string>('reviewEffort', 'high'),
         githubBaseUrl: c.get<string>('githubBaseUrl', 'https://github.com'),
         copilotInheritMcp: c.get<boolean>('copilotInheritMcp', false),
@@ -44,7 +48,9 @@ function readState(notificationHealth: NotificationHealth = EMPTY_NOTIFICATION_H
         repositoryReviewInstructions: normalizeRepositoryInstructions(c.get<unknown>('repositoryReviewInstructions', {})),
         reviewSelfCritique: c.get<boolean>('reviewSelfCritique', true),
         reviewSupervisorEnabled: c.get<boolean>('reviewSupervisorEnabled', true),
+        reviewSecondReviewerModelClaude: c.get<string>('reviewSecondReviewerModelClaude', '').trim(),
         reviewSecondReviewerModel: c.get<string>('reviewSecondReviewerModel', '').trim(),
+        reviewSecondReviewerModelAntigravity: c.get<string>('reviewSecondReviewerModelAntigravity', '').trim(),
         reviewSecondReviewerEffort: c.get<string>('reviewSecondReviewerEffort', 'medium').trim() || 'medium',
         reviewRulesDirectory: c.get<string>('reviewRulesDirectory', '').trim(),
         reviewBuiltInRules: c.get<boolean>('reviewBuiltInRules', true),
@@ -59,11 +65,12 @@ function readState(notificationHealth: NotificationHealth = EMPTY_NOTIFICATION_H
 }
 
 const ALLOWED_KEYS = new Set([
-    'reviewProvider', 'reviewModel', 'reviewModelCopilot', 'reviewEffort', 'githubBaseUrl',
+    'reviewProvider', 'reviewModel', 'reviewModelCopilot', 'reviewModelAntigravity', 'reviewEffort', 'githubBaseUrl',
     'copilotInheritMcp', 'copilotAutoEnableMcpOnReview', 'copilotConfigDir', 'reviewFocusAreas',
     'reviewCustomInstructions', 'reviewGuidanceGlobs', 'reviewGuidanceProfiles',
     'activeReviewGuidanceProfileId', 'repositoryReviewInstructions', 'reviewSelfCritique', 'reviewSupervisorEnabled',
-    'reviewSecondReviewerModel', 'reviewSecondReviewerEffort', 'reviewRulesDirectory', 'reviewBuiltInRules',
+    'reviewSecondReviewerModelClaude', 'reviewSecondReviewerModel', 'reviewSecondReviewerModelAntigravity',
+    'reviewSecondReviewerEffort', 'reviewRulesDirectory', 'reviewBuiltInRules',
     'experimentalIntellijAssistedReview', 'experimentalVsCodeCodeIntelligence',
     'notificationsEnabled', 'notifyReviewRequested', 'notifyStarredRepos', 'notificationPollMinutes',
 ]);
@@ -255,17 +262,47 @@ export function openSettings(
         }
     };
 
+    const refreshAntigravityModels = async (quiet: boolean) => {
+        const previous = antigravity.cachedModels();
+        const result = await antigravity.discoverModels(sidecar, true);
+        try {
+            void current.webview.postMessage(
+                buildAntigravityModelsMessage(
+                    result.models,
+                    previous,
+                    readState().reviewModelAntigravity,
+                    quiet,
+                    result.source,
+                    result.failureReason,
+                ),
+            );
+        } catch {
+            // The panel was closed while the probe was running; the next open refreshes again.
+        }
+    };
+
     // Render immediately from the last known list, then re-probe: the probe boots the Copilot
     // runtime (seconds), and the account's catalog changes as new models roll out.
     const sendInit = async (refresh = true) => {
         const state = readState(getNotificationHealth());
+        const refreshAgy = refresh && state.provider === 'antigravity';
         current.webview.postMessage({
             type: 'init',
             state,
             refreshingModels: refresh,
+            refreshingAntigravityModels: refreshAgy,
             copilotModels: mergeCopilotModelOptions(copilot.cachedModels() ?? [], state.reviewModelCopilot),
+            antigravityModels: mergeAntigravityModelOptions(
+                antigravity.cachedModels() ?? [],
+                state.reviewModelAntigravity,
+            ),
         });
-        if (refresh) await refreshModels(true);
+        if (refresh) {
+            await Promise.all([
+                refreshModels(true),
+                refreshAgy ? refreshAntigravityModels(true) : Promise.resolve(),
+            ]);
+        }
     };
 
     current.webview.onDidReceiveMessage(async (msg: SettingsMessage) => {
@@ -276,6 +313,9 @@ export function openSettings(
                 break;
             case 'update': {
                 await enqueueSave(() => persistSetting(current.webview, msg));
+                if (msg.key === 'reviewProvider' && msg.value === 'antigravity' && antigravity.cachedModels() === null) {
+                    await refreshAntigravityModels(true);
+                }
                 break;
             }
             case 'updateReviewGuidanceState': {
@@ -284,6 +324,10 @@ export function openSettings(
             }
             case 'refreshModels': {
                 await refreshModels(false);
+                break;
+            }
+            case 'refreshAntigravityModels': {
+                await refreshAntigravityModels(false);
                 break;
             }
             case 'retryNotifications': {

@@ -7,6 +7,8 @@ import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
+import com.jinloes.prpilot.review.AntigravityModelDiscovery;
+import com.jinloes.prpilot.review.AntigravityService;
 import com.jinloes.prpilot.review.CancellationToken;
 import com.jinloes.prpilot.review.ClaudeService;
 import com.jinloes.prpilot.review.CopilotModelDiscovery;
@@ -14,15 +16,12 @@ import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.HostCodeIntelligence;
 import com.jinloes.prpilot.review.ProviderSetupProbe;
-import com.jinloes.prpilot.review.RepoGuidelinesReader;
 import com.jinloes.prpilot.review.ReviewChatPrompts;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
 import com.jinloes.prpilot.review.ReviewPipelineService;
 import com.jinloes.prpilot.review.ReviewPrompts;
-import com.jinloes.prpilot.review.ReviewedBlobReader;
 import com.jinloes.prpilot.review.SemanticReviewService;
 import com.jinloes.prpilot.review.SemanticWorktreeStore;
-import com.jinloes.prpilot.util.LogRedactor;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -33,12 +32,10 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.apache.commons.lang3.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
- * Default {@link ReviewEngineApi} implementation: dispatches to the Claude or Copilot provider
- * service and adapts transport-neutral request records into {@link PRReviewRequest}.
+ * Default {@link ReviewEngineApi} implementation: dispatches to the Claude, Copilot, or Antigravity
+ * provider service and adapts transport-neutral request records into {@link PRReviewRequest}.
  *
  * <p>Lives in {@code review-engine} rather than the sidecar so every client can reach it the same
  * way — the sidecar wraps it in JSON-RPC for VS Code, while an in-process client (IntelliJ, a
@@ -49,7 +46,6 @@ import org.slf4j.LoggerFactory;
  */
 public class ReviewSessionService implements ReviewEngineApi {
 
-    private static final Logger log = LoggerFactory.getLogger(ReviewSessionService.class);
     private static final int MAX_OPERATION_ID_LENGTH = 128;
 
     private final OperationRegistry activeOperations = new OperationRegistry();
@@ -101,10 +97,9 @@ public class ReviewSessionService implements ReviewEngineApi {
             throws IOException, InterruptedException {
         throwIfInterrupted();
         requireValidGenerateParams(params);
-        boolean copilot = "copilot".equals(params.provider());
         PRReviewRequest request = toReviewRequest(params);
         if (params.deepReview() != null) return generateDeep(params, request, onStatus, onChunk);
-        if (copilot) {
+        if ("copilot".equals(params.provider())) {
             CancellationToken cancellationToken = new CancellationToken();
             CopilotService service =
                     new CopilotService(params.projectDir(), cancellationToken)
@@ -121,6 +116,28 @@ public class ReviewSessionService implements ReviewEngineApi {
                                         params.effort(),
                                         params.inheritMcp(),
                                         params.configDir()),
+                                params)
+                        .review(
+                                request,
+                                params.chunkedReview(),
+                                params.selfCritique(),
+                                params.reviewSupervisorEnabled(),
+                                onStatus,
+                                onChunk);
+            } finally {
+                activeOperations.finish(operation);
+            }
+        }
+        if ("antigravity".equals(params.provider())) {
+            CancellationToken cancellationToken = new CancellationToken();
+            AntigravityService service =
+                    new AntigravityService(params.projectDir(), cancellationToken);
+            ActiveOperation operation =
+                    startOperation(
+                            params.operationId(), cancellationToken, service::cancelCurrentRequest);
+            try {
+                return withSecondReviewer(
+                                ReviewPipelineService.forAntigravity(service, params.model()),
                                 params)
                         .review(
                                 request,
@@ -174,22 +191,26 @@ public class ReviewSessionService implements ReviewEngineApi {
     }
 
     /**
-     * Attaches the opt-in second Copilot reviewer for ordinary reviews, at its own reasoning effort
-     * (see {@link #secondReviewerEffort}).
+     * Attaches the opt-in second reviewer from the selected provider for ordinary reviews. Copilot
+     * second reviewers run at {@link #secondReviewerEffort} and share {@code configDir}; Claude and
+     * Antigravity second reviewers ignore those Copilot-only options.
      */
     static ReviewPipelineService withSecondReviewer(
             ReviewPipelineService pipeline, GenerateReviewParams params) {
         if (StringUtils.isBlank(params.secondReviewerModel())) {
             return pipeline;
         }
+        boolean isCopilot = "copilot".equals(params.provider());
         return pipeline.withSecondReviewer(
-                params.secondReviewerModel(), secondReviewerEffort(params), params.configDir());
+                params.secondReviewerModel(),
+                isCopilot ? secondReviewerEffort(params) : "",
+                isCopilot ? params.configDir() : "");
     }
 
     /**
-     * The configured second-reviewer effort. When a host does not send one, the second reviewer
-     * follows a Copilot primary's effort, and a Claude primary's effort is not forwarded because it
-     * is not a Copilot value.
+     * The configured Copilot second-reviewer effort. When a host does not send one, it follows a
+     * Copilot primary's effort and otherwise falls back to {@link
+     * CopilotService#DEFAULT_REASONING_EFFORT}.
      */
     static String secondReviewerEffort(GenerateReviewParams params) {
         if (StringUtils.isNotBlank(params.secondReviewerEffort())) {
@@ -241,6 +262,19 @@ public class ReviewSessionService implements ReviewEngineApi {
                                         params.effort(),
                                         false,
                                         params.configDir())
+                                .review(
+                                        request,
+                                        params.chunkedReview(),
+                                        params.selfCritique(),
+                                        params.reviewSupervisorEnabled(),
+                                        onStatus,
+                                        onChunk,
+                                        execution);
+            } else if ("antigravity".equals(params.provider())) {
+                AntigravityService service = new AntigravityService(root, token);
+                providerCancel.set(service::cancelCurrentRequest);
+                result =
+                        ReviewPipelineService.forAntigravity(service, params.model())
                                 .review(
                                         request,
                                         params.chunkedReview(),
@@ -347,6 +381,28 @@ public class ReviewSessionService implements ReviewEngineApi {
                                 onChunk,
                                 params.inheritMcp(),
                                 params.configDir());
+                return new ChatResult(
+                        content,
+                        ReviewChatPrompts.historyQuestion(params.context(), params.userMessage()));
+            } finally {
+                activeOperations.finish(operation);
+            }
+        }
+        if ("antigravity".equals(params.provider())) {
+            CancellationToken cancellationToken = new CancellationToken();
+            AntigravityService service =
+                    new AntigravityService(params.projectDir(), cancellationToken);
+            ActiveOperation operation =
+                    startOperation(
+                            params.operationId(), cancellationToken, service::cancelCurrentRequest);
+            try {
+                String content =
+                        service.chat(
+                                params.context(),
+                                history,
+                                params.userMessage(),
+                                params.model(),
+                                onChunk);
                 return new ChatResult(
                         content,
                         ReviewChatPrompts.historyQuestion(params.context(), params.userMessage()));
@@ -473,6 +529,7 @@ public class ReviewSessionService implements ReviewEngineApi {
                 switch (params.provider().trim().toLowerCase(java.util.Locale.ROOT)) {
                     case "claude" -> ReviewProvider.CLAUDE;
                     case "copilot" -> ReviewProvider.COPILOT;
+                    case "antigravity" -> ReviewProvider.ANTIGRAVITY;
                     default ->
                             throw new IllegalArgumentException(
                                     "Unsupported provider: " + params.provider());
@@ -528,44 +585,12 @@ public class ReviewSessionService implements ReviewEngineApi {
 
     @Override
     public ReviewedBlobResult readReviewedBlob(ReviewedBlobParams params) {
-        try {
-            return new ReviewedBlobResult(
-                    new ReviewedBlobReader()
-                            .read(params.gitRoot(), params.commit(), params.file(), params.line()),
-                    null);
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            log.warn(
-                    "Interrupted while reading reviewed blob {} at {}",
-                    params.file(),
-                    params.commit(),
-                    LogRedactor.sanitize(interrupted));
-            return new ReviewedBlobResult(null, "Reviewed file lookup was interrupted.");
-        } catch (java.io.IOException
-                | java.util.concurrent.TimeoutException
-                | java.nio.file.InvalidPathException failure) {
-            log.warn(
-                    "Failed to read reviewed blob {} at {}",
-                    params.file(),
-                    params.commit(),
-                    LogRedactor.sanitize(failure));
-            return new ReviewedBlobResult(
-                    null,
-                    StringUtils.defaultIfBlank(
-                            LogRedactor.redact(failure.getMessage()),
-                            LogRedactor.errorType(failure)));
-        }
+        return ReviewSessionWorkspaceSupport.readReviewedBlob(params);
     }
 
     @Override
     public GuidelinesResult readGuidelines(ReadGuidelinesParams params) {
-        if (params == null || StringUtils.isBlank(params.projectDir())) {
-            return new GuidelinesResult("");
-        }
-        // RepoGuidelinesReader adds configured globs to the engine defaults, so no host needs its
-        // own copy of the default file list.
-        return new GuidelinesResult(
-                RepoGuidelinesReader.read(new File(params.projectDir()), params.globs()));
+        return ReviewSessionWorkspaceSupport.readGuidelines(params);
     }
 
     @Override
@@ -578,74 +603,35 @@ public class ReviewSessionService implements ReviewEngineApi {
             ListCopilotModelsParams params,
             Supplier<CopilotModelDiscovery.Result> cachedLookup,
             Supplier<CopilotModelDiscovery.Result> refreshLookup) {
-        boolean forceRefresh = params != null && params.forceRefresh();
-        CopilotModelDiscovery.Result cached = cachedLookup.get();
-        CopilotModelDiscovery.Result result =
-                (!forceRefresh && cached != null) ? cached : refreshLookup.get();
-        return new CopilotModelsResult(
-                result.models(), result.source().name(), result.failureReason());
+        return ReviewSessionWorkspaceSupport.listCopilotModels(params, cachedLookup, refreshLookup);
+    }
+
+    @Override
+    public AntigravityModelsResult listAntigravityModels(ListAntigravityModelsParams params) {
+        return listAntigravityModels(
+                params, AntigravityModelDiscovery::cached, AntigravityModelDiscovery::refresh);
+    }
+
+    static AntigravityModelsResult listAntigravityModels(
+            ListAntigravityModelsParams params,
+            Supplier<AntigravityModelDiscovery.Result> cachedLookup,
+            Supplier<AntigravityModelDiscovery.Result> refreshLookup) {
+        return ReviewSessionWorkspaceSupport.listAntigravityModels(
+                params, cachedLookup, refreshLookup);
     }
 
     @Override
     public GitRootResult findGitRoot(String startDir) {
-        if (StringUtils.isBlank(startDir)) return new GitRootResult("");
-        try {
-            File root = worktreeService.findGitRoot(new File(startDir));
-            return new GitRootResult(root == null ? "" : root.getAbsolutePath());
-        } catch (RuntimeException e) {
-            // An uncanonicalizable path is "not a repository" from the caller's perspective; the
-            // only consumer decides between worktree and plain checkout, and neither wants a throw.
-            return new GitRootResult("");
-        }
+        return ReviewSessionWorkspaceSupport.findGitRoot(worktreeService, startDir);
     }
 
     @Override
     public WorktreeResult createWorktree(CreateWorktreeParams params) {
-        if (params == null
-                || StringUtils.isBlank(params.gitRoot())
-                || StringUtils.isBlank(params.branch())) {
-            return new WorktreeResult("skipped", "", "No branch to check out.");
-        }
-        File repoDir = new File(params.gitRoot());
-        File worktreeDir = worktreeService.newWorktreePath(params.prNumber());
-        try {
-            if (StringUtils.isNotBlank(params.forkCloneUrl())) {
-                worktreeService.createWorktreeFromFork(
-                        repoDir,
-                        params.forkCloneUrl(),
-                        params.branch(),
-                        params.headSha(),
-                        worktreeDir);
-            } else {
-                worktreeService.createWorktree(
-                        repoDir, params.branch(), params.headSha(), worktreeDir);
-            }
-            return new WorktreeResult("created", worktreeDir.getAbsolutePath(), "");
-        } catch (IOException | IllegalStateException e) {
-            log.warn(
-                    "Failed to create worktree for PR #{} in {}",
-                    params.prNumber(),
-                    params.gitRoot(),
-                    LogRedactor.sanitize(e));
-            // Domain result, not an exception: hosts present an actionable failure rather than
-            // granting a provider access to an arbitrary open checkout.
-            return new WorktreeResult(
-                    "failed",
-                    "",
-                    StringUtils.defaultIfBlank(
-                            LogRedactor.redact(e.getMessage()), LogRedactor.errorType(e)));
-        }
+        return ReviewSessionWorkspaceSupport.createWorktree(worktreeService, params);
     }
 
     @Override
     public WorktreeRemovalResult removeWorktree(RemoveWorktreeParams params) {
-        if (params == null
-                || StringUtils.isBlank(params.gitRoot())
-                || StringUtils.isBlank(params.worktreeDir())) {
-            return new WorktreeRemovalResult(false);
-        }
-        return new WorktreeRemovalResult(
-                worktreeService.removeWorktree(
-                        new File(params.gitRoot()), new File(params.worktreeDir())));
+        return ReviewSessionWorkspaceSupport.removeWorktree(worktreeService, params);
     }
 }

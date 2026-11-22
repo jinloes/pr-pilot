@@ -40,8 +40,8 @@ pipeline stages. It is not shipped with either host.
 - `benchmark/ReviewBenchDiagnostics.java` - Per-review stage lines and critique-dropped findings,
   written to `<run>/diagnostics/` for the report.
 - `benchmark/ProviderCanary.java` - Fast live CLI/SDK contract canary (`:review-benchmark:providerCanary`):
-  binary preflight, live `Source.ACCOUNT` Copilot model discovery, temporary checkout setup, and
-  anchored `ReviewResult` validation (`ProviderCanaryTest`).
+  binary preflight, live `Source.ACCOUNT` Copilot/Antigravity model discovery, temporary checkout
+  setup, and anchored `ReviewResult` validation (`ProviderCanaryTest`).
 - `benchmark/StageEvalRunner.java` and `src/main/resources/stage-eval/cases.json` - Stage-isolated
   golden evaluation harness (`:review-benchmark:stageEval`), supporting deterministic recorded
   replay (run in `StageEvalRunnerTest`) and `--live` single-turn downstream critique/rule/hygiene

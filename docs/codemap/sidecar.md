@@ -24,7 +24,8 @@ Thin Java 21, non-web Spring Boot stdio JSON-RPC adapter used only by VS Code.
 - `sidecar/StdioJsonRpcServerSupport.java` - Shared JSON-RPC response, notification, and
   parameter-shape helpers.
   Tests: `StdioJsonRpcServerTest` (protocol), `StdioJsonRpcServerGitHubParamsTest`,
-  `StdioJsonRpcServerReviewsTest` (including streamed notifications), sharing
+  `StdioJsonRpcServerReviewsTest` (including streamed notifications), and
+  `StdioJsonRpcServerAntigravityTest`, sharing
   `StdioJsonRpcServerTestBase`; `StdioJsonRpcServerOperationSchedulerTest` drives the scheduler
   directly.
 - `sidecar/SidecarBootstrapService.java` - Initialize response and advertised capability groups.

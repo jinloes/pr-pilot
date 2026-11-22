@@ -1,5 +1,6 @@
 import type { LineComment, ReviewResult } from './models';
 import type {
+    SidecarAntigravityModelsResult,
     SidecarChatResult,
     SidecarCopilotModelsResult,
     SidecarDraftReviewMutationResult,
@@ -40,6 +41,7 @@ export const REQUIRED_CAPABILITIES = [
     'repoProfile',
     'repoGuidelines',
     'copilotModels',
+    'antigravityModels',
     'worktrees',
     'semanticReviews',
     'reviewGeneration',
@@ -111,6 +113,26 @@ export function parseCopilotModelsResult(value: unknown): SidecarCopilotModelsRe
     return {
         models: [...result.models] as string[],
         source: result.source as SidecarCopilotModelsResult['source'],
+        failureReason: result.failureReason,
+    };
+}
+
+const ANTIGRAVITY_MODEL_SOURCES = new Set<SidecarAntigravityModelsResult['source']>(['ACCOUNT', 'NONE']);
+
+/** Validates the shape returned by `reviews/listAntigravityModels`. */
+export function parseAntigravityModelsResult(value: unknown): SidecarAntigravityModelsResult | null {
+    if (!value || typeof value !== 'object') return null;
+    const result = value as Record<string, unknown>;
+    if (!Array.isArray(result.models)
+        || result.models.some((id) => typeof id !== 'string')
+        || typeof result.source !== 'string'
+        || !ANTIGRAVITY_MODEL_SOURCES.has(result.source as SidecarAntigravityModelsResult['source'])
+        || typeof result.failureReason !== 'string') {
+        return null;
+    }
+    return {
+        models: [...result.models] as string[],
+        source: result.source as SidecarAntigravityModelsResult['source'],
         failureReason: result.failureReason,
     };
 }

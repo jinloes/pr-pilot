@@ -17,11 +17,14 @@ Operational guide for coding agents working in this repository.
   `CODEMAP.md` only when locating implementation and test files, then read just the relevant
   `docs/architecture/*.md` or `docs/codemap/*.md` topic file.
 
-## Context-window efficiency
+## Context-window efficiency (264k budget)
 
-- Scope reads and searches: prefer narrow directory/glob searches and `view_range` on large files
-  instead of loading whole suites or unrelated modules. `.ignore` hides build, staged, report, and
-  snapshot artifacts from ripgrep.
+Keep the working set fit comfortably inside a **264k-token context window** after system/tool
+schemas and always-loaded instructions:
+
+- Scope reads and searches: prefer narrow directory/glob searches and `view_range` on legacy large
+  files instead of loading whole suites or unrelated modules. `.ignore` hides build, staged,
+  report, and snapshot artifacts from ripgrep.
 - Filter inner-loop test runs before running full suites:
   - JVM: `./gradlew :<module>:test --tests "*MyClassTest*"` (failures print full stack/assertion
     diffs inline without `--info`).
@@ -29,9 +32,14 @@ Operational guide for coding agents working in this repository.
     (add `--verbose` for full per-test `spec` output).
   - Webview logic/UI: `npm --prefix webview run test:logic -- <name-substring>` or
     `npx --prefix webview vitest run src/components/Foo.test.tsx`.
-- Split files before they require multi-pass reads: agent docs fail verification above 20,000 LF
-  bytes (`AGENTS.md` above 10,000 LF bytes), and `node scripts/verify.mjs` flags touched test files
-  past 20 KB or source files past 32 KB.
+- Keep context sizes bounded (`scripts/agent-docs.mjs`, `scripts/file-budgets.mjs`, `scripts/verify.mjs`):
+  - **Doc caps (`agent-docs.mjs`):** `AGENTS.md` <= 10 KB, nested `*/AGENTS.md` <= 8 KB, topic docs
+    <= 20 KB, and total doc corpus <= 350 KB (prune stale prose rather than splitting forever).
+  - **Advisory code/test targets (`file-budgets.mjs`):** aim for source <= 32 KB and tests <= 20 KB
+    (`warnings` only, never build failures; `LEGACY_CEILINGS` quiets known larger files). Clean code
+    and cohesive design come first — split only along real responsibility seams, never artificially
+    to hit a byte count (going over or raising a baseline is fine when justified; use `view_range`
+    on larger files).
 
 ## Maintenance rule
 
@@ -102,8 +110,8 @@ Every code change must include tests for new/modified non-UI logic:
 3. Cover happy paths, edge cases, and error paths.
 4. Place JUnit 5 + AssertJ tests in `<module>/src/test/java/com/jinloes/prpilot/`, grouped by
    `@Nested` classes named after the method under test.
-5. Split test classes before ~20 KB into `<Class><Area>Test` files sharing a package-private
-   `<Class>TestSupport`.
+5. Prefer splitting large test classes (~20 KB) along logical areas into `<Class><Area>Test` files
+   sharing a package-private `<Class>TestSupport` when natural seams exist.
 6. Use `@BeforeEach`/`@AfterEach` + `Files.createTempDirectory`; never write to `~/.pr-pilot`.
 
 ## Required verification commands
@@ -117,12 +125,10 @@ node scripts/verify.mjs --dry-run      # show planned checks and notes only
 node scripts/verify.mjs --all          # full local suite; run before opening a PR
 ```
 
-`verify.mjs` maps changed paths to the smallest covering set (affected JVM `check` tasks including
-Spotless and `intellij-plugin:unitTest`, webview/extension lint+typecheck+tests, cross-toolchain
-tests, and in-process agent-doc / Playwright pin checks), printing one line per passing check and
-only the tail of failures with log paths. Update `planChecks` when module dependencies or
-cross-toolchain tests change. CI-only checks (plugin verifier, visual regression, extension-host
-smoke, coverage) are documented in `docs/architecture/ci.md`.
+`verify.mjs` maps changed paths to the smallest covering set (affected JVM `check` tasks,
+webview/extension lint+typecheck+tests, cross-toolchain tests, and in-process doc / file-budget /
+Playwright checks), printing one line per passing check and only failure tails. Update `planChecks`
+when module dependencies or cross-toolchain tests change; CI-only checks live in `docs/architecture/ci.md`.
 
 ## Coding rules
 

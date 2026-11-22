@@ -59,12 +59,14 @@ ext.selectSandboxIde = { String override, List<File> directories, String os, Clo
         report("Local sandbox: ${selected.path} (version ${selected.version}, build ${selected.build})")
         return selected
     }
-    if (os != 'macOS') {
+    if (!(os in ['macOS', 'Windows'])) {
         throw new GradleException('Set ideaLocalPath to an IntelliJ build >=262 for runIdeLocal on this OS')
     }
     def candidates = directories.collectMany { dir ->
         (dir.listFiles() ?: [] as File[]).findAll {
-            it.name.startsWith('IntelliJ') && it.name.endsWith('.app')
+            os == 'macOS'
+                ? (it.name.startsWith('IntelliJ') && it.name.endsWith('.app'))
+                : (it.isDirectory() && it.name.startsWith('IntelliJ'))
         }
     }
     def valid = []
@@ -98,9 +100,24 @@ def overridePath = providers.gradleProperty('ideaLocalPath')
 def localSelection = providers.provider {
     String osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
     String os = osName.contains('mac') ? 'macOS' : osName.contains('windows') ? 'Windows' : 'Linux'
-    selector(overridePath.orNull,
-        [new File(System.getProperty('user.home'), 'Applications'), new File('/Applications')],
-        os, { message -> logger.lifecycle(message) })
+    String userHome = System.getProperty('user.home')
+    List<File> searchDirs
+    if (os == 'macOS') {
+        searchDirs = [new File(userHome, 'Applications'), new File('/Applications')]
+    } else if (os == 'Windows') {
+        String localAppData = System.getenv('LOCALAPPDATA')
+        File userPrograms = localAppData
+            ? new File(localAppData, 'Programs')
+            : new File(userHome, 'AppData/Local/Programs')
+        searchDirs = [
+            userPrograms,
+            System.getenv('ProgramFiles') ? new File(System.getenv('ProgramFiles'), 'JetBrains') : null,
+            System.getenv('ProgramW6432') ? new File(System.getenv('ProgramW6432'), 'JetBrains') : null,
+        ].findAll { it != null }.unique { it.absolutePath.toLowerCase(Locale.ROOT) }
+    } else {
+        searchDirs = []
+    }
+    selector(overridePath.orNull, searchDirs, os, { message -> logger.lifecycle(message) })
 }
 ext.sandboxIdeSelection = localSelection
 

@@ -198,6 +198,16 @@ class UserFacingErrorsTest {
         }
 
         @Test
+        void missingAntigravityBinaryNamesAgyAndAntigravityCli() {
+            String msg =
+                    UserFacingErrors.forProvider(
+                            ReviewProvider.ANTIGRAVITY,
+                            new IOException("Cannot run program \"agy\": error=2"),
+                            "generate a review");
+            assertThat(msg).contains("'agy'").contains("Antigravity CLI").contains("Install");
+        }
+
+        @Test
         void parseErrorsMapToStructuredOutputGuidance() {
             String msg =
                     UserFacingErrors.forProvider(
@@ -259,6 +269,12 @@ class UserFacingErrorsTest {
         void claudeGuidanceNamesTheClaudeCli() {
             String msg = UserFacingErrors.forProviderNotInstalled(ReviewProvider.CLAUDE);
             assertThat(msg).contains("claude").contains("Claude Code CLI").contains("try again");
+        }
+
+        @Test
+        void antigravityGuidanceNamesAgyAndAntigravityCli() {
+            String msg = UserFacingErrors.forProviderNotInstalled(ReviewProvider.ANTIGRAVITY);
+            assertThat(msg).contains("'agy'").contains("Antigravity CLI").contains("try again");
         }
     }
 }

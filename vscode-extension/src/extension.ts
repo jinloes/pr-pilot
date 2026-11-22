@@ -14,6 +14,7 @@ import { SidecarClient, resolveSidecarJarPath } from './sidecar';
 import { DraftRecoveryStore } from './draftRecovery';
 import { PendingDraftIndex } from './pendingDraftIndex';
 import { buildGhAuthLoginCommand, toProviderReadiness } from './providerSetup';
+import { normalizeProvider } from './settingsView';
 import type { PR, ReviewResult } from './models';
 import { cancelThenCleanup, invalidateChatAndCancel, invalidateGenerationAndCancel } from './operationCorrelation';
 import { normalizeRepositoryInstructions, repositoryKey } from './repositoryInstructions';
@@ -68,8 +69,7 @@ function registerReadOnlyWorktreePreviewUri({
 }
 
 function provider(): Provider {
-    const value = config().get<string>('reviewProvider', 'claude');
-    return value === 'copilot' ? 'copilot' : 'claude';
+    return normalizeProvider(config().get<string>('reviewProvider', 'claude'));
 }
 
 async function cancelActiveProvider(operationId: string): Promise<void> {
@@ -400,7 +400,11 @@ function providerReadiness(): ProviderReadiness {
         available: true,
         binaryStatus: 'ready',
         authenticationStatus: 'unverified',
-        authCommand: current === 'copilot' ? 'copilot login' : 'claude auth login',
+        authCommand: current === 'copilot'
+            ? 'copilot login'
+            : current === 'antigravity'
+                ? 'agy'
+                : 'claude auth login',
     });
 }
 
@@ -449,9 +453,12 @@ function githubBaseUrl(): string {
 
 function snapshotReviewGenerationSettings(): ReviewGenerationSettings {
     const c = config();
-    const selectedProvider: Provider = c.get<string>('reviewProvider', 'claude') === 'copilot'
-        ? 'copilot'
-        : 'claude';
+    const selectedProvider: Provider = normalizeProvider(c.get<string>('reviewProvider', 'claude'));
+    const modelKey = selectedProvider === 'copilot'
+        ? 'reviewModelCopilot'
+        : selectedProvider === 'antigravity'
+            ? 'reviewModelAntigravity'
+            : 'reviewModel';
     const effort = c.get<string>('reviewEffort', 'high').trim() || 'high';
     const guidanceGlobs = normalizeReviewGuidanceGlobs(c.get<unknown>('reviewGuidanceGlobs', [])) ?? [];
     const guidance = resolveReviewGuidance(
@@ -465,7 +472,7 @@ function snapshotReviewGenerationSettings(): ReviewGenerationSettings {
     );
     return {
         provider: selectedProvider,
-        model: c.get<string>(selectedProvider === 'copilot' ? 'reviewModelCopilot' : 'reviewModel', ''),
+        model: c.get<string>(modelKey, ''),
         effort,
         inheritMcp: selectedProvider === 'copilot'
             ? copilot.resolveReviewInheritMcp(
@@ -476,7 +483,11 @@ function snapshotReviewGenerationSettings(): ReviewGenerationSettings {
         configDir: selectedProvider === 'copilot' ? c.get<string>('copilotConfigDir', '').trim() : '',
         selfCritique: c.get<boolean>('reviewSelfCritique', true),
         supervisorEnabled: c.get<boolean>('reviewSupervisorEnabled', true),
-        secondReviewerModel: c.get<string>('reviewSecondReviewerModel', '').trim(),
+        secondReviewerModel: selectedProvider === 'copilot'
+            ? c.get<string>('reviewSecondReviewerModel', '').trim()
+            : selectedProvider === 'antigravity'
+                ? c.get<string>('reviewSecondReviewerModelAntigravity', '').trim()
+                : c.get<string>('reviewSecondReviewerModelClaude', '').trim(),
         secondReviewerEffort: c.get<string>('reviewSecondReviewerEffort', 'medium').trim() || 'medium',
         rulesDirectory: c.get<string>('reviewRulesDirectory', '').trim(),
         builtInRules: c.get<boolean>('reviewBuiltInRules', true),

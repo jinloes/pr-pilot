@@ -13,8 +13,9 @@ import { buildSettingsHtml } from '../src/settingsViewHtml';
 
 // ── normalizeProvider ─────────────────────────────────────────────────────────
 
-test('normalizeProvider returns copilot only for the exact value', () => {
+test('normalizeProvider recognizes copilot and antigravity and defaults other values to claude', () => {
     assert.equal(normalizeProvider('copilot'), 'copilot');
+    assert.equal(normalizeProvider('antigravity'), 'antigravity');
     assert.equal(normalizeProvider('claude'), 'claude');
     assert.equal(normalizeProvider('anything-else'), 'claude');
     assert.equal(normalizeProvider(undefined), 'claude');
@@ -226,6 +227,8 @@ test('buildSettingsHtml renders reusable review-guidance profile controls', () =
     );
     assert.match(html, /renderModelSelect\(\$\('reviewSecondReviewerModel'\), models, secondReviewer, 'Off'\)/);
     assert.match(html, /save\('reviewSecondReviewerModel', secondReviewerValue\(\)\)/);
+    assert.match(html, /save\('reviewSecondReviewerModelClaude', \$\('reviewSecondReviewerModelClaude'\)\.value\)/);
+    assert.match(html, /save\('reviewSecondReviewerModelAntigravity', secondReviewerAntigravityValue\(\)\)/);
     assert.match(html, /state\.reviewModelCopilot, \(state\.reviewSecondReviewerModel \|\| ''\)\.trim\(\)/);
     assert.match(html, /type: 'updateReviewGuidanceState'/);
     assert.match(html, /profiles: guidanceProfiles/);

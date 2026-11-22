@@ -120,11 +120,11 @@ installation and must never launch an IDE. Selector fixture tests run under chec
 one.
 
 The explicit override must be valid and at least build 262; it never silently falls back. Automatic
-macOS discovery is limited to direct IntelliJ app bundles in the two Applications directories and
-orders full numeric metadata builds, including EAPs. Other platforms require an explicit path.
-Discovery may resolve aliases read-only, but must not alter app bundles or normal IDE
-configuration/plugins. No remote latest-version lookup or local-selection download fallback is
-permitted.
+discovery scans direct IntelliJ installations in standard macOS (`~/Applications`, `/Applications`)
+and Windows (`%LOCALAPPDATA%\Programs`, `%ProgramFiles%\JetBrains`) install roots and orders full
+numeric metadata builds, including EAPs; Linux requires an explicit `ideaLocalPath`. Discovery may
+resolve aliases read-only, but must not alter installations or normal IDE configuration/plugins. No
+remote latest-version lookup or local-selection download fallback is permitted.
 
 ### VS Code extension development target repo
 The `.vscode/launch.json` config `Run PR Pilot Extension Against Target Repo` prompts for an

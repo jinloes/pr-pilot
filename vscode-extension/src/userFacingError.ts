@@ -99,10 +99,14 @@ function template(key: TemplateKey, vars: Record<string, string>): string {
  * pre-generate preflight before any spawn is attempted. Wording is kept in sync with the IntelliJ
  * host (`UserFacingErrors.java`).
  */
-export function providerNotInstalledMessage(provider: 'claude' | 'copilot'): string {
-    return provider === 'copilot'
-        ? template('provider_not_installed', { binary: 'copilot', provider_cli: 'GitHub Copilot CLI' })
-        : template('provider_not_installed', { binary: 'claude', provider_cli: 'Claude Code CLI' });
+export function providerNotInstalledMessage(provider: 'claude' | 'copilot' | 'antigravity'): string {
+    if (provider === 'copilot') {
+        return template('provider_not_installed', { binary: 'copilot', provider_cli: 'GitHub Copilot CLI' });
+    }
+    if (provider === 'antigravity') {
+        return template('provider_not_installed', { binary: 'agy', provider_cli: 'Antigravity CLI' });
+    }
+    return template('provider_not_installed', { binary: 'claude', provider_cli: 'Claude Code CLI' });
 }
 
 /**
@@ -172,6 +176,12 @@ function mapError(err: unknown, context: ErrorContext): string {
             return template('provider_binary_missing', {
                 binary: 'copilot',
                 provider_cli: 'GitHub Copilot CLI',
+            });
+        }
+        if (msg.includes('agy') || msg.includes('antigravity')) {
+            return template('provider_binary_missing', {
+                binary: 'agy',
+                provider_cli: 'Antigravity CLI',
             });
         }
         if (msg.includes('claude')) {

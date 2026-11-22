@@ -5,7 +5,7 @@ PR Pilot is a dual-host code review assistant for GitHub pull requests:
 - IntelliJ plugin (`intellij-plugin`)
 - VS Code extension (`vscode-extension`)
 
-It helps you discover PRs, generate AI-assisted reviews (Claude or Copilot), edit comments, and submit review drafts.
+It helps you discover PRs, generate AI-assisted reviews (Claude, Copilot, or Antigravity), edit comments, and submit review drafts.
 
 > **Beta availability:** PR Pilot is prerelease software distributed through
 > [GitHub Releases](https://github.com/jinloes/pr-pilot/releases), not an IDE marketplace. Install
@@ -33,6 +33,7 @@ Both hosts require:
 - One authenticated review provider:
   - Claude Code CLI (`claude`)
   - GitHub Copilot CLI (`copilot`)
+  - Antigravity CLI (`agy`)
 
 The VS Code extension also requires Java 21 or newer to run its bundled sidecar. IntelliJ uses the
 IDE runtime and does not launch the sidecar.
@@ -46,10 +47,11 @@ gh auth status
 java -version       # required for VS Code; verify the major version is 21 or newer
 claude --version    # if using Claude
 copilot --version   # if using Copilot
+agy --version       # if using Antigravity
 ```
 
-If `gh auth status` fails, run `gh auth login`. For provider sign-in, run `claude auth login` or
-`copilot login`. PR Pilot's first-run checklist verifies the selected binary before loading the PR
+If `gh auth status` fails, run `gh auth login`. For provider sign-in, run `claude auth login`,
+`copilot login`, or `agy login`. PR Pilot's first-run checklist verifies the selected binary before loading the PR
 list. When a provider has no safe non-interactive authentication status command, the checklist
 labels authentication as **unverified** instead of claiming it is ready. Claude probe timeouts,
 execution failures, and unsupported commands also remain non-blocking and unverified; only a
@@ -85,7 +87,7 @@ conclusive signed-out response blocks onboarding.
 - **IntelliJ IDEA:** open **Settings/Preferences > Tools > PR Pilot**.
 - **VS Code:** run **PR Pilot: Open Settings** or use the settings button in the PR Pilot view.
 
-Select **Claude** or **Copilot** as the review provider. Keep the default model initially; model,
+Select **Claude**, **Copilot**, or **Antigravity** as the review provider. Keep the default model initially; model,
 reasoning-effort, and MCP options are advanced controls. PR Pilot checks the selected provider CLI
 during onboarding and again before generating a review. Settings remain available from the setup
 screen so you can switch providers.

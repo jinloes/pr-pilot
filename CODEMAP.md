@@ -10,7 +10,7 @@ only the map for the module you are changing.
 | Task | Start here | Follow through | Primary tests |
 |---|---|---|---|
 | Inspect internal source coverage (not readiness) | `model/SourceInventory.java`, `review/SourceInventoryClient.java` | `SourceInventoryFiles.java`, IntelliJ `SourceInventoryService.java` and `SourceInventoryMcpProvider.java` | `SourceInventoryTest`, `SourceInventoryFilesTest`, `SourceInventoryClientTest`, `SourceInventoryServiceTest`, `SourceInventoryMcpProviderTest` (positive-traversal tests carry `@RequiresSecureTraversal`); manual protocol recipe in `docs/intellij-assisted-review.md` |
-| Change review generation or prompts | `review-engine/.../ReviewPrompts.java` and its per-stage `Review*Prompts.java`/`ReviewInstructions.java`/`*Checklists.java` siblings, `ReviewResultParser.java`, `ClaudeService.java`, `CopilotService.java` | `ReviewEngineApi.java`, `ReviewSessionService.java`, host request wiring | Matching `review-engine` service tests; prompt mirrors listed in `scripts/host-mirrors.mjs` |
+| Change review generation or prompts | `review-engine/.../ReviewPrompts.java` and its per-stage `Review*Prompts.java`/`ReviewInstructions.java`/`*Checklists.java` siblings, `ReviewResultParser.java`, `ClaudeService.java`, `CopilotService.java`, `AntigravityService.java` | `ReviewEngineApi.java`, `ReviewSessionService.java`, host request wiring | Matching `review-engine` service tests; prompt mirrors listed in `scripts/host-mirrors.mjs` |
 | Add an engine capability | `GitHubEngineApi.java` or `ReviewEngineApi.java` | `StdioJsonRpcServerGitHubHandlers.java`/`StdioJsonRpcServerReviewHandlers.java` (cancellable or streaming work: `StdioJsonRpcServerAsyncReviewHandlers.java`), `SidecarBootstrapService.java`, `vscode-extension/src/sidecarGitHubClient.ts`/`sidecarReviewClient.ts` | `EngineCapabilityCoverageTest.java`, `wireCatalog.test.ts` |
 | Change PR discovery, metadata, diff, or draft mutations | `github-engine/.../sidecar/pr/` | `GitHubEngine.java`, both host bridges, shared webview messages | Matching `github-engine` service test plus host bridge tests |
 | Change the shared review UI | `webview/src/App.tsx`, `webview/src/components/` | `webview/src/bridge/types.ts`, both host bridge handlers | Component tests plus accessibility/visual suites when behavior or layout changes |
@@ -70,9 +70,13 @@ only the map for the module you are changing.
   golden findings with nearby and critique-dropped findings, false positives, and a noise-aware
   baseline comparison (`reviewbench-report.test.mjs`, run by the extension runner).
 - `scripts/verify.mjs` - Change-aware verification: `planChecks` maps changed paths to the minimal
-  Gradle/npm checks plus the in-process agent-doc and Playwright image checks, adds hand-mirror,
-  large-file (`largeFileNotes`), and CI-lint reminders, and prints only failing output
+  Gradle/npm checks plus the in-process agent-doc, file-budget, and Playwright image checks, adds
+  hand-mirror, large-file (`largeFileNotes`), and CI-lint reminders, and prints only failing output
   (`verify.test.mjs`, run by the extension runner).
+- `scripts/file-budgets.mjs` - Advisory single-read LF byte guidelines (`32,000` source, `20,000`
+  test) with `LEGACY_CEILINGS` baselines so untouched large files stay quiet while new/growing
+  files emit non-blocking design-first warnings (`file-budgets.test.mjs`, run by the extension
+  runner; also runnable directly via `node`).
 - `scripts/compact-test-reporter.mjs` - Single-line passing reporter and file/test-name filter
   helper shared by `vscode-extension/scripts/run-unit-tests.mjs` and
   `webview/scripts/run-logic-tests.mjs` (`--verbose` restores `spec`; `compact-test-reporter.test.mjs`).
@@ -84,8 +88,9 @@ only the map for the module you are changing.
   extension runner, which runs every `scripts/*.test.mjs`).
 - `scripts/agent-docs.mjs` - Agent-doc consistency: every `docs/architecture` decision indexed once
   in `ARCHITECTURE.md`, relative links and anchors resolve, every code map is linked, LF byte caps
-  enforced (`20,000` bytes; `10,000` for root `AGENTS.md`), and warnings above `18,500` bytes
-  (`agent-docs.test.mjs`, run by the extension runner; also runnable directly via `node`).
+  enforced (`20,000` topic docs, `10,000` root `AGENTS.md`, `8,000` nested `AGENTS.md`, `350,000`
+  total corpus), and early warnings emitted (`agent-docs.test.mjs`, run by the extension runner;
+  also runnable directly via `node`).
 - `gradle/intellij-sandbox.gradle` - Lazy installed-IDE selection and separate `runIdeLocal`
   platform/runtime/sandbox wiring; compilation and ordinary `runIde` stay pinned.
 - `gradle/intellij-sandbox-tests.gradle` - Temporary metadata fixtures exercising the production

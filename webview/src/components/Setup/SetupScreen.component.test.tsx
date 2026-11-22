@@ -81,6 +81,12 @@ describe('setup recovery actions', () => {
     detail: 'Copilot CLI needs attention.',
     authCommand: 'copilot login',
   }
+  const antigravity = {
+    ...claude,
+    provider: 'antigravity' as const,
+    detail: 'Antigravity CLI needs attention.',
+    authCommand: 'agy',
+  }
 
   it('maps every setup reason to the diagnosed next step', () => {
     expect(setupRecoveryAction('gh_not_installed', claude)).toMatchObject({
@@ -114,6 +120,18 @@ describe('setup recovery actions', () => {
       command: 'copilot login',
       guideUrl: expect.stringContaining('/authenticate-copilot-cli'),
     })
+    expect(setupRecoveryAction('provider_not_installed', antigravity)).toMatchObject({
+      kind: 'install',
+      label: 'Install Antigravity CLI',
+      guideUrl: 'https://antigravity.google/download',
+    })
+    expect(setupRecoveryAction('provider_not_authenticated', antigravity)).toMatchObject({
+      kind: 'authenticate',
+      label: 'Authenticate Antigravity CLI',
+      command: 'agy',
+      guideUrl: 'https://antigravity.google/docs',
+    })
+    expect(setupSteps('provider_not_installed', antigravity)[2]?.label).toBe('Install Antigravity CLI')
     expect(setupRecoveryAction('load_failed', claude)).toEqual({ kind: 'retry', label: 'Retry' })
     expect(setupRecoveryAction('draft_index_unavailable', copilot)).toEqual({ kind: 'check', label: 'Check status' })
   })

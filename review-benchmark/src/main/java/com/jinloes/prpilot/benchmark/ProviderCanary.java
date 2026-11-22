@@ -6,6 +6,8 @@ import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
+import com.jinloes.prpilot.review.AntigravityModelDiscovery;
+import com.jinloes.prpilot.review.AntigravityService;
 import com.jinloes.prpilot.review.ClaudeService;
 import com.jinloes.prpilot.review.CopilotModelDiscovery;
 import com.jinloes.prpilot.review.CopilotService;
@@ -58,7 +60,8 @@ public final class ProviderCanary {
 
     static final String USAGE =
             "Usage: ./gradlew :review-benchmark:providerCanary --args=\"[options]\"\n"
-                    + "  --provider copilot|claude|both   Provider(s) to verify (default: copilot)\n"
+                    + "  --provider copilot|claude|antigravity|both|all\n"
+                    + "                                   Provider(s) to verify (default: copilot)\n"
                     + "  --model <id>                     Optional model override\n"
                     + "  --effort low|medium|high         Copilot reasoning effort (default: low)\n"
                     + "  --json                           Emit JSON report to stdout\n"
@@ -86,6 +89,10 @@ public final class ProviderCanary {
         ProviderSetupProbe.Result preflight(ReviewProvider provider);
 
         CopilotModelDiscovery.Result discoverCopilotModels();
+
+        default AntigravityModelDiscovery.Result discoverAntigravityModels() {
+            return AntigravityModelDiscovery.Result.none("");
+        }
 
         ReviewResult runCanaryReview(
                 ReviewProvider provider,
@@ -188,7 +195,13 @@ public final class ProviderCanary {
         return switch (StringUtils.trimToEmpty(raw).toLowerCase(Locale.ROOT)) {
             case "copilot" -> List.of(ReviewProvider.COPILOT);
             case "claude" -> List.of(ReviewProvider.CLAUDE);
-            case "both", "all" -> List.of(ReviewProvider.COPILOT, ReviewProvider.CLAUDE);
+            case "antigravity" -> List.of(ReviewProvider.ANTIGRAVITY);
+            case "both" -> List.of(ReviewProvider.COPILOT, ReviewProvider.CLAUDE);
+            case "all" ->
+                    List.of(
+                            ReviewProvider.COPILOT,
+                            ReviewProvider.CLAUDE,
+                            ReviewProvider.ANTIGRAVITY);
             default -> throw new IllegalArgumentException("Unsupported --provider: " + raw);
         };
     }
@@ -237,6 +250,27 @@ public final class ProviderCanary {
                         0,
                         elapsedMillis(startedNanos),
                         "Copilot live model discovery failed: " + LogRedactor.redact(reason));
+            }
+        } else if (provider == ReviewProvider.ANTIGRAVITY) {
+            AntigravityModelDiscovery.Result discovery = probe.discoverAntigravityModels();
+            discoverySource = discovery.source().name();
+            discoveredCount = discovery.models().size();
+            if (discovery.source() != AntigravityModelDiscovery.Source.ACCOUNT
+                    || discovery.models().isEmpty()) {
+                String reason =
+                        StringUtils.defaultIfBlank(
+                                discovery.failureReason(),
+                                "expected live ACCOUNT catalog, got " + discovery.source());
+                return new CheckReport(
+                        provider.getId(),
+                        false,
+                        setup.binaryStatus(),
+                        discoverySource,
+                        discoveredCount,
+                        "",
+                        0,
+                        elapsedMillis(startedNanos),
+                        "Antigravity live model discovery failed: " + LogRedactor.redact(reason));
             }
         }
 
@@ -369,6 +403,12 @@ public final class ProviderCanary {
             }
 
             @Override
+            public AntigravityModelDiscovery.Result discoverAntigravityModels() {
+                AntigravityModelDiscovery.invalidate();
+                return AntigravityModelDiscovery.refresh();
+            }
+
+            @Override
             public ReviewResult runCanaryReview(
                     ReviewProvider provider,
                     Path repoDir,
@@ -379,6 +419,11 @@ public final class ProviderCanary {
                 if (provider == ReviewProvider.COPILOT) {
                     CopilotService copilot = new CopilotService(repoDir.toString());
                     return ReviewPipelineService.forCopilot(copilot, model, effort, false, "")
+                            .review(request, false, false, false, ignored -> {}, null);
+                }
+                if (provider == ReviewProvider.ANTIGRAVITY) {
+                    AntigravityService antigravity = new AntigravityService(repoDir.toString());
+                    return ReviewPipelineService.forAntigravity(antigravity, model)
                             .review(request, false, false, false, ignored -> {}, null);
                 }
                 ClaudeService claude = new ClaudeService(repoDir.toString());

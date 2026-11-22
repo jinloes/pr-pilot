@@ -86,6 +86,8 @@ class ReviewBenchOptionsTest {
             assertThat(options.only()).containsExactly("a", "b");
             assertThat(options.reposDir()).isEqualTo(Path.of("/r"));
             assertThat(options.provider()).isEqualTo("claude");
+            assertThat(ReviewBenchOptions.parse(with("--provider", "Antigravity")).provider())
+                    .isEqualTo("antigravity");
             assertThat(options.model()).isEqualTo("m");
             assertThat(options.effort()).isEqualTo("high");
             assertThat(options.configDir()).isEqualTo("/cfg");

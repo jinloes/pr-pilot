@@ -82,6 +82,30 @@ tasks.register('testSandboxIdeSelection') {
             assert select(windows.path, [], 'Windows', report).path == windows.canonicalFile
             assert new File(windows, 'Contents/jbr/bin/java').delete()
             rejects({ select(windows.path, [], 'Windows', report) }, 'bundled runtime')
+            File winRoot = new File(root, 'win-programs')
+            assert winRoot.mkdir()
+            rejects({ select(null, [winRoot], 'Windows', report) }, 'No eligible')
+            def winInstall = { String name, String build, String version = '2026.3' ->
+                File home = new File(winRoot, name)
+                File launcher = new File(home, 'bin/idea64.exe')
+                assert launcher.parentFile.mkdirs()
+                launcher.text = 'fixture only; not executable code'
+                File runtime = new File(home, 'jbr/bin/java.exe')
+                assert runtime.parentFile.mkdirs()
+                runtime.text = 'fixture only; not executable code'
+                new File(home, 'product-info.json').text = JsonOutput.toJson([
+                    name: 'IntelliJ IDEA', productCode: 'IU', version: version, buildNumber: build,
+                    launch: [[os: 'Windows', launcherPath: 'bin/idea64.exe', javaExecutablePath: 'jbr/bin/java.exe']]
+                ])
+                home
+            }
+            assert new File(winRoot, 'Fleet').mkdir()
+            winInstall('IntelliJ IDEA 2026.1', '261.9999.1', '2026.1')
+            rejects({ select(null, [winRoot], 'Windows', report) }, 'No eligible')
+            def winOlder = winInstall('IntelliJ IDEA 2026.2', '262.10.1', '2026.2')
+            assert select(null, [winRoot], 'Windows', report).path == winOlder.canonicalFile
+            def winNewest = winInstall('IntelliJ IDEA', '263.7307.200', '2026.3')
+            assert select(null, [winRoot], 'Windows', report).path == winNewest.canonicalFile
             def noMetadata = new File(root, 'IntelliJ No Metadata.app')
             assert noMetadata.mkdir()
             rejects({ select(noMetadata.path, [root], 'macOS', report) }, 'product-info.json')

@@ -10,10 +10,10 @@ import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringUtils;
 
 /**
- * Resolves provider CLI binaries (`claude`, `copilot`). Probes known hard-coded install paths
- * before falling back to the bare command name, because GUI-launched IDEs often have an incomplete
- * {@code PATH}. Mirrors {@code github-engine}'s own binary-resolution convention rather than
- * reaching across module boundaries for the tiny amount of logic involved.
+ * Resolves provider CLI binaries (`claude`, `copilot`, `agy`). Probes known hard-coded install
+ * paths before falling back to the bare command name, because GUI-launched IDEs often have an
+ * incomplete {@code PATH}. Mirrors {@code github-engine}'s own binary-resolution convention rather
+ * than reaching across module boundaries for the tiny amount of logic involved.
  */
 final class BinaryLocator {
 
@@ -124,6 +124,7 @@ final class BinaryLocator {
             candidates.add(new File(new File(userHome, ".volta\\bin"), name).getPath());
         }
         if (localAppData != null && !localAppData.isBlank()) {
+            candidates.add(new File(new File(localAppData, name + "\\bin"), name).getPath());
             candidates.add(new File(new File(localAppData, "Programs\\" + name), name).getPath());
             candidates.add(new File(new File(localAppData, "Volta\\bin"), name).getPath());
         }
@@ -165,6 +166,7 @@ final class BinaryLocator {
             }
             String localAppData = envValue(env, "LOCALAPPDATA");
             if (localAppData != null && !localAppData.isBlank()) {
+                directories.add(new File(localAppData, "agy\\bin").getPath());
                 directories.add(new File(localAppData, "Volta\\bin").getPath());
             }
             String appData = envValue(env, "APPDATA");

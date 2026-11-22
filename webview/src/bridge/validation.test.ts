@@ -232,6 +232,20 @@ void test('validates provider setup readiness states', () => {
       authCommand: 'claude auth login',
     },
   }), null)
+  assert.notEqual(parseIncomingMessage({
+    ...version,
+    type: 'setupRequired',
+    reason: 'provider_not_authenticated',
+    detail: 'Sign in.',
+    providerReadiness: {
+      provider: 'antigravity',
+      available: true,
+      detail: 'Sign in.',
+      binaryStatus: 'ready',
+      authenticationStatus: 'unverified',
+      authCommand: 'agy',
+    },
+  }), null)
   assert.equal(parseIncomingMessage({
     ...version,
     type: 'setupRequired',

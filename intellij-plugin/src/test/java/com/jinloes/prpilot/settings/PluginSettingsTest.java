@@ -152,14 +152,35 @@ class PluginSettingsTest {
     }
 
     @Test
-    void reviewSecondReviewerModelDefaultsToBlankAndRoundTripsTrimmed() {
+    void reviewSecondReviewerModelDefaultsToBlankAndRoundTripsPerProvider() {
         PluginSettings settings = new PluginSettings();
 
         assertThat(settings.getReviewSecondReviewerModel()).isEmpty();
+        assertThat(settings.getReviewSecondReviewerModelClaude()).isEmpty();
+        assertThat(settings.getReviewSecondReviewerModelAntigravity()).isEmpty();
+        assertThat(settings.getActiveSecondReviewerModel()).isEmpty();
+
         settings.setReviewSecondReviewerModel("  gpt-5.4  ");
+        settings.setReviewSecondReviewerModelClaude("  claude-haiku-4-5-20251001  ");
+        settings.setReviewSecondReviewerModelAntigravity("  gemini-3.8-flash-high  ");
         assertThat(settings.getReviewSecondReviewerModel()).isEqualTo("gpt-5.4");
+        assertThat(settings.getReviewSecondReviewerModelClaude())
+                .isEqualTo("claude-haiku-4-5-20251001");
+        assertThat(settings.getReviewSecondReviewerModelAntigravity())
+                .isEqualTo("gemini-3.8-flash-high");
+
+        assertThat(settings.getActiveSecondReviewerModel()).isEqualTo("claude-haiku-4-5-20251001");
+        settings.setReviewProvider(ReviewProvider.COPILOT);
+        assertThat(settings.getActiveSecondReviewerModel()).isEqualTo("gpt-5.4");
+        settings.setReviewProvider(ReviewProvider.ANTIGRAVITY);
+        assertThat(settings.getActiveSecondReviewerModel()).isEqualTo("gemini-3.8-flash-high");
+
         settings.setReviewSecondReviewerModel(null);
+        settings.setReviewSecondReviewerModelClaude(null);
+        settings.setReviewSecondReviewerModelAntigravity(null);
         assertThat(settings.getReviewSecondReviewerModel()).isEmpty();
+        assertThat(settings.getReviewSecondReviewerModelClaude()).isEmpty();
+        assertThat(settings.getReviewSecondReviewerModelAntigravity()).isEmpty();
     }
 
     @Test

@@ -53,7 +53,8 @@ public final class StageEvalRunner {
                     + "  --corpus <path>             Optional path to custom cases.json\n"
                     + "  --only <case-id>            Run only matching case ID (repeatable)\n"
                     + "  --live                      Run downstream stages (critique/rules/hygiene) on live CLI\n"
-                    + "  --provider copilot|claude   Live provider when --live is set (default: copilot)\n"
+                    + "  --provider copilot|claude|antigravity\n"
+                    + "                              Live provider when --live is set (default: copilot)\n"
                     + "  --model <id>                Optional live model override\n"
                     + "  --effort low|medium|high    Copilot reasoning effort for --live (default: medium)\n"
                     + "  --json                      Emit full JSON report to stdout\n"
@@ -228,7 +229,7 @@ public final class StageEvalRunner {
                         throw new IllegalArgumentException("Missing value after --provider");
                     }
                     String p = args[++i].trim().toLowerCase(Locale.ROOT);
-                    if (!"copilot".equals(p) && !"claude".equals(p)) {
+                    if (!"copilot".equals(p) && !"claude".equals(p) && !"antigravity".equals(p)) {
                         throw new IllegalArgumentException("Unsupported --provider: " + p);
                     }
                     provider = ReviewProvider.fromId(p);

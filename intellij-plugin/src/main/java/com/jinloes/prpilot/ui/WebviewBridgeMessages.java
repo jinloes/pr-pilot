@@ -2,8 +2,10 @@ package com.jinloes.prpilot.ui;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.model.ReviewStatus;
+import com.jinloes.prpilot.review.ProviderSetupProbe;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import java.util.List;
@@ -183,7 +185,7 @@ final class WebviewBridgeMessages {
                     detail,
                     available ? "ready" : "missing",
                     available ? "unverified" : "unavailable",
-                    "copilot".equals(provider) ? "copilot login" : "claude auth login");
+                    ProviderSetupProbe.authCommand(ReviewProvider.fromId(provider)));
         }
     }
 

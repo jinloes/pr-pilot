@@ -2,6 +2,7 @@ import { buildSettingsScript } from './settingsViewScript';
 import { SETTINGS_VIEW_STYLES } from './settingsViewStyles';
 import {
     CLAUDE_MODEL_OPTIONS,
+    CLAUDE_SECOND_REVIEWER_OPTIONS,
     COPILOT_EFFORTS,
     GITHUB_BASE_URL_ERROR,
     escapeHtml,
@@ -16,6 +17,9 @@ import {
  */
 export function buildSettingsHtml(cspSource: string, nonce: string): string {
     const claudeOptions = CLAUDE_MODEL_OPTIONS
+        .map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`)
+        .join('');
+    const claudeSecondReviewerOptions = CLAUDE_SECOND_REVIEWER_OPTIONS
         .map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`)
         .join('');
     const effortOptions = COPILOT_EFFORTS
@@ -84,6 +88,7 @@ ${SETTINGS_VIEW_STYLES}
       <select id="provider">
         <option value="claude">Claude Code (claude CLI)</option>
         <option value="copilot">GitHub Copilot (copilot CLI)</option>
+        <option value="antigravity">Antigravity (agy CLI)</option>
       </select>
       <div class="hint">Backend CLI used to generate reviews and chat replies.</div>
     </div>
@@ -103,6 +108,15 @@ ${SETTINGS_VIEW_STYLES}
       <div class="hint">Pick a discovered model. Choose "CLI default" to use the Copilot CLI's own routing.</div>
     </div>
 
+    <div class="field hidden" id="antigravityModelField">
+      <label for="antigravityModel">Antigravity model</label>
+      <div class="row">
+        <select id="antigravityModel"></select>
+        <button id="refreshAntigravityModels" class="secondary" title="Reload the models reported by agy models">Refresh</button>
+      </div>
+      <div class="hint">Pick a discovered model. Choose "CLI default" to use the Antigravity CLI's default model.</div>
+    </div>
+
     <div class="field hidden" id="effortField">
       <label for="effort">Reasoning effort</label>
       <select id="effort" aria-describedby="effortHint">${effortOptions}</select>
@@ -111,10 +125,22 @@ ${SETTINGS_VIEW_STYLES}
 
     <fieldset class="group" id="secondReviewerGroup">
       <legend>Second reviewer</legend>
-      <div class="field">
+      <div class="field" id="secondReviewerClaudeModelField">
+        <label for="reviewSecondReviewerModelClaude">Model</label>
+        <select id="reviewSecondReviewerModelClaude" aria-describedby="reviewSecondReviewerModelClaudeHint">${claudeSecondReviewerOptions}</select>
+        <div class="hint" id="reviewSecondReviewerModelClaudeHint">Optional. Runs a second Claude model in parallel; findings are cross-validated. Choose Off to disable.</div>
+      </div>
+
+      <div class="field hidden" id="secondReviewerCopilotModelField">
         <label for="reviewSecondReviewerModel">Model</label>
         <select id="reviewSecondReviewerModel" aria-describedby="reviewSecondReviewerModelHint"></select>
-        <div class="hint" id="reviewSecondReviewerModelHint">Optional. Runs a second Copilot model in parallel with either provider; findings are cross-validated. Choose Off to disable.</div>
+        <div class="hint" id="reviewSecondReviewerModelHint">Optional. Runs a second Copilot model in parallel; findings are cross-validated. Choose Off to disable.</div>
+      </div>
+
+      <div class="field hidden" id="secondReviewerAntigravityModelField">
+        <label for="reviewSecondReviewerModelAntigravity">Model</label>
+        <select id="reviewSecondReviewerModelAntigravity" aria-describedby="reviewSecondReviewerModelAntigravityHint"></select>
+        <div class="hint" id="reviewSecondReviewerModelAntigravityHint">Optional. Runs a second Antigravity model in parallel; findings are cross-validated. Choose Off to disable.</div>
       </div>
 
       <div class="field hidden" id="secondReviewerEffortField">

@@ -5,6 +5,7 @@ import com.jinloes.prpilot.model.ChatContext;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
+import com.jinloes.prpilot.review.AntigravityService;
 import com.jinloes.prpilot.review.ClaudeService;
 import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.ProviderSetupProbe;
@@ -130,9 +131,11 @@ final class WebviewPanelSupport {
     }
 
     static boolean isProviderBinaryAvailable(ReviewProvider provider) {
-        return provider == ReviewProvider.COPILOT
-                ? CopilotService.isBinaryAvailable()
-                : ClaudeService.isBinaryAvailable();
+        return switch (provider == null ? ReviewProvider.CLAUDE : provider) {
+            case COPILOT -> CopilotService.isBinaryAvailable();
+            case ANTIGRAVITY -> AntigravityService.isBinaryAvailable();
+            case CLAUDE -> ClaudeService.isBinaryAvailable();
+        };
     }
 
     private static ReviewProvider configuredReviewProvider() {
@@ -145,25 +148,30 @@ final class WebviewPanelSupport {
         ReviewProvider provider = configuredReviewProvider();
         boolean available = isProviderBinaryAvailable(provider);
         return new WebviewBridgeMessages.ProviderReadinessDto(
-                provider == ReviewProvider.COPILOT ? "copilot" : "claude",
+                provider.getId(),
                 available,
                 available
                         ? "Provider CLI found. Authentication cannot be verified without starting a provider session."
                         : UserFacingErrors.forProviderNotInstalled(provider),
                 available ? "ready" : "missing",
                 available ? "unverified" : "unavailable",
-                provider == ReviewProvider.COPILOT ? "copilot login" : "claude auth login");
+                ProviderSetupProbe.authCommand(provider));
     }
 
     static WebviewBridgeMessages.ProviderReadinessDto providerReadiness(
             ProviderSetupProbe.Result setup) {
+        return providerReadiness(configuredReviewProvider(), setup);
+    }
+
+    static WebviewBridgeMessages.ProviderReadinessDto providerReadiness(
+            ReviewProvider provider, ProviderSetupProbe.Result setup) {
+        ReviewProvider resolved = provider != null ? provider : ReviewProvider.CLAUDE;
         if (setup == null) {
             return currentProviderReadiness();
         }
-        ReviewProvider provider = configuredReviewProvider();
         String detail;
         if (!setup.available()) {
-            detail = UserFacingErrors.forProviderNotInstalled(provider);
+            detail = UserFacingErrors.forProviderNotInstalled(resolved);
         } else if ("ready".equals(setup.authenticationStatus())) {
             detail = "Provider CLI and authentication are ready.";
         } else if ("unavailable".equals(setup.authenticationStatus())) {
@@ -178,7 +186,7 @@ final class WebviewPanelSupport {
                             + "' if sign-in is required.";
         }
         return new WebviewBridgeMessages.ProviderReadinessDto(
-                provider == ReviewProvider.COPILOT ? "copilot" : "claude",
+                resolved.getId(),
                 setup.available(),
                 detail,
                 setup.binaryStatus(),

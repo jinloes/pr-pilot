@@ -5,11 +5,19 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Agents read larger files in several pieces, so each doc must stay a single read.
+// Agents read larger files in several pieces, so each doc must stay a single read within a 264k
+// context-window budget.
 export const AGENT_DOC_MAX_BYTES = 20_000
 export const AGENT_DOC_WARN_BYTES = 18_500
 // Root AGENTS.md is injected into every prompt turn, so keep its token footprint tight.
 export const ROOT_AGENTS_MAX_BYTES = 10_000
+export const ROOT_AGENTS_WARN_BYTES = 9_200
+// Directory AGENTS.md files load alongside edits in that directory; keep them compact overlays.
+export const NESTED_AGENTS_MAX_BYTES = 8_000
+export const NESTED_AGENTS_WARN_BYTES = 7_000
+// Bound the whole agent-doc corpus so topic docs are pruned rather than split indefinitely.
+export const AGENT_DOC_CORPUS_MAX_BYTES = 350_000
+export const AGENT_DOC_CORPUS_WARN_BYTES = 325_000
 
 // Each topic directory must be reachable from its root doc.
 const TOPIC_ROOTS = { 'docs/architecture': 'ARCHITECTURE.md', 'docs/codemap': 'CODEMAP.md' }
@@ -212,13 +220,33 @@ export function checkAgentDocs(repoRoot) {
     return cache.get(file)
   }
   const docs = new Map(listAgentDocs(repoRoot).map((file) => [file, parse(file)]))
+  let totalBytes = 0
   for (const [file, doc] of docs) {
     const size = doc.lfBytes
-    if (file === 'AGENTS.md' && size > ROOT_AGENTS_MAX_BYTES) {
-      errors.push(
-        `${file} is ${size} LF bytes; keep the always-loaded root guide under ` +
-          `${ROOT_AGENTS_MAX_BYTES} bytes.`,
-      )
+    totalBytes += size
+    const isNestedAgents = file !== 'AGENTS.md' && file.endsWith('/AGENTS.md')
+    if (file === 'AGENTS.md') {
+      if (size > ROOT_AGENTS_MAX_BYTES) {
+        errors.push(
+          `${file} is ${size} LF bytes; keep the always-loaded root guide under ` +
+            `${ROOT_AGENTS_MAX_BYTES} bytes.`,
+        )
+      } else if (size > ROOT_AGENTS_WARN_BYTES) {
+        warnings.push(
+          `${file} is ${size} LF bytes; approaching the ${ROOT_AGENTS_MAX_BYTES}-byte root-guide limit.`,
+        )
+      }
+    } else if (isNestedAgents) {
+      if (size > NESTED_AGENTS_MAX_BYTES) {
+        errors.push(
+          `${file} is ${size} LF bytes; keep nested directory guides under ` +
+            `${NESTED_AGENTS_MAX_BYTES} bytes.`,
+        )
+      } else if (size > NESTED_AGENTS_WARN_BYTES) {
+        warnings.push(
+          `${file} is ${size} LF bytes; approaching the ${NESTED_AGENTS_MAX_BYTES}-byte nested-guide limit.`,
+        )
+      }
     } else if (size > AGENT_DOC_MAX_BYTES) {
       errors.push(
         `${file} is ${size} LF bytes; split it so agents can read it in one pass ` +
@@ -234,6 +262,16 @@ export function checkAgentDocs(repoRoot) {
       const problem = resolved && linkProblem(repoRoot, link, resolved, parse)
       if (problem) errors.push(`${file}:${link.line}: ${problem}`)
     }
+  }
+  if (totalBytes > AGENT_DOC_CORPUS_MAX_BYTES) {
+    errors.push(
+      `Agent docs total ${totalBytes} LF bytes across ${docs.size} files; prune stale detail to ` +
+        `stay within ${AGENT_DOC_CORPUS_MAX_BYTES} bytes.`,
+    )
+  } else if (totalBytes > AGENT_DOC_CORPUS_WARN_BYTES) {
+    warnings.push(
+      `Agent docs total ${totalBytes} LF bytes; approaching the ${AGENT_DOC_CORPUS_MAX_BYTES}-byte corpus cap.`,
+    )
   }
   checkDecisionIndex(docs, errors)
   checkTopicFilesLinked(docs, errors)

@@ -35,7 +35,7 @@ record BenchmarkOptions(
     static final String JUDGE_LLM = "llm";
     static final String JUDGE_LOCATION = "location";
     static final int DEFAULT_LINE_WINDOW = 10;
-    private static final Set<String> PROVIDERS = Set.of("claude", "copilot");
+    private static final Set<String> PROVIDERS = Set.of("claude", "copilot", "antigravity");
     private static final Set<String> VALUE_OPTIONS =
             Set.of(
                     "--prs",
@@ -56,7 +56,7 @@ record BenchmarkOptions(
 
     static final String USAGE =
             """
-            Usage: ./gradlew :review-benchmark:reviewBenchmark --args="--prs FILE --repos-root DIR --provider claude|copilot [options]"
+            Usage: ./gradlew :review-benchmark:reviewBenchmark --args="--prs FILE --repos-root DIR --provider claude|copilot|antigravity [options]"
 
             Reviews each pull request at the commit the reference reviewer reviewed and reports how many of the reference reviewer's
             inline findings PR Pilot also raised.
@@ -64,7 +64,7 @@ record BenchmarkOptions(
               --prs FILE              Pull request URLs, one per line (# comments allowed),
                                       each optionally followed by base=<sha> to pin the diff base
               --repos-root DIR        Directory holding local clones as <repo> or <owner>/<repo>
-              --provider NAME         claude or copilot
+              --provider NAME         claude, copilot, or antigravity
               --model ID              Review model (provider default when omitted)
               --effort LEVEL          Reasoning effort
               --config-dir DIR        Provider config directory
@@ -171,7 +171,8 @@ record BenchmarkOptions(
         if (prs == null) throw new IllegalArgumentException("--prs is required.");
         if (repos == null) throw new IllegalArgumentException("--repos-root is required.");
         if (provider == null || !PROVIDERS.contains(provider)) {
-            throw new IllegalArgumentException("--provider must be claude or copilot.");
+            throw new IllegalArgumentException(
+                    "--provider must be claude, copilot, or antigravity.");
         }
         if (!JUDGE_LLM.equals(judge) && !JUDGE_LOCATION.equals(judge)) {
             throw new IllegalArgumentException("--judge must be llm or location.");

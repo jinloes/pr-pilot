@@ -83,6 +83,34 @@ class ProviderSetupProbeTest {
     }
 
     @Test
+    void reportsAntigravityAuthenticationAsUnverifiedAndUsesAgyAuthCommand() {
+        ProviderSetupProbe readyProbe =
+                new ProviderSetupProbe(
+                        ignored -> true,
+                        () -> {
+                            throw new AssertionError("Antigravity auth probe must not run");
+                        });
+        ProviderSetupProbe missingProbe =
+                new ProviderSetupProbe(
+                        ignored -> false,
+                        () -> {
+                            throw new AssertionError("Antigravity auth probe must not run");
+                        });
+
+        ProviderSetupProbe.Result ready = readyProbe.probe(ReviewProvider.ANTIGRAVITY);
+        assertThat(ready.available()).isTrue();
+        assertThat(ready.binaryStatus()).isEqualTo("ready");
+        assertThat(ready.authenticationStatus()).isEqualTo("unverified");
+        assertThat(ready.authCommand()).isEqualTo("agy");
+
+        ProviderSetupProbe.Result missing = missingProbe.probe(ReviewProvider.ANTIGRAVITY);
+        assertThat(missing.available()).isFalse();
+        assertThat(missing.binaryStatus()).isEqualTo("missing");
+        assertThat(missing.authenticationStatus()).isEqualTo("unavailable");
+        assertThat(missing.authCommand()).isEqualTo("agy");
+    }
+
+    @Test
     void buildClaudeAuthProcessWrapsWindowsBatchShimAndNormalizesPathEnv() throws IOException {
         String shim = "C:\\Program Files (x86)\\nodejs\\claude.cmd";
         ProcessBuilder pb =

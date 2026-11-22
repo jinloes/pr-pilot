@@ -35,7 +35,7 @@ test('hand-mirrored files add a reminder note', () => {
   assert.match(plan.notes[0], /^Hand-mirrored .*check vscode-extension\/src\/copilot\.ts/)
 })
 
-test('a core change checks every downstream JVM module in build order', () => {
+test('a core change checks file budgets and every downstream JVM module in build order', () => {
   const plan = planChecks(['core/src/main/java/com/jinloes/prpilot/model/PullRequest.java'])
   assert.deepEqual(gradleTasks(plan), [
     ':core:check',
@@ -45,7 +45,10 @@ test('a core change checks every downstream JVM module in build order', () => {
     ':review-benchmark:check',
     ':intellij-plugin:check',
   ])
-  assert.equal(plan.checks.length, 1)
+  assert.deepEqual(names(plan), [
+    'file budgets',
+    'gradle :core:check :github-engine:check :review-engine:check :sidecar:check :review-benchmark:check :intellij-plugin:check',
+  ])
 })
 
 test('a leaf module change checks only that module', () => {
@@ -108,7 +111,7 @@ test('CI config changes outside workflows add only a lint note', () => {
 
 test('workflow changes run everything and add the lint note', () => {
   const plan = planChecks(['.github/workflows/ci.yml'])
-  assert.deepEqual(names(plan).slice(0, 2), ['agent docs', 'playwright image pins'])
+  assert.deepEqual(names(plan).slice(0, 3), ['agent docs', 'playwright image pins', 'file budgets'])
   assert.equal(gradleTasks(plan).length, 6)
   assert.equal(plan.notes.length, 2)
   assert.match(plan.notes[0], /^CI config changed: /)
@@ -117,7 +120,7 @@ test('workflow changes run everything and add the lint note', () => {
 
 test('root build files and --all run everything', () => {
   for (const plan of [planChecks(['settings.gradle']), planChecks([], { all: true })]) {
-    assert.deepEqual(names(plan).slice(0, 2), ['agent docs', 'playwright image pins'])
+    assert.deepEqual(names(plan).slice(0, 3), ['agent docs', 'playwright image pins', 'file budgets'])
     assert.equal(gradleTasks(plan).length, 6)
     assert.ok(names(plan).includes('webview a11y tests'))
     assert.ok(names(plan).includes('vscode-extension unit tests'))

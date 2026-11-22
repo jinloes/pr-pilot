@@ -1,6 +1,7 @@
 # PR Pilot Architecture
 
-PR Pilot reviews GitHub pull requests in IntelliJ and VS Code using Claude Code or GitHub Copilot.
+PR Pilot reviews GitHub pull requests in IntelliJ and VS Code using Claude Code, GitHub Copilot, or
+Antigravity.
 
 ## Scope
 
@@ -101,6 +102,7 @@ Index non-obvious active constraints here; record each as a `###` section in the
 
 - [Provider toggle and prompt sharing](docs/architecture/providers.md#provider-toggle-and-prompt-sharing)
 - [Copilot SDK runtime](docs/architecture/providers.md#copilot-sdk-runtime)
+- [Antigravity CLI runtime](docs/architecture/providers.md#antigravity-cli-runtime)
 - [Provider capability isolation](docs/architecture/providers.md#provider-capability-isolation)
 - [Host code intelligence over MCP](docs/architecture/providers.md#host-code-intelligence-over-mcp)
 - [Reasoning effort normalization](docs/architecture/providers.md#reasoning-effort-normalization)

@@ -33,6 +33,8 @@ VS Code host integration. All GitHub and review generation routes through the Ja
   behind `reviews/probeProviderSetup`).
 - `src/copilot.ts` - Copilot model-list caching (`reviews/listCopilotModels`) and reasoning-effort
   normalization.
+- `src/antigravity.ts` - Antigravity model-list caching (`reviews/listAntigravityModels`) and
+  built-in fallback options (`antigravity.test.ts`).
 - `src/codeIntelligence.ts` - Host-neutral read-only lookup tools (path confinement, symbol
   location, bounded formatting) over a `CodeIntelligenceBackend`. `codeIntelligenceServer.ts`
   serves them as a per-request loopback MCP server (`withCodeIntelligenceServer`), and
@@ -46,7 +48,7 @@ VS Code host integration. All GitHub and review generation routes through the Ja
   document from `settingsViewStyles.ts` and the inline script that `settingsViewScript.ts`
   assembles from `settingsViewScriptHelpers.ts` (state, rendering, validation) and
   `settingsViewScriptEvents.ts` (event wiring and host messages). Tests: `settingsView.test.ts`,
-  `settingsViewScript.test.ts`.
+  `settingsViewScript.test.ts`, `settingsViewSecondReviewer.test.ts`.
 - `src/reviewGuidanceProfiles.ts` - Guidance-profile validation and resolution.
 - `src/repositoryInstructions.ts` - Remembered per-repository review instructions
   (`pr-pilot.repositoryReviewInstructions`): key normalization, limits, settings-view update
@@ -70,7 +72,8 @@ VS Code host integration. All GitHub and review generation routes through the Ja
   (`test:integration`) on the minimum supported VS Code: activation, contributed command
   registration, opening the main UI, and the staged sidecar's required capabilities.
 - `test/wireCatalog.test.ts` - Enforces engine declarations against the TypeScript client.
-- `test/hostHandlers.test.ts` - Runs the compiled `extension.ts` bridge handlers with VS Code, the
+- `test/hostHandlers.test.ts` (with `test/hostHandlersSupport.ts`) - Runs the compiled
+  `extension.ts` bridge handlers with VS Code, the
   providers, and the sidecar replaced (PR-list payload fields and `cancelChat`).
 - `test/sidecar.test.ts` - `SidecarClient` JAR resolution, lifecycle, and recovery;
   `sidecarContext.test.ts` covers context and worktree reads. Both drive the fake sidecar process

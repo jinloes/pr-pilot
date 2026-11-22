@@ -4,12 +4,13 @@ Key design decisions moved from [ARCHITECTURE.md](../../ARCHITECTURE.md). Each s
 active constraint future code must respect.
 
 ### Provider toggle and prompt sharing
-Copilot and Claude share prompt builders/parsing (`ReviewPrompts` and its per-stage siblings such
-as `ReviewChatPrompts`, plus `ReviewResultParser`; static helpers in `review-engine`). Do not fork
-prompt constants by provider unless absolutely required.
-Full-review and chat prompts are built in the engine (inside `ClaudeService`/`CopilotService`) from
-structured fields. Chat hosts send a `ChatContext` (PR metadata, diff, generated review, and any
-attached text with its file and lines) and never assemble prompt text themselves.
+Claude, Copilot, and Antigravity share prompt builders/parsing (`ReviewPrompts` and its per-stage
+siblings such as `ReviewChatPrompts`, plus `ReviewResultParser`; static helpers in `review-engine`).
+Do not fork prompt constants by provider unless absolutely required.
+Full-review and chat prompts are built in the engine (inside
+`ClaudeService`/`CopilotService`/`AntigravityService`) from structured fields. Chat hosts send a
+`ChatContext` (PR metadata, diff, generated review, and any attached text with its file and lines)
+and never assemble prompt text themselves.
 
 ### Copilot SDK runtime
 Both the IntelliJ plugin and the sidecar use the official Java Copilot SDK
@@ -25,6 +26,33 @@ self-critique (closing each `RuntimeSession` after its call and invalidating the
 route Copilot model discovery (`CopilotModelDiscovery` via `reviews/listCopilotModels` on
 `ReviewEngineApi`) through the Java engine/sidecar rather than bundling a second Copilot SDK in the
 VS Code extension.
+
+### Antigravity CLI runtime
+`AntigravityService` spawns local `agy` in headless NDJSON mode via `--print= --input-format
+stream-json --output-format stream-json --agent pr-pilot-reviewer --settings <path>
+--disable-slash-commands`. Unlike `claude`, `agy` parses `--print` as a string option rather than a
+boolean flag (bare `--print` consumes the next flag as an inline prompt or fails at the end of
+argv), so `--print=` is required when prompts arrive over `stream-json` stdin; `agy` also defines
+no `--max-turns` or `--cwd` flag. Reasoning effort (`--effort`) is never passed and is hidden in
+both hosts when Antigravity is selected because `agy` model slugs encode their own thinking tier
+(such as `gemini-3.1-pro-high` or `claude-opus-4-6-thinking`) and `agy` exits non-zero when
+`--effort` is combined with tier-encoded or non-effort models. `AntigravityModelDiscovery`
+(`reviews/listAntigravityModels`, capability `antigravityModels`) parses `agy models` (`<slug>
+(<Display Name>)`) after stripping ANSI escapes, caches non-empty `ACCOUNT` catalogs with
+stale-while-revalidate, and falls back to built-in slugs when discovery fails.
+
+Because `agy` walks upward from its working directory to `.git` and loads `.agents/hooks.json`,
+`.agents/agents`, `AGENTS.md`, and `GEMINI.md`, running directly in an untrusted PR worktree could
+execute PR-authored shell hooks. Every invocation runs inside an ephemeral owner-only
+`AntigravityIsolatedWorkspace` containing an empty `.git/` boundary marker, PR Pilot's restricted
+`.agents/agents/pr-pilot-reviewer.md` (`commandExecutionPolicy: off`, empty MCP/skills/plugins, and
+either read-only tools `[read_file, find_by_name, grep_search, list_dir]` or `[]`), a generated
+`--settings` file (`toolPermission: "request-review"`, `allowNonWorkspaceAccess: false`, and
+`permissions.deny` blocking `write_file(*)`, `command(*)`, `unsandboxed(*)`, `read_url(*)`,
+`execute_url(*)`, `download_url(*)`, `mcp(*)`, plus `read_file(*)` for tool-free stages), and safe
+top-level links/Windows junctions into `projectDir` that exclude `.git`, `.agents`/`.agent`/
+`_agents`/`_agent`/`.gemini`, `AGENTS.md`, `GEMINI.md`, and symlinks escaping `projectDir`.
+`AntigravityStreamParser` relativizes any emitted isolated-workspace path back to `projectDir`.
 
 ### Provider capability isolation
 Claude review/chat processes are granted a **read-only tool allowlist** (`--tools "Read Grep Glob"`,
@@ -145,21 +173,22 @@ back to a short hardcoded suggestion list.
   verifies `gh` authentication for the configured host.
 
 ### Binary resolution
-Probe known hard-coded paths for `gh`, `claude`, and `copilot` before falling back to command name,
-because GUI-launched IDEs often have incomplete `PATH`. `review-engine`'s `BinaryLocator` is the
-single implementation of this probing logic for both IntelliJ (in-process) and VS Code (via the
-sidecar's `reviews/probeProviderSetup` capability; the former TypeScript copy in
-`claude.ts`/`copilot.ts` is retired). JVM provider subprocesses must prepend `~/.local/bin`,
-`~/.npm-global/bin`, and `~/.volta/bin` as well as Homebrew/local-bin paths: a resolved Node-backed
-CLI wrapper otherwise cannot find its runtime when Toolbox launches the IDE without shell
-initialization.
+Probe known hard-coded paths for `gh`, `claude`, `copilot`, and `agy` before falling back to
+command name, because GUI-launched IDEs often have incomplete `PATH`. `review-engine`'s
+`BinaryLocator` is the single implementation of this probing logic for both IntelliJ (in-process)
+and VS Code (via the sidecar's `reviews/probeProviderSetup` capability; the former TypeScript copy
+in `claude.ts`/`copilot.ts` is retired). JVM provider subprocesses must prepend `~/.local/bin`,
+`~/.npm-global/bin`, and `~/.volta/bin` as well as Homebrew/local-bin and Antigravity install paths
+(`%LOCALAPPDATA%\agy\bin`, `~/.local/share/agy/bin`): a resolved CLI wrapper otherwise cannot find
+its runtime when Toolbox launches the IDE without shell initialization.
 
 ### Provider preflight
 Before the PR list is first shown, both hosts check that the configured provider's CLI
-(`claude`/`copilot`) is resolvable and publish binary/authentication states in the setup bridge
-payload. Claude authentication uses the bounded, non-interactive `claude auth status --text` probe;
-Copilot exposes no status-only command, so its authentication is explicitly `unverified` and the
-checklist gives the manual `copilot login` action rather than claiming readiness. Missing binaries
+(`claude`/`copilot`/`agy`) is resolvable and publish binary/authentication states in the setup
+bridge payload. Claude authentication uses the bounded, non-interactive `claude auth status --text`
+probe; Copilot and Antigravity expose no safe non-interactive status-only command, so their
+authentication is explicitly `unverified` and the checklist gives the manual `copilot login` or
+`agy login` action rather than claiming readiness. Missing binaries
 and conclusively signed-out auth responses keep onboarding open with settings access. Timeouts,
 execution errors, and unsupported or changed auth commands degrade to `unverified` so an
 inconclusive probe cannot block onboarding. The same binary preflight remains in the review path as

@@ -12,7 +12,7 @@ sequenceDiagram
     participant ReviewEngine as ReviewEngineApi
     participant Worktree as GitWorktreeService
     participant Pipeline as ReviewPipelineService
-    participant Provider as Claude or Copilot
+    participant Provider as Claude, Copilot, or Antigravity
 
     Reviewer->>UI: Select pull request
     UI->>Host: selectPR(prKey)
@@ -135,7 +135,7 @@ sequenceDiagram
 
     opt Second reviewer model configured (non-deep)
         Note over Pipeline,Provider: Started in parallel with the primary; cancelled with it.
-        Pipeline->>Provider: Same request to the second Copilot model
+        Pipeline->>Provider: Same request to the second model on the selected provider
         Provider-->>Pipeline: Second review (errors and timeouts are ignored)
         Pipeline->>Pipeline: Merge and deduplicate with the primary findings
     end

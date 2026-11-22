@@ -43,17 +43,31 @@ class IntellijClaudeServiceTest {
         }
 
         @Test
-        void identityChangesWithTheSecondReviewerModel() {
+        void identityChangesWithTheActiveProviderSecondReviewerModel() {
             PluginSettings settings = new PluginSettings();
-            Object before =
-                    IntellijClaudeService.snapshotReviewRuntimeSettings(settings).identity();
-
             settings.setReviewSecondReviewerModel("gpt-5.4");
-            IntellijClaudeService.ReviewRuntimeSettings after =
+            settings.setReviewSecondReviewerModelAntigravity("gemini-3.8-flash-high");
+            IntellijClaudeService.ReviewRuntimeSettings claudeBefore =
                     IntellijClaudeService.snapshotReviewRuntimeSettings(settings);
+            assertThat(claudeBefore.secondReviewerModel()).isEmpty();
 
-            assertThat(after.secondReviewerModel()).isEqualTo("gpt-5.4");
-            assertThat(after.identity()).isNotEqualTo(before);
+            settings.setReviewSecondReviewerModelClaude("claude-haiku-4-5-20251001");
+            IntellijClaudeService.ReviewRuntimeSettings claudeAfter =
+                    IntellijClaudeService.snapshotReviewRuntimeSettings(settings);
+            assertThat(claudeAfter.secondReviewerModel()).isEqualTo("claude-haiku-4-5-20251001");
+            assertThat(claudeAfter.identity()).isNotEqualTo(claudeBefore.identity());
+
+            settings.setReviewProvider(ReviewProvider.COPILOT);
+            assertThat(
+                            IntellijClaudeService.snapshotReviewRuntimeSettings(settings)
+                                    .secondReviewerModel())
+                    .isEqualTo("gpt-5.4");
+
+            settings.setReviewProvider(ReviewProvider.ANTIGRAVITY);
+            assertThat(
+                            IntellijClaudeService.snapshotReviewRuntimeSettings(settings)
+                                    .secondReviewerModel())
+                    .isEqualTo("gemini-3.8-flash-high");
         }
 
         @Test
@@ -101,6 +115,19 @@ class IntellijClaudeServiceTest {
                                     .secondReviewerEffort())
                     .isEqualTo("medium");
         }
+
+        @Test
+        void snapshotsAntigravityProviderAndModel() {
+            PluginSettings settings = new PluginSettings();
+            settings.setReviewProvider(ReviewProvider.ANTIGRAVITY);
+            settings.setReviewModelAntigravity("gemini-3.8-flash-high");
+
+            IntellijClaudeService.ReviewRuntimeSettings snapshot =
+                    IntellijClaudeService.snapshotReviewRuntimeSettings(settings);
+
+            assertThat(snapshot.provider()).isEqualTo(ReviewProvider.ANTIGRAVITY);
+            assertThat(snapshot.model()).isEqualTo("gemini-3.8-flash-high");
+        }
     }
 
     @Nested
@@ -143,6 +170,16 @@ class IntellijClaudeServiceTest {
                             new IOException("Cannot run program \"copilot\": error=2"),
                             "generate review");
             assertThat(msg).contains("'copilot'").contains("GitHub Copilot");
+        }
+
+        @Test
+        void antigravityBinaryMissingMentionsAgy() {
+            String msg =
+                    IntellijClaudeService.friendlyMessage(
+                            ReviewProvider.ANTIGRAVITY,
+                            new IOException("Cannot run program \"agy\": error=2"),
+                            "generate review");
+            assertThat(msg).contains("'agy'").contains("Antigravity CLI");
         }
 
         @Test

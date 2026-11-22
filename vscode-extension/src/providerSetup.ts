@@ -44,7 +44,7 @@ export function toProviderReadiness(
             detail: providerNotInstalledMessage(provider),
         };
     }
-    if (provider === 'copilot') {
+    if (provider === 'copilot' || provider === 'antigravity') {
         return {
             provider,
             available: true,

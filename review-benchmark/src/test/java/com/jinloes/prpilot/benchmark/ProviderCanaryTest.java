@@ -7,6 +7,7 @@ import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
+import com.jinloes.prpilot.review.AntigravityModelDiscovery;
 import com.jinloes.prpilot.review.CopilotModelDiscovery;
 import com.jinloes.prpilot.review.ProviderSetupProbe;
 import java.io.ByteArrayOutputStream;
@@ -43,6 +44,16 @@ class ProviderCanaryTest {
             assertThat(opts.model()).isEqualTo("gpt-5.4");
             assertThat(opts.effort()).isEqualTo("medium");
             assertThat(opts.json()).isTrue();
+
+            assertThat(
+                            ProviderCanary.parseArgs(new String[] {"--provider", "antigravity"})
+                                    .providers())
+                    .containsExactly(ReviewProvider.ANTIGRAVITY);
+            assertThat(ProviderCanary.parseArgs(new String[] {"--provider", "all"}).providers())
+                    .containsExactly(
+                            ReviewProvider.COPILOT,
+                            ReviewProvider.CLAUDE,
+                            ReviewProvider.ANTIGRAVITY);
         }
 
         @Test
@@ -148,6 +159,82 @@ class ProviderCanaryTest {
 
             assertThat(report.passed()).isFalse();
             assertThat(report.failure()).contains("SDK protocol version mismatch");
+        }
+
+        @Test
+        void verifiesAntigravityLiveDiscoveryBeforeRunningReview() throws Exception {
+            ProviderCanary.ProviderProbe okProbe =
+                    new ProviderCanary.ProviderProbe() {
+                        @Override
+                        public ProviderSetupProbe.Result preflight(ReviewProvider provider) {
+                            return new ProviderSetupProbe.Result(
+                                    true, "ready", "unverified", "agy");
+                        }
+
+                        @Override
+                        public CopilotModelDiscovery.Result discoverCopilotModels() {
+                            return CopilotModelDiscovery.Result.none("");
+                        }
+
+                        @Override
+                        public AntigravityModelDiscovery.Result discoverAntigravityModels() {
+                            return new AntigravityModelDiscovery.Result(
+                                    List.of("gemini-3.1-pro-high"),
+                                    AntigravityModelDiscovery.Source.ACCOUNT,
+                                    "");
+                        }
+
+                        @Override
+                        public ReviewResult runCanaryReview(
+                                ReviewProvider provider,
+                                Path repoDir,
+                                PRReviewRequest request,
+                                String model,
+                                String effort) {
+                            return new ReviewResult("Looks good.", "APPROVE", List.of());
+                        }
+                    };
+
+            ProviderCanary.CheckReport passed =
+                    ProviderCanary.verifyProvider(ReviewProvider.ANTIGRAVITY, "", "low", okProbe);
+            assertThat(passed.passed()).isTrue();
+            assertThat(passed.discoverySource()).isEqualTo("ACCOUNT");
+            assertThat(passed.discoveredModels()).isEqualTo(1);
+
+            ProviderCanary.ProviderProbe failedDiscoveryProbe =
+                    new ProviderCanary.ProviderProbe() {
+                        @Override
+                        public ProviderSetupProbe.Result preflight(ReviewProvider provider) {
+                            return new ProviderSetupProbe.Result(
+                                    true, "ready", "unverified", "agy");
+                        }
+
+                        @Override
+                        public CopilotModelDiscovery.Result discoverCopilotModels() {
+                            return CopilotModelDiscovery.Result.none("");
+                        }
+
+                        @Override
+                        public AntigravityModelDiscovery.Result discoverAntigravityModels() {
+                            return AntigravityModelDiscovery.Result.none("agy models failed");
+                        }
+
+                        @Override
+                        public ReviewResult runCanaryReview(
+                                ReviewProvider provider,
+                                Path repoDir,
+                                PRReviewRequest request,
+                                String model,
+                                String effort) {
+                            throw new AssertionError("Should fail before starting review");
+                        }
+                    };
+
+            ProviderCanary.CheckReport failed =
+                    ProviderCanary.verifyProvider(
+                            ReviewProvider.ANTIGRAVITY, "", "low", failedDiscoveryProbe);
+            assertThat(failed.passed()).isFalse();
+            assertThat(failed.failure()).contains("agy models failed");
         }
 
         @Test

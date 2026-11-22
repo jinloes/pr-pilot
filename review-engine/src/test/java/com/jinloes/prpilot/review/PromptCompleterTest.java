@@ -19,9 +19,10 @@ class PromptCompleterTest {
         }
 
         @Test
-        void acceptsBothSupportedProviders() {
+        void acceptsAllSupportedProviders() {
             assertThat(PromptCompleter.forProvider("claude", "/tmp", "", "", "")).isNotNull();
             assertThat(PromptCompleter.forProvider("copilot", "/tmp", "m", "high", "")).isNotNull();
+            assertThat(PromptCompleter.forProvider("antigravity", "/tmp", "m", "", "")).isNotNull();
         }
     }
 

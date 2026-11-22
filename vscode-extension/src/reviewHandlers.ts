@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { PendingDraftIndex } from './pendingDraftIndex';
 import { composeCustomInstructions } from './repositoryInstructions';
+import { normalizeProvider } from './settingsView';
 import { GitHubOperationError, LocalPrDiffError, providerNotInstalledMessage, toUserFacingError } from './userFacingError';
 import {
     canPersistDraft,
@@ -84,7 +85,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         deps.push(state, {
             type: 'reviewError',
             prKey: key,
-            message: providerNotInstalledMessage(isCopilot ? 'copilot' : 'claude'),
+            message: providerNotInstalledMessage(settings.provider),
         });
         if (state.activeProviderOperation === providerOperation) state.activeProviderOperation = null;
         return;
@@ -288,7 +289,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
                 selfCritique: settings.selfCritique,
                 reviewSupervisorEnabled: settings.supervisorEnabled,
                 secondReviewerModel: settings.secondReviewerModel || undefined,
-                secondReviewerEffort: settings.secondReviewerModel ? settings.secondReviewerEffort : undefined,
+                secondReviewerEffort: isCopilot && settings.secondReviewerModel ? settings.secondReviewerEffort : undefined,
                 baseSha: revisions.baseSha || undefined,
                 incrementalBaselineSha,
                 chunkedReview: msg.chunkedReview === true && !incrementalBaselineSha,
@@ -600,9 +601,10 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
     const history = key ? [...(state.chatHistory.get(key) ?? [])] : [];
     const context = buildChatContext(state, chatAttachment(msg));
     const c = deps.config();
-    const selectedProvider: Provider = c.get<string>('reviewProvider', 'claude') === 'copilot'
-        ? 'copilot'
-        : 'claude';
+    const selectedProvider: Provider = normalizeProvider(c.get<string>('reviewProvider', 'claude'));
+    const model = selectedProvider === 'antigravity'
+        ? c.get<string>('reviewModelAntigravity', '').trim()
+        : undefined;
     const effort = c.get<string>('reviewEffort', 'high').trim() || 'high';
     const inheritMcp = selectedProvider === 'copilot'
         ? c.get<boolean>('copilotInheritMcp', false)
@@ -646,6 +648,7 @@ async function handleAskClaude(state: ViewState, msg: Record<string, unknown>): 
                 operationId,
                 provider: selectedProvider,
                 projectDir: chatDir,
+                ...(model ? { model } : {}),
                 effort,
                 inheritMcp,
                 configDir,

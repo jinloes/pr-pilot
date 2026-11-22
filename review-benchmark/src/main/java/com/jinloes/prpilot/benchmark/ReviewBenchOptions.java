@@ -29,7 +29,7 @@ record ReviewBenchOptions(
         boolean verbose,
         boolean help) {
 
-    private static final Set<String> PROVIDERS = Set.of("claude", "copilot");
+    private static final Set<String> PROVIDERS = Set.of("claude", "copilot", "antigravity");
     private static final Set<String> SETS =
             Set.of(ReviewBenchTask.SET_TEST, ReviewBenchTask.SET_FULL);
     private static final Set<String> VALUE_OPTIONS =
@@ -62,7 +62,7 @@ record ReviewBenchOptions(
               --limit N               Review only the first N PRs
               --only KEY              Review only this task (golden-file stem; repeatable)
               --repos-dir DIR         Clone cache (default build/reviewbench/repos)
-              --provider NAME         claude or copilot (default copilot)
+              --provider NAME         claude, copilot, or antigravity (default copilot)
               --model ID              Review model (provider default when omitted)
               --effort LEVEL          Reasoning effort
               --config-dir DIR        Provider config directory
@@ -135,7 +135,8 @@ record ReviewBenchOptions(
         if (out == null) throw new IllegalArgumentException("--out is required.");
         if (!SETS.contains(set)) throw new IllegalArgumentException("--set must be test or full.");
         if (!PROVIDERS.contains(provider)) {
-            throw new IllegalArgumentException("--provider must be claude or copilot.");
+            throw new IllegalArgumentException(
+                    "--provider must be claude, copilot, or antigravity.");
         }
         return new ReviewBenchOptions(
                 corpus,

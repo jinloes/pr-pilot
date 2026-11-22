@@ -1,9 +1,10 @@
 package com.jinloes.prpilot.model;
 
-/** Review provider CLI backend: Claude Code or GitHub Copilot. */
+/** Review provider CLI backend: Claude Code, GitHub Copilot, or Antigravity. */
 public enum ReviewProvider {
     CLAUDE("claude", "Claude Code", "claude"),
-    COPILOT("copilot", "GitHub Copilot", "copilot");
+    COPILOT("copilot", "GitHub Copilot", "copilot"),
+    ANTIGRAVITY("antigravity", "Antigravity", "agy");
 
     private final String id;
     private final String displayName;

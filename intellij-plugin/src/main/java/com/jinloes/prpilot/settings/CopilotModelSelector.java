@@ -4,6 +4,7 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.JBUI;
 import com.jinloes.prpilot.model.ReviewProvider;
+import com.jinloes.prpilot.review.AntigravityModelDiscovery;
 import com.jinloes.prpilot.review.CopilotModelDiscovery;
 import com.jinloes.prpilot.util.LogRedactor;
 import java.awt.Component;
@@ -34,6 +35,7 @@ final class CopilotModelSelector {
     private record ModelOption(String label, String id) {}
 
     static final String MODELS_LOADING_HINT = "Loading models available to your Copilot account…";
+    static final String ANTIGRAVITY_MODELS_LOADING_HINT = "Loading models from Antigravity CLI…";
 
     private static final List<ModelOption> CLAUDE_MODELS =
             List.of(
@@ -42,8 +44,24 @@ final class CopilotModelSelector {
                     new ModelOption("Sonnet — balanced", "claude-sonnet-4-6"),
                     new ModelOption("Opus — most thorough", "claude-opus-4-7"));
 
+    private static final List<ModelOption> CLAUDE_SECOND_REVIEWER_MODELS =
+            List.of(
+                    new ModelOption("Off", ""),
+                    new ModelOption("Haiku — fastest", "claude-haiku-4-5-20251001"),
+                    new ModelOption("Sonnet — balanced", "claude-sonnet-4-6"),
+                    new ModelOption("Opus — most thorough", "claude-opus-4-7"));
+
     private static final String[] COPILOT_MODEL_SUGGESTIONS = {
         "", "claude-sonnet-4.6", "claude-opus-4.7", "claude-opus-4.8", "gpt-5.5", "gpt-5.4",
+    };
+
+    private static final String[] ANTIGRAVITY_MODEL_SUGGESTIONS = {
+        "",
+        "gemini-3.8-flash-high",
+        "gemini-3.8-flash-medium",
+        "claude-sonnet-4-6",
+        "claude-opus-4-6-thinking",
+        "gpt-oss-120b-medium",
     };
 
     private static final String[] COPILOT_EFFORTS = {
@@ -53,35 +71,54 @@ final class CopilotModelSelector {
     private final JComboBox<String> claudeModelCombo =
             new JComboBox<>(CLAUDE_MODELS.stream().map(ModelOption::label).toArray(String[]::new));
     private final JComboBox<String> copilotModelCombo = new JComboBox<>(COPILOT_MODEL_SUGGESTIONS);
+    private final JComboBox<String> antigravityModelCombo =
+            new JComboBox<>(ANTIGRAVITY_MODEL_SUGGESTIONS);
     private final JComboBox<String> copilotEffortCombo = new JComboBox<>(COPILOT_EFFORTS);
     private final JCheckBox copilotInheritMcpBox =
             new JCheckBox("Allow Copilot to use MCP tools from your trusted Copilot config");
     private final JCheckBox copilotAutoEnableMcpOnReviewBox =
             new JCheckBox("Always enable MCP for Copilot reviews");
     private final JBTextField copilotConfigDirField = new JBTextField();
+    private final JComboBox<String> secondReviewerClaudeCombo =
+            new JComboBox<>(
+                    CLAUDE_SECOND_REVIEWER_MODELS.stream()
+                            .map(ModelOption::label)
+                            .toArray(String[]::new));
     private final JComboBox<String> secondReviewerModelCombo =
             new JComboBox<>(COPILOT_MODEL_SUGGESTIONS);
+    private final JComboBox<String> secondReviewerAntigravityCombo =
+            new JComboBox<>(ANTIGRAVITY_MODEL_SUGGESTIONS);
     private final JComboBox<String> secondReviewerEffortCombo = new JComboBox<>(COPILOT_EFFORTS);
     private final JComboBox<ReviewProvider> providerCombo =
             new JComboBox<>(ReviewProvider.values());
     private final JBLabel modelLabel = new JBLabel("Model:");
+    private final JBLabel secondReviewerLabel = new JBLabel("Second reviewer:");
     private final JPanel modelComboPanel = new JPanel(new java.awt.CardLayout());
+    private final JPanel secondReviewerComboPanel = new JPanel(new java.awt.CardLayout());
     private final JPanel copilotModelCard = new JPanel();
+    private final JPanel antigravityModelCard = new JPanel();
 
     /** Rows that only apply when Copilot is the primary provider, shown and hidden together. */
     private final List<JComponent> copilotOnly = new ArrayList<>();
 
     private final PluginSettingsComponent.CopilotModelCatalog catalog;
+    private final PluginSettingsComponent.AntigravityModelCatalog antigravityCatalog;
     private final Consumer<Runnable> backgroundExecutor;
     private final Consumer<Runnable> uiExecutor;
     private final JButton refreshModelsButton = new JButton("Refresh");
     private final JBLabel copilotModelHint = SettingsUi.hintLabel(MODELS_LOADING_HINT);
+    private final JButton refreshAntigravityModelsButton = new JButton("Refresh");
+    private final JBLabel antigravityModelHint =
+            SettingsUi.hintLabel(ANTIGRAVITY_MODELS_LOADING_HINT);
+    private boolean antigravityModelsLoaded;
 
     CopilotModelSelector(
             PluginSettingsComponent.CopilotModelCatalog catalog,
+            PluginSettingsComponent.AntigravityModelCatalog antigravityCatalog,
             Consumer<Runnable> backgroundExecutor,
             Consumer<Runnable> uiExecutor) {
         this.catalog = catalog;
+        this.antigravityCatalog = antigravityCatalog;
         this.backgroundExecutor = backgroundExecutor;
         this.uiExecutor = uiExecutor;
 
@@ -92,6 +129,10 @@ final class CopilotModelSelector {
         CopilotModelDiscovery.Result cachedModels = catalog.cached();
         if (cachedModels != null) {
             applyCopilotModelResult(cachedModels);
+        }
+        AntigravityModelDiscovery.Result cachedAntigravity = antigravityCatalog.cached();
+        if (cachedAntigravity != null) {
+            applyAntigravityModelResult(cachedAntigravity);
         }
         refreshCopilotModels();
     }
@@ -119,33 +160,27 @@ final class CopilotModelSelector {
 
         copilotModelCombo.setEditable(true);
         SettingsUi.boundContentWidth(copilotModelCombo);
+        antigravityModelCombo.setEditable(true);
+        SettingsUi.boundContentWidth(antigravityModelCombo);
         SettingsUi.boundContentWidth(claudeModelCombo);
+        SettingsUi.boundContentWidth(secondReviewerClaudeCombo);
         secondReviewerModelCombo.setEditable(true);
         secondReviewerModelCombo.addActionListener(e -> updateSecondReviewerEffortEnabled());
-        secondReviewerModelCombo.setRenderer(
-                new DefaultListCellRenderer() {
-                    @Override
-                    public Component getListCellRendererComponent(
-                            JList<?> list,
-                            Object value,
-                            int index,
-                            boolean isSelected,
-                            boolean cellHasFocus) {
-                        super.getListCellRendererComponent(
-                                list, value, index, isSelected, cellHasFocus);
-                        if (value == null || value.toString().isBlank()) {
-                            setText("Off");
-                        }
-                        return this;
-                    }
-                });
+        installOffRenderer(secondReviewerModelCombo);
         SettingsUi.boundContentWidth(secondReviewerModelCombo);
+        secondReviewerAntigravityCombo.setEditable(true);
+        installOffRenderer(secondReviewerAntigravityCombo);
+        SettingsUi.boundContentWidth(secondReviewerAntigravityCombo);
         secondReviewerEffortCombo.setSelectedItem(PluginSettings.DEFAULT_SECOND_REVIEWER_EFFORT);
         SettingsUi.boundContentWidth(secondReviewerEffortCombo);
         updateSecondReviewerEffortEnabled();
         copilotModelHint.setAlignmentX(Component.LEFT_ALIGNMENT);
         refreshModelsButton.setToolTipText("Reload the models available to your Copilot account");
         refreshModelsButton.addActionListener(e -> refreshCopilotModels());
+        antigravityModelHint.setAlignmentX(Component.LEFT_ALIGNMENT);
+        refreshAntigravityModelsButton.setToolTipText(
+                "Reload the models available from the Antigravity CLI");
+        refreshAntigravityModelsButton.addActionListener(e -> refreshAntigravityModels());
     }
 
     private void configureModelCards() {
@@ -163,6 +198,20 @@ final class CopilotModelSelector {
         copilotModelCard.add(copilotModelRow);
         copilotModelCard.add(copilotModelHint);
 
+        JPanel antigravityModelRow = new JPanel();
+        antigravityModelRow.setLayout(new BoxLayout(antigravityModelRow, BoxLayout.X_AXIS));
+        antigravityModelRow.setFocusable(false);
+        antigravityModelRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        antigravityModelRow.add(antigravityModelCombo);
+        antigravityModelRow.add(Box.createHorizontalStrut(JBUI.scale(6)));
+        antigravityModelRow.add(refreshAntigravityModelsButton);
+        antigravityModelRow.setMaximumSize(antigravityModelRow.getPreferredSize());
+
+        antigravityModelCard.setLayout(new BoxLayout(antigravityModelCard, BoxLayout.Y_AXIS));
+        antigravityModelCard.setFocusable(false);
+        antigravityModelCard.add(antigravityModelRow);
+        antigravityModelCard.add(antigravityModelHint);
+
         JPanel claudeModelCard = new JPanel();
         claudeModelCard.setLayout(new BoxLayout(claudeModelCard, BoxLayout.Y_AXIS));
         claudeModelCard.setFocusable(false);
@@ -170,15 +219,61 @@ final class CopilotModelSelector {
 
         modelComboPanel.add(claudeModelCard, ReviewProvider.CLAUDE.getId());
         modelComboPanel.add(copilotModelCard, ReviewProvider.COPILOT.getId());
+        modelComboPanel.add(antigravityModelCard, ReviewProvider.ANTIGRAVITY.getId());
         modelLabel.setLabelFor(claudeModelCombo);
+
+        secondReviewerComboPanel.setFocusable(false);
+        secondReviewerComboPanel.add(secondReviewerClaudeCombo, ReviewProvider.CLAUDE.getId());
+        secondReviewerComboPanel.add(secondReviewerModelCombo, ReviewProvider.COPILOT.getId());
+        secondReviewerComboPanel.add(
+                secondReviewerAntigravityCombo, ReviewProvider.ANTIGRAVITY.getId());
+        SettingsUi.boundContentWidth(secondReviewerComboPanel);
+        secondReviewerLabel.setLabelFor(secondReviewerClaudeCombo);
+
         providerCombo.addActionListener(e -> updateActiveModelCombo());
+    }
+
+    private static void installOffRenderer(JComboBox<String> combo) {
+        combo.setRenderer(
+                new DefaultListCellRenderer() {
+                    @Override
+                    public Component getListCellRendererComponent(
+                            JList<?> list,
+                            Object value,
+                            int index,
+                            boolean isSelected,
+                            boolean cellHasFocus) {
+                        super.getListCellRendererComponent(
+                                list, value, index, isSelected, cellHasFocus);
+                        if (value == null || value.toString().isBlank()) {
+                            setText("Off");
+                        }
+                        return this;
+                    }
+                });
     }
 
     private void updateActiveModelCombo() {
         ReviewProvider active = getReviewProvider();
         ((java.awt.CardLayout) modelComboPanel.getLayout()).show(modelComboPanel, active.getId());
+        ((java.awt.CardLayout) secondReviewerComboPanel.getLayout())
+                .show(secondReviewerComboPanel, active.getId());
         modelLabel.setLabelFor(
-                active == ReviewProvider.COPILOT ? copilotModelCombo : claudeModelCombo);
+                switch (active) {
+                    case COPILOT -> copilotModelCombo;
+                    case ANTIGRAVITY -> antigravityModelCombo;
+                    case CLAUDE -> claudeModelCombo;
+                });
+        secondReviewerLabel.setLabelFor(
+                switch (active) {
+                    case COPILOT -> secondReviewerModelCombo;
+                    case ANTIGRAVITY -> secondReviewerAntigravityCombo;
+                    case CLAUDE -> secondReviewerClaudeCombo;
+                });
+        if (active == ReviewProvider.ANTIGRAVITY && !antigravityModelsLoaded) {
+            antigravityModelsLoaded = true;
+            refreshAntigravityModels();
+        }
         updateCopilotOnlyVisibility();
     }
 
@@ -263,6 +358,64 @@ final class CopilotModelSelector {
         mergeModelOptions(secondReviewerModelCombo, discovered);
     }
 
+    private void refreshAntigravityModels() {
+        antigravityModelsLoaded = true;
+        refreshAntigravityModelsButton.setEnabled(false);
+        refreshAntigravityModelsButton.setText("Refreshing…");
+        if (antigravityCatalog.cached() == null) {
+            antigravityModelHint.setText(
+                    SettingsUi.boundedHintHtml(ANTIGRAVITY_MODELS_LOADING_HINT));
+        }
+        backgroundExecutor.accept(
+                () -> {
+                    AntigravityModelDiscovery.Result result;
+                    try {
+                        result = antigravityCatalog.refresh();
+                    } catch (RuntimeException e) {
+                        log.warn("Antigravity model refresh failed", LogRedactor.sanitize(e));
+                        result = AntigravityModelDiscovery.Result.none(LogRedactor.errorType(e));
+                    }
+                    AntigravityModelDiscovery.Result finalResult = result;
+                    uiExecutor.accept(
+                            () -> {
+                                refreshAntigravityModelsButton.setEnabled(true);
+                                refreshAntigravityModelsButton.setText("Refresh");
+                                applyAntigravityModelResult(finalResult);
+                            });
+                });
+    }
+
+    private void applyAntigravityModelResult(AntigravityModelDiscovery.Result result) {
+        if (!result.models().isEmpty()) {
+            mergeModelOptions(antigravityModelCombo, result.models());
+            mergeModelOptions(secondReviewerAntigravityCombo, result.models());
+        }
+        boolean hasPreviousList = antigravityCatalog.cached() != null;
+        antigravityModelHint.setText(
+                SettingsUi.boundedHintHtml(antigravityModelStatus(result, hasPreviousList)));
+    }
+
+    static String antigravityModelStatus(
+            AntigravityModelDiscovery.Result result, boolean hasPreviousList) {
+        String reason =
+                result.failureReason().isBlank()
+                        ? ""
+                        : " (" + StringEscapeUtils.escapeHtml4(result.failureReason()) + ")";
+        return switch (result.source()) {
+            case ACCOUNT ->
+                    result.models().size()
+                            + " models available from Antigravity CLI."
+                            + " Leave blank for CLI default, or type any model ID to override.";
+            case NONE ->
+                    hasPreviousList
+                            ? "Couldn't refresh models" + reason + ". Showing the last loaded list."
+                            : "Couldn't load models"
+                                    + reason
+                                    + ". Showing suggestions; leave blank for CLI default or type"
+                                    + " any model ID.";
+        };
+    }
+
     private static void mergeModelOptions(JComboBox<String> combo, List<String> discovered) {
         Object currentEditorValue = combo.getEditor().getItem();
         String currentText = currentEditorValue != null ? currentEditorValue.toString() : "";
@@ -311,8 +464,16 @@ final class CopilotModelSelector {
         return modelLabel;
     }
 
+    JBLabel secondReviewerLabel() {
+        return secondReviewerLabel;
+    }
+
     JPanel modelComboPanel() {
         return modelComboPanel;
+    }
+
+    JPanel secondReviewerComboPanel() {
+        return secondReviewerComboPanel;
     }
 
     JComboBox<String> effortCombo() {
@@ -352,6 +513,17 @@ final class CopilotModelSelector {
         String id = StringUtils.trimToEmpty(modelId);
         copilotModelCombo.setSelectedItem(id);
         copilotModelCombo.getEditor().setItem(id);
+    }
+
+    String getReviewModelAntigravity() {
+        Object editorValue = antigravityModelCombo.getEditor().getItem();
+        return editorValue != null ? editorValue.toString().trim() : "";
+    }
+
+    void setReviewModelAntigravity(String modelId) {
+        String id = StringUtils.trimToEmpty(modelId);
+        antigravityModelCombo.setSelectedItem(id);
+        antigravityModelCombo.getEditor().setItem(id);
     }
 
     ReviewProvider getReviewProvider() {
@@ -398,6 +570,14 @@ final class CopilotModelSelector {
         copilotAutoEnableMcpOnReviewBox.setSelected(value);
     }
 
+    String getReviewSecondReviewerModelClaude() {
+        return selectedId(secondReviewerClaudeCombo, CLAUDE_SECOND_REVIEWER_MODELS);
+    }
+
+    void setReviewSecondReviewerModelClaude(String value) {
+        selectId(secondReviewerClaudeCombo, CLAUDE_SECOND_REVIEWER_MODELS, value);
+    }
+
     String getReviewSecondReviewerModel() {
         Object editorValue = secondReviewerModelCombo.getEditor().getItem();
         return editorValue != null ? editorValue.toString().trim() : "";
@@ -408,6 +588,17 @@ final class CopilotModelSelector {
         secondReviewerModelCombo.setSelectedItem(id);
         secondReviewerModelCombo.getEditor().setItem(id);
         updateSecondReviewerEffortEnabled();
+    }
+
+    String getReviewSecondReviewerModelAntigravity() {
+        Object editorValue = secondReviewerAntigravityCombo.getEditor().getItem();
+        return editorValue != null ? editorValue.toString().trim() : "";
+    }
+
+    void setReviewSecondReviewerModelAntigravity(String value) {
+        String id = StringUtils.trimToEmpty(value);
+        secondReviewerAntigravityCombo.setSelectedItem(id);
+        secondReviewerAntigravityCombo.getEditor().setItem(id);
     }
 
     List<String> getCopilotModelOptions() {
@@ -442,5 +633,21 @@ final class CopilotModelSelector {
 
     JButton getRefreshModelsButton() {
         return refreshModelsButton;
+    }
+
+    List<String> getAntigravityModelOptions() {
+        return comboItems(antigravityModelCombo);
+    }
+
+    List<String> getSecondReviewerAntigravityModelOptions() {
+        return comboItems(secondReviewerAntigravityCombo);
+    }
+
+    String getAntigravityModelHintText() {
+        return antigravityModelHint.getText();
+    }
+
+    JButton getRefreshAntigravityModelsButton() {
+        return refreshAntigravityModelsButton;
     }
 }

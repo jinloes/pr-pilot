@@ -49,25 +49,29 @@ public final class UserFacingErrors {
      * Code host (`userFacingError.ts`).
      */
     public static String forProviderNotInstalled(ReviewProvider provider) {
-        boolean copilot = provider == ReviewProvider.COPILOT;
+        ReviewProvider resolved = provider != null ? provider : ReviewProvider.CLAUDE;
         return template(
                 TEMPLATE_PROVIDER_NOT_INSTALLED,
                 Map.of(
                         "binary",
-                        copilot ? "copilot" : "claude",
+                        resolved.getBinary(),
                         "provider_cli",
-                        copilot ? "GitHub Copilot CLI" : "Claude Code CLI"));
+                        resolved.getDisplayName() + " CLI"));
     }
 
     public static String forProvider(ReviewProvider provider, Exception e, String operation) {
+        ReviewProvider resolved = provider != null ? provider : ReviewProvider.CLAUDE;
         String msg = normalize(e);
         String op = StringUtils.defaultIfBlank(operation, "run request");
 
         if (containsAny(msg, "no such file", "error=2")) {
-            String binary = provider == ReviewProvider.COPILOT ? "copilot" : "claude";
             return template(
                     TEMPLATE_PROVIDER_BINARY_MISSING,
-                    Map.of("binary", binary, "provider_cli", provider.getDisplayName() + " CLI"));
+                    Map.of(
+                            "binary",
+                            resolved.getBinary(),
+                            "provider_cli",
+                            resolved.getDisplayName() + " CLI"));
         }
         if (containsAny(msg, "timed out", "timeout")) {
             return timedOut(msg, op);

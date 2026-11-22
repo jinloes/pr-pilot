@@ -8,12 +8,24 @@ Host-neutral provider invocation, prompt construction, review parsing, worktrees
 guidance.
 
 - `engine/ReviewEngineApi.java` - Complete review capability surface and JSON-RPC wire-name map.
-- `engine/ReviewSessionService.java` - Provider dispatch and operation-scoped cancellation.
+- `engine/ReviewSessionService.java` and `engine/ReviewSessionWorkspaceSupport.java` - Provider
+  dispatch, operation-scoped cancellation, and workspace/guideline/model-discovery helpers. Tests:
+  `ReviewSessionServiceTest`, `ReviewSessionServiceAntigravityTest`,
+  `ReviewSessionServiceHostCodeIntelligenceTest`.
 - `review/ClaudeService.java` - Claude CLI execution, tool-use status, and process lifecycle.
   Tests: `ClaudeServiceTest`.
 - `review/ClaudeStreamParser.java` - Stateless parser for the CLI's `stream-json` output: final
   review text, the error subtype and session ID that drive `--resume`, and streamed status/chunk
   callbacks. Tests: `ClaudeStreamParserTest`.
+- `review/AntigravityService.java` - Antigravity CLI (`agy`) headless `stream-json` execution,
+  single-turn stdin framing, tool-use status, and cancellation. Tests: `AntigravityServiceTest`.
+- `review/AntigravityIsolatedWorkspace.java` - Zero-trust temp workspace around an untrusted PR
+  worktree: empty `.git/` boundary marker, restricted `pr-pilot-reviewer` agent, `--settings`
+  permission rules, and safe top-level links/Windows junctions excluding repo-local agent/hook
+  directories. Tests: `AntigravityIsolatedWorkspaceTest`.
+- `review/AntigravityStreamParser.java` - Stateless parser for `agy` NDJSON events, relativizing
+  isolated-workspace paths in tool status back to the checkout. Tests:
+  `AntigravityStreamParserTest`.
 - `review/PromptResources.java` and `src/main/resources/review-prompts/` - UTF-8 loader (normalizing
   CRLF) for the packaged Markdown prompt templates and checklists, plus deterministic SHA-256
   derivation for `ReviewPrompts.PROMPT_VERSION`. Tests: `PromptResourcesTest`.
@@ -60,17 +72,18 @@ guidance.
 - `review/ChunkedReviewService.java` - Shared diff batching, contract-index generation, and
   mandatory global reconciliation.
 - `review/ReviewPipelineService.java` - Shared primary/chunked orchestration, leaving regenerated
-  protobuf code out of the reviewed diff, base-commit context enrichment, optional parallel Copilot
-  second reviewer, bounded supervision, the review-rules pass,
+  protobuf code out of the reviewed diff, base-commit context enrichment, optional parallel
+  provider-matched second reviewer, bounded supervision, the review-rules pass,
   the recall-mode hygiene pass, recall-candidate critique, opt-in dropped-finding statuses,
   cancellation checkpoints, fallback behavior, final CI suppression, and the final comment cap.
   Tests: `ReviewPipelineServiceTest`, `ReviewPipelineRecallTest`,
-  `ReviewPipelineSecondReviewerTest`, `ReviewPipelineRulesAndHygieneTest`,
-  `ReviewPipelineConcurrencyTest`, `ReviewPipelineBaseCommitTest`, and
-  `ReviewPipelineAuthorityTest`, sharing `ReviewPipelineTestSupport`.
+  `ReviewPipelineSecondReviewerTest`, `ReviewPipelineSecondReviewerProviderTest`,
+  `ReviewPipelineRulesAndHygieneTest`, `ReviewPipelineConcurrencyTest`,
+  `ReviewPipelineBaseCommitTest`, and `ReviewPipelineAuthorityTest`, sharing
+  `ReviewPipelineTestSupport`.
 - `review/ReviewProviderExecutor.java` - Provider seam that the pipeline and `ReviewRulesPass`
-  drive (first pass, later-stage prompt completions, cooperative cancellation), with Claude and
-  Copilot adapters.
+  drive (first pass, later-stage prompt completions, cooperative cancellation), with Claude,
+  Copilot, and Antigravity adapters.
 - `review/ReviewStageReplay.java` - Replays frozen primary-pass JSON into `ReviewPipelineService`
   either deterministically from recorded stage fixtures or with live downstream stages for
   `review-benchmark`'s `stageEval` harness (`ReviewStageReplayTest`).
@@ -158,6 +171,9 @@ guidance.
 - `review/CopilotModelDiscovery.java` - Copilot model discovery from the live session model
   catalog (global `models.list`, then help-config fallbacks), cached with refresh-on-open. Tests:
   `CopilotModelDiscoveryTest`, `CopilotModelDiscoverySessionCatalogTest`.
+- `review/AntigravityModelDiscovery.java` - Antigravity model discovery from `agy models` (ANSI
+  stripping, `ACCOUNT` cache with refresh-on-open, built-in fallback slugs). Tests:
+  `AntigravityModelDiscoveryTest`.
 - `review/GitWorktreeService.java` - Temporary PR-head worktree lifecycle.
 - `review/RepoGuidelinesReader.java` - Bounded repository-guidance discovery.
 - `review/BinaryLocator.java` - Provider binary-path probing.

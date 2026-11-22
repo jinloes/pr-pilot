@@ -5,8 +5,11 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
+  AGENT_DOC_CORPUS_MAX_BYTES,
   AGENT_DOC_MAX_BYTES,
   AGENT_DOC_WARN_BYTES,
+  NESTED_AGENTS_MAX_BYTES,
+  NESTED_AGENTS_WARN_BYTES,
   ROOT_AGENTS_MAX_BYTES,
   checkAgentDocs,
   githubSlug,
@@ -154,23 +157,46 @@ test('topic files must be linked from their root doc', () => {
   assert.deepEqual(errors, ['docs/codemap/webview.md: not linked from CODEMAP.md, so agents will not find it'])
 })
 
-test('oversized docs and oversized root AGENTS.md are errors, while near-limit docs warn', () => {
-  withDocs({ 'webview/AGENTS.md': `# Webview\n\n${'x'.repeat(AGENT_DOC_MAX_BYTES)}\n` }, (root) => {
+test('oversized docs, nested guides, root AGENTS.md, and corpus caps are errors while near-limit docs warn', () => {
+  withDocs({ 'docs/codemap/core.md': `# core\n\n${'x'.repeat(AGENT_DOC_MAX_BYTES)}\n` }, (root) => {
     const { errors, warnings } = checkAgentDocs(root)
     assert.equal(errors.length, 1)
-    assert.match(errors[0], /^webview\/AGENTS\.md is \d+ LF bytes; split it/)
+    assert.match(errors[0], /^docs\/codemap\/core\.md is \d+ LF bytes; split it/)
     assert.deepEqual(warnings, [])
+  })
+  withDocs({ 'webview/AGENTS.md': `# Webview\n\n${'x'.repeat(NESTED_AGENTS_MAX_BYTES)}\n` }, (root) => {
+    const { errors } = checkAgentDocs(root)
+    assert.equal(errors.length, 1)
+    assert.match(errors[0], /^webview\/AGENTS\.md is \d+ LF bytes; keep nested directory guides/)
+  })
+  withDocs({ 'webview/AGENTS.md': `# Webview\n\n${'x'.repeat(NESTED_AGENTS_WARN_BYTES)}\n` }, (root) => {
+    const { errors, warnings } = checkAgentDocs(root)
+    assert.deepEqual(errors, [])
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0], /^webview\/AGENTS\.md is \d+ LF bytes; approaching/)
   })
   withDocs({ 'AGENTS.md': `# Guide\n\n${'x'.repeat(ROOT_AGENTS_MAX_BYTES)}\n` }, (root) => {
     const { errors } = checkAgentDocs(root)
     assert.equal(errors.length, 1)
     assert.match(errors[0], /^AGENTS\.md is \d+ LF bytes; keep the always-loaded root guide/)
   })
-  withDocs({ 'webview/AGENTS.md': `# Webview\n\n${'x'.repeat(AGENT_DOC_WARN_BYTES)}\n` }, (root) => {
+  withDocs({ 'docs/codemap/core.md': `# core\n\n${'x'.repeat(AGENT_DOC_WARN_BYTES)}\n` }, (root) => {
     const { errors, warnings } = checkAgentDocs(root)
     assert.deepEqual(errors, [])
     assert.equal(warnings.length, 1)
-    assert.match(warnings[0], /^webview\/AGENTS\.md is \d+ LF bytes; approaching/)
+    assert.match(warnings[0], /^docs\/codemap\/core\.md is \d+ LF bytes; approaching/)
+  })
+  const extraFiles = {}
+  const extraLinks = ['- [core](docs/codemap/core.md)']
+  for (let i = 0; i < 20; i++) {
+    const name = `mod-${i}.md`
+    extraFiles[`docs/codemap/${name}`] = `# ${name}\n\n${'x'.repeat(18_000)}\n`
+    extraLinks.push(`- [${name}](docs/codemap/${name})`)
+  }
+  withDocs({ ...extraFiles, 'CODEMAP.md': `# Code map\n\n${extraLinks.join('\n')}\n` }, (root) => {
+    const { errors } = checkAgentDocs(root)
+    assert.equal(errors.length, 1)
+    assert.match(errors[0], new RegExp(`stay within ${AGENT_DOC_CORPUS_MAX_BYTES} bytes`))
   })
 })
 
@@ -178,11 +204,11 @@ test('CRLF line endings do not inflate LF byte counts', () => {
   // 200 lines of 95 chars + LF = 19,200 LF bytes (< 20,000), even though CRLF is 19,400+ or over
   // when near the boundary: 1,000 lines of 19 chars + LF = 20,000 LF bytes (21,000 CRLF bytes).
   const crlfAtExactLimit = Array.from({ length: 1_000 }, () => 'x'.repeat(19)).join('\r\n') + '\r\n'
-  withDocs({ 'webview/AGENTS.md': crlfAtExactLimit }, (root) => {
+  withDocs({ 'docs/codemap/core.md': crlfAtExactLimit }, (root) => {
     const { errors, warnings } = checkAgentDocs(root)
     assert.deepEqual(errors, [])
     assert.equal(warnings.length, 1)
-    assert.match(warnings[0], /^webview\/AGENTS\.md is 20000 LF bytes; approaching/)
+    assert.match(warnings[0], /^docs\/codemap\/core\.md is 20000 LF bytes; approaching/)
   })
 })
 

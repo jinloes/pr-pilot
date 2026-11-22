@@ -260,8 +260,10 @@ export interface PR {
 
 export type ReviewStatus = 'UNREVIEWED' | 'REVIEWED' | 'UPDATED_SINCE_REVIEW' | 'UNAVAILABLE'
 
+export type ReviewProviderId = 'claude' | 'copilot' | 'antigravity'
+
 export interface ProviderReadiness {
-  provider: 'claude' | 'copilot'
+  provider: ReviewProviderId
   available: boolean
   detail: string
   binaryStatus?: 'ready' | 'missing'

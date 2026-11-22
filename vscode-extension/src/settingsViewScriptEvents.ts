@@ -7,6 +7,7 @@ export function buildSettingsScriptEvents(): string {
   });
   $('claudeModel').addEventListener('change', () => save('reviewModel', $('claudeModel').value));
   $('copilotModel').addEventListener('change', () => save('reviewModelCopilot', copilotModelValue()));
+  $('antigravityModel').addEventListener('change', () => save('reviewModelAntigravity', antigravityModelValue()));
   $('effort').addEventListener('change', () => save('reviewEffort', $('effort').value));
   $('inheritMcp').addEventListener('change', () => save('copilotInheritMcp', $('inheritMcp').checked));
   $('reviewAutoEnableMcp').addEventListener('change', () => save('copilotAutoEnableMcpOnReview', $('reviewAutoEnableMcp').checked));
@@ -159,9 +160,15 @@ export function buildSettingsScriptEvents(): string {
   $('reviewSelfCritique').addEventListener('change', () => save('reviewSelfCritique', $('reviewSelfCritique').checked));
   $('reviewSupervisorEnabled').addEventListener('change', () => save('reviewSupervisorEnabled', $('reviewSupervisorEnabled').checked));
   $('reviewBuiltInRules').addEventListener('change', () => save('reviewBuiltInRules', $('reviewBuiltInRules').checked));
+  $('reviewSecondReviewerModelClaude').addEventListener('change', () => {
+    save('reviewSecondReviewerModelClaude', $('reviewSecondReviewerModelClaude').value);
+  });
   $('reviewSecondReviewerModel').addEventListener('change', () => {
     applySecondReviewerVisibility();
     save('reviewSecondReviewerModel', secondReviewerValue());
+  });
+  $('reviewSecondReviewerModelAntigravity').addEventListener('change', () => {
+    save('reviewSecondReviewerModelAntigravity', secondReviewerAntigravityValue());
   });
   $('reviewSecondReviewerEffort').addEventListener('change', () => save('reviewSecondReviewerEffort', $('reviewSecondReviewerEffort').value));
   $('experimentalIntellijAssistedReview').addEventListener('change', () => save('experimentalIntellijAssistedReview', $('experimentalIntellijAssistedReview').checked));
@@ -186,6 +193,15 @@ export function buildSettingsScriptEvents(): string {
     setModelsRefreshing(true);
     setStatus('Refreshing model list…');
     vscode.postMessage({ type: 'refreshModels' });
+  });
+  function setAntigravityModelsRefreshing(refreshing) {
+    $('refreshAntigravityModels').textContent = refreshing ? 'Refreshing…' : 'Refresh';
+    $('refreshAntigravityModels').disabled = refreshing;
+  }
+  $('refreshAntigravityModels').addEventListener('click', () => {
+    setAntigravityModelsRefreshing(true);
+    setStatus('Refreshing Antigravity model list…');
+    vscode.postMessage({ type: 'refreshAntigravityModels' });
   });
   $('testConnection').addEventListener('click', () => {
     const value = $('baseUrl').value.trim();
@@ -214,6 +230,7 @@ export function buildSettingsScriptEvents(): string {
       state = msg.state;
       $('provider').value = state.provider;
       $('claudeModel').value = state.reviewModel;
+      $('reviewSecondReviewerModelClaude').value = (state.reviewSecondReviewerModelClaude || '').trim();
       $('effort').value = state.reviewEffort;
       $('reviewSecondReviewerEffort').value = state.reviewSecondReviewerEffort || 'medium';
       $('baseUrl').value = state.githubBaseUrl;
@@ -240,7 +257,13 @@ export function buildSettingsScriptEvents(): string {
       applyNotificationVisibility(state.notificationsEnabled);
       renderNotificationHealth(state.notificationHealth);
       renderCopilotModels(msg.copilotModels || [], state.reviewModelCopilot, (state.reviewSecondReviewerModel || '').trim());
+      renderAntigravityModels(
+        msg.antigravityModels || [],
+        state.reviewModelAntigravity || '',
+        (state.reviewSecondReviewerModelAntigravity || '').trim(),
+      );
       if (msg.refreshingModels === true) setModelsRefreshing(true);
+      if (msg.refreshingAntigravityModels === true) setAntigravityModelsRefreshing(true);
       applyProviderVisibility(state.provider);
       seedSavedPayloads();
     } else if (msg.type === 'models') {
@@ -250,6 +273,12 @@ export function buildSettingsScriptEvents(): string {
       // the list may be stale.
       if (msg.quiet !== true || msg.ok === false) {
         setStatus(msg.message || (msg.ok === false ? 'Could not refresh models.' : 'Model list refreshed.'), msg.ok === false ? 'error' : 'ok');
+      }
+    } else if (msg.type === 'antigravityModels') {
+      setAntigravityModelsRefreshing(false);
+      renderAntigravityModels(msg.antigravityModels || [], antigravityModelValue(), secondReviewerAntigravityValue());
+      if (msg.quiet !== true || msg.ok === false) {
+        setStatus(msg.message || (msg.ok === false ? 'Could not refresh Antigravity models.' : 'Antigravity model list refreshed.'), msg.ok === false ? 'error' : 'ok');
       }
     } else if (msg.type === 'saveResult') {
       handleSaveResult(msg);

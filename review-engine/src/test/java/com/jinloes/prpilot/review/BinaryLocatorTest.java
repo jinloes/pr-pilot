@@ -75,6 +75,15 @@ class BinaryLocatorTest {
                                     true,
                                     Map.of("ProgramFiles", "C:\\Program Files")))
                     .contains(new File("C:\\Program Files\\Volta", "claude").getPath());
+            assertThat(
+                            BinaryLocator.candidatePaths(
+                                    "agy",
+                                    "C:\\Users\\tester",
+                                    true,
+                                    Map.of("LOCALAPPDATA", "C:\\Users\\tester\\AppData\\Local")))
+                    .contains(
+                            new File("C:\\Users\\tester\\AppData\\Local\\agy\\bin", "agy")
+                                    .getPath());
         }
 
         @Test
@@ -95,6 +104,7 @@ class BinaryLocatorTest {
                                     ";",
                                     "C:\\Users\\tester\\.local\\bin",
                                     "C:\\Users\\tester\\.volta\\bin",
+                                    "C:\\Users\\tester\\AppData\\Local\\agy\\bin",
                                     "C:\\Users\\tester\\AppData\\Local\\Volta\\bin",
                                     "C:\\Users\\tester\\AppData\\Roaming\\npm",
                                     "C:\\Windows\\System32"));

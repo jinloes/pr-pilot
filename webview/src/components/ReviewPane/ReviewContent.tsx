@@ -491,7 +491,7 @@ function GenerationCard({
                 role="status"
               >
                 {readiness.available
-                  ? `${readiness.provider === 'claude' ? 'Claude' : 'Copilot'} ready`
+                  ? `${readiness.provider === 'claude' ? 'Claude' : readiness.provider === 'copilot' ? 'Copilot' : 'Antigravity'} ready`
                   : readiness.detail}
               </p>
             )}

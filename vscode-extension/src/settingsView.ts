@@ -11,7 +11,14 @@
 import type { ReviewGuidanceProfile } from './reviewGuidanceProfiles';
 import type { NotificationHealth } from './notifications';
 
-export type Provider = 'claude' | 'copilot';
+export {
+    ANTIGRAVITY_MODEL_SUGGESTIONS,
+    buildAntigravityModelsMessage,
+    mergeAntigravityModelOptions,
+    type AntigravityModelsMessage,
+} from './antigravity';
+
+export type Provider = 'claude' | 'copilot' | 'antigravity';
 
 export interface ClaudeModelOption {
     label: string;
@@ -24,6 +31,12 @@ export const CLAUDE_MODEL_OPTIONS: ClaudeModelOption[] = [
     { label: 'Haiku — fastest', id: 'claude-haiku-4-5-20251001' },
     { label: 'Sonnet — balanced', id: 'claude-sonnet-4-6' },
     { label: 'Opus — most thorough', id: 'claude-opus-4-7' },
+];
+
+/** Claude second-reviewer presets. Mirrors CLAUDE_SECOND_REVIEWER_MODELS in CopilotModelSelector. */
+export const CLAUDE_SECOND_REVIEWER_OPTIONS: ClaudeModelOption[] = [
+    { label: 'Off', id: '' },
+    ...CLAUDE_MODEL_OPTIONS.slice(1),
 ];
 
 /** Fallback Copilot model IDs when SDK discovery is unavailable. Mirrors COPILOT_MODEL_SUGGESTIONS. */
@@ -39,6 +52,7 @@ export interface SettingsState {
     provider: Provider;
     reviewModel: string;
     reviewModelCopilot: string;
+    reviewModelAntigravity: string;
     reviewEffort: string;
     githubBaseUrl: string;
     copilotInheritMcp: boolean;
@@ -55,7 +69,9 @@ export interface SettingsState {
     reviewSupervisorEnabled: boolean;
     reviewRulesDirectory: string;
     reviewBuiltInRules: boolean;
+    reviewSecondReviewerModelClaude: string;
     reviewSecondReviewerModel: string;
+    reviewSecondReviewerModelAntigravity: string;
     reviewSecondReviewerEffort: string;
     experimentalIntellijAssistedReview: boolean;
     experimentalVsCodeCodeIntelligence: boolean;
@@ -67,7 +83,9 @@ export interface SettingsState {
 }
 
 export function normalizeProvider(value: unknown): Provider {
-    return value === 'copilot' ? 'copilot' : 'claude';
+    if (value === 'copilot') return 'copilot';
+    if (value === 'antigravity') return 'antigravity';
+    return 'claude';
 }
 
 export function normalizeGithubBaseUrl(value: string): string {

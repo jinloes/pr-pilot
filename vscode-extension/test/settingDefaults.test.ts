@@ -60,13 +60,31 @@ test('reviewSupervisorEnabled defaults to on and matches the reader fallback', (
     assert.equal(readerFallback('reviewSupervisorEnabled'), String(property.default));
 });
 
-test('reviewSecondReviewerModel defaults to blank in the contribution and both readers', () => {
-    const property = packageJsonDefaults()['pr-pilot.reviewSecondReviewerModel'] as { type: string; default: string };
-    assert.equal(property.type, 'string');
-    assert.equal(property.default, '');
+test('per-provider second reviewer model settings default to blank in contributions and readers', () => {
+    const defaults = packageJsonDefaults();
+    const copilot = defaults['pr-pilot.reviewSecondReviewerModel'] as { type: string; default: string };
+    const claude = defaults['pr-pilot.reviewSecondReviewerModelClaude'] as {
+        type: string; default: string; enum: string[];
+    };
+    const antigravity = defaults['pr-pilot.reviewSecondReviewerModelAntigravity'] as {
+        type: string; default: string;
+    };
+    assert.equal(copilot.type, 'string');
+    assert.equal(copilot.default, '');
+    assert.equal(claude.type, 'string');
+    assert.equal(claude.default, '');
+    assert.deepEqual(claude.enum, ['', 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-7']);
+    assert.equal(antigravity.type, 'string');
+    assert.equal(antigravity.default, '');
     for (const file of ['extension.ts', 'settings.ts']) {
         const source = fs.readFileSync(path.join(extensionRoot, 'src', file), 'utf8');
-        assert.match(source, /c\.get<string>\('reviewSecondReviewerModel', ''\)\.trim\(\)/, file);
+        for (const key of [
+            'reviewSecondReviewerModel',
+            'reviewSecondReviewerModelClaude',
+            'reviewSecondReviewerModelAntigravity',
+        ]) {
+            assert.match(source, new RegExp(`c\\.get<string>\\('${key}', ''\\)\\.trim\\(\\)`), `${file}:${key}`);
+        }
     }
 });
 

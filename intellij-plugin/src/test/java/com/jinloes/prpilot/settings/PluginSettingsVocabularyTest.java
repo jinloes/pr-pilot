@@ -81,16 +81,31 @@ class PluginSettingsVocabularyTest {
 
         AbstractButton supervisor = button(panel, "Re-inspect coverage gaps");
         assertFieldWithHint(supervisor, hintContaining(panel, "bounded coverage check"));
-        JComponent secondReviewer = (JComponent) label(panel, "Second reviewer:").getLabelFor();
-        assertThat(secondReviewer).isInstanceOf(JComboBox.class);
+        JComponent claudeSecondReviewer =
+                (JComponent) label(panel, "Second reviewer:").getLabelFor();
+        assertThat(claudeSecondReviewer).isInstanceOf(JComboBox.class);
         assertThat(indexContaining(texts, "Second reviewer:"))
                 .isGreaterThan(indexContaining(texts, "Reviewer"))
                 .isLessThan(indexContaining(texts, "Review guidance"));
-        JLabel secondReviewerHint = hintContaining(panel, "Runs a second Copilot model");
-        assertFieldWithHint(secondReviewer, secondReviewerHint);
+        JLabel secondReviewerHint =
+                hintContaining(panel, "Runs a second model from the selected provider");
+        assertFieldWithHint((JComponent) claudeSecondReviewer.getParent(), secondReviewerHint);
         assertThat(secondReviewerHint.getText())
-                .contains("in parallel with either provider")
+                .contains("findings are cross-validated")
                 .contains("Choose Off to disable.");
+        assertThat(component.getReviewSecondReviewerModelClaude()).isEmpty();
+        component.setReviewSecondReviewerModelClaude("claude-haiku-4-5-20251001");
+        assertThat(component.getReviewSecondReviewerModelClaude())
+                .isEqualTo("claude-haiku-4-5-20251001");
+        component.setReviewSecondReviewerModelClaude(null);
+        assertThat(component.getReviewSecondReviewerModelClaude()).isEmpty();
+
+        JLabel secondReviewerEffortLabel = label(panel, "Second reviewer effort:");
+        assertThat(visibleWithin(secondReviewerEffortLabel, panel)).isFalse();
+        component.setReviewProvider(ReviewProvider.COPILOT);
+        assertThat(visibleWithin(secondReviewerEffortLabel, panel)).isTrue();
+        JComponent secondReviewer = (JComponent) label(panel, "Second reviewer:").getLabelFor();
+        assertThat(secondReviewer).isInstanceOf(JComboBox.class).isNotSameAs(claudeSecondReviewer);
         assertThat(component.getReviewSecondReviewerModel()).isEmpty();
         component.setReviewSecondReviewerModel(" gpt-5.4 ");
         assertThat(((JComboBox<?>) secondReviewer).getEditor().getItem()).isEqualTo("gpt-5.4");
@@ -98,8 +113,7 @@ class PluginSettingsVocabularyTest {
         component.setReviewSecondReviewerModel(null);
         assertThat(component.getReviewSecondReviewerModel()).isEmpty();
 
-        JComponent secondReviewerEffort =
-                (JComponent) label(panel, "Second reviewer effort:").getLabelFor();
+        JComponent secondReviewerEffort = (JComponent) secondReviewerEffortLabel.getLabelFor();
         assertThat(secondReviewerEffort).isInstanceOf(JComboBox.class);
         assertFieldWithHint(
                 secondReviewerEffort, hintContaining(panel, "Separate from the primary's"));
@@ -115,6 +129,7 @@ class PluginSettingsVocabularyTest {
         assertThat(secondReviewerEffort.isEnabled()).isTrue();
         component.setReviewSecondReviewerModel(null);
         assertThat(secondReviewerEffort.isEnabled()).isFalse();
+        component.setReviewProvider(ReviewProvider.CLAUDE);
 
         AbstractButton inheritMcpBox =
                 button(panel, "Allow Copilot to use MCP tools from your trusted Copilot config");

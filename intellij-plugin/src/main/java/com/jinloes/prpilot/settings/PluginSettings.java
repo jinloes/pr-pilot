@@ -97,6 +97,12 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
          */
         public String reviewModelCopilot = "claude-sonnet-4.6";
 
+        /**
+         * Model slug passed to {@code agy --model} for reviews and chat. Empty string uses the
+         * CLI's default routing because available Antigravity slugs vary per account.
+         */
+        public String reviewModelAntigravity = "";
+
         /** Backend CLI used to generate reviews and chat replies. */
         public String reviewProvider = ReviewProvider.CLAUDE.getId();
 
@@ -186,14 +192,27 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
         public boolean reviewSupervisorEnabled = true;
 
         /**
-         * Optional Copilot model that reviews the same diff in parallel with the primary provider.
-         * Its candidates are merged and cross-validated with the primary's. Blank disables it.
+         * Optional Copilot model that reviews the same diff in parallel when Copilot is the
+         * selected provider. Its candidates are merged and cross-validated with the primary's.
+         * Blank disables it.
          */
         public String reviewSecondReviewerModel = "";
 
         /**
-         * Copilot reasoning effort for the second reviewer, independent of the primary's so a
-         * slower model does not hold up the review.
+         * Optional Claude model that reviews the same diff in parallel when Claude is the selected
+         * provider. Blank disables it.
+         */
+        public String reviewSecondReviewerModelClaude = "";
+
+        /**
+         * Optional Antigravity model that reviews the same diff in parallel when Antigravity is the
+         * selected provider. Blank disables it.
+         */
+        public String reviewSecondReviewerModelAntigravity = "";
+
+        /**
+         * Copilot reasoning effort for the second reviewer when Copilot is the selected provider,
+         * independent of the primary's so a slower model does not hold up the review.
          */
         public String reviewSecondReviewerEffort = DEFAULT_SECOND_REVIEWER_EFFORT;
 
@@ -278,11 +297,21 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
         myState.reviewModelCopilot = model != null ? model : "";
     }
 
+    public String getReviewModelAntigravity() {
+        return myState.reviewModelAntigravity != null ? myState.reviewModelAntigravity.trim() : "";
+    }
+
+    public void setReviewModelAntigravity(String model) {
+        myState.reviewModelAntigravity = model != null ? model.trim() : "";
+    }
+
     /** Returns the model ID for the currently selected provider. */
     public String getActiveReviewModel() {
-        return getReviewProvider() == ReviewProvider.COPILOT
-                ? getReviewModelCopilot()
-                : getReviewModel();
+        return switch (getReviewProvider()) {
+            case COPILOT -> getReviewModelCopilot();
+            case ANTIGRAVITY -> getReviewModelAntigravity();
+            case CLAUDE -> getReviewModel();
+        };
     }
 
     public ReviewProvider getReviewProvider() {
@@ -527,6 +556,31 @@ public class PluginSettings implements PersistentStateComponent<PluginSettings.S
 
     public void setReviewSecondReviewerModel(String value) {
         myState.reviewSecondReviewerModel = StringUtils.defaultString(value).trim();
+    }
+
+    public String getReviewSecondReviewerModelClaude() {
+        return StringUtils.defaultString(myState.reviewSecondReviewerModelClaude).trim();
+    }
+
+    public void setReviewSecondReviewerModelClaude(String value) {
+        myState.reviewSecondReviewerModelClaude = StringUtils.defaultString(value).trim();
+    }
+
+    public String getReviewSecondReviewerModelAntigravity() {
+        return StringUtils.defaultString(myState.reviewSecondReviewerModelAntigravity).trim();
+    }
+
+    public void setReviewSecondReviewerModelAntigravity(String value) {
+        myState.reviewSecondReviewerModelAntigravity = StringUtils.defaultString(value).trim();
+    }
+
+    /** Returns the second-reviewer model ID for the active {@link ReviewProvider}. */
+    public String getActiveSecondReviewerModel() {
+        return switch (getReviewProvider()) {
+            case COPILOT -> getReviewSecondReviewerModel();
+            case ANTIGRAVITY -> getReviewSecondReviewerModelAntigravity();
+            case CLAUDE -> getReviewSecondReviewerModelClaude();
+        };
     }
 
     public String getReviewSecondReviewerEffort() {

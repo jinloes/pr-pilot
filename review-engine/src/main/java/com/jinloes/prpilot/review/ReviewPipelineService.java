@@ -28,8 +28,8 @@ import org.slf4j.LoggerFactory;
 /**
  * Shared provider-neutral review pipeline used by every host. Optional supervision is bounded to
  * one tool-free prioritization call and one targeted read-only follow-up. An optional second
- * reviewer runs the primary pass concurrently on another Copilot model; its findings are merged and
- * cross-validated by the final critique.
+ * reviewer runs the primary pass concurrently on another model from the selected provider; its
+ * findings are merged and cross-validated by the final critique.
  */
 public final class ReviewPipelineService {
     private static final Logger log = LoggerFactory.getLogger(ReviewPipelineService.class);
@@ -114,9 +114,9 @@ public final class ReviewPipelineService {
     }
 
     /**
-     * Returns a pipeline that also runs the primary pass on a second Copilot model, in parallel,
-     * against the same working directory. Returns this pipeline unchanged when {@code model} is
-     * blank or the primary provider has no working directory to share.
+     * Returns a pipeline that also runs the primary pass on a second model from the same provider,
+     * in parallel, against the same working directory. Returns this pipeline unchanged when {@code
+     * model} is blank or the primary provider has no working directory to share.
      */
     public ReviewPipelineService withSecondReviewer(String model, String effort, String configDir) {
         if (StringUtils.isBlank(model)) return this;
@@ -125,12 +125,31 @@ public final class ReviewPipelineService {
             log.warn("Second reviewer skipped: the primary provider has no working directory");
             return this;
         }
+        String trimmed = model.trim();
+        if (provider instanceof ReviewProviderExecutor.ClaudeExecutor) {
+            ClaudeService service = new ClaudeService(projectDir.getPath());
+            return withSecondReviewer(
+                    new ReviewProviderExecutor.ClaudeExecutor(service, trimmed),
+                    service::cancelCurrentRequest,
+                    trimmed);
+        }
+        if (provider instanceof ReviewProviderExecutor.AntigravityExecutor) {
+            AntigravityService service = new AntigravityService(projectDir.getPath());
+            return withSecondReviewer(
+                    new ReviewProviderExecutor.AntigravityExecutor(service, trimmed),
+                    service::cancelCurrentRequest,
+                    trimmed);
+        }
         CopilotService service = new CopilotService(projectDir.getPath());
         return withSecondReviewer(
                 new ReviewProviderExecutor.CopilotExecutor(
-                        service, model.trim(), effort, false, configDir),
+                        service, trimmed, effort, false, configDir),
                 service::cancelCurrentRequest,
-                model.trim());
+                trimmed);
+    }
+
+    ReviewProviderExecutor secondaryReviewer() {
+        return secondary;
     }
 
     ReviewPipelineService withSecondReviewer(
@@ -162,6 +181,11 @@ public final class ReviewPipelineService {
 
     public static ReviewPipelineService forClaude(ClaudeService service, String model) {
         return new ReviewPipelineService(new ReviewProviderExecutor.ClaudeExecutor(service, model));
+    }
+
+    public static ReviewPipelineService forAntigravity(AntigravityService service, String model) {
+        return new ReviewPipelineService(
+                new ReviewProviderExecutor.AntigravityExecutor(service, model));
     }
 
     public static ReviewPipelineService forCopilot(

@@ -117,7 +117,7 @@ describe('PRList', () => {
     expect(screen.getByTestId('pr-list-repository')).toHaveTextContent('acme/platform')
   })
 
-  it.each(['copilot', 'claude'] as const)('uses neutral localized copy for unverified %s without probing sign-in', async (provider) => {
+  it.each(['copilot', 'claude', 'antigravity'] as const)('uses neutral localized copy for unverified %s without probing sign-in', async (provider) => {
     const user = userEvent.setup()
     const sendToHost = vi.spyOn(bridge, 'sendToHost').mockImplementation(() => {})
     const view = render(<I18nProvider><PRList /></I18nProvider>)
@@ -125,7 +125,7 @@ describe('PRList', () => {
       type: 'prListLoaded', prs: [firstPr], listStatus: normalStatus,
       providerReadiness: { provider, available: true, authenticationStatus: 'unverified', detail: 'CLI found' },
     })
-    const name = provider === 'copilot' ? 'Copilot' : 'Claude'
+    const name = provider === 'copilot' ? 'Copilot' : provider === 'antigravity' ? 'Antigravity' : 'Claude'
     const sentence = screen.getByText(`${name} CLI found. Sign-in has not been checked.`)
     const coach = sentence.closest('[role="status"]')!
     expect(coach).toHaveClass('bg-muted')

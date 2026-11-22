@@ -34,11 +34,11 @@ public final class ProviderSetupProbe {
      */
     public Result probe(ReviewProvider provider, boolean checkAuthentication) {
         boolean available = binaryAvailable.test(provider);
-        String command = provider == ReviewProvider.COPILOT ? "copilot login" : "claude auth login";
+        String command = authCommand(provider);
         if (!available) {
             return new Result(false, "missing", "unavailable", command);
         }
-        if (!checkAuthentication || provider == ReviewProvider.COPILOT) {
+        if (!checkAuthentication || provider != ReviewProvider.CLAUDE) {
             return new Result(true, "ready", "unverified", command);
         }
         try {
@@ -57,10 +57,20 @@ public final class ProviderSetupProbe {
             String authenticationStatus,
             String authCommand) {}
 
+    public static String authCommand(ReviewProvider provider) {
+        return switch (provider) {
+            case COPILOT -> "copilot login";
+            case ANTIGRAVITY -> "agy";
+            case CLAUDE -> "claude auth login";
+        };
+    }
+
     private static boolean isBinaryAvailable(ReviewProvider provider) {
-        return provider == ReviewProvider.COPILOT
-                ? CopilotService.isBinaryAvailable()
-                : ClaudeService.isBinaryAvailable();
+        return switch (provider) {
+            case COPILOT -> CopilotService.isBinaryAvailable();
+            case ANTIGRAVITY -> AntigravityService.isBinaryAvailable();
+            case CLAUDE -> ClaudeService.isBinaryAvailable();
+        };
     }
 
     private static AuthenticationStatus probeClaudeAuth()

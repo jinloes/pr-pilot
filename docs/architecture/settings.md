@@ -16,8 +16,9 @@ Full semantics of the persisted settings summarized in
 | `notificationPollMinutes` | `5` | Notification poll interval in minutes |
 | `reviewModel` | `""` | Claude model; blank uses the CLI default |
 | `reviewModelCopilot` | `"claude-sonnet-4.6"` | Copilot model |
-| `reviewProvider` | `"claude"` | `claude` or `copilot` |
-| `reviewEffort` | `"high"` | Reasoning effort (`none\|low\|medium\|high\|xhigh\|max`) |
+| `reviewModelAntigravity` | `""` | Antigravity model; blank uses the CLI default |
+| `reviewProvider` | `"claude"` | `claude`, `copilot`, or `antigravity` |
+| `reviewEffort` | `"high"` | Reasoning effort (`none\|low\|medium\|high\|xhigh\|max`, Claude/Copilot) |
 | `copilotInheritMcp` | `false` | Inject MCP servers from the trusted Copilot config (Copilot only) |
 | `copilotAutoEnableMcpOnReview` | `false` | Force MCP for Copilot review generation only |
 | `copilotConfigDir` | `""` | Copilot config directory override; blank uses `~/.copilot` |
@@ -31,6 +32,8 @@ Full semantics of the persisted settings summarized in
 | `reviewRulesDirectory` | `""` | Local folder of the reviewer's own rules |
 | `reviewBuiltInRules` | `true` | Runs the review rules bundled with PR Pilot |
 | `reviewSecondReviewerModel` | `""` | Parallel Copilot second reviewer; blank disables it |
+| `reviewSecondReviewerModelClaude` | `""` | Parallel Claude second reviewer; blank disables it |
+| `reviewSecondReviewerModelAntigravity` | `""` | Parallel Antigravity second reviewer; blank disables it |
 | `reviewSecondReviewerEffort` | `"medium"` | Second reviewer's Copilot reasoning effort |
 | `experimentalIntellijAssistedReview` | `false` | IntelliJ-assisted review opt-in |
 | `experimentalVsCodeCodeIntelligence` | `false` | VS Code language-server lookups for Copilot; VS Code only |
@@ -38,6 +41,11 @@ Full semantics of the persisted settings summarized in
 
 ## Fields
 
+- `reviewModelAntigravity` (default `""`; VS Code `pr-pilot.reviewModelAntigravity`) — optional
+  Antigravity model slug (such as `gemini-3.1-pro-high` or `claude-sonnet-4-6`); blank lets `agy`
+  use its default model. Both hosts populate the picker from `reviews/listAntigravityModels` (`agy
+  models`) with built-in fallback slugs and hide `reviewEffort` while `reviewProvider` is
+  `antigravity`.
 - `copilotInheritMcp` (default `false`) — explicit capability elevation that injects MCP servers
   read from the user's trusted Copilot config (`<configDir>/mcp-config.json`) via `setMcpServers`,
   while retaining the read/MCP-only permission allowlist. On-disk config discovery stays disabled,
@@ -97,17 +105,23 @@ Full semantics of the persisted settings summarized in
   disabled one (`enabled: false`) turns it off. It is carried on the nullable
   `GenerateReviewParams.builtInRules` (omitted means on, so older hosts keep the built-ins) /
   `PRReviewRequest.builtInRules`.
-- `reviewSecondReviewerModel` (default `""`; VS Code `pr-pilot.reviewSecondReviewerModel`) —
-  optional Copilot model run in parallel as a second reviewer whose findings are merged and
-  cross-validated. Blank disables it. Runs at `reviewSecondReviewerEffort`. Sent to the engine as
-  `secondReviewerModel`; ignored for IntelliJ-assisted deep review. Shared by both hosts.
+- `reviewSecondReviewerModel`, `reviewSecondReviewerModelClaude`, and
+  `reviewSecondReviewerModelAntigravity` (all default `""`; VS Code
+  `pr-pilot.reviewSecondReviewerModel`, `pr-pilot.reviewSecondReviewerModelClaude`, and
+  `pr-pilot.reviewSecondReviewerModelAntigravity`) — per-provider model selections for the optional
+  parallel second reviewer (`reviewSecondReviewerModel` stores the Copilot slug so existing Copilot
+  selections upgrade without migration). Both settings UIs switch the second-reviewer picker with
+  `reviewProvider` (Claude fixed presets `Off`/`Haiku`/`Sonnet`/`Opus`, Copilot SDK-discovered
+  models, Antigravity `agy models` merged with built-in fallbacks) while preserving inactive
+  providers' saved values. At review start each host resolves the active provider's setting and
+  sends it to the engine as `secondReviewerModel`; blank disables it, and IntelliJ-assisted deep
+  review ignores it. Shared by both hosts.
 - `reviewSecondReviewerEffort` (default `"medium"`; VS Code `pr-pilot.reviewSecondReviewerEffort`,
   values `none|low|medium|high|xhigh|max`) — Copilot reasoning effort for the second reviewer,
-  independent of `reviewEffort` and of the primary provider. The pipeline waits for both reviewers
-  before merging, so the default sits below `reviewEffort`'s `high` to keep a slower second model
-  from holding up the review. Sent as `secondReviewerEffort` only when a second reviewer is set.
-  When a host omits it, the engine keeps the earlier rule: a Copilot primary's effort, otherwise
-  Copilot's default. Shared by both hosts.
+  independent of `reviewEffort`. Both settings UIs show it only when `reviewProvider` is `copilot`
+  (enabled once a Copilot second reviewer is chosen), and hosts send `secondReviewerEffort` on the
+  wire only for Copilot reviews. When omitted on a Copilot review, the engine falls back to the
+  primary Copilot effort or Copilot's default. Shared by both hosts.
 - `experimentalIntellijAssistedReview` (default `false`; VS Code
   `pr-pilot.experimentalIntellijAssistedReview`) — experimental opt-in for IntelliJ-assisted review.
   Each host sends it to the webview as `intellijAssistedEnabled` on every `draftLoaded` and

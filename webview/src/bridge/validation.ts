@@ -97,7 +97,7 @@ function isListStatus(value: unknown): boolean {
 
 function isProviderReadiness(value: unknown): boolean {
   if (!isRecord(value)) return false
-  return ['claude', 'copilot'].includes(value.provider as string)
+  return ['claude', 'copilot', 'antigravity'].includes(value.provider as string)
     && typeof value.available === 'boolean'
     && isString(value.detail)
     && (value.binaryStatus === undefined || ['ready', 'missing'].includes(value.binaryStatus as string))

@@ -94,6 +94,11 @@ class StageEvalRunnerTest {
             assertThat(opts.provider()).isEqualTo(ReviewProvider.CLAUDE);
             assertThat(opts.model()).isEqualTo("claude-sonnet-4-6");
 
+            assertThat(
+                            StageEvalRunner.parseArgs(new String[] {"--provider", "antigravity"})
+                                    .provider())
+                    .isEqualTo(ReviewProvider.ANTIGRAVITY);
+
             assertThatThrownBy(() -> StageEvalRunner.parseArgs(new String[] {"--provider", "nope"}))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> StageEvalRunner.parseArgs(new String[] {"--bogus"}))

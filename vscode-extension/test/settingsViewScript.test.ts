@@ -190,6 +190,7 @@ function initState(repositoryReviewInstructions: Record<string, string>): Record
         copilotConfigDir: '', reviewFocusAreas: '', reviewCustomInstructions: '', reviewGuidanceGlobs: [],
         reviewGuidanceProfiles: [], activeReviewGuidanceProfileId: '', repositoryReviewInstructions,
         reviewSelfCritique: true, reviewSupervisorEnabled: true, reviewSecondReviewerModel: '',
+        reviewSecondReviewerModelClaude: '', reviewSecondReviewerModelAntigravity: '',
         reviewSecondReviewerEffort: 'medium', reviewRulesDirectory: '',
         reviewBuiltInRules: true,
         experimentalIntellijAssistedReview: false,
@@ -206,7 +207,7 @@ function postedUpdates(posted: Array<Record<string, unknown>>) {
 
 test('the second reviewer effort row hides while the second reviewer is Off', () => {
     const { element, posted, deliver } = runSettingsScript();
-    deliver({ type: 'init', state: { ...initState({}), reviewSecondReviewerModel: 'gemini-4-argon' } });
+    deliver({ type: 'init', state: { ...initState({}), provider: 'copilot', reviewSecondReviewerModel: 'gemini-4-argon' } });
     const effortRow = element('secondReviewerEffortField');
     assert.equal(effortRow.hiddenClass, false);
 

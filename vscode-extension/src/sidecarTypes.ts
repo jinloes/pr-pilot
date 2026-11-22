@@ -227,7 +227,7 @@ export interface SidecarDraftReviewMutationResult {
 
 // ── Review generation / chat ───────────────────────────────────────────────────
 
-export type ReviewProvider = 'claude' | 'copilot';
+export type ReviewProvider = 'claude' | 'copilot' | 'antigravity';
 
 export interface SidecarPrInput {
     title: string;
@@ -320,6 +320,7 @@ export interface SidecarChatParams {
     operationId: string;
     provider: ReviewProvider;
     projectDir?: string;
+    model?: string;
     effort: string;
     inheritMcp: boolean;
     configDir?: string;
@@ -371,6 +372,13 @@ export interface SidecarChatResult {
 export interface SidecarCopilotModelsResult {
     models: string[];
     source: 'ACCOUNT' | 'CLI_HELP' | 'NONE';
+    failureReason: string;
+}
+
+/** Result of `reviews/listAntigravityModels`: discovered model IDs plus provenance. */
+export interface SidecarAntigravityModelsResult {
+    models: string[];
+    source: 'ACCOUNT' | 'NONE';
     failureReason: string;
 }
 

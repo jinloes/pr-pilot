@@ -22,8 +22,14 @@ class ReviewProviderTest {
         }
 
         @Test
+        void resolvesAntigravityById() {
+            assertThat(ReviewProvider.fromId("antigravity")).isEqualTo(ReviewProvider.ANTIGRAVITY);
+        }
+
+        @Test
         void isCaseInsensitive() {
             assertThat(ReviewProvider.fromId("CoPiLoT")).isEqualTo(ReviewProvider.COPILOT);
+            assertThat(ReviewProvider.fromId("AnTiGrAvItY")).isEqualTo(ReviewProvider.ANTIGRAVITY);
         }
 
         @Test
@@ -54,6 +60,10 @@ class ReviewProviderTest {
             assertThat(ReviewProvider.COPILOT.getId()).isEqualTo("copilot");
             assertThat(ReviewProvider.COPILOT.getDisplayName()).isEqualTo("GitHub Copilot");
             assertThat(ReviewProvider.COPILOT.getBinary()).isEqualTo("copilot");
+
+            assertThat(ReviewProvider.ANTIGRAVITY.getId()).isEqualTo("antigravity");
+            assertThat(ReviewProvider.ANTIGRAVITY.getDisplayName()).isEqualTo("Antigravity");
+            assertThat(ReviewProvider.ANTIGRAVITY.getBinary()).isEqualTo("agy");
         }
     }
 }
