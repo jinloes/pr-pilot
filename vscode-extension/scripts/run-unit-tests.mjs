@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import { buildNodeTestInvocation } from '../../scripts/compact-test-reporter.mjs'
 import { npmCliInvocation } from '../../scripts/portable-process.mjs'
 
 const npm = npmCliInvocation(['run', 'build:test'])
@@ -12,11 +13,11 @@ if (status === 0) {
   const scriptTests = fs.readdirSync('../scripts')
     .filter((name) => name.endsWith('.test.mjs'))
     .map((name) => `../scripts/${name}`)
-  const tests = spawnSync(
-    process.execPath,
-    ['--test', ...testFiles, ...scriptTests],
-    { stdio: 'inherit', shell: false },
-  )
+  const { nodeArgs } = buildNodeTestInvocation({
+    files: [...testFiles, ...scriptTests],
+    argv: process.argv.slice(2),
+  })
+  const tests = spawnSync(process.execPath, nodeArgs, { stdio: 'inherit', shell: false })
   status = tests.status ?? 1
 }
 if (process.env.PR_PILOT_KEEP_DIST_TEST !== '1') {

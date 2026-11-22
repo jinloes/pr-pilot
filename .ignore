@@ -15,4 +15,10 @@ dist/
 .intellijPlatform/
 .kotlin/
 *.vsix
+**/coverage/
+**/playwright-report/
+**/.stryker-tmp/
 webview/test-results/
+vscode-extension/webview-dist/
+vscode-extension/sidecar/
+

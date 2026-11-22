@@ -2,6 +2,7 @@ import { readdirSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildNodeTestInvocation } from '../../scripts/compact-test-reporter.mjs'
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
 
@@ -33,12 +34,18 @@ if (uniqueFiles.length === 0) {
 }
 
 const relativeFiles = uniqueFiles.map((file) => path.relative(root, file))
-console.error(`Logic test globs: ${groups.map((group) => group.label).join(', ')}`)
-console.error(`Logic test files (${relativeFiles.length}): ${relativeFiles.join(', ')}`)
+const { verbose, selectedFiles, nodeArgs } = buildNodeTestInvocation({
+  files: relativeFiles,
+  argv: process.argv.slice(2),
+})
+if (verbose) {
+  console.error(`Logic test globs: ${groups.map((group) => group.label).join(', ')}`)
+  console.error(`Logic test files (${selectedFiles.length}): ${selectedFiles.join(', ')}`)
+}
 
 const child = spawn(
   process.execPath,
-  ['--import', 'tsx', '--test', ...relativeFiles],
+  ['--import', 'tsx', ...nodeArgs],
   { cwd: root, stdio: 'inherit' },
 )
 

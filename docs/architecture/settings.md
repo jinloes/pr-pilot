@@ -5,17 +5,39 @@ Full semantics of the persisted settings summarized in
 `PluginSettings` (`claudeReviews.xml`). VS Code contributes each as `pr-pilot.<name>` in
 `vscode-extension/package.json`. No API keys or tokens are written to disk.
 
+## Summary
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `githubBaseUrl` | `https://github.com` | GitHub.com or Enterprise Server origin for API calls |
+| `notificationsEnabled` | `false` | Background PR notifications |
+| `notifyReviewRequested` | `true` | Notify when the user's review is requested |
+| `notifyStarredRepos` | `false` | Notify about new PRs in starred repositories |
+| `notificationPollMinutes` | `5` | Notification poll interval in minutes |
+| `reviewModel` | `""` | Claude model; blank uses the CLI default |
+| `reviewModelCopilot` | `"claude-sonnet-4.6"` | Copilot model |
+| `reviewProvider` | `"claude"` | `claude` or `copilot` |
+| `reviewEffort` | `"high"` | Reasoning effort (`none\|low\|medium\|high\|xhigh\|max`) |
+| `copilotInheritMcp` | `false` | Inject MCP servers from the trusted Copilot config (Copilot only) |
+| `copilotAutoEnableMcpOnReview` | `false` | Force MCP for Copilot review generation only |
+| `copilotConfigDir` | `""` | Copilot config directory override; blank uses `~/.copilot` |
+| `reviewFocusAreas` | `""` | Default focus areas; a per-review override wins |
+| `reviewCustomInstructions` | `""` | Default extra instructions; a per-review override wins |
+| `reviewGuidanceProfiles` | `[]` | Named focus/instruction bundles with stable IDs |
+| `activeReviewGuidanceProfileId` | `""` | Selected profile; blank uses the built-in defaults |
+| `repositoryReviewInstructions` | `{}` | Instructions remembered per `owner/repo` |
+| `reviewSelfCritique` | `true` | Validation pass that drops unsupported findings |
+| `reviewSupervisorEnabled` | `true` | Bounded "Re-inspect coverage gaps" follow-ups |
+| `reviewRulesDirectory` | `""` | Local folder of the reviewer's own rules |
+| `reviewBuiltInRules` | `true` | Runs the review rules bundled with PR Pilot |
+| `reviewSecondReviewerModel` | `""` | Parallel Copilot second reviewer; blank disables it |
+| `reviewSecondReviewerEffort` | `"medium"` | Second reviewer's Copilot reasoning effort |
+| `experimentalIntellijAssistedReview` | `false` | IntelliJ-assisted review opt-in |
+| `experimentalVsCodeCodeIntelligence` | `false` | VS Code language-server lookups for Copilot; VS Code only |
+| `reviewGuidanceGlobs` | `[]` | Base-commit guidance globs |
+
 ## Fields
 
-- `githubBaseUrl` (default `https://github.com`)
-- `notificationsEnabled` (default `false`)
-- `notifyReviewRequested` (default `true`)
-- `notifyStarredRepos` (default `false`)
-- `notificationPollMinutes` (default `5`)
-- `reviewModel` (default `""`)
-- `reviewModelCopilot` (default `"claude-sonnet-4.6"`)
-- `reviewProvider` (default `"claude"`; values `claude|copilot`)
-- `reviewEffort` (default `"high"`; values `none|low|medium|high|xhigh|max`)
 - `copilotInheritMcp` (default `false`) — explicit capability elevation that injects MCP servers
   read from the user's trusted Copilot config (`<configDir>/mcp-config.json`) via `setMcpServers`,
   while retaining the read/MCP-only permission allowlist. On-disk config discovery stays disabled,

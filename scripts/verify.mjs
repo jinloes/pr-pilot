@@ -48,6 +48,42 @@ const ROOT_BUILD_FILES = new Set([
 ])
 
 const DOC_ONLY = /\.(md|mmd)$/i
+const SIZED_CODE_FILE = /\.(java|tsx?|m?js|cjs|css|gradle)$/i
+const TEST_PATH = /(?:^|\/)(?:src\/test|test)\/|\.(?:test|spec)\.[^/]+$|Test\.java$/
+
+export const TEST_FILE_MAX_BYTES = 20_000
+export const SOURCE_FILE_MAX_BYTES = 32_000
+
+/**
+ * Flags touched source/test files whose LF-normalized UTF-8 size exceeds single-read budgets so
+ * agents split growing files before they require multi-pass reads. Kept separate from pure
+ * `planChecks` because synthetic test paths do not exist on disk.
+ */
+export function largeFileNotes(repoRoot, changedPaths) {
+  const seen = new Set()
+  const notes = []
+  for (const rawPath of changedPaths) {
+    const file = normalize(rawPath)
+    if (!file || seen.has(file) || isAgentDoc(file) || !SIZED_CODE_FILE.test(file)) continue
+    seen.add(file)
+    const fullPath = path.join(repoRoot, file)
+    if (!fs.statSync(fullPath, { throwIfNoEntry: false })?.isFile()) continue
+    const lfBytes = Buffer.byteLength(fs.readFileSync(fullPath, 'utf8').replaceAll('\r\n', '\n'), 'utf8')
+    const isTest = TEST_PATH.test(file)
+    if (isTest && lfBytes > TEST_FILE_MAX_BYTES) {
+      notes.push(
+        `Large test file: ${file} is ${lfBytes} LF bytes (target <= ${TEST_FILE_MAX_BYTES}); ` +
+          'consider splitting by area so agents can read it in one pass.',
+      )
+    } else if (!isTest && lfBytes > SOURCE_FILE_MAX_BYTES) {
+      notes.push(
+        `Large source file: ${file} is ${lfBytes} LF bytes (target <= ${SOURCE_FILE_MAX_BYTES}); ` +
+          'consider extracting focused collaborators if growing.',
+      )
+    }
+  }
+  return notes
+}
 
 // Checks that run inside this process rather than as a child command.
 const IN_PROCESS = {
@@ -503,6 +539,7 @@ async function main(argv) {
       ? parsed.files
       : changedFiles(repoRoot, { base: parsed.since, uncommittedOnly: parsed.uncommittedOnly })
   const { checks, notes } = planChecks(files, { all: parsed.all })
+  notes.push(...largeFileNotes(repoRoot, files))
 
   if (checks.length === 0) {
     console.log(files.length === 0 ? 'No changes detected.' : 'No local checks cover these changes.')

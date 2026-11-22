@@ -1,7 +1,17 @@
 # Local data and outcome logging
 
-Design constraints for files PR Pilot reads and writes under `~/.pr-pilot`. The file inventory is in
-[ARCHITECTURE.md](../../ARCHITECTURE.md#local-data-files).
+Inventory and design constraints for files PR Pilot reads and writes under `~/.pr-pilot`
+(referenced from [ARCHITECTURE.md](../../ARCHITECTURE.md#local-data-files)).
+
+## Files
+
+| Path | Owner / Scope | Purpose |
+|------|---------------|---------|
+| `~/.pr-pilot/semantic-review.json` | User-authored | Machine-local semantic launch config (schema 1; read-only) |
+| `~/.pr-pilot/semantic-worktrees.json` | `review-engine` | Retained worktree/head identities (`semantic-worktrees.lock`, `semantic-leases/<id>.lock`) |
+| `~/.pr-pilot/pending-prs.json` | IntelliJ only | Saved-draft PR index (VS Code uses `globalState`; `.corrupt-<timestamp>` on quarantine) |
+| `~/.pr-pilot/seen-prs.json` | IntelliJ only | Notified `owner/repo#number` set (VS Code uses `globalState`) |
+| `~/.pr-pilot/review-outcomes.jsonl` | Both hosts | Append-only outcome hashes/metadata per submitted review |
 
 ## Semantic runtime and host state
 

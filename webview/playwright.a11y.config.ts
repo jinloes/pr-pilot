@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './a11y',
+  reporter: process.env.PR_PILOT_VERBOSE_TESTS === '1' ? 'list' : 'dot',
   retries: process.env.CI ? 2 : 0,
   fullyParallel: true,
   timeout: 60_000,

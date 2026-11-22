@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import {
+  SOURCE_FILE_MAX_BYTES,
+  TEST_FILE_MAX_BYTES,
   changedFiles,
   executeChecks,
+  largeFileNotes,
   nodeVersionSupported,
   parseVerifyArgs,
   planChecks,
@@ -336,4 +341,35 @@ test('changedFiles skips merge-base committed diff when uncommittedOnly or --sin
   ])
   assert.ok(!calls.some((call) => call.startsWith('merge-base')))
 })
+
+test('largeFileNotes flags touched source and test files exceeding LF byte budgets', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-pilot-verify-size-'))
+  try {
+    const write = (rel, content) => {
+      const target = path.join(dir, rel)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, content)
+    }
+    write('core/src/test/java/FooTest.java', 'x'.repeat(TEST_FILE_MAX_BYTES + 1))
+    write('core/src/main/java/Foo.java', 'x'.repeat(SOURCE_FILE_MAX_BYTES + 1))
+    write('webview/src/App.test.tsx', 'x'.repeat(TEST_FILE_MAX_BYTES))
+    write('webview/src/App.tsx', 'x'.repeat(SOURCE_FILE_MAX_BYTES))
+    write('webview/fixtures/big.json', 'x'.repeat(SOURCE_FILE_MAX_BYTES * 2))
+
+    const notes = largeFileNotes(dir, [
+      'core/src/test/java/FooTest.java',
+      'core/src/main/java/Foo.java',
+      'webview/src/App.test.tsx',
+      'webview/src/App.tsx',
+      'webview/fixtures/big.json',
+      'core/src/main/java/Deleted.java',
+    ])
+    assert.equal(notes.length, 2)
+    assert.match(notes[0], /^Large test file: core\/src\/test\/java\/FooTest\.java/)
+    assert.match(notes[1], /^Large source file: core\/src\/main\/java\/Foo\.java/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 

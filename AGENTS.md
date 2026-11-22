@@ -5,16 +5,33 @@ Operational guide for coding agents working in this repository.
 ## Source of truth split
 
 - `AGENTS.md` (this file): workflow, testing, coding conventions, and cross-host sync obligations.
-- `ARCHITECTURE.md`: system boundaries, a settings summary, local data files, and an index of
-  design constraints whose full text lives in `docs/architecture/*.md`.
+  Loaded on every turn — keep under 10,000 LF bytes (`scripts/agent-docs.mjs` enforces this).
+- `ARCHITECTURE.md`: system boundaries, local data files, and an index of design constraints whose
+  full text lives in `docs/architecture/*.md` (settings live in `docs/architecture/settings.md`).
 - `CODEMAP.md`: task entry points and cross-module paths, plus per-module maps in
-  `docs/codemap/*.md` that list implementation files and related tests.
+  `docs/codemap/*.md` listing implementation files and related tests.
 - Treat `AGENTS.md` files as the only agent instruction files in this repo. This root file applies
   everywhere; `intellij-plugin/AGENTS.md`, `webview/AGENTS.md`, and `vscode-extension/AGENTS.md`
   add rules for work inside those directories. Read the nested file before editing files under it.
-- Read `ARCHITECTURE.md` when a change affects design or crosses module boundaries. Read
-  `CODEMAP.md` when locating implementation and test files. Do not load either file when the task
-  does not need that context.
+- Read `ARCHITECTURE.md` only when a change affects design or crosses module boundaries. Read
+  `CODEMAP.md` only when locating implementation and test files, then read just the relevant
+  `docs/architecture/*.md` or `docs/codemap/*.md` topic file.
+
+## Context-window efficiency
+
+- Scope reads and searches: prefer narrow directory/glob searches and `view_range` on large files
+  instead of loading whole suites or unrelated modules. `.ignore` hides build, staged, report, and
+  snapshot artifacts from ripgrep.
+- Filter inner-loop test runs before running full suites:
+  - JVM: `./gradlew :<module>:test --tests "*MyClassTest*"` (failures print full stack/assertion
+    diffs inline without `--info`).
+  - VS Code extension: `npm --prefix vscode-extension run test:unit -- <name-substring>`
+    (add `--verbose` for full per-test `spec` output).
+  - Webview logic/UI: `npm --prefix webview run test:logic -- <name-substring>` or
+    `npx --prefix webview vitest run src/components/Foo.test.tsx`.
+- Split files before they require multi-pass reads: agent docs fail verification above 20,000 LF
+  bytes (`AGENTS.md` above 10,000 LF bytes), and `node scripts/verify.mjs` flags touched test files
+  past 20 KB or source files past 32 KB.
 
 ## Maintenance rule
 
@@ -25,186 +42,105 @@ Update docs as part of each coding task:
 - Record non-obvious constraints future code must respect as a `###` section in the matching
   `docs/architecture/*.md` topic file, plus an index line under `ARCHITECTURE.md` "Key design
   decisions".
-- Add new persisted settings to the `ARCHITECTURE.md` "Settings persistence" table and describe
-  them in `docs/architecture/settings.md`.
-- Update `ARCHITECTURE.md` "Local data files" when persistent files are added.
-- Update affected Mermaid sources under `diagrams/` when code changes alter depicted components,
-  boundaries, ownership, persistence, or workflows. In particular, keep `architecture.md` aligned
-  with host/sidecar/engine boundaries and keep `review-generation-sequence.md` aligned with PR
-  context loading, worktree setup, generation stages, cancellation, and result delivery.
-- Update `diagrams/README.md` and documentation links when diagrams are added, removed, or renamed.
-- Keep this file focused on workflow rules; keep implementation details in code.
-- Keep file/class inventories out of `ARCHITECTURE.md`; put them in the code maps.
-- Keep each agent doc (every `AGENTS.md`, `ARCHITECTURE.md`, `CODEMAP.md`, and the
-  `docs/architecture` and `docs/codemap` topic files) under 20,000 bytes so agents read it in one
-  pass; split a topic file rather than growing it. `scripts/verify.mjs` checks their links,
-  anchors, decision index, and sizes.
+- Add new persisted settings to `docs/architecture/settings.md` (summary table and field notes).
+- Update `docs/architecture/local-data.md` (and `ARCHITECTURE.md` "Local data files" if new file
+  names are added) when persistent files change.
+- Update affected Mermaid sources under `diagrams/` (`architecture.md`,
+  `review-generation-sequence.md`, `pr-discovery-sequence.md`) and `diagrams/README.md` when code
+  changes alter depicted boundaries, persistence, or workflows.
+- Keep file/class inventories in `docs/codemap/*.md`, design rules in `docs/architecture/*.md`, and
+  each agent doc under 20,000 LF bytes (split topic files rather than growing them).
 
 ## Host parity obligations
 
 ### The capability rule
 
-**Engine capabilities are defined once and exposed everywhere.** The full capability surface of each
-engine is declared as an interface:
+**Engine capabilities are defined once and exposed everywhere** on the engine interfaces:
 
 - `github-engine`: `com.jinloes.prpilot.engine.GitHubEngineApi`
 - `review-engine`: `com.jinloes.prpilot.engine.ReviewEngineApi`
 
-Each interface carries an `RPC_METHODS` map from Java method name to JSON-RPC wire name.
-`sidecar/StdioJsonRpcServer` (handlers in `StdioJsonRpcServerGitHubHandlers`,
-`StdioJsonRpcServerReviewHandlers`, and `StdioJsonRpcServerAsyncReviewHandlers`) must register a
-handler for every entry, and `SidecarBootstrapService.CAPABILITY_METHODS` must group every wire
-name under a logical capability (that grouping is what the `initialize` handshake advertises).
+Each interface maps Java method names to JSON-RPC wire names in `RPC_METHODS`.
+`sidecar/StdioJsonRpcServer` (`StdioJsonRpcServerGitHubHandlers`,
+`StdioJsonRpcServerReviewHandlers`, `StdioJsonRpcServerAsyncReviewHandlers`) registers a handler for
+every entry, and `SidecarBootstrapService.CAPABILITY_METHODS` groups every wire name under a logical
+capability advertised in `initialize`.
 
-This is **enforced by `EngineCapabilityCoverageTest`** in the sidecar module, which fails the build if
-a capability is declared without a wire name, exposed without being declared, declared without being
-registered, or registered without being advertised. Do not maintain any of these mappings by hand —
-add the method to the interface, add its `RPC_METHODS` entry, register the handler, and group it in
-`CAPABILITY_METHODS`; the tests tell you if you missed a step.
+- **Server enforcement:** `EngineCapabilityCoverageTest` (`sidecar`) fails if a capability lacks a
+  wire name, handler registration, or `CAPABILITY_METHODS` entry, or if an undeclared method is
+  exposed.
+- **Client enforcement:** `vscode-extension/test/wireCatalog.test.ts` fails if
+  `vscode-extension/src/sidecar*.ts` lacks a method for a wire name, calls an undeclared one, or
+  drifts from `CAPABILITY_METHODS` in `REQUIRED_CAPABILITIES`.
 
-**The client side is enforced too**, by `vscode-extension/test/wireCatalog.test.ts`, which reads the
-engine interfaces as the source of truth and fails if the `vscode-extension/src/sidecar*.ts`
-clients have no method for a wire name (or calls one no engine declares), and if
-`REQUIRED_CAPABILITIES` drifts from `CAPABILITY_METHODS`. So a new capability is not "done" until
-VS Code can reach it.
+### Parity requirements and modularity guardrails
 
-### What parity does and does not require
-
-**Required:** every capability is reachable by every host. A capability lives in `core`,
-`github-engine`, or `review-engine` — never in a host. Do not add host-local GitHub behavior,
-fallback transport, or a second CLI-spawning review implementation in
-`vscode-extension/src/claude.ts` or `copilot.ts`.
-
-**Not required:** that every host *consumes* every capability on the same day. A host may lag in
-surfacing a capability in its UI. What is never acceptable is a host working around a missing
-capability by re-implementing it locally.
-
-**But record the lag as a lag.** The tests prove a capability is *reachable* and that a client
-method *exists*, not that any UI surfaces it. (VS Code once shipped months of reviews with empty
-context prompt sections because four exposed capabilities were never called.) When you ship a
-capability a host does not yet consume, say so explicitly in the PR description — do not mark the
-work complete.
-
-If a genuine platform constraint makes a capability impossible in one host, document the gap and the
-reason as a section in the matching `docs/architecture/*.md` topic file (with an index line under
-`ARCHITECTURE.md` "Key design decisions") and call it out in the PR description.
-
-### Modularity guardrails
-
-1. No IntelliJ types in `core`, `github-engine`, or `review-engine`.
-2. Every new capability lands on the engine interface first, host wiring second.
-3. `webview/` stays host-neutral and shared — it is UI, not host code.
-4. `webview/src/bridge/types.ts` remains the host↔UI contract.
-5. Deleting a TypeScript reimplementation is always preferred over updating it.
-
-### VS Code support floor
-
-VS Code is a first-class host, not a port. Concretely:
-
-- Every engine capability is exposed over the sidecar (test-enforced above).
-- Any user-facing feature built on engine capabilities must have a VS Code path in the same change,
-  or a documented gap. UI polish may differ; access to functionality may not.
-- The sidecar is the only VS Code transport. No direct `gh`/CLI invocation from the extension.
-
-### Remaining hand-mirrored logic
-
-Some logic is still duplicated across hosts or wired per host, so no coverage test keeps the copies
-in sync. `MIRRORS` in `scripts/host-mirrors.mjs` lists each pair, and `node scripts/verify.mjs`
-(including `--dry-run`) prints a reminder naming the other side whenever a change touches one.
-`scripts/host-mirrors.test.mjs` fails when a listed path disappears, so move an entry with its
-files. Treat the list as tech debt, not as a pattern to extend — do not add entries without
-justification.
-
-New **request** wire methods are not on the list: `wireCatalog.test.ts` fails the build when the
-`sidecar*.ts` clients lack a method for one. Notifications (`reviews/status`, `reviews/chunk`,
-`reviews/chatChunk`) are, because neither engine interface declares them, so there is no source
-of truth to check them against.
-
-**Retiring an entry is the preferred fix** (guardrail #5): expose the logic as an engine
-capability, call it from `sidecar.ts`, and delete the TypeScript. `RepoGuidelinesReader` and
-`GitWorktreeService` were retired this way after their copies had already diverged (different
-truncation markers; different temp-directory name formats, which matter because cleanup matches on
-the `pr-pilot-wt-` prefix).
+- **Required:** every capability lives in `core`, `github-engine`, or `review-engine` and is
+  reachable by every host. Never add host-local GitHub HTTP, fallback transport, or CLI-spawning
+  review logic in `vscode-extension/` or `intellij-plugin/`.
+- **UI lag must be recorded:** tests prove wire reachability, not UI consumption. If one host does
+  not yet surface a new capability, call that out in the PR description (and document genuine
+  platform constraints in `docs/architecture/*.md` + `ARCHITECTURE.md`).
+- **VS Code support floor:** VS Code is a first-class host; the sidecar is its only transport, and
+  user-facing engine features must ship with a VS Code path or a documented gap.
+- **Guardrails:**
+  1. No IntelliJ types in `core`, `github-engine`, or `review-engine`.
+  2. Engine interface first, host wiring second.
+  3. `webview/` stays host-neutral; `webview/src/bridge/types.ts` is the host↔UI contract.
+  4. Prefer retiring `MIRRORS` entries in `scripts/host-mirrors.mjs` (`host-mirrors.test.mjs`
+     enforces path existence; `verify.mjs` prints cross-host reminders) by moving shared logic into
+     an engine capability and deleting the TypeScript copy. Notifications (`reviews/status`,
+     `reviews/chunk`, `reviews/chatChunk`) remain listed because engine interfaces declare requests
+     only.
 
 ## Testing conventions
 
-Every code change must include tests for new/modified non-UI logic.
-
-Checklist before completing a coding task:
+Every code change must include tests for new/modified non-UI logic:
 
 1. Identify every changed non-UI method (service, utility, model, static helper).
-2. Widen private methods to package-private only when needed for test access (never public).
-3. Add tests for happy path, edge cases, and error paths.
-4. Run required test suites and verify pass.
-
-Test framework and location rules:
-
-- Core tests: `core/src/test/java/com/jinloes/prpilot/` using JUnit 5 + AssertJ (same convention
-  as `intellij-plugin`).
-- IntelliJ plugin tests: `intellij-plugin/src/test/java/com/jinloes/prpilot/` using JUnit 5 +
-  AssertJ.
-- `review-engine`/`github-engine`/`sidecar` tests: `<module>/src/test/java/com/jinloes/prpilot/`
-  using JUnit 5 + AssertJ (same convention as `intellij-plugin`).
-- Group tests by `@Nested` classes named after the method under test.
-- Prefer a new test class over growing one past about 20 KB, which agents must read in pieces:
-  split by area into `<Class><Area>Test` files that share a package-private `<Class>TestSupport`.
-- For temp directories, use `@BeforeEach`/`@AfterEach` + `Files.createTempDirectory`.
-- Do not write tests to `~/.pr-pilot`; use temp dirs.
+2. Widen `private` methods to package-private only when needed for tests (never `public`).
+3. Cover happy paths, edge cases, and error paths.
+4. Place JUnit 5 + AssertJ tests in `<module>/src/test/java/com/jinloes/prpilot/`, grouped by
+   `@Nested` classes named after the method under test.
+5. Split test classes before ~20 KB into `<Class><Area>Test` files sharing a package-private
+   `<Class>TestSupport`.
+6. Use `@BeforeEach`/`@AfterEach` + `Files.createTempDirectory`; never write to `~/.pr-pilot`.
 
 ## Required verification commands
 
-Use Node from `.nvmrc` (the script refuses Node older than 26.0). Run `./gradlew spotlessApply`
-after Java edits, then:
+Use Node from `.nvmrc` (`>= 26.0`). Run `./gradlew spotlessApply` after Java edits, then:
 
 ```bash
-node scripts/verify.mjs                # checks affected by changes vs origin/main, incl. uncommitted
-node scripts/verify.mjs --uncommitted  # inner-loop: only uncommitted/untracked changes (--since HEAD)
-node scripts/verify.mjs --dry-run      # show the plan only
-node scripts/verify.mjs --all          # everything; run before opening a PR
+node scripts/verify.mjs --uncommitted  # inner-loop: uncommitted/untracked changes (--since HEAD)
+node scripts/verify.mjs                # all changes vs origin/main, incl. uncommitted
+node scripts/verify.mjs --dry-run      # show planned checks and notes only
+node scripts/verify.mjs --all          # full local suite; run before opening a PR
 ```
 
-The script maps changed paths to the smallest covering set (a JVM module plus its downstream
-modules' `check`, which includes Spotless and `intellij-plugin:unitTest`; webview and extension
-lint/typecheck/tests; cross-toolchain tests for the engine interfaces and the diff-coverage golden;
-in-process agent-docs and Playwright image pin checks when their inputs change). It prints one line
-per passing check and only the tail of failing output, with the full log path. Its notes name the
-other side of any hand-mirrored file you changed, the Docker visual check in `webview/AGENTS.md` for
-webview UI files, and the workflow linters for `.github/` changes. Update `planChecks` in
-`scripts/verify.mjs` when module dependencies or cross-toolchain tests change. CI additionally runs
-checks this script does not (plugin verifier, visual regression, extension-host smoke, coverage);
-see `docs/architecture/ci.md`.
+`verify.mjs` maps changed paths to the smallest covering set (affected JVM `check` tasks including
+Spotless and `intellij-plugin:unitTest`, webview/extension lint+typecheck+tests, cross-toolchain
+tests, and in-process agent-doc / Playwright pin checks), printing one line per passing check and
+only the tail of failures with log paths. Update `planChecks` when module dependencies or
+cross-toolchain tests change. CI-only checks (plugin verifier, visual regression, extension-host
+smoke, coverage) are documented in `docs/architecture/ci.md`.
 
 ## Coding rules
 
-- Prefer Apache Commons helpers over hand-rolled equivalents (`CollectionUtils`, `StringUtils`,
-  `Strings.CS`, `StringEscapeUtils`).
-- `core`'s shared model classes are plain Java (JavaBean getters/setters). Don't reintroduce
-  Kotlin, kotlinx.serialization, or jackson-module-kotlin for these classes — Jackson (plain bean
-  introspection) is the only runtime JSON serializer used against them.
-- For Java JSON, use the applicable Jackson `ObjectMapper` to serialize DTOs, maps, or tree nodes;
-  do not concatenate raw JSON strings. Tests must build valid JSON fixtures through that
-  serialization path, except when intentionally testing malformed JSON input.
-- Follow Google Java Style (Spotless-enforced), avoid FQNs in method bodies, keep imports explicit.
-- Use comments only for non-obvious "why", not to restate code.
-- No `Co-Authored-By` trailers in commit messages.
+- Prefer Apache Commons helpers (`CollectionUtils`, `StringUtils`, `Strings.CS`,
+  `StringEscapeUtils`) over hand-rolled equivalents.
+- Keep `core` models plain JavaBeans serialized via Jackson bean introspection — no Kotlin,
+  `kotlinx.serialization`, or `jackson-module-kotlin`.
+- Build Java JSON through Jackson `ObjectMapper` (including test fixtures, except intentional
+  malformed-JSON tests); never concatenate raw JSON strings.
+- Follow Google Java Style (Spotless-enforced), avoid FQNs in method bodies, keep imports explicit,
+  and comment only non-obvious "why".
+- Never include `Co-Authored-By` trailers in commit messages.
 
 ## Keep the repository company-neutral
 
-PR Pilot is a general-purpose tool. Code, review prompts, built-in rules, checklists, tests,
-fixtures, docs, and diagrams must not name any employer or its internal systems: company names,
-internal products, services, repositories, bot or service accounts, hostnames, URLs, ticket keys,
-URN namespaces, build tools, or internal guide paths.
+Code, prompts, built-in rules, checklists, tests, fixtures, docs, and diagrams must not name any
+employer or internal system (products, services, repos, bot logins, hostnames, URLs, ticket keys,
+URNs, build tools, or guide paths). Use neutral placeholders (`acme/widgets`, `urn:example:…`,
+`.review/ai-agent/*.md`, `svc-review-bot`), express real-PR review gaps as generic defect patterns,
+keep repo-specific rules in `reviewGuidanceGlobs`, and scan changes before finishing.
 
-- Use neutral placeholders instead: `acme/widgets` for repositories, `urn:example:…` for URNs,
-  `.review/ai-agent/*.md` for repository guidance globs, `svc-review-bot` for bot logins.
-- When a review gap is found on a real pull request, add the check as a generic pattern (the defect
-  class and how to confirm it), never the PR's file, field, or service names.
-- Repository-specific rules belong in that repository's own guidance files, which reviews load
-  through `reviewGuidanceGlobs`, not in PR Pilot.
-- Before finishing a task, search your changes for company names and internal identifiers you saw
-  while working, and replace them.
-
-## Scope reminder
-
-- Keep this file short and operational; put design constraints in `ARCHITECTURE.md` and
-  implementation navigation in `CODEMAP.md`.

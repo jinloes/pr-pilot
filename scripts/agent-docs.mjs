@@ -3,9 +3,13 @@
 // in-process whenever one of those files changes.
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-// Agents read larger files in several pieces, so each doc should stay a single read.
+// Agents read larger files in several pieces, so each doc must stay a single read.
 export const AGENT_DOC_MAX_BYTES = 20_000
+export const AGENT_DOC_WARN_BYTES = 18_500
+// Root AGENTS.md is injected into every prompt turn, so keep its token footprint tight.
+export const ROOT_AGENTS_MAX_BYTES = 10_000
 
 // Each topic directory must be reachable from its root doc.
 const TOPIC_ROOTS = { 'docs/architecture': 'ARCHITECTURE.md', 'docs/codemap': 'CODEMAP.md' }
@@ -110,7 +114,7 @@ export function resolveLink(fromFile, url) {
   return { target, anchor }
 }
 
-function listAgentDocs(repoRoot) {
+export function listAgentDocs(repoRoot) {
   const found = []
   const walk = (relativeDir, depth) => {
     const entries = fs.readdirSync(path.join(repoRoot, relativeDir), { withFileTypes: true })
@@ -190,8 +194,10 @@ function checkTopicFilesLinked(docs, errors) {
 }
 
 /**
- * Checks every agent doc under `repoRoot`. Errors are broken links or anchors and gaps in the
- * ARCHITECTURE.md decision index or the topic-file links; warnings are docs over the size limit.
+ * Checks every agent doc under `repoRoot`. Errors are broken links or anchors, gaps in the
+ * ARCHITECTURE.md decision index or topic-file links, and docs exceeding their LF-normalized UTF-8
+ * byte budget (`ROOT_AGENTS_MAX_BYTES` for root `AGENTS.md`, `AGENT_DOC_MAX_BYTES` for all others);
+ * warnings flag docs approaching the limit (`> AGENT_DOC_WARN_BYTES`).
  */
 export function checkAgentDocs(repoRoot) {
   const errors = []
@@ -199,17 +205,28 @@ export function checkAgentDocs(repoRoot) {
   const cache = new Map()
   const parse = (file) => {
     if (!cache.has(file)) {
-      cache.set(file, parseMarkdown(fs.readFileSync(path.join(repoRoot, file), 'utf8')))
+      const raw = fs.readFileSync(path.join(repoRoot, file), 'utf8')
+      const lfBytes = Buffer.byteLength(raw.replaceAll('\r\n', '\n'), 'utf8')
+      cache.set(file, { ...parseMarkdown(raw), lfBytes })
     }
     return cache.get(file)
   }
   const docs = new Map(listAgentDocs(repoRoot).map((file) => [file, parse(file)]))
   for (const [file, doc] of docs) {
-    const size = fs.statSync(path.join(repoRoot, file)).size
-    if (size > AGENT_DOC_MAX_BYTES) {
-      warnings.push(
-        `${file} is ${size} bytes; split it so agents can read it in one pass ` +
+    const size = doc.lfBytes
+    if (file === 'AGENTS.md' && size > ROOT_AGENTS_MAX_BYTES) {
+      errors.push(
+        `${file} is ${size} LF bytes; keep the always-loaded root guide under ` +
+          `${ROOT_AGENTS_MAX_BYTES} bytes.`,
+      )
+    } else if (size > AGENT_DOC_MAX_BYTES) {
+      errors.push(
+        `${file} is ${size} LF bytes; split it so agents can read it in one pass ` +
           `(limit ${AGENT_DOC_MAX_BYTES}).`,
+      )
+    } else if (size > AGENT_DOC_WARN_BYTES) {
+      warnings.push(
+        `${file} is ${size} LF bytes; approaching the ${AGENT_DOC_MAX_BYTES}-byte single-read limit.`,
       )
     }
     for (const link of doc.links) {
@@ -221,4 +238,15 @@ export function checkAgentDocs(repoRoot) {
   checkDecisionIndex(docs, errors)
   checkTopicFilesLinked(docs, errors)
   return { errors, warnings }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const { errors, warnings } = checkAgentDocs(repoRoot)
+  warnings.forEach((warning) => console.error(`warn: ${warning}`))
+  errors.forEach((error) => console.error(`error: ${error}`))
+  if (errors.length === 0) {
+    console.log(`ok   agent docs (${warnings.length} warning${warnings.length === 1 ? '' : 's'})`)
+  }
+  process.exit(errors.length === 0 ? 0 : 1)
 }

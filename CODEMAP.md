@@ -39,9 +39,10 @@ only the map for the module you are changing.
 - `.ignore` - Hides lockfiles, visual snapshots, and build output from ripgrep-based search tools.
 - `ARCHITECTURE.md` - Design-constraint index, settings persistence, and local data.
 - `docs/architecture/*.md` - Full design-constraint sections by topic (review pipeline, review
-  checklists, protobuf review, benchmarks, comments and context, diff coverage, providers, semantic
-  review, hosts and sidecar, sidecar capabilities, module and runtime boundaries, GitHub drafts and
-  worktrees, webview, local data, CI and releases) plus the settings reference.
+  findings, review checklists, protobuf review, benchmarks, comments and context, diff coverage,
+  providers, semantic review, hosts and sidecar, sidecar capabilities, GitHub RPC, module and
+  runtime boundaries, GitHub drafts and worktrees, webview UI, webview bridge and hosts, local data,
+  CI and releases) plus the settings reference.
 - `docs/codemap/*.md` - Per-module file maps and the semantic-review lifecycle entry points.
 - `diagrams/` - Mermaid architecture and PR review-generation sequence diagrams.
 - `.github/workflows/ci.yml` - Pull-request and `main` gate: Gradle check with JaCoCo, IntelliJ
@@ -69,9 +70,12 @@ only the map for the module you are changing.
   golden findings with nearby and critique-dropped findings, false positives, and a noise-aware
   baseline comparison (`reviewbench-report.test.mjs`, run by the extension runner).
 - `scripts/verify.mjs` - Change-aware verification: `planChecks` maps changed paths to the minimal
-  Gradle/npm checks plus the in-process agent-doc and Playwright image checks, adds hand-mirror and
-  CI-lint reminders, and prints only failing output (`verify.test.mjs`, run by the extension
-  runner).
+  Gradle/npm checks plus the in-process agent-doc and Playwright image checks, adds hand-mirror,
+  large-file (`largeFileNotes`), and CI-lint reminders, and prints only failing output
+  (`verify.test.mjs`, run by the extension runner).
+- `scripts/compact-test-reporter.mjs` - Single-line passing reporter and file/test-name filter
+  helper shared by `vscode-extension/scripts/run-unit-tests.mjs` and
+  `webview/scripts/run-logic-tests.mjs` (`--verbose` restores `spec`; `compact-test-reporter.test.mjs`).
 - `scripts/playwright-image.mjs` - Fails when a Playwright container reference (CI, release, or
   `webview/AGENTS.md`) is not the locked `@playwright/test` version's tag pinned by the shared
   digest (`playwright-image.test.mjs`, run by the extension runner).
@@ -79,8 +83,9 @@ only the map for the module you are changing.
   the reminders `verify.mjs` prints when one side changes (`host-mirrors.test.mjs`, run by the
   extension runner, which runs every `scripts/*.test.mjs`).
 - `scripts/agent-docs.mjs` - Agent-doc consistency: every `docs/architecture` decision indexed once
-  in `ARCHITECTURE.md`, relative links and anchors resolve, every code map is linked, and size
-  warnings above 20,000 bytes (`agent-docs.test.mjs`, run by the extension runner).
+  in `ARCHITECTURE.md`, relative links and anchors resolve, every code map is linked, LF byte caps
+  enforced (`20,000` bytes; `10,000` for root `AGENTS.md`), and warnings above `18,500` bytes
+  (`agent-docs.test.mjs`, run by the extension runner; also runnable directly via `node`).
 - `gradle/intellij-sandbox.gradle` - Lazy installed-IDE selection and separate `runIdeLocal`
   platform/runtime/sandbox wiring; compilation and ordinary `runIde` stay pinned.
 - `gradle/intellij-sandbox-tests.gradle` - Temporary metadata fixtures exercising the production

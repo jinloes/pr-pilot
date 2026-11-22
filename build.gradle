@@ -92,6 +92,11 @@ subprojects {
         tasks.withType(Test).configureEach {
             maxParallelForks =
                     Math.max(1, Math.min(4, Runtime.runtime.availableProcessors().intdiv(2)))
+            testLogging {
+                events 'failed'
+                exceptionFormat = 'full'
+                showStandardStreams = false
+            }
         }
 
         if (secureTraversalJdk.get()) {

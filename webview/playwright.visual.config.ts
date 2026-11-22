@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './visual',
+  reporter: process.env.PR_PILOT_VERBOSE_TESTS === '1' ? 'list' : 'dot',
   timeout: 60_000,
   // Whole-page tolerance absorbs antialiasing only; it is intentionally loose enough that copy and
   // hierarchy changes can pass. Text-critical panes therefore add locator-level screenshots with a

@@ -38,12 +38,15 @@ Index non-obvious active constraints here; record each as a `###` section in the
 - [Repository guidance confinement](docs/architecture/review-pipeline.md#repository-guidance-confinement)
 - [Review guidance, file history and call sites come from the base commit](docs/architecture/review-pipeline.md#review-guidance-file-history-and-call-sites-come-from-the-base-commit)
 - [Recall: second reviewer and candidate validation](docs/architecture/review-pipeline.md#recall-second-reviewer-and-candidate-validation)
-- [Reviewer attribution and corroboration](docs/architecture/review-pipeline.md#reviewer-attribution-and-corroboration)
-- [Cross-pass rewordings are deduplicated by content](docs/architecture/review-pipeline.md#cross-pass-rewordings-are-deduplicated-by-content)
-- [Suggested changes are literal, one-line, high-confidence replacements](docs/architecture/review-pipeline.md#suggested-changes-are-literal-one-line-high-confidence-replacements)
-- [Review JSON parsing is self-healing, not all-or-nothing](docs/architecture/review-pipeline.md#review-json-parsing-is-self-healing-not-all-or-nothing)
 - [Low confidence is a gate, not a label](docs/architecture/review-pipeline.md#low-confidence-is-a-gate-not-a-label)
 - [Prompt-injection hardening](docs/architecture/review-pipeline.md#prompt-injection-hardening)
+
+**Review findings** ([review-findings.md](docs/architecture/review-findings.md))
+
+- [Reviewer attribution and corroboration](docs/architecture/review-findings.md#reviewer-attribution-and-corroboration)
+- [Cross-pass rewordings are deduplicated by content](docs/architecture/review-findings.md#cross-pass-rewordings-are-deduplicated-by-content)
+- [Suggested changes are literal, one-line, high-confidence replacements](docs/architecture/review-findings.md#suggested-changes-are-literal-one-line-high-confidence-replacements)
+- [Review JSON parsing is self-healing, not all-or-nothing](docs/architecture/review-findings.md#review-json-parsing-is-self-healing-not-all-or-nothing)
 
 **Review checklists** ([review-checklists.md](docs/architecture/review-checklists.md))
 
@@ -123,7 +126,11 @@ Index non-obvious active constraints here; record each as a `###` section in the
 
 - [Engine capability boundary (test-enforced host parity)](docs/architecture/sidecar-capabilities.md#engine-capability-boundary-test-enforced-host-parity)
 - [Sidecar streaming: async requests plus server-push notifications](docs/architecture/sidecar-capabilities.md#sidecar-streaming-async-requests-plus-server-push-notifications)
-- [GitHub engine host wiring](docs/architecture/sidecar-capabilities.md#github-engine-host-wiring)
+
+**GitHub RPC and host wiring** ([github-rpc.md](docs/architecture/github-rpc.md))
+
+- [GitHub and repository RPC contracts](docs/architecture/github-rpc.md#github-and-repository-rpc-contracts)
+- [GitHub engine host wiring](docs/architecture/github-rpc.md#github-engine-host-wiring)
 
 **Module and runtime boundaries**
 ([module-runtime-boundaries.md](docs/architecture/module-runtime-boundaries.md))
@@ -154,22 +161,26 @@ Index non-obvious active constraints here; record each as a `###` section in the
 
 - [Webview styling](docs/architecture/webview.md#webview-styling)
 - [Webview accessibility tooling](docs/architecture/webview.md#webview-accessibility-tooling)
-- [Webview draft mutation watchdog](docs/architecture/webview.md#webview-draft-mutation-watchdog)
 - [Chat pane structured verify/fix results](docs/architecture/webview.md#chat-pane-structured-verifyfix-results)
 - [Verify verdicts apply to the comment that was verified, not the latest one](docs/architecture/webview.md#verify-verdicts-apply-to-the-comment-that-was-verified-not-the-latest-one)
 - [Suggest fix patches attach as a collapsed diff, not a suggestion block](docs/architecture/webview.md#suggest-fix-patches-attach-as-a-collapsed-diff-not-a-suggestion-block)
 - [Chat replies become comments by picking a line](docs/architecture/webview.md#chat-replies-become-comments-by-picking-a-line)
-- [User-facing error copy](docs/architecture/webview.md#user-facing-error-copy)
-- [Bridge payload validation](docs/architecture/webview.md#bridge-payload-validation)
-- [PR chat scope](docs/architecture/webview.md#pr-chat-scope)
-- [DTO mapping in IntelliJ webview bridge](docs/architecture/webview.md#dto-mapping-in-intellij-webview-bridge)
-- [Webview bridge PR correlation](docs/architecture/webview.md#webview-bridge-pr-correlation)
 - [Incremental review button and scope banner](docs/architecture/webview.md#incremental-review-button-and-scope-banner)
 - [Reviewer sources chip](docs/architecture/webview.md#reviewer-sources-chip)
 - [Suggested change preview and removal](docs/architecture/webview.md#suggested-change-preview-and-removal)
-- [Opening diff files and findings in the IDE editor](docs/architecture/webview.md#opening-diff-files-and-findings-in-the-ide-editor)
-- [VS Code webview surfaces](docs/architecture/webview.md#vs-code-webview-surfaces)
-- [IntelliJ webview surfaces](docs/architecture/webview.md#intellij-webview-surfaces)
+
+**Webview bridge and host surfaces**
+([webview-bridge-and-hosts.md](docs/architecture/webview-bridge-and-hosts.md))
+
+- [Webview draft mutation watchdog](docs/architecture/webview-bridge-and-hosts.md#webview-draft-mutation-watchdog)
+- [User-facing error copy](docs/architecture/webview-bridge-and-hosts.md#user-facing-error-copy)
+- [Bridge payload validation](docs/architecture/webview-bridge-and-hosts.md#bridge-payload-validation)
+- [PR chat scope](docs/architecture/webview-bridge-and-hosts.md#pr-chat-scope)
+- [DTO mapping in IntelliJ webview bridge](docs/architecture/webview-bridge-and-hosts.md#dto-mapping-in-intellij-webview-bridge)
+- [Webview bridge PR correlation](docs/architecture/webview-bridge-and-hosts.md#webview-bridge-pr-correlation)
+- [Opening diff files and findings in the IDE editor](docs/architecture/webview-bridge-and-hosts.md#opening-diff-files-and-findings-in-the-ide-editor)
+- [VS Code webview surfaces](docs/architecture/webview-bridge-and-hosts.md#vs-code-webview-surfaces)
+- [IntelliJ webview surfaces](docs/architecture/webview-bridge-and-hosts.md#intellij-webview-surfaces)
 
 **Local data** ([local-data.md](docs/architecture/local-data.md))
 
@@ -194,47 +205,13 @@ Index non-obvious active constraints here; record each as a `###` section in the
 
 ## Settings persistence
 
-IntelliJ persists these in `PluginSettings` (`claudeReviews.xml`); VS Code declares `pr-pilot.<name>`
-in `vscode-extension/package.json`. Details in [settings.md](docs/architecture/settings.md); no
-tokens or keys are stored on disk.
-
-| Setting | Default | Purpose |
-|---|---|---|
-| `githubBaseUrl` | `https://github.com` | GitHub.com or Enterprise Server origin for API calls |
-| `notificationsEnabled` | `false` | Background PR notifications |
-| `notifyReviewRequested` | `true` | Notify when the user's review is requested |
-| `notifyStarredRepos` | `false` | Notify about new PRs in starred repositories |
-| `notificationPollMinutes` | `5` | Notification poll interval in minutes |
-| `reviewModel` | `""` | Claude model; blank uses the CLI default |
-| `reviewModelCopilot` | `"claude-sonnet-4.6"` | Copilot model |
-| `reviewProvider` | `"claude"` | `claude` or `copilot` |
-| `reviewEffort` | `"high"` | Reasoning effort, `none` through `max` |
-| `copilotInheritMcp` | `false` | Inject MCP servers from the trusted Copilot config (Copilot only) |
-| `copilotAutoEnableMcpOnReview` | `false` | Force MCP for Copilot review generation only |
-| `copilotConfigDir` | `""` | Copilot config directory override; blank uses `~/.copilot` |
-| `reviewFocusAreas` | `""` | Default focus areas; a per-review override wins |
-| `reviewCustomInstructions` | `""` | Default extra instructions; a per-review override wins |
-| `reviewGuidanceProfiles` | `[]` | Named focus/instruction bundles with stable IDs |
-| `activeReviewGuidanceProfileId` | `""` | Selected profile; blank uses the built-in defaults |
-| `repositoryReviewInstructions` | `{}` | Instructions remembered per `owner/repo` |
-| `reviewSelfCritique` | `true` | Validation pass that drops unsupported findings |
-| `reviewSupervisorEnabled` | `true` | Bounded "Re-inspect coverage gaps" follow-ups |
-| `reviewRulesDirectory` | `""` | Local folder of the reviewer's own rules |
-| `reviewBuiltInRules` | `true` | Runs the review rules bundled with PR Pilot |
-| `reviewSecondReviewerModel` | `""` | Parallel Copilot second reviewer; blank disables it |
-| `reviewSecondReviewerEffort` | `"medium"` | Second reviewer's Copilot reasoning effort |
-| `experimentalIntellijAssistedReview` | `false` | IntelliJ-assisted review opt-in |
-| `experimentalVsCodeCodeIntelligence` | `false` | VS Code language-server lookups for Copilot; VS Code only |
-| `reviewGuidanceGlobs` | `[]` | Base-commit guidance globs |
+IntelliJ persists settings in `PluginSettings` (`claudeReviews.xml`); VS Code declares each as
+`pr-pilot.<name>` in `vscode-extension/package.json`. Full summary table, defaults, and behavioral
+semantics live in [settings.md](docs/architecture/settings.md); no tokens or API keys are stored on
+disk.
 
 ## Local data files
 
-State under `~/.pr-pilot/` (rules in [local-data.md](docs/architecture/local-data.md)):
-
-| Path | Owner / Scope | Purpose |
-|------|---------------|---------|
-| `~/.pr-pilot/semantic-review.json` | User-authored | Machine-local semantic launch config (schema 1; read-only) |
-| `~/.pr-pilot/semantic-worktrees.json` | `review-engine` | Retained worktree/head identities (`semantic-worktrees.lock`, `semantic-leases/<id>.lock`) |
-| `~/.pr-pilot/pending-prs.json` | IntelliJ only | Saved-draft PR index (VS Code uses `globalState`; `.corrupt-<timestamp>` on quarantine) |
-| `~/.pr-pilot/seen-prs.json` | IntelliJ only | Notified `owner/repo#number` set (VS Code uses `globalState`) |
-| `~/.pr-pilot/review-outcomes.jsonl` | Both hosts | Append-only outcome hashes/metadata per submitted review |
+State under `~/.pr-pilot/` (`semantic-review.json`, `semantic-worktrees.json`, `pending-prs.json`,
+`seen-prs.json`, and `review-outcomes.jsonl`) is owned per module as documented in
+[local-data.md](docs/architecture/local-data.md).
