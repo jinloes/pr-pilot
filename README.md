@@ -43,7 +43,7 @@ Run these preflight checks in a terminal:
 git --version
 gh --version
 gh auth status
-java -version       # required for VS Code; verify the major version is 17 or newer
+java -version       # required for VS Code; verify the major version is 21 or newer
 claude --version    # if using Claude
 copilot --version   # if using Copilot
 ```
@@ -198,7 +198,8 @@ code, or sensitive pull-request content.
 
 - An installed JDK 21 (Gradle builds use it as the Java toolchain) and Java 21+ at VS Code
   extension runtime
-- Node.js 20.17 or newer
+- Node.js 26.0 or newer (`.nvmrc` pins 26.13.1; the packaged VS Code extension runs on Node.js
+  20.17+)
 - npm
 - GitHub CLI (`gh`) authenticated (`gh auth login`)
 - Optional for runtime review providers:
@@ -218,7 +219,7 @@ error instead of falling back to a separate TypeScript GitHub implementation.
 ./gradlew :intellij-plugin:buildPlugin
 ```
 
-Compilation, unit tests, packaging, and CI use the pinned IntelliJ **2026.1.4** SDK,
+Compilation, unit tests, packaging, and CI use the pinned IntelliJ **2026.1.5.1** SDK,
 regardless of installed IDEs or `ideaLocalPath`. Ordinary reviews remain supported on
 2026.1; the separate local-development sandbox requires build **262** (2026.2) or newer.
 This sandbox configuration alone does not enable deep semantic reviews.

@@ -91,7 +91,7 @@ tasks.register('testSandboxIdeSelection') {
             // Inspect lazy wiring without resolving or executing any sandbox task.
             def primary = configurations.intellijPlatformDependencyArchive.dependencies
             assert primary.size() == 1
-            assert primary.first().version == '2026.1.4'
+            assert primary.first().version == '2026.1.5.1'
             assert configurations.intellijPlatformLocal.dependencies.empty
             def custom = intellijPlatformTesting.runIde.getByName('runIdeLocal')
             assert custom.task.name == 'runIdeLocal'

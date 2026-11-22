@@ -54,7 +54,7 @@ dependencies {
 
     intellijPlatform {
         // Compile against the ordinary-review floor, never a user's running IDE.
-        intellijIdeaUltimate('2026.1.4')
+        intellijIdeaUltimate('2026.1.5.1')
         bundledPlugin('com.intellij.modules.jcef')
         bundledPlugin('com.intellij.mcpServer')
         pluginVerifier()
