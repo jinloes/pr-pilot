@@ -157,9 +157,10 @@ Use Node from `.nvmrc` (the script refuses Node older than 26.0). Run `./gradlew
 after Java edits, then:
 
 ```bash
-node scripts/verify.mjs            # checks affected by changes vs origin/main, incl. uncommitted
-node scripts/verify.mjs --dry-run  # show the plan only
-node scripts/verify.mjs --all      # everything; run before opening a PR
+node scripts/verify.mjs                # checks affected by changes vs origin/main, incl. uncommitted
+node scripts/verify.mjs --uncommitted  # inner-loop: only uncommitted/untracked changes (--since HEAD)
+node scripts/verify.mjs --dry-run      # show the plan only
+node scripts/verify.mjs --all          # everything; run before opening a PR
 ```
 
 The script maps changed paths to the smallest covering set (a JVM module plus its downstream

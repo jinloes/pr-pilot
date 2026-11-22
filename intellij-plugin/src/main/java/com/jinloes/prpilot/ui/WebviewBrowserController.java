@@ -39,7 +39,7 @@ final class WebviewBrowserController {
                             });
             return;
         }
-        String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
+        String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/index.html";
         panel.webviewUrl = url;
         log.info("Loading webview from {}", url);
         ApplicationManager.getApplication()

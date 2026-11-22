@@ -3,10 +3,11 @@ package com.jinloes.prpilot.review;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.github.copilot.rpc.ModelInfo;
-import com.github.copilot.rpc.ModelPolicy;
 import com.jinloes.prpilot.review.CopilotModelDiscovery.Result;
 import com.jinloes.prpilot.review.CopilotModelDiscovery.Source;
+import com.microsoft.copilot.generated.rpc.Model;
+import com.microsoft.copilot.generated.rpc.ModelPolicy;
+import com.microsoft.copilot.generated.rpc.ModelPolicyState;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -207,7 +208,7 @@ class CopilotModelDiscoveryTest {
 
         @Test
         void dropsDisabledBlankAndDuplicateIdsPreservingOrder() {
-            List<ModelInfo> models =
+            List<Model> models =
                     List.of(
                             model("auto", null),
                             model("claude-opus-5.5", "enabled"),
@@ -226,10 +227,14 @@ class CopilotModelDiscoveryTest {
             assertThat(CopilotModelDiscovery.filterModelIds(null)).isEmpty();
         }
 
-        private ModelInfo model(String id, String policyState) {
-            ModelInfo info = new ModelInfo().setId(id);
-            if (policyState != null) info.setPolicy(new ModelPolicy().setState(policyState));
-            return info;
+        private Model model(String id, String policyState) {
+            ModelPolicy policy =
+                    policyState == null
+                            ? null
+                            : new ModelPolicy(ModelPolicyState.fromValue(policyState), "");
+            return new Model(
+                    id, "Model", null, null, null, policy, null, null, null, null, null, null, null,
+                    null, null, null);
         }
     }
 

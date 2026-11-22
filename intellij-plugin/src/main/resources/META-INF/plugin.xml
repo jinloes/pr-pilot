@@ -16,7 +16,17 @@
         <toolWindow id="PR Pilot"
                     secondary="false"
                     anchor="right"
+                    icon="AllIcons.Vcs.Branch"
                     factoryClass="com.jinloes.prpilot.ui.PRToolWindowFactory"/>
+
+        <projectService
+            serviceImplementation="com.jinloes.prpilot.ui.PrPilotUiCoordinator"/>
+
+        <fileEditorProvider
+            implementation="com.jinloes.prpilot.ui.PrReviewFileEditorProvider"/>
+
+        <editorTabTitleProvider
+            implementation="com.jinloes.prpilot.ui.PrReviewEditorTabTitleProvider"/>
 
 
         <applicationService
@@ -44,4 +54,19 @@
         <postStartupActivity
             implementation="com.jinloes.prpilot.services.PRNotificationStartup"/>
     </extensions>
+
+    <projectListeners>
+        <listener class="com.jinloes.prpilot.ui.PrPilotToolWindowListener"
+                  topic="com.intellij.openapi.wm.ex.ToolWindowManagerListener"/>
+    </projectListeners>
+
+    <actions>
+        <action id="PRPilot.Open"
+                class="com.jinloes.prpilot.ui.OpenPrPilotAction"
+                text="Open PR Pilot"
+                description="Open PR Pilot in a main editor tab"
+                icon="AllIcons.Vcs.Branch">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>

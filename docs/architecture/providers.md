@@ -13,7 +13,9 @@ attached text with its file and lines) and never assemble prompt text themselves
 
 ### Copilot SDK runtime
 Both the IntelliJ plugin and the sidecar use the official Java Copilot SDK
-(`com.github:copilot-sdk-java`, wrapped by `review-engine`'s `CopilotService`) to control local
+(`com.microsoft:copilot-sdk`, wrapped by `review-engine`'s `CopilotService`) over an explicit
+`RuntimeConnection.forSpawnedStdio` child process (never in-process native runtime hosting, so a
+runtime crash cannot take down the IDE or sidecar JVM) to control local
 `copilot`. Stream `assistant.message_delta` to text chunks, surface `tool.execution_start` names as
 status, and parse final `assistant.message` JSON with delta fallback. During a multi-stage
 `ReviewPipelineService` run, `CopilotService.openClientScope()` keeps one started `RuntimeClient`
@@ -55,13 +57,13 @@ enabled — unconditionally `false`, not derived from any setting — because th
 directory is the untrusted PR-branch worktree, and discovery would scan it for a repo-local
 `.mcp.json`. A malicious PR could ship an `.mcp.json` whose server `command` is an arbitrary
 process, which the SDK could launch at discovery time before any tool-call permission gate runs.
-**Always** pass `SessionConfig.setMcpServers(mcpServers)` even when the map is empty: leaving
-`mcpServers` `null` lets `copilot --server` load `~/.copilot/mcp-config.json` anyway, and read-only
-remote MCP tools can execute without triggering `onPermissionRequest`. `copilotInheritMcp` is an
-explicit capability elevation, but it never touches the worktree: when enabled,
-`CopilotMcpConfig.loadTrustedServers` reads MCP server definitions only from the user's own trusted
-config (`<configDir>/mcp-config.json`, default `~/.copilot`) and injects them via
-`SessionConfig.setMcpServers`. The optional `copilotConfigDir` setting maps to
+**Always** pass `SessionMcpOptions.setServers(mcpServers)` on `CreateSessionOptions` even when the
+map is empty: leaving `mcpServers` `null` lets `copilot --server` load `~/.copilot/mcp-config.json`
+anyway, and read-only remote MCP tools can execute without triggering `onPermissionRequest`.
+`copilotInheritMcp` is an explicit capability elevation, but it never touches the worktree: when
+enabled, `CopilotMcpConfig.loadTrustedServers` reads MCP server definitions only from the user's own
+trusted config (`<configDir>/mcp-config.json`, default `~/.copilot`) and injects them via
+`SessionMcpOptions.setServers`. The optional `copilotConfigDir` setting maps to
 `configDir`/`setConfigDirectory` and also scopes which trusted config file is read. Never enable
 config discovery against the worktree and never replace the explicit permission handler with blanket
 approval.
@@ -144,13 +146,10 @@ back to a short hardcoded suggestion list.
 
 ### Binary resolution
 Probe known hard-coded paths for `gh`, `claude`, and `copilot` before falling back to command name,
-because GUI-launched IntelliJ often has incomplete `PATH`. `review-engine`'s `BinaryLocator` is the
-single JVM implementation of this probing logic (used by both `ClaudeService` and `CopilotService`,
-for both IntelliJ and the sidecar); `claude.ts`/`copilot.ts` keep an independent TypeScript copy for
-the same probing since the sidecar (Java) and the extension process (Node) are different runtimes —
-the sidecar is the one that actually spawns the CLI for VS Code, but the extension still
-preflight-checks binary availability locally before even asking the sidecar to start a review (see
-Provider preflight below). JVM provider subprocesses must prepend `~/.local/bin`,
+because GUI-launched IDEs often have incomplete `PATH`. `review-engine`'s `BinaryLocator` is the
+single implementation of this probing logic for both IntelliJ (in-process) and VS Code (via the
+sidecar's `reviews/probeProviderSetup` capability; the former TypeScript copy in
+`claude.ts`/`copilot.ts` is retired). JVM provider subprocesses must prepend `~/.local/bin`,
 `~/.npm-global/bin`, and `~/.volta/bin` as well as Homebrew/local-bin paths: a resolved Node-backed
 CLI wrapper otherwise cannot find its runtime when Toolbox launches the IDE without shell
 initialization.
@@ -165,10 +164,9 @@ and conclusively signed-out auth responses keep onboarding open with settings ac
 execution errors, and unsupported or changed auth commands degrade to `unverified` so an
 inconclusive probe cannot block onboarding. The same binary preflight remains in the review path as
 defense in depth and produces actionable `provider_not_installed` copy instead of attempting a
-doomed spawn. Availability checks: `ClaudeService.isBinaryAvailable()`/
-`CopilotService.isBinaryAvailable()` (JVM, backed by `BinaryLocator` and `ProviderSetupProbe` in
-`review-engine`); `claudeBinaryAvailable()`/`copilotBinaryAvailable()` plus shared `existsOnPath`
-(`claude.ts`/`copilot.ts`) in VS Code.
+doomed spawn. Both hosts run this logic through `ProviderSetupProbe` in `review-engine` — IntelliJ
+in-process, VS Code via `reviews/probeProviderSetup` (`checkAuthentication: true` for onboarding,
+`false` for fast review preflight) so the extension never spawns `claude` directly.
 
 ### Max-turns recovery for Claude
 If stream-json returns `error_max_turns` with `session_id`, auto-resume via `claude --resume

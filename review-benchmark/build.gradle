@@ -56,3 +56,30 @@ tasks.register('reviewBench', JavaExec) {
     standardInput = System.in
     systemProperty 'org.slf4j.simpleLogger.defaultLogLevel', 'warn'
 }
+
+// Fast (~5-10s) live provider contract canary: checks CLI resolution, Copilot SDK protocol/model
+// catalog discovery, read-only worktree access, and structured JSON output on a tiny diff.
+//   ./gradlew :review-benchmark:providerCanary --args="--provider copilot"
+tasks.register('providerCanary', JavaExec) {
+    group = 'verification'
+    description = 'Runs a fast live contract canary against Copilot and/or Claude CLI.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.jinloes.prpilot.benchmark.ProviderCanary'
+    workingDir = rootProject.projectDir
+    standardInput = System.in
+    systemProperty 'org.slf4j.simpleLogger.defaultLogLevel', 'warn'
+}
+
+// Stage-isolated golden evaluation suite: deterministic replay (<1s) by default, or `--live` to
+// run only single-turn downstream stages (critique/rules/hygiene) on frozen primary drafts.
+//   ./gradlew :review-benchmark:stageEval
+//   ./gradlew :review-benchmark:stageEval --args="--live --provider copilot"
+tasks.register('stageEval', JavaExec) {
+    group = 'verification'
+    description = 'Evaluates review pipeline stages against the bundled golden corpus.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.jinloes.prpilot.benchmark.StageEvalRunner'
+    workingDir = rootProject.projectDir
+    standardInput = System.in
+    systemProperty 'org.slf4j.simpleLogger.defaultLogLevel', 'warn'
+}

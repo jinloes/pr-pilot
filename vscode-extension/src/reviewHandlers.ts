@@ -1,6 +1,4 @@
-import * as claude from './claude';
 import { randomUUID } from 'crypto';
-import * as copilot from './copilot';
 import { PendingDraftIndex } from './pendingDraftIndex';
 import { composeCustomInstructions } from './repositoryInstructions';
 import { GitHubOperationError, LocalPrDiffError, providerNotInstalledMessage, toUserFacingError } from './userFacingError';
@@ -74,10 +72,15 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
         await deps.cancelActiveProvider(previousOperationId);
     }
 
-    // Provider preflight: fail fast with actionable guidance instead of a raw CLI spawn error
-    // when the configured review provider's binary isn't installed/resolvable.
+    // Provider preflight via the shared review-engine probe: fail fast with actionable guidance
+    // instead of a raw CLI spawn error when the configured provider's binary isn't installed.
     const isCopilot = settings.provider === 'copilot';
-    if (isCopilot ? !copilot.copilotBinaryAvailable() : !claude.claudeBinaryAvailable()) {
+    const setup = await deps.client().probeProviderSetup(settings.provider, false);
+    if (!isCurrentGeneration()) {
+        if (state.activeProviderOperation === providerOperation) state.activeProviderOperation = null;
+        return;
+    }
+    if (!setup.available) {
         deps.push(state, {
             type: 'reviewError',
             prKey: key,
@@ -364,6 +367,7 @@ async function handleGenerateReview(state: ViewState, msg: Record<string, unknow
             attribution: {
                 provider: settings.provider,
                 model: settings.model,
+                secondReviewerModel: deep ? '' : settings.secondReviewerModel,
                 reviewSupervisorEnabled: settings.supervisorEnabled,
             },
         });
@@ -518,7 +522,9 @@ async function recordReviewOutcome(state: ViewState, key: string): Promise<void>
             type: c.type,
             body: c.body,
             severity: c.severity,
+            category: c.category,
             confidence: c.confidence,
+            corroborated: (c.sources?.length ?? 0) >= 2,
         }));
     await deps.client().recordReviewOutcome(
         tracked.attribution.provider,
@@ -526,6 +532,7 @@ async function recordReviewOutcome(state: ViewState, key: string): Promise<void>
         tracked.attribution.reviewSupervisorEnabled,
         toOutcome(generated.lineComments),
         toOutcome(submitted.lineComments),
+        tracked.attribution.secondReviewerModel ?? '',
     );
 }
 

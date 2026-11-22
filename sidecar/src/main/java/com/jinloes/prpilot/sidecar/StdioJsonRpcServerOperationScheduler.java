@@ -2,6 +2,7 @@ package com.jinloes.prpilot.sidecar;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
@@ -74,7 +75,10 @@ final class StdioJsonRpcServerOperationScheduler {
                                 } catch (RuntimeException | Error failure) {
                                     // The executor's Future would swallow this, leaving the
                                     // client waiting on a response that never comes.
-                                    log.error("Operation {} failed", operationId, failure);
+                                    log.error(
+                                            "Operation {} failed",
+                                            operationId,
+                                            LogRedactor.sanitize(failure));
                                 } finally {
                                     if (scheduled.completeIfUnfinished(UNFINISHED_MESSAGE)) {
                                         log.error(

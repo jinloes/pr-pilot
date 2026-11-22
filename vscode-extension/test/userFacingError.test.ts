@@ -85,6 +85,17 @@ test('falls back to context-specific generic message', () => {
   assert.equal(msg, "Couldn't delete draft review. Please retry." + OUTPUT_PANEL_HINT);
 });
 
+test('includes error class name when error message is blank or a bare exception type', () => {
+  assert.equal(
+    toUserFacingError(new TypeError(''), 'generate review'),
+    "Couldn't generate review (TypeError)." + OUTPUT_PANEL_HINT,
+  );
+  assert.equal(
+    toUserFacingError(new Error('NullPointerException'), 'generate review'),
+    "Couldn't generate review (NullPointerException)." + OUTPUT_PANEL_HINT,
+  );
+});
+
 test('names a git command timeout and drops the diff-size advice', () => {
   const msg = toUserFacingError(new Error('git fetch timed out after 60s'), 'generate review');
   assert.equal(msg, "'git fetch' timed out while trying to generate review. Check your VPN and your git access to"
@@ -124,8 +135,27 @@ test('logs the raw cause behind every user-facing error', () => {
   const previous = setLogSink((line) => lines.push(line));
   try {
     toUserFacingError(new Error('git fetch timed out after 60s'), 'generate review');
+    toUserFacingError(new TypeError(''), 'generate review');
   } finally {
     setLogSink(previous);
   }
-  assert.deepEqual(lines, ["[error] Couldn't generate review: git fetch timed out after 60s"]);
+  assert.equal(lines[0], "[error] Couldn't generate review: git fetch timed out after 60s");
+  assert.match(lines[1], /^\[error\] Couldn't generate review: TypeError/);
+});
+
+test('maps SAML SSO enforcement and provider repository-not-found errors to org-access guidance', () => {
+  const ssoMsg = toUserFacingError(
+    new Error('Organization SAML SSO enforcement requires token authorization.'),
+    'load PR details',
+  );
+  assert.match(ssoMsg, /SAML SSO/);
+  assert.match(ssoMsg, /gh auth refresh -h github\.com -s repo,read:org/);
+  assert.ok(!ssoMsg.includes(OUTPUT_PANEL_HINT));
+
+  const repoNotFoundMsg = toUserFacingError(
+    new Error('Copilot failed: repository not found'),
+    'generate review',
+  );
+  assert.match(repoNotFoundMsg, /gh auth status/);
+  assert.match(repoNotFoundMsg, /organization/);
 });

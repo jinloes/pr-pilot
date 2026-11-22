@@ -25,12 +25,20 @@ public final class ProviderSetupProbe {
     }
 
     public Result probe(ReviewProvider provider) {
+        return probe(provider, true);
+    }
+
+    /**
+     * Probes CLI binary availability, optionally also checking non-interactive authentication
+     * readiness when {@code checkAuthentication} is true.
+     */
+    public Result probe(ReviewProvider provider, boolean checkAuthentication) {
         boolean available = binaryAvailable.test(provider);
         String command = provider == ReviewProvider.COPILOT ? "copilot login" : "claude auth login";
         if (!available) {
             return new Result(false, "missing", "unavailable", command);
         }
-        if (provider == ReviewProvider.COPILOT) {
+        if (!checkAuthentication || provider == ReviewProvider.COPILOT) {
             return new Result(true, "ready", "unverified", command);
         }
         try {

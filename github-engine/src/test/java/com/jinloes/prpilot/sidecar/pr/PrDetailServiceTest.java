@@ -107,6 +107,28 @@ class PrDetailServiceTest {
     }
 
     @Test
+    void mapsNotFoundAndSsoRequiredDetailResponsesToActionableStatuses() {
+        PrDetailService notFound =
+                new PrDetailService(
+                        ignored -> GitHubAuthService.TokenResolution.resolved("token"),
+                        (baseUrl, token, owner, repo, number) ->
+                                PrDetailService.DetailResponse.of(
+                                        PrDetailService.DetailStatus.NOT_FOUND));
+        PrDetailService sso =
+                new PrDetailService(
+                        ignored -> GitHubAuthService.TokenResolution.resolved("token"),
+                        (baseUrl, token, owner, repo, number) ->
+                                PrDetailService.DetailResponse.of(
+                                        PrDetailService.DetailStatus.SSO_REQUIRED));
+
+        assertThat(notFound.get(params("https://github.com")).status())
+                .isEqualTo(PrDiffResult.STATUS_NOT_FOUND_OR_INACCESSIBLE);
+        PrDetailResult ssoResult = sso.get(params("https://github.com"));
+        assertThat(ssoResult.status()).isEqualTo("not_authenticated");
+        assertThat(ssoResult.message()).contains("SAML SSO");
+    }
+
+    @Test
     void rejectsUnsafeUrlsAndInvalidRepositoryIdentityBeforeResolvingAToken() {
         AtomicReference<Boolean> resolverCalled = new AtomicReference<>(false);
         PrDetailService service =

@@ -31,6 +31,7 @@ public interface ReviewEngineApi {
                     Map.entry("recordOutcome", "reviews/recordOutcome"),
                     Map.entry("readGuidelines", "reviews/readGuidelines"),
                     Map.entry("listCopilotModels", "reviews/listCopilotModels"),
+                    Map.entry("probeProviderSetup", "reviews/probeProviderSetup"),
                     Map.entry("findGitRoot", "reviews/findGitRoot"),
                     Map.entry("createWorktree", "reviews/createWorktree"),
                     Map.entry("readReviewedBlob", "reviews/readReviewedBlob"),
@@ -683,7 +684,24 @@ public interface ReviewEngineApi {
      * and segmentation need — the outcome log persists no comment text.
      */
     record OutcomeCommentParam(
-            String file, int line, String type, String body, String severity, String confidence) {}
+            String file,
+            int line,
+            String type,
+            String body,
+            String severity,
+            String category,
+            String confidence,
+            boolean corroborated) {
+        public OutcomeCommentParam(
+                String file,
+                int line,
+                String type,
+                String body,
+                String severity,
+                String confidence) {
+            this(file, line, type, body, severity, "", confidence, false);
+        }
+    }
 
     /**
      * A completed review, for outcome logging.
@@ -700,9 +718,19 @@ public interface ReviewEngineApi {
     record RecordOutcomeParams(
             String provider,
             String model,
+            String secondReviewerModel,
             boolean reviewSupervisorEnabled,
             List<OutcomeCommentParam> generated,
-            List<OutcomeCommentParam> submitted) {}
+            List<OutcomeCommentParam> submitted) {
+        public RecordOutcomeParams(
+                String provider,
+                String model,
+                boolean reviewSupervisorEnabled,
+                List<OutcomeCommentParam> generated,
+                List<OutcomeCommentParam> submitted) {
+            this(provider, model, "", reviewSupervisorEnabled, generated, submitted);
+        }
+    }
 
     /** Result of {@link #recordOutcome}: how many outcome records were written. */
     record RecordOutcomeResult(int recorded) {}
@@ -721,6 +749,9 @@ public interface ReviewEngineApi {
 
     /** Request for {@link #listCopilotModels}. */
     record ListCopilotModelsParams(boolean forceRefresh) {}
+
+    /** Request for {@link #probeProviderSetup}. */
+    record ProbeProviderSetupParams(String provider, boolean checkAuthentication) {}
 
     /**
      * Result of {@link #listCopilotModels}: discovered model IDs plus provenance ({@code ACCOUNT},
@@ -798,6 +829,17 @@ public interface ReviewEngineApi {
      * logic. Two hand-mirrored copies had already diverged on the truncation marker.
      */
     GuidelinesResult readGuidelines(ReadGuidelinesParams params);
+
+    /**
+     * Probes provider CLI binary resolution and optional non-interactive authentication readiness
+     * via the shared {@link com.jinloes.prpilot.review.ProviderSetupProbe}, retiring host-local CLI
+     * path-probing and auth-probing copies.
+     */
+    default com.jinloes.prpilot.review.ProviderSetupProbe.Result probeProviderSetup(
+            ProbeProviderSetupParams params) {
+        return new com.jinloes.prpilot.review.ProviderSetupProbe.Result(
+                false, "missing", "unavailable", "claude auth login");
+    }
 
     /**
      * Walks up from {@code startDir} to the closest ancestor containing a {@code .git} entry.

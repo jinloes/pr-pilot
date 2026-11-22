@@ -10,6 +10,7 @@ import com.jinloes.prpilot.review.CopilotModelDiscovery;
 import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.services.PRNotificationService;
 import com.jinloes.prpilot.sidecar.github.CheckAuthResult;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.awt.Component;
 import java.util.List;
 import java.util.Map;
@@ -32,8 +33,12 @@ import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeEvent;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.text.StringEscapeUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class PluginSettingsComponent {
+
+    private static final Logger log = LoggerFactory.getLogger(PluginSettingsComponent.class);
 
     @FunctionalInterface
     interface ProfileNamePrompt {
@@ -737,6 +742,8 @@ public class PluginSettingsComponent {
                 () -> {
                     try {
                         pollRetryAction.run();
+                    } catch (RuntimeException e) {
+                        log.warn("Manual PR notification poll failed", LogRedactor.sanitize(e));
                     } finally {
                         uiExecutor.accept(
                                 () -> {
@@ -840,11 +847,22 @@ public class PluginSettingsComponent {
         void execute(long checkId, String baseUrl, Consumer<CheckAuthResult> resultConsumer) {
             backgroundExecutor.accept(
                     () -> {
-                        CheckAuthResult result = authChecker.apply(baseUrl);
+                        CheckAuthResult result;
+                        try {
+                            result = authChecker.apply(baseUrl);
+                        } catch (RuntimeException e) {
+                            log.warn("GitHub auth check failed", LogRedactor.sanitize(e));
+                            result =
+                                    new CheckAuthResult(
+                                            "api_failed",
+                                            null,
+                                            "GitHub authentication could not be verified. Try again shortly.");
+                        }
+                        CheckAuthResult finalResult = result;
                         uiExecutor.accept(
                                 () -> {
                                     if (checkId == sequence.get()) {
-                                        resultConsumer.accept(result);
+                                        resultConsumer.accept(finalResult);
                                     }
                                 });
                     });

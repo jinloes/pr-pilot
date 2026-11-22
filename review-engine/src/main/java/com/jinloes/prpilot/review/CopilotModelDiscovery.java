@@ -1,14 +1,17 @@
 package com.jinloes.prpilot.review;
 
-import com.github.copilot.CopilotClient;
-import com.github.copilot.CopilotSession;
-import com.github.copilot.generated.rpc.SessionModelListResult;
-import com.github.copilot.rpc.CopilotClientMode;
-import com.github.copilot.rpc.CopilotClientOptions;
-import com.github.copilot.rpc.ModelInfo;
-import com.github.copilot.rpc.ModelPolicy;
-import com.github.copilot.rpc.PermissionRequestResult;
-import com.github.copilot.rpc.SessionConfig;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.CopilotSession;
+import com.microsoft.copilot.generated.rpc.Model;
+import com.microsoft.copilot.generated.rpc.ModelPolicy;
+import com.microsoft.copilot.generated.rpc.SessionModelListResult;
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
+import com.microsoft.copilot.rpc.PermissionRequestResult;
+import com.microsoft.copilot.rpc.RuntimeConnection;
+import com.microsoft.copilot.rpc.SessionPermissionOptions;
+import com.microsoft.copilot.rpc.SessionToolOptions;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -177,14 +180,16 @@ public final class CopilotModelDiscovery {
      * Keeps IDs whose policy is not {@code disabled}, dropping blanks and duplicates while
      * preserving catalog order. Mirrors {@code filterModelIds} in {@code vscode-extension}.
      */
-    static List<String> filterModelIds(List<ModelInfo> models) {
+    static List<String> filterModelIds(List<Model> models) {
         if (models == null) return List.of();
         LinkedHashSet<String> ids = new LinkedHashSet<>();
-        for (ModelInfo model : models) {
-            if (model == null || StringUtils.isBlank(model.getId())) continue;
-            ModelPolicy policy = model.getPolicy();
-            if (policy != null && "disabled".equalsIgnoreCase(policy.getState())) continue;
-            ids.add(model.getId().trim());
+        for (Model model : models) {
+            if (model == null || StringUtils.isBlank(model.id())) continue;
+            ModelPolicy policy = model.policy();
+            if (policy != null
+                    && policy.state() != null
+                    && "disabled".equalsIgnoreCase(policy.state().getValue())) continue;
+            ids.add(model.id().trim());
         }
         return List.copyOf(ids);
     }
@@ -217,10 +222,12 @@ public final class CopilotModelDiscovery {
         try (CopilotClient client =
                 new CopilotClient(
                         new CopilotClientOptions()
-                                .setCliPath(CopilotService.findCopilotBinary())
-                                .setCwd(userHome)
-                                .setEnvironment(env)
-                                .setMode(CopilotClientMode.COPILOT_CLI)
+                                .setRuntime(
+                                        RuntimeConnection.forSpawnedStdio(
+                                                        CopilotService.findCopilotBinary())
+                                                .setWorkingDirectory(userHome)
+                                                .setEnvironment(env))
+                                .setMode(CopilotClientMode.CODING_AGENT)
                                 .setAutoStart(false))) {
             client.start().get(stepBudgetMillis(deadlineNanos), TimeUnit.MILLISECONDS);
             return accountModels(
@@ -266,15 +273,17 @@ public final class CopilotModelDiscovery {
      */
     private static List<String> fetchSessionModels(
             CopilotClient client, String workingDirectory, long deadlineNanos) throws Exception {
-        SessionConfig config =
-                new SessionConfig()
-                        .setOnPermissionRequest(
-                                (request, ctx) ->
-                                        CompletableFuture.completedFuture(
-                                                PermissionRequestResult.reject(
-                                                        "Model discovery runs no tools.")))
+        CreateSessionOptions config =
+                new CreateSessionOptions()
+                        .setPermissions(
+                                new SessionPermissionOptions()
+                                        .setOnRequest(
+                                                (request, ctx) ->
+                                                        CompletableFuture.completedFuture(
+                                                                PermissionRequestResult.reject(
+                                                                        "Model discovery runs no tools."))))
                         .setWorkingDirectory(workingDirectory)
-                        .setAvailableTools(List.of())
+                        .setTools(new SessionToolOptions().setAvailableTools(List.of()))
                         .setEnableConfigDiscovery(false);
         CopilotSession session =
                 client.createSession(config)

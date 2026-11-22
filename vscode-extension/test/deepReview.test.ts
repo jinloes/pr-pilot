@@ -37,6 +37,12 @@ function host() {
         getCheckStatus: async () => ({ summary: '', annotations: [] }),
         getLinkedIssues: async () => '',
         getRepoProfile: async () => '',
+        probeProviderSetup: async () => ({
+            available: true,
+            binaryStatus: 'ready',
+            authenticationStatus: 'unverified',
+            authCommand: 'claude auth login',
+        }),
         generateReview: async (params: Record<string, unknown>) => {
             providerCalls++;
             await generateHook();

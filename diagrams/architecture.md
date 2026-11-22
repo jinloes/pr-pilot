@@ -17,7 +17,7 @@ flowchart LR
     end
 
     subgraph IntelliJ["IntelliJ host - intellij-plugin/"]
-        ToolWindow["JCEF tool window<br/>WebviewPanel"]
+        ToolWindow["Main editor tab + stripe launcher<br/>PrPilotUiCoordinator / WebviewPanel"]
         IntelliJAdapters["IntellijGitHubService<br/>IntellijClaudeService"]
         ToolWindow <--> IntelliJAdapters
     end

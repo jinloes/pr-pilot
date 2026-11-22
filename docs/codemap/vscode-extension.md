@@ -29,16 +29,18 @@ VS Code host integration. All GitHub and review generation routes through the Ja
 - `src/sidecarProtocol.ts`, `sidecarTypes.ts`, `sidecarFraming.ts`, `sidecarJar.ts` - Capability
   declarations and parsers, DTOs, framing, and JAR resolution.
 - `src/models.ts` - Host-neutral PR/review view models.
-- `src/claude.ts` - Claude binary discovery and preflight.
-- `src/copilot.ts` - Copilot model-list caching (`reviews/listCopilotModels`) and binary preflight.
+- `src/claude.ts` - Shared `ChatMessage` host type (CLI binary/auth probing lives in `review-engine`
+  behind `reviews/probeProviderSetup`).
+- `src/copilot.ts` - Copilot model-list caching (`reviews/listCopilotModels`) and reasoning-effort
+  normalization.
 - `src/codeIntelligence.ts` - Host-neutral read-only lookup tools (path confinement, symbol
   location, bounded formatting) over a `CodeIntelligenceBackend`. `codeIntelligenceServer.ts`
   serves them as a per-request loopback MCP server (`withCodeIntelligenceServer`), and
   `codeIntelligenceVscode.ts` answers them through VS Code's language-service commands. Tests:
   `codeIntelligence.test.ts`, `codeIntelligenceServer.test.ts`.
-- `src/providerSetup.ts` - Conservative Claude authentication probe classification and GitHub CLI
-  login command construction (`--hostname` for GitHub Enterprise) for onboarding. Tests:
-  `providerSetup.test.ts`.
+- `src/providerSetup.ts` - Maps `reviews/probeProviderSetup` results into `ProviderReadiness` and
+  constructs `gh auth login` commands (`--hostname` for GitHub Enterprise) for onboarding. Tests:
+  `providerPreflight.test.ts`.
 - `src/settings.ts` and `settingsView.ts` - Settings controller, and the settings state, model
   options, and pure normalization/validation helpers. `settingsViewHtml.ts` renders the webview
   document from `settingsViewStyles.ts` and the inline script that `settingsViewScript.ts`

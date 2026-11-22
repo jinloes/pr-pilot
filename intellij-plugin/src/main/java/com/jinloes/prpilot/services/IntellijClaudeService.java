@@ -11,10 +11,13 @@ import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.ReviewPipelineService;
 import com.jinloes.prpilot.review.SemanticReviewService;
 import com.jinloes.prpilot.settings.PluginSettings;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * IntelliJ adapter that fronts both the Claude and Copilot CLI backends. The active provider is
@@ -25,8 +28,10 @@ import org.apache.commons.lang3.StringUtils;
  */
 public class IntellijClaudeService {
 
+    private static final Logger log = LoggerFactory.getLogger(IntellijClaudeService.class);
+
     @FunctionalInterface
-    private interface CheckedRunnable {
+    interface CheckedRunnable {
         void run() throws Exception;
     }
 
@@ -232,14 +237,9 @@ public class IntellijClaudeService {
                                                         });
                                     }
                                 } catch (Exception failure) {
-                                    if (failure instanceof InterruptedException)
-                                        Thread.currentThread().interrupt();
-                                    invokeLater(
-                                            () ->
-                                                    onError.accept(
-                                                            failure.getMessage() == null
-                                                                    ? "IntelliJ-assisted review could not continue."
-                                                                    : failure.getMessage()));
+                                    String message =
+                                            handleDeepFailure(settings.provider, failure, log);
+                                    invokeLater(() -> onError.accept(message));
                                 } finally {
                                     deepThread = null;
                                     deepProviderCancel = () -> {};
@@ -434,19 +434,72 @@ public class IntellijClaudeService {
             CheckedRunnable runnable) {
         ApplicationManager.getApplication()
                 .executeOnPooledThread(
-                        () -> {
-                            try {
-                                runnable.run();
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                                invokeLater(() -> onError.accept(interruptedMessage));
-                            } catch (Exception e) {
-                                invokeLater(
-                                        () ->
-                                                onError.accept(
-                                                        friendlyMessage(provider, e, operation)));
-                            }
-                        });
+                        () ->
+                                runWithErrorHandling(
+                                        provider,
+                                        operation,
+                                        interruptedMessage,
+                                        onError,
+                                        IntellijClaudeService::invokeLater,
+                                        log,
+                                        runnable));
+    }
+
+    static void runWithErrorHandling(
+            ReviewProvider provider,
+            String operation,
+            String interruptedMessage,
+            Consumer<String> onError,
+            Consumer<Runnable> uiExecutor,
+            Logger logger,
+            CheckedRunnable runnable) {
+        String safeOperation =
+                StringUtils.defaultIfBlank(LogRedactor.redact(operation), "run request");
+        String providerId = providerId(provider);
+        try {
+            runnable.run();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.warn(
+                    "Review provider '{}' interrupted while trying to {}",
+                    providerId,
+                    safeOperation,
+                    LogRedactor.sanitize(e));
+            uiExecutor.accept(() -> onError.accept(interruptedMessage));
+        } catch (Exception e) {
+            logger.warn(
+                    "Review provider '{}' failed to {}",
+                    providerId,
+                    safeOperation,
+                    LogRedactor.sanitize(e));
+            uiExecutor.accept(() -> onError.accept(friendlyMessage(provider, e, operation)));
+        }
+    }
+
+    static String handleDeepFailure(ReviewProvider provider, Exception failure, Logger logger) {
+        String providerId = providerId(provider);
+        if (failure instanceof InterruptedException) {
+            Thread.currentThread().interrupt();
+            logger.warn(
+                    "Review provider '{}' interrupted while trying to generate IntelliJ-assisted review",
+                    providerId,
+                    LogRedactor.sanitize(failure));
+            return StringUtils.defaultIfBlank(failure.getMessage(), "Review interrupted.");
+        }
+        logger.warn(
+                "Review provider '{}' failed to generate IntelliJ-assisted review",
+                providerId,
+                LogRedactor.sanitize(failure));
+        if (StringUtils.isBlank(failure.getMessage())) {
+            return "Couldn't generate IntelliJ-assisted review ("
+                    + LogRedactor.errorType(failure)
+                    + "). See idea.log.";
+        }
+        return failure.getMessage();
+    }
+
+    private static String providerId(ReviewProvider provider) {
+        return provider == null ? "unknown" : provider.getId();
     }
 
     static String friendlyMessage(ReviewProvider provider, Exception e, String operation) {

@@ -15,10 +15,12 @@ type ErrorContext =
 
 type TemplateKey =
     | 'github_auth_failed'
+    | 'github_sso_required'
     | 'github_not_found_or_inaccessible'
     | 'github_diff_too_large'
     | 'provider_binary_missing'
     | 'provider_not_installed'
+    | 'provider_repo_inaccessible'
     | 'request_timed_out'
     | 'git_timed_out'
     | 'provider_start_timed_out'
@@ -26,10 +28,13 @@ type TemplateKey =
     | 'invalid_review_format'
     | 'network_error'
     | 'tls_certificate_untrusted'
-    | 'generic_failure';
+    | 'generic_failure'
+    | 'blank_message_failure';
 
 /** Appended where the summary hides the cause, so the user can find the raw error. */
 export const OUTPUT_PANEL_HINT = ' Details are in the PR Pilot output panel.';
+
+const BARE_ERROR_CLASS_NAME = /^[A-Za-z_$][A-Za-z0-9_$]*(?:Exception|Error|Throwable)$/;
 
 const TEMPLATES = loadTemplates();
 
@@ -116,8 +121,26 @@ function timeoutMessage(msg: string, raw: string, context: ErrorContext): string
     return template('request_timed_out', { operation: context });
 }
 
+function blankErrorType(err: unknown): string | null {
+    if (err instanceof Error) {
+        const trimmed = err.message.trim();
+        if (trimmed === '') {
+            return err.name?.trim() || err.constructor?.name || 'Error';
+        }
+        if (BARE_ERROR_CLASS_NAME.test(trimmed)) {
+            return trimmed;
+        }
+        return null;
+    }
+    return String(err).trim() === '' ? 'Error' : null;
+}
+
 export function toUserFacingError(err: unknown, context: ErrorContext): string {
-    log(`[error] Couldn't ${context}: ${err instanceof Error ? err.message : String(err)}`);
+    const rawDetail =
+        err instanceof Error
+            ? err.message.trim() || err.stack || blankErrorType(err) || 'Error'
+            : String(err);
+    log(`[error] Couldn't ${context}: ${rawDetail}`);
     const message = mapError(err, context);
     return message.includes('timed out') || message === template('generic_failure', { operation: context })
         ? message + OUTPUT_PANEL_HINT
@@ -134,6 +157,12 @@ function mapError(err: unknown, context: ErrorContext): string {
 
     if (err instanceof GitHubOperationError && err.status === 'diff_too_large') {
         return template('github_diff_too_large', {});
+    }
+    if (includesAny(msg, ['saml enforcement', 'saml sso', 'organization saml'])) {
+        return template('github_sso_required', {});
+    }
+    if (includesAny(msg, ['repository not found', 'repo not found'])) {
+        return template('provider_repo_inaccessible', {});
     }
     if (includesAny(msg, ['no github token configured', 'gh auth', 'authentication', 'unauthorized', 'forbidden'])) {
         return template('github_auth_failed', { auth_command: 'gh auth login' });
@@ -163,6 +192,15 @@ function mapError(err: unknown, context: ErrorContext): string {
     }
     if (includesAny(msg, ['connection refused', 'unknownhost', 'enotfound', 'network', 'unable to reach'])) {
         return template('network_error', { operation: context });
+    }
+
+    const errorType = blankErrorType(err);
+    if (errorType) {
+        return template('blank_message_failure', {
+            operation: context,
+            error_type: errorType,
+            log_hint: OUTPUT_PANEL_HINT.trim(),
+        });
     }
 
     return template('generic_failure', { operation: context });

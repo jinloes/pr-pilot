@@ -168,8 +168,12 @@ with IntelliJ's `UserFacingErrors`), so the raw cause must be kept somewhere a u
   `toUserFacingError` call. A log channel also persists with VS Code's own logs, so a failure can
   be diagnosed after its window is gone. Lines pass through `redact`, which masks GitHub tokens and
   bearer credentials; keep anything that can carry a credential out of log lines regardless.
-  Timeout and generic-failure messages end with a pointer to that panel. IntelliJ runs the engine
-  in-process, so the same causes already land in `idea.log`.
+  Timeout and generic-failure messages end with a pointer to that panel. **IntelliJ** logs
+  background review, chat, GitHub, and worktree failures at `WARN` to `idea.log` with full stack
+  traces passed through `LogRedactor.sanitize` so tokens and credentials are masked before
+  serialization. When an unrecognized exception has a blank message, both hosts include the
+  exception class name alongside the log hint (`See idea.log.` in IntelliJ, the PR Pilot output
+  panel hint in VS Code).
 - **Timeouts name their step.** Both hosts map `git <command> timed out` (worktree fetch and add)
   and `copilot runtime startup` / `session creation timed out` (which includes MCP server startup)
   to step-specific advice; VS Code also names the sidecar request that hit its 60-second client

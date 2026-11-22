@@ -680,7 +680,8 @@ final class BaseCommitContext {
             Deadline overall)
             throws InterruptedException {
         List<ChangedSymbols.Symbol> symbols = ChangedSymbols.extract(manifest);
-        if (symbols.isEmpty()) return "";
+        List<ChangedEnumVariants.Addition> enumAdditions = ChangedEnumVariants.extract(manifest);
+        if (symbols.isEmpty() && enumAdditions.isEmpty()) return "";
         Deadline deadline = overall.within(CALL_SITES_TIMEOUT_SECONDS);
         Set<String> changed = Set.copyOf(changedPaths);
         String prefix = baseSha + ":";
@@ -695,6 +696,26 @@ final class BaseCommitContext {
                 continue;
             } catch (TimeoutException e) {
                 log.warn("Call-site search ran out of time; using the sites found so far");
+                return sb.toString();
+            }
+            if (section.isEmpty()) continue;
+            String block = (sb.length() == 0 ? "" : "\n\n") + section;
+            int bytes = utf8Length(block);
+            if (total + bytes > MAX_CALL_SITES_BYTES) break;
+            sb.append(block);
+            total += bytes;
+        }
+        for (ChangedEnumVariants.Addition addition : enumAdditions) {
+            String section;
+            try {
+                section =
+                        enumDispatchSection(repoDir, baseSha, prefix, changed, addition, deadline);
+            } catch (IOException e) {
+                log.debug(
+                        "Skipping dispatch sites for {}: {}", addition.typeName(), e.getMessage());
+                continue;
+            } catch (TimeoutException e) {
+                log.warn("Dispatch-site search ran out of time; using the sites found so far");
                 break;
             }
             if (section.isEmpty()) continue;
@@ -705,6 +726,92 @@ final class BaseCommitContext {
             total += bytes;
         }
         return sb.toString();
+    }
+
+    /**
+     * Finds {@code switch} / {@code when} / {@code match} dispatch sites in unchanged files that
+     * reference {@code addition.typeName()}, even when the enum itself is referenced too widely for
+     * {@link #callSiteSection} to list individual lines.
+     */
+    private String enumDispatchSection(
+            File repoDir,
+            String baseSha,
+            String prefix,
+            Set<String> changed,
+            ChangedEnumVariants.Addition addition,
+            Deadline deadline)
+            throws IOException, TimeoutException, InterruptedException {
+        GitOutput filesOut =
+                git(
+                        repoDir,
+                        deadline,
+                        "grep",
+                        "-z",
+                        "-l",
+                        "-I",
+                        "-w",
+                        "-F",
+                        "-e",
+                        addition.typeName(),
+                        baseSha);
+        if (filesOut.exitCode() != 0) return "";
+        List<String> candidateFiles = new ArrayList<>();
+        for (String token : filesOut.output().split("\0")) {
+            String entry = token.strip();
+            if (!entry.startsWith(prefix)) continue;
+            String path = entry.substring(prefix.length());
+            if (!path.isEmpty() && !changed.contains(path)) {
+                candidateFiles.add(path);
+                if (candidateFiles.size() == MAX_CALL_SITE_FILES) break;
+            }
+        }
+        if (candidateFiles.isEmpty()) return "";
+
+        List<String> args =
+                new ArrayList<>(
+                        List.of(
+                                "grep",
+                                "-z",
+                                "-n",
+                                "-I",
+                                "-E",
+                                "-e",
+                                "\\b(switch|when|match)\\b",
+                                baseSha,
+                                "--"));
+        args.addAll(candidateFiles);
+        GitOutput matches = git(repoDir, deadline, args.toArray(String[]::new));
+        if (matches.exitCode() != 0) return "";
+
+        String variantsLabel = String.join(", ", addition.addedVariants());
+        String header =
+                "## "
+                        + addition.typeName()
+                        + " (added variant"
+                        + (addition.addedVariants().size() == 1 ? " " : "s ")
+                        + variantsLabel
+                        + " in "
+                        + addition.path()
+                        + "; check switch/when/match dispatch sites for unhandled or default arms)";
+        StringBuilder sb = new StringBuilder(header);
+        int listed = 0;
+        for (String line : matches.output().split("\n")) {
+            if (listed == MAX_CALL_SITES_PER_SYMBOL) break;
+            String[] parts = line.split("\0", 3);
+            if (parts.length < 3 || !parts[0].startsWith(prefix)) continue;
+            String content = parts[2].strip();
+            if (content.length() > MAX_CALL_SITE_LINE_CHARS) {
+                content = content.substring(0, MAX_CALL_SITE_LINE_CHARS) + "...";
+            }
+            sb.append('\n')
+                    .append(parts[0].substring(prefix.length()))
+                    .append(':')
+                    .append(parts[1])
+                    .append(": ")
+                    .append(content);
+            listed++;
+        }
+        return listed == 0 ? "" : sb.toString();
     }
 
     private String callSiteSection(

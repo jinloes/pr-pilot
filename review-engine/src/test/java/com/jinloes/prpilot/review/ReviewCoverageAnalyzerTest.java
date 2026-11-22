@@ -185,6 +185,69 @@ class ReviewCoverageAnalyzerTest {
         }
 
         @Test
+        void returnsUpToThreeHighRiskHunksInUncommentedFilesWhenMultiFileLedgerIsOmitted() {
+            StringBuilder diff = new StringBuilder();
+            for (int index = 0; index < 5; index++) {
+                diff.append(
+                        """
+                        diff --git a/src/Api%1$02d.java b/src/Api%1$02d.java
+                        --- a/src/Api%1$02d.java
+                        +++ b/src/Api%1$02d.java
+                        @@ -1 +1 @@
+                        -private void oldApi() {}
+                        +public void newApi() {}
+                        """
+                                .formatted(index));
+            }
+            diff.append(
+                    """
+                    diff --git a/src/Formatting.java b/src/Formatting.java
+                    --- a/src/Formatting.java
+                    +++ b/src/Formatting.java
+                    @@ -1 +1 @@
+                    -int spacing = 1;
+                    +int spacing = 2;
+                    """);
+            InspectionManifest manifest = InspectionManifest.fromDiff(diff.toString());
+
+            List<CoverageGap> gaps =
+                    analyzer.findGaps(
+                            manifest, InspectionLedger.missing(), Set.of("src/Api00.java"));
+
+            assertThat(gaps)
+                    .hasSize(3)
+                    .noneMatch(CoverageGap::wholeFile)
+                    .extracting(CoverageGap::path)
+                    .containsExactly("src/Api01.java", "src/Api02.java", "src/Api03.java");
+            assertThat(gaps).extracting(CoverageGap::id).containsExactly("G001", "G002", "G003");
+        }
+
+        @Test
+        void returnsNoGapsWhenOmittedLedgerMultiFileDiffHasOnlyCommentedOrLowRiskFiles() {
+            InspectionManifest manifest =
+                    InspectionManifest.fromDiff(
+                            """
+                            diff --git a/src/Api.java b/src/Api.java
+                            --- a/src/Api.java
+                            +++ b/src/Api.java
+                            @@ -1 +1 @@
+                            -private void oldApi() {}
+                            +public void newApi() {}
+                            diff --git a/src/Formatting.java b/src/Formatting.java
+                            --- a/src/Formatting.java
+                            +++ b/src/Formatting.java
+                            @@ -1 +1 @@
+                            -int spacing = 1;
+                            +int spacing = 2;
+                            """);
+
+            assertThat(
+                            analyzer.findGaps(
+                                    manifest, InspectionLedger.missing(), Set.of("src/Api.java")))
+                    .isEmpty();
+        }
+
+        @Test
         void doesNotCreateGapsForDeletedFiles() {
             InspectionManifest manifest =
                     InspectionManifest.fromDiff(

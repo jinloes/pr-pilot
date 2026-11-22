@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import test from 'node:test'
-import { executeChecks, nodeVersionSupported, planChecks, resolveNvmrcNode } from './verify.mjs'
+import {
+  changedFiles,
+  executeChecks,
+  nodeVersionSupported,
+  parseVerifyArgs,
+  planChecks,
+  resolveNvmrcNode,
+} from './verify.mjs'
 
 const names = (plan) => plan.checks.map((check) => check.name)
 const gradleTasks = (plan) => plan.checks.find((check) => check.gradle)?.gradle.slice(2) ?? []
@@ -18,9 +25,9 @@ test('other docs need no checks', () => {
 })
 
 test('hand-mirrored files add a reminder note', () => {
-  const plan = planChecks(['review-engine/src/main/java/com/jinloes/prpilot/review/BinaryLocator.java'])
+  const plan = planChecks(['review-engine/src/main/java/com/jinloes/prpilot/review/CopilotService.java'])
   assert.equal(plan.notes.length, 1)
-  assert.match(plan.notes[0], /^Hand-mirrored .*check vscode-extension\/src\/claude\.ts/)
+  assert.match(plan.notes[0], /^Hand-mirrored .*check vscode-extension\/src\/copilot\.ts/)
 })
 
 test('a core change checks every downstream JVM module in build order', () => {
@@ -49,16 +56,21 @@ test('engine interface changes also run the VS Code wire catalog tests', () => {
   assert.ok(!names(plan).includes('webview unit tests'))
 })
 
-test('diff-coverage golden changes also run webview tests', () => {
+test('diff-coverage golden changes run webview unit tests without Playwright a11y', () => {
   const plan = planChecks(['core/src/test/resources/diff-coverage/trailer.golden.txt'])
   assert.ok(names(plan).includes('webview unit tests'))
+  assert.ok(!names(plan).includes('webview a11y tests'))
 })
 
-test('webview source changes add a visual-check note but test-only changes do not', () => {
-  assert.equal(planChecks(['webview/src/App.tsx']).notes.length, 1)
+test('webview source changes run a11y and add a visual-check note while unit-test-only changes skip both', () => {
+  const appChange = planChecks(['webview/src/App.tsx'])
+  assert.equal(appChange.notes.length, 1)
+  assert.ok(names(appChange).includes('webview a11y tests'))
   const testOnly = planChecks(['webview/src/lib/diffCoverage.test.ts'])
   assert.equal(testOnly.notes.length, 0)
   assert.ok(names(testOnly).includes('webview lint'))
+  assert.ok(names(testOnly).includes('webview unit tests'))
+  assert.ok(!names(testOnly).includes('webview a11y tests'))
   assert.ok(!names(testOnly).some((name) => name.startsWith('gradle')))
 })
 
@@ -218,5 +230,110 @@ test('executeChecks runs distinct lanes concurrently while keeping same-lane ste
     events.indexOf('end:ext-lint') < events.indexOf('start:ext-unit'),
     `same-lane checks must stay sequential: ${events.join(', ')}`,
   )
+})
+
+test('executeChecks honors maxParallelLanes cap', async () => {
+  let active = 0
+  let maxActive = 0
+  const checks = [
+    { name: 'lane-1', lane: 'l1' },
+    { name: 'lane-2', lane: 'l2' },
+    { name: 'lane-3', lane: 'l3' },
+  ]
+  await executeChecks(
+    checks,
+    async () => {
+      active++
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setTimeout(resolve, 15))
+      active--
+      return { ok: true, output: '', warnings: [] }
+    },
+    () => {},
+    { maxParallelLanes: 2 },
+  )
+  assert.equal(maxActive, 2)
+})
+
+test('executeChecks waits for present afterLane dependencies and ignores absent ones', async () => {
+  const events = []
+  const withGradle = [
+    { name: 'gradle', lane: 'gradle' },
+    { name: 'unit', lane: 'webview-tests' },
+    { name: 'a11y', lane: 'webview-a11y', afterLane: ['gradle', 'webview-tests'] },
+  ]
+  await executeChecks(
+    withGradle,
+    async (check) => {
+      events.push(`start:${check.name}`)
+      await new Promise((resolve) => setTimeout(resolve, check.name === 'gradle' ? 20 : 5))
+      events.push(`end:${check.name}`)
+      return { ok: true, output: '', warnings: [] }
+    },
+    () => {},
+  )
+  assert.ok(events.indexOf('end:gradle') < events.indexOf('start:a11y'))
+  assert.ok(events.indexOf('end:unit') < events.indexOf('start:a11y'))
+
+  const withoutGradleEvents = []
+  await executeChecks(
+    [
+      { name: 'unit', lane: 'webview-tests' },
+      { name: 'a11y', lane: 'webview-a11y', afterLane: ['gradle', 'webview-tests'] },
+    ],
+    async (check) => {
+      withoutGradleEvents.push(`start:${check.name}`)
+      return { ok: true, output: '', warnings: [] }
+    },
+    () => {},
+  )
+  assert.deepEqual(withoutGradleEvents, ['start:unit', 'start:a11y'])
+})
+
+test('parseVerifyArgs supports --since, --uncommitted, --jobs, and rejects invalid flags', () => {
+  assert.deepEqual(parseVerifyArgs(['--since', 'HEAD~1', '--jobs=2', 'core/Foo.java'], {}), {
+    all: false,
+    dryRun: false,
+    uncommittedOnly: false,
+    since: 'HEAD~1',
+    jobs: 2,
+    files: ['core/Foo.java'],
+  })
+  assert.deepEqual(parseVerifyArgs(['--uncommitted', '--dry-run'], {}), {
+    all: false,
+    dryRun: true,
+    uncommittedOnly: true,
+    since: 'HEAD',
+    jobs: 3,
+    files: [],
+  })
+  assert.equal(parseVerifyArgs([], { PR_PILOT_VERIFY_JOBS: '1' }).jobs, 1)
+  assert.throws(() => parseVerifyArgs(['--since'], {}), /Missing git ref/)
+  assert.throws(() => parseVerifyArgs(['--jobs', '0'], {}), /Invalid --jobs/)
+  assert.throws(() => parseVerifyArgs(['--bogus'], {}), /Unknown option/)
+})
+
+test('changedFiles skips merge-base committed diff when uncommittedOnly or --since HEAD is used', () => {
+  const calls = []
+  const fakeGit = (args) => {
+    calls.push(args.join(' '))
+    if (args[0] === 'merge-base') return 'abc123\n'
+    if (args[0] === 'diff' && args[2] === 'abc123') return 'committed/A.java\n'
+    if (args[0] === 'diff' && args[2] === 'HEAD') return 'dirty/B.java\n'
+    if (args[0] === 'ls-files') return 'untracked/C.java\n'
+    return ''
+  }
+
+  assert.deepEqual(changedFiles('/repo', 'origin/main', fakeGit), [
+    'committed/A.java',
+    'dirty/B.java',
+    'untracked/C.java',
+  ])
+  calls.length = 0
+  assert.deepEqual(changedFiles('/repo', { base: 'HEAD', uncommittedOnly: true }, fakeGit), [
+    'dirty/B.java',
+    'untracked/C.java',
+  ])
+  assert.ok(!calls.some((call) => call.startsWith('merge-base')))
 })
 

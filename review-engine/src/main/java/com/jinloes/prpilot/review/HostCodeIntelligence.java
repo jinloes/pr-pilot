@@ -1,6 +1,6 @@
 package com.jinloes.prpilot.review;
 
-import com.github.copilot.rpc.McpHttpServerConfig;
+import com.microsoft.copilot.rpc.McpHttpServerConfig;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;

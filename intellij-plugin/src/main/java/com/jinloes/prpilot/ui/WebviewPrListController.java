@@ -30,8 +30,11 @@ final class WebviewPrListController {
         this.panel = panel;
     }
 
-    /** Pushes the PR list into the webview via the bridge. Call from the EDT. */
-    public void loadPRs(
+    /**
+     * Pushes the PR list into the webview via the bridge and returns {@code true} when {@code
+     * prListLoaded} was published (as opposed to {@code setupRequired}). Call from the EDT.
+     */
+    public boolean loadPRs(
             List<PullRequest> prs,
             String defaultRepo,
             String searchScope,
@@ -44,18 +47,18 @@ final class WebviewPrListController {
         if (!providerReadiness.available()) {
             panel.pushSetupRequired(
                     "provider_not_installed", providerReadiness.detail(), providerReadiness);
-            return;
+            return false;
         }
         if ("unavailable".equals(providerReadiness.authenticationStatus())) {
             panel.pushSetupRequired(
                     "provider_not_authenticated", providerReadiness.detail(), providerReadiness);
-            return;
+            return false;
         }
         Optional<List<PendingReviewIndex.Entry>> pendingEntries = loadHealthyDraftEntries();
         if (pendingEntries.isEmpty()) {
             panel.pushSetupRequired(
                     "draft_index_unavailable", PendingReviewIndexNotifications.userMessage());
-            return;
+            return false;
         }
         Set<String> draftKeys =
                 pendingEntries.orElseThrow().stream()
@@ -85,6 +88,7 @@ final class WebviewPrListController {
                                 limited,
                                 reviewStatusAvailable),
                         providerReadiness));
+        return true;
     }
 
     /**
@@ -112,36 +116,40 @@ final class WebviewPrListController {
                     "draft_index_unavailable", PendingReviewIndexNotifications.userMessage());
             return;
         }
-        boolean hasReviewDraft =
-                pendingEntries.orElseThrow().stream()
-                        .anyMatch(
-                                entry ->
-                                        entry.owner().equals(pr.getOwner())
-                                                && entry.repo().equals(pr.getRepo())
-                                                && entry.number() == pr.getNumber());
-        PullRequest activatedPr =
+        boolean hasReviewDraft = hasDraftEntry(pendingEntries.orElseThrow(), pr);
+        PullRequest activatedPr = upsertCachedPr(pr);
+        panel.pushMessage(
+                new ActivatePrMsg("activatePR", toWebviewPr(activatedPr, hasReviewDraft), source));
+    }
+
+    private static boolean hasDraftEntry(List<PendingReviewIndex.Entry> entries, PullRequest pr) {
+        return entries.stream()
+                .anyMatch(
+                        entry ->
+                                entry.owner().equals(pr.getOwner())
+                                        && entry.repo().equals(pr.getRepo())
+                                        && entry.number() == pr.getNumber());
+    }
+
+    private PullRequest upsertCachedPr(PullRequest pr) {
+        PullRequest merged =
                 panel.cachedPRs.stream()
                         .filter(existing -> isSamePr(existing, pr))
                         .findFirst()
                         .map(existing -> mergeActivatedPr(existing, pr))
                         .orElse(pr);
-        if (panel.cachedPRs.stream().anyMatch(existing -> isSamePr(existing, activatedPr))) {
+        if (panel.cachedPRs.stream().anyMatch(existing -> isSamePr(existing, merged))) {
             panel.cachedPRs =
                     panel.cachedPRs.stream()
-                            .map(
-                                    existing ->
-                                            isSamePr(existing, activatedPr)
-                                                    ? activatedPr
-                                                    : existing)
+                            .map(existing -> isSamePr(existing, merged) ? merged : existing)
                             .toList();
         } else {
             List<PullRequest> next = new ArrayList<>();
-            next.add(activatedPr);
+            next.add(merged);
             next.addAll(panel.cachedPRs);
             panel.cachedPRs = next;
         }
-        panel.pushMessage(
-                new ActivatePrMsg("activatePR", toWebviewPr(activatedPr, hasReviewDraft), source));
+        return merged;
     }
 
     Optional<List<PendingReviewIndex.Entry>> loadHealthyDraftEntries() {

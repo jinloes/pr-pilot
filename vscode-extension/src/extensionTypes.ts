@@ -69,7 +69,12 @@ export interface ViewState {
     generatedReviews: Map<string, {
         result: ReviewResult;
         editedResult: ReviewResult | null;
-        attribution: { provider: Provider; model: string; reviewSupervisorEnabled: boolean };
+        attribution: {
+            provider: Provider;
+            model: string;
+            secondReviewerModel?: string;
+            reviewSupervisorEnabled: boolean;
+        };
     }>;
     mutationQueue: Promise<void>;
     chatHistory: Map<string, ChatMessage[]>;

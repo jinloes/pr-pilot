@@ -16,6 +16,7 @@ import com.jinloes.prpilot.ui.WebviewBridgeMessages.DraftLoadingMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ErrorMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrDraftStatusMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ProviderReadinessDto;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -119,8 +120,9 @@ final class WebviewPrSelectionController {
                                                             owner, repo, number);
                                                 } catch (Exception e) {
                                                     log.warn(
-                                                            "getPRDetail prefetch failed: {}",
-                                                            e.getMessage());
+                                                            "getPRDetail prefetch failed for {}",
+                                                            key,
+                                                            LogRedactor.sanitize(e));
                                                     return null;
                                                 }
                                             });
@@ -154,8 +156,9 @@ final class WebviewPrSelectionController {
                                                                             : null);
                                                 } catch (Exception e) {
                                                     log.warn(
-                                                            "getPRDiff prefetch failed: {}",
-                                                            e.getMessage());
+                                                            "getPRDiff prefetch failed for {}",
+                                                            key,
+                                                            LogRedactor.sanitize(e));
                                                     return null;
                                                 }
                                             });
@@ -185,8 +188,10 @@ final class WebviewPrSelectionController {
                                                                                     : null);
                                                         } catch (Exception e) {
                                                             log.warn(
-                                                                    "getPRDiffFull prefetch failed: {}",
-                                                                    e.getMessage());
+                                                                    "getPRDiffFull prefetch failed"
+                                                                            + " for {}",
+                                                                    key,
+                                                                    LogRedactor.sanitize(e));
                                                             return null;
                                                         }
                                                     });
@@ -200,8 +205,9 @@ final class WebviewPrSelectionController {
                                                 } catch (Exception e) {
                                                     log.warn(
                                                             "getExistingReviewsSummary prefetch"
-                                                                    + " failed: {}",
-                                                            e.getMessage());
+                                                                    + " failed for {}",
+                                                            key,
+                                                            LogRedactor.sanitize(e));
                                                     return "";
                                                 }
                                             });
@@ -270,8 +276,9 @@ final class WebviewPrSelectionController {
                             if (pendingLoad.status()
                                     == WebviewPanel.PendingReviewLoadStatus.FAILED) {
                                 log.warn(
-                                        "loadDraftReview failed: {}",
-                                        pendingLoad.failure().getMessage());
+                                        "loadDraftReview failed for {}",
+                                        key,
+                                        LogRedactor.sanitize(pendingLoad.failure()));
                                 panel.publishIfCurrentSelection(
                                         key,
                                         revision,
@@ -287,7 +294,10 @@ final class WebviewPrSelectionController {
                                     panel.ghSvc.deleteDraftReview(
                                             owner, repo, number, pending.id());
                                 } catch (Exception e) {
-                                    log.warn("deleteDraftReview failed: {}", e.getMessage());
+                                    log.warn(
+                                            "deleteDraftReview failed for {}",
+                                            key,
+                                            LogRedactor.sanitize(e));
                                 }
                                 pending = null;
                             }

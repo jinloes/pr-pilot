@@ -78,7 +78,9 @@ export interface OutcomeComment {
     type?: string;
     body: string;
     severity?: string;
+    category?: string;
     confidence?: string;
+    corroborated?: boolean;
 }
 
 /** A file-anchored CI finding, machine-comparable against generated review comments. */
@@ -161,7 +163,7 @@ export type SidecarIncrementalDiffResult =
     };
 
 export interface SidecarPrDetailResult {
-    status: 'ok' | 'not_installed' | 'not_authenticated' | 'invalid_base_url' | 'invalid_request' | 'rate_limited' | 'network_error' | 'api_failed';
+    status: 'ok' | 'not_installed' | 'not_authenticated' | 'invalid_base_url' | 'invalid_request' | 'rate_limited' | 'network_error' | 'not_found_or_inaccessible' | 'api_failed';
     message: string;
     detail: {
         merged: boolean;
@@ -370,6 +372,13 @@ export interface SidecarCopilotModelsResult {
     models: string[];
     source: 'ACCOUNT' | 'CLI_HELP' | 'NONE';
     failureReason: string;
+}
+
+export interface SidecarProviderSetupResult {
+    available: boolean;
+    binaryStatus: 'ready' | 'missing';
+    authenticationStatus: 'ready' | 'unavailable' | 'unverified';
+    authCommand: string;
 }
 
 /** Validates the shape returned by `reviews/generate`. */

@@ -10,11 +10,13 @@ Each carries an `RPC_METHODS` map from Java method name to JSON-RPC wire name, a
 `StdioJsonRpcServer` registers a handler per entry (via a `Map<String, MethodHandler>` registry
 rather than a `switch`, so the registered set is introspectable).
 
-Engine result statuses are also part of the host contract. In particular, `PrDiffResult` returns
-`not_found_or_inaccessible` for GitHub HTTP 404 because GitHub deliberately does not distinguish a
-missing resource from one hidden by authorization. IntelliJ preserves non-`ok` statuses in
-`GitHubOperationException`, and VS Code preserves them in `GitHubOperationError`; user-facing
-adapters select shared templates from those typed statuses rather than matching engine prose. The
+Engine result statuses are also part of the host contract. In particular, `PrDetailResult` and
+`PrDiffResult` return `not_found_or_inaccessible` for GitHub HTTP 404 because GitHub deliberately
+does not distinguish a missing resource from one hidden by authorization, while `GitHubFailure`
+recognizes `X-GitHub-SSO: required` / SAML enforcement bodies (keeping only a sanitized `required`
+marker) so hosts surface SSO token-authorization guidance instead of generic login copy. IntelliJ
+preserves non-`ok` statuses in `GitHubOperationException`, and VS Code preserves them in
+`GitHubOperationError`; user-facing adapters select shared templates from those typed statuses. The
 404 template must retain both possible causes and make account switching conditional—never claim
 that access is the definite cause.
 
@@ -53,8 +55,9 @@ logic (worktrees, binary probing, notification polling, prompt constants); `MIRR
 when a change touches one. Guidance-doc reading used to be on that list and was retired by
 moving it behind the `reviews/readGuidelines` capability — the two copies had already diverged on
 the truncation marker, which is the concrete argument for preferring deletion over dual maintenance.
-Copilot model discovery was likewise moved behind `reviews/listCopilotModels` (`copilotModels`
-capability) so VS Code no longer bundles `@github/copilot-sdk` or spawns `copilot` locally.
+Copilot model discovery and provider CLI/authentication probing were likewise moved behind
+`reviews/listCopilotModels` and `reviews/probeProviderSetup` so VS Code no longer bundles
+`@github/copilot-sdk`, duplicates `BinaryLocator`, or spawns `copilot`/`claude` locally.
 
 ### Sidecar streaming: async requests plus server-push notifications
 The base JSON-RPC loop in `StdioJsonRpcServer.run()` is still one blocking read → dispatch →

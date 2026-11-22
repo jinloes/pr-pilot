@@ -334,15 +334,22 @@ class ReviewSessionServiceTest {
         }
 
         @Test
-        void carriesSeverityAndConfidenceThroughToTheRecord() throws IOException {
+        void carriesSeverityCategoryCorroborationAndSecondReviewerThroughToTheRecord()
+                throws IOException {
+            ReviewEngineApi.OutcomeCommentParam corroborated =
+                    new ReviewEngineApi.OutcomeCommentParam(
+                            "A.java", 10, "issue", "x", "major", "security", "high", true);
             service.recordOutcome(
                     new ReviewEngineApi.RecordOutcomeParams(
-                            "claude", "sonnet", false, List.of(comment("x")), List.of()));
+                            "claude", "sonnet", "gpt-5", false, List.of(corroborated), List.of()));
 
             String line = Files.readAllLines(logFile, StandardCharsets.UTF_8).get(0);
             assertThat(line)
+                    .contains("\"secondReviewerModel\":\"gpt-5\"")
                     .contains("\"severity\":\"major\"")
+                    .contains("\"category\":\"security\"")
                     .contains("\"confidence\":\"high\"")
+                    .contains("\"corroborated\":true")
                     .contains("\"outcome\":\"deleted\"");
         }
     }

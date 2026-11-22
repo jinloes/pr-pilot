@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewResult;
+import java.util.List;
 import org.apache.commons.lang3.StringUtils;
 
 /**
@@ -68,10 +69,22 @@ final class ReviewCritiquePrompts {
      */
     static String buildCritiquePrompt(
             PRReviewRequest request, ReviewResult draft, boolean reportDropped) {
+        return buildCritiquePrompt(
+                request,
+                draft,
+                reportDropped,
+                WeakenedTests.extract(InspectionManifest.fromDiff(request.getDiff())));
+    }
+
+    static String buildCritiquePrompt(
+            PRReviewRequest request,
+            ReviewResult draft,
+            boolean reportDropped,
+            List<WeakenedTests.Entry> weakenedTests) {
         StringBuilder prompt =
                 new StringBuilder(CRITIQUE_PREAMBLE).append(ReviewOutputContract.OUTPUT_CONTRACT);
         ReviewPrompts.appendPrMetadata(prompt, request.getPr());
-        ReviewPrompts.appendContextSections(prompt, request);
+        ReviewPrompts.appendContextSections(prompt, request, weakenedTests);
         ReviewPrompts.appendPrDiff(prompt, request);
         prompt.append("\n<draft_review>\n")
                 .append(ReviewPrompts.escapeClosingTag(draftReviewJson(draft), "draft_review"))

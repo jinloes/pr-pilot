@@ -4,16 +4,16 @@ PR Pilot reviews GitHub pull requests in IntelliJ and VS Code using Claude Code 
 
 ## Scope
 
-- Stable architecture and design constraints only; see `CODEMAP.md` for code/test paths and
-  `AGENTS.md` for workflow rules.
-- Keep volatile version numbers in build manifests unless a version is itself a constraint.
+- Architecture and active design constraints only; see `CODEMAP.md` for file paths and `AGENTS.md`
+  for workflow rules.
+- Keep volatile versions in build manifests unless a version is itself a constraint.
 
 ## System shape
 
-PR Pilot is a multi-module Java 21 project with two IDE hosts sharing one React webview. `core`,
-`github-engine`, and `review-engine` own host-neutral logic: IntelliJ calls them in-process and VS
-Code reaches them via the stdio JSON-RPC `sidecar`, leaving hosts with IDE lifecycle, settings, and
-bridge wiring. GitHub tokens stay in `github-engine`; provider processes stay in `review-engine`.
+Multi-module Java 21 project with two IDE hosts sharing one React webview. `core`, `github-engine`,
+and `review-engine` own host-neutral logic: IntelliJ calls them in-process and VS Code reaches them
+over the stdio JSON-RPC `sidecar`, leaving hosts with IDE lifecycle, settings, and bridge wiring.
+GitHub tokens stay in `github-engine`; provider processes stay in `review-engine`.
 
 Visual references:
 
@@ -68,6 +68,7 @@ Index non-obvious active constraints here; record each as a `###` section in the
 - [Recall benchmark withholds the reference answers](docs/architecture/review-benchmarks.md#recall-benchmark-withholds-the-reference-answers)
 - [Recall benchmark diffs against the base the reference reviewer saw](docs/architecture/review-benchmarks.md#recall-benchmark-diffs-against-the-base-the-reference-reviewer-saw)
 - [ReviewBench runs never consult GitHub and delegate scoring](docs/architecture/review-benchmarks.md#reviewbench-runs-never-consult-github-and-delegate-scoring)
+- [Layered provider canary and stage-isolated golden evals](docs/architecture/review-benchmarks.md#layered-provider-canary-and-stage-isolated-golden-evals)
 
 **Review comments and context**
 ([review-comments-context.md](docs/architecture/review-comments-context.md))
@@ -193,9 +194,9 @@ Index non-obvious active constraints here; record each as a `###` section in the
 
 ## Settings persistence
 
-IntelliJ stores these in `PluginSettings` (`claudeReviews.xml`); VS Code contributes `pr-pilot.<name>`
-in `vscode-extension/package.json`. Details live in [settings.md](docs/architecture/settings.md); no
-API keys or tokens are written to disk.
+IntelliJ persists these in `PluginSettings` (`claudeReviews.xml`); VS Code declares `pr-pilot.<name>`
+in `vscode-extension/package.json`. Details in [settings.md](docs/architecture/settings.md); no
+tokens or keys are stored on disk.
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -228,13 +229,12 @@ API keys or tokens are written to disk.
 
 ## Local data files
 
-Runtime state under `~/.pr-pilot/` (retention and locking rules in
-[local-data.md](docs/architecture/local-data.md)):
+State under `~/.pr-pilot/` (rules in [local-data.md](docs/architecture/local-data.md)):
 
 | Path | Owner / Scope | Purpose |
 |------|---------------|---------|
-| `~/.pr-pilot/semantic-review.json` | User-authored | Machine-local semantic launch configuration (schema 1; read-only) |
-| `~/.pr-pilot/semantic-worktrees.json` | `review-engine` | Retained repository/worktree/head identities (`semantic-worktrees.lock`, `semantic-leases/<id>.lock`) |
-| `~/.pr-pilot/pending-prs.json` | IntelliJ only | Saved-draft PR index (VS Code uses extension `globalState`; `.corrupt-<timestamp>` on quarantine) |
+| `~/.pr-pilot/semantic-review.json` | User-authored | Machine-local semantic launch config (schema 1; read-only) |
+| `~/.pr-pilot/semantic-worktrees.json` | `review-engine` | Retained worktree/head identities (`semantic-worktrees.lock`, `semantic-leases/<id>.lock`) |
+| `~/.pr-pilot/pending-prs.json` | IntelliJ only | Saved-draft PR index (VS Code uses `globalState`; `.corrupt-<timestamp>` on quarantine) |
 | `~/.pr-pilot/seen-prs.json` | IntelliJ only | Notified `owner/repo#number` set (VS Code uses `globalState`) |
-| `~/.pr-pilot/review-outcomes.jsonl` | Both hosts (`review-engine`) | Append-only outcome hashes/metadata per submitted review, without prose or file paths |
+| `~/.pr-pilot/review-outcomes.jsonl` | Both hosts | Append-only outcome hashes/metadata per submitted review |

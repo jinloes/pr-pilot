@@ -129,9 +129,11 @@ anchors. When enabled:
 - `InspectionManifest` assigns stable IDs to changed files and hunks and records changed new-side
   lines. `ReviewPassParser` accepts only manifest IDs and repository-confined evidence paths.
 - `ReviewCoverageAnalyzer` deterministically identifies uninspected high-risk hunks, plus changed
-  files whose file ID and hunk IDs are all absent from the ledger (ranked below high-risk hunks). It
-  does not infer gaps when the provider omitted its ledger. Hunk gaps are capped at 12; file gaps
-  are not, because a file the reviewer never opened is the likeliest place for a missed finding.
+  files whose file ID and hunk IDs are all absent from the ledger (ranked below high-risk hunks).
+  Hunk gaps are capped at 12; file gaps are not, because a file the reviewer never opened is the
+  likeliest place for a missed finding. When a provider omits its ledger, whole-file gaps and
+  single-file diffs are never guessed; on multi-file diffs, at most three high-risk changed hunks in
+  files with zero baseline findings are queued for one bounded follow-up pass.
 - Every uncovered file is re-reviewed in full, six files per follow-up and at most five such
   follow-ups. Hunk gaps inside those files are dropped as redundant.
 - Three or fewer remaining hunk gaps are prioritized deterministically. Larger sets get one
@@ -169,3 +171,8 @@ whose opening `logger.info(` line was unchanged context but whose arguments chan
   capped, the prompt tells the model to inventory the remainder itself.
 - The inventory is untrusted PR content and goes through `escapeClosingTag` like every other
   section.
+
+`WeakenedTests.extract` applies the same deterministic-inventory pattern to test files only,
+emitting `<weakened_tests>` into review and critique prompts (from the pre-condensed `manifest` in
+chunked mode) only when a hunk newly adds a skip marker or deletes assertions without replacement
+assertions, while forbidding generic requests for additional test cases.

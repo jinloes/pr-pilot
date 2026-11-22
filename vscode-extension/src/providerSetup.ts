@@ -1,4 +1,7 @@
+import type { Provider, ProviderReadiness } from './extensionTypes';
+import type { SidecarProviderSetupResult } from './sidecarTypes';
 import { normalizeGithubBaseUrl } from './settingsView';
+import { providerNotInstalledMessage } from './userFacingError';
 
 export type ProviderAuthenticationStatus = 'ready' | 'unavailable' | 'unverified';
 
@@ -23,47 +26,45 @@ export function buildGhAuthLoginCommand(rawBaseUrl: string): string {
     return 'gh auth login';
 }
 
-export type ClaudeAuthProbeRunner = (
-    complete: (error: Error | null, stdout: string, stderr: string) => void,
-) => void;
-
-export function classifyClaudeAuthProbe(
-    error: Error | null,
-    stdout: string,
-    stderr: string,
-): ProviderAuthenticationStatus {
-    const output = `${stdout}\n${stderr}`.toLowerCase();
-    if (output.includes('unknown command')
-        || output.includes('unrecognized command')
-        || output.includes('unsupported command')
-        || output.includes('invalid command')
-        || output.includes('unknown option')
-        || output.includes('unrecognized option')
-        || output.includes('unexpected argument')) {
-        return 'unverified';
+/**
+ * Formats a sidecar `reviews/probeProviderSetup` result into the host `ProviderReadiness` shape
+ * sent to the webview.
+ */
+export function toProviderReadiness(
+    provider: Provider,
+    probe: SidecarProviderSetupResult,
+): ProviderReadiness {
+    if (!probe.available) {
+        return {
+            provider,
+            available: false,
+            binaryStatus: 'missing',
+            authenticationStatus: 'unavailable',
+            authCommand: probe.authCommand,
+            detail: providerNotInstalledMessage(provider),
+        };
     }
-    if (!error) return 'ready';
-
-    const processError = error as Error & { code?: unknown; killed?: boolean; signal?: unknown };
-    if (processError.killed || processError.signal || typeof processError.code !== 'number') {
-        return 'unverified';
+    if (provider === 'copilot') {
+        return {
+            provider,
+            available: true,
+            binaryStatus: probe.binaryStatus,
+            authenticationStatus: probe.authenticationStatus,
+            authCommand: probe.authCommand,
+            detail: 'Provider CLI found. Authentication cannot be verified without starting a provider session.',
+        };
     }
-    return output.includes('not logged in')
-        || output.includes('not authenticated')
-        || output.includes('signed out')
-        || output.includes('logged out')
-        ? 'unavailable'
-        : 'unverified';
-}
-
-export async function probeClaudeAuthentication(
-    run: ClaudeAuthProbeRunner,
-): Promise<ProviderAuthenticationStatus> {
-    return new Promise((resolve) => {
-        try {
-            run((error, stdout, stderr) => resolve(classifyClaudeAuthProbe(error, stdout, stderr)));
-        } catch {
-            resolve('unverified');
-        }
-    });
+    const detail = probe.authenticationStatus === 'ready'
+        ? 'Provider CLI and authentication are ready.'
+        : probe.authenticationStatus === 'unavailable'
+            ? `Claude authentication is unavailable. Run '${probe.authCommand}' and check again.`
+            : `Claude authentication could not be verified non-interactively; run '${probe.authCommand}' if sign-in is required.`;
+    return {
+        provider,
+        available: true,
+        binaryStatus: probe.binaryStatus,
+        authenticationStatus: probe.authenticationStatus,
+        authCommand: probe.authCommand,
+        detail,
+    };
 }

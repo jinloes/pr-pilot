@@ -5,8 +5,10 @@ Paths omit `src/main/java/com/jinloes/prpilot/` and equivalent test roots where 
 makes them unambiguous; other paths are relative to the module directory.
 
 Developer-only CLIs: `./gradlew :review-benchmark:reviewBenchmark` measures PR Pilot's recall
-against a reference reviewer's GitHub review comments, and `reviewBench` (driven by `scripts/reviewbench.mjs`)
-produces findings for ReviewBench's judge. It is not shipped with either host.
+against a reference reviewer's GitHub review comments, `reviewBench` (driven by `scripts/reviewbench.mjs`)
+produces findings for ReviewBench's judge, `providerCanary` verifies live CLI/SDK protocol and
+schema contracts in seconds, and `stageEval` replays frozen primary-pass drafts through downstream
+pipeline stages. It is not shipped with either host.
 
 - `benchmark/ReviewBenchmark.java` - Entry point and per-PR orchestration.
 - `benchmark/BenchmarkOptions.java` - Argument parsing (including repeatable `--guidance-glob`),
@@ -37,5 +39,12 @@ produces findings for ReviewBench's judge. It is not shipped with either host.
   format.
 - `benchmark/ReviewBenchDiagnostics.java` - Per-review stage lines and critique-dropped findings,
   written to `<run>/diagnostics/` for the report.
+- `benchmark/ProviderCanary.java` - Fast live CLI/SDK contract canary (`:review-benchmark:providerCanary`):
+  binary preflight, live `Source.ACCOUNT` Copilot model discovery, temporary checkout setup, and
+  anchored `ReviewResult` validation (`ProviderCanaryTest`).
+- `benchmark/StageEvalRunner.java` and `src/main/resources/stage-eval/cases.json` - Stage-isolated
+  golden evaluation harness (`:review-benchmark:stageEval`), supporting deterministic recorded
+  replay (run in `StageEvalRunnerTest`) and `--live` single-turn downstream critique/rule/hygiene
+  evaluation over frozen primary drafts.
 - Tests mirror each class; `LocalCheckoutTest` and `ReviewBenchCheckoutTest` use real git in temp
   directories.

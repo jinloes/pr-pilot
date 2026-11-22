@@ -29,6 +29,7 @@ final class WebviewPanelLifecycle {
 
         boolean samePullRequest =
                 panel.activePR != null
+                        && pr != null
                         && panel.activePR.getNumber() == pr.getNumber()
                         && StringUtils.equals(panel.activePR.getOwner(), pr.getOwner())
                         && StringUtils.equals(panel.activePR.getRepo(), pr.getRepo());

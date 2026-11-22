@@ -62,10 +62,18 @@ public final class PrDetailService {
                         params.number());
         return switch (response.status()) {
             case OK -> PrDetailResult.success(response.detail());
+            case SSO_REQUIRED ->
+                    PrDetailResult.failure(
+                            GitHubFailure.SSO_REQUIRED.status(),
+                            GitHubFailure.SSO_REQUIRED.message());
             case NOT_AUTHENTICATED ->
                     PrDetailResult.failure(
                             "not_authenticated",
                             "Run 'gh auth login' in a terminal for this GitHub host.");
+            case NOT_FOUND ->
+                    PrDetailResult.failure(
+                            PrDiffResult.STATUS_NOT_FOUND_OR_INACCESSIBLE,
+                            "Pull request not found or inaccessible to the active gh account.");
             case RATE_LIMITED ->
                     PrDetailResult.failure(
                             "rate_limited", "GitHub rate limit exceeded. Try again shortly.");
@@ -98,7 +106,9 @@ public final class PrDetailService {
 
     enum DetailStatus {
         OK,
+        SSO_REQUIRED,
         NOT_AUTHENTICATED,
+        NOT_FOUND,
         RATE_LIMITED,
         NETWORK_ERROR,
         TLS_ERROR,
@@ -120,11 +130,17 @@ public final class PrDetailService {
                             + "/pulls/"
                             + number;
             GitHubResponse response = httpClient.get(url, token);
+            if (response.isSsoRequired()) {
+                return DetailResponse.of(DetailStatus.SSO_REQUIRED);
+            }
             if (response.isUnauthenticated()) {
                 return DetailResponse.of(DetailStatus.NOT_AUTHENTICATED);
             }
             if (response.isRateLimited()) {
                 return DetailResponse.of(DetailStatus.RATE_LIMITED);
+            }
+            if (response.statusCode() == 404) {
+                return DetailResponse.of(DetailStatus.NOT_FOUND);
             }
             if (response.isTlsError()) {
                 return DetailResponse.of(DetailStatus.TLS_ERROR);

@@ -25,27 +25,27 @@ a PR-head worktree is also author-controlled, so hosts never read it and always 
 ### Review guidance, file history and call sites come from the base commit
 Hosts pass the GitHub-reported `baseSha` (`PrDetail.baseSha`, validated as a full hex object ID) on
 `PRReviewRequest`. Before the first provider call, `ReviewPipelineService` asks `BaseCommitContext`
-to resolve trusted guidance (files matching the configured guidance globs first, then root and
-changed-directory-scoped `AGENTS.md`/`CLAUDE.md` and contributing/PR-template files, capped at 48
-KB) the recent commit history of each changed file, and textual call sites of the declarations the
-diff changes, reading only base-commit git objects through read-only plumbing (`cat-file`,
-`ls-tree`, `log`, `grep <sha>`) with per-command and overall time bounds. A missing base commit is
-fetched once from `origin` by SHA. Guidance is never read from the worktree or the head tree, so a
-PR cannot inject policy by editing guidance files — those edits remain review evidence only. Any
-failure (not a git work tree, malformed SHA, unreachable commit, timeout) degrades to an unenriched
-review; only cancellation propagates. Call sites are whole-word name matches (`ChangedSymbols` picks
-declarations from removed lines and hunk-header context, skipping test files) in files the PR does
-not change; they can include unrelated same-name symbols, so the prompt labels them as candidates to
-confirm, and they run last on their own sub-budget so a large repository cannot starve guidance or
-history. Changed `.proto` files also get a computed schema delta; see
-[proto-review.md](proto-review.md). Configured guidance globs (`PRReviewRequest.guidanceGlobs`,
-from the active profile's or default `reviewGuidanceGlobs`) are honored and additive to the
-built-in defaults: each becomes a
-literal pathspec prefix, so `..`, absolute, and wildcard-leading globs read nothing, and matches are
-read only from the base commit like every other guidance file. No repository-specific path is built
-in; a repo whose review rules live elsewhere (for example `.review/ai-agent/*.md`) needs that glob
-configured. Resolved base-commit guidance replaces host-supplied `repoGuidelines`; the host value
-(always blank today) is kept only when the base commit yields none.
+to resolve trusted guidance (configured guidance globs first, then root and changed-directory-scoped
+`AGENTS.md`/`CLAUDE.md` and contributing/PR-template files, capped at 48 KB), recent commit history
+of each changed file, and textual call sites of changed declarations, reading only base-commit git
+objects via read-only plumbing (`cat-file`, `ls-tree`, `log`, `grep <sha>`) with per-command and
+overall time bounds. A missing base commit is fetched once from `origin` by SHA. Guidance is never
+read from the worktree or head tree, so a PR cannot inject policy by editing guidance files — those
+edits remain review evidence only. Any failure (not a git work tree, malformed SHA, unreachable
+commit, timeout) degrades to an unenriched review; only cancellation propagates. Call sites are
+whole-word matches (`ChangedSymbols` picks declarations from removed lines and hunk-header context,
+skipping test files) in unchanged files; they are labeled as candidates to confirm and run last on
+their own sub-budget so large repositories cannot starve guidance or history. When the diff adds an
+enum, TypeScript union, or sealed-hierarchy variant (`ChangedEnumVariants`), `BaseCommitContext`
+also queries unchanged files mentioning that type for `switch`/`when`/`match` lines so unhandled or
+default dispatch arms stay visible even past `MAX_LISTED_REFERENCES`. Changed `.proto` files get a
+computed schema delta; see [proto-review.md](proto-review.md). Configured guidance globs
+(`PRReviewRequest.guidanceGlobs`, from the active profile's or default `reviewGuidanceGlobs`) are
+additive to the defaults: each becomes a literal pathspec prefix (`..`, absolute, and
+wildcard-leading globs read nothing) read only from `baseSha`. No repository-specific path is built
+in; a repo whose rules live elsewhere (for example `.review/ai-agent/*.md`) configures that glob.
+Resolved base-commit guidance replaces host-supplied `repoGuidelines` unless the base commit yields
+none.
 
 ### Recall: second reviewer and candidate validation
 Recall is traded for precision in one place only: the final critique. When self-critique is on or a
@@ -59,9 +59,9 @@ the pipeline waits at most `DEFAULT_SECONDARY_POST_PRIMARY_TIMEOUT_MS` (3 minute
 reviewer before cancelling it and continuing with the primary's findings. Its progress (started,
 still running, any tool calls while waiting, finished/timed out/failed) is reported only from the
 primary's thread, because host status sinks such as the sidecar's stdout are not thread-safe. The
-final comment count is capped after merging. The outcome log does not yet distinguish reviews that
-used a second reviewer. Near-duplicate collapse and reviewer attribution are described in the next
-section.
+final comment count is capped after merging. `ReviewOutcomeLog` records `secondReviewerModel` and
+per-comment `corroborated` status so outcome analysis can segment second-reviewer runs.
+Near-duplicate collapse and reviewer attribution are described in the next section.
 
 ### Reviewer attribution and corroboration
 Before the second-reviewer merge, `ReviewerAttribution` collapses near-duplicates: each
@@ -106,8 +106,10 @@ replacement. The parser reads it as an optional string, and `draftReviewJson` pa
 critique.
 
 The model is not trusted with this field, because a wrong suggestion is one click from being
-committed. `ReviewSuggestionGuard.apply` runs as the last step of every
-`ReviewPipelineService.review`, after `CiFindingSuppressor.suppress`. It converts CRLF to LF and
+committed. `CiFindingSuppressor.suppress` runs before `restoreHygieneFindings` (so a doomed CI
+duplicate cannot shadow a nearby hygiene or rule finding) and before `ReviewResultMerger.capFinal`
+(so CI duplicates never consume any of the 20 comment slots); `ReviewSuggestionGuard.apply` then
+runs as the last step of every `ReviewPipelineService.review`. It converts CRLF to LF and
 strips trailing newlines, then clears the suggestion (always keeping the comment) unless all hold:
 non-blank; at most 6 lines and 1,000 characters; no "```"; no line starting with a `N| ` prefix;
 type `issue` or `suggestion`; confidence `high`; the anchored line is a new-side (added or context)

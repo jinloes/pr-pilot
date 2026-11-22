@@ -28,10 +28,10 @@ test('every entry names two non-empty sides', () => {
 })
 
 test('a JVM-side change points at the TypeScript copy', () => {
-  const notes = mirrorNotes([`review-engine/${JAVA}/review/BinaryLocator.java`])
+  const notes = mirrorNotes([`review-engine/${JAVA}/review/CopilotService.java`])
   assert.equal(notes.length, 1)
-  assert.match(notes[0], /^Hand-mirrored CLI binary-probing candidates: you changed .*BinaryLocator\.java;/)
-  assert.match(notes[0], /check vscode-extension\/src\/claude\.ts, vscode-extension\/src\/copilot\.ts\.$/)
+  assert.match(notes[0], /^Hand-mirrored default Copilot reasoning effort.*CopilotService\.java;/)
+  assert.match(notes[0], /check vscode-extension\/src\/copilot\.ts\.$/)
 })
 
 test('a TypeScript-side change points back at the JVM copy', () => {
@@ -41,7 +41,13 @@ test('a TypeScript-side change points back at the JVM copy', () => {
 })
 
 test('one file can be in several entries', () => {
-  const notes = mirrorNotes(['vscode-extension/src/copilot.ts'])
+  const notes = mirrorNotes(
+    ['vscode-extension/src/shared.ts'],
+    [
+      { what: 'rule A', sides: [['a/A.java'], ['vscode-extension/src/shared.ts']] },
+      { what: 'rule B', sides: [['b/B.java'], ['vscode-extension/src/shared.ts']] },
+    ],
+  )
   assert.equal(notes.length, 2)
 })
 

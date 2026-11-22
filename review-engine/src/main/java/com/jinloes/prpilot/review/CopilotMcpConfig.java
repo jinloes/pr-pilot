@@ -2,9 +2,9 @@ package com.jinloes.prpilot.review;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.copilot.rpc.McpHttpServerConfig;
-import com.github.copilot.rpc.McpServerConfig;
-import com.github.copilot.rpc.McpStdioServerConfig;
+import com.microsoft.copilot.rpc.McpHttpServerConfig;
+import com.microsoft.copilot.rpc.McpServerConfig;
+import com.microsoft.copilot.rpc.McpStdioServerConfig;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -28,9 +28,9 @@ import org.slf4j.LoggerFactory;
  * server whose {@code command} is an arbitrary process — code execution triggered merely by
  * generating a review, bypassing the read-only permission gate (which only sees later tool-call
  * kinds, not server launch). Reading only the trusted config file and injecting the servers via
- * {@link com.github.copilot.rpc.SessionConfig#setMcpServers} closes that vector while preserving
- * the "inherit my MCP servers" behavior. See {@code ARCHITECTURE.md} "Provider capability
- * isolation".
+ * {@link com.microsoft.copilot.rpc.SessionMcpOptions#setServers} closes that vector while
+ * preserving the "inherit my MCP servers" behavior. See {@code ARCHITECTURE.md} "Provider
+ * capability isolation".
  */
 final class CopilotMcpConfig {
 

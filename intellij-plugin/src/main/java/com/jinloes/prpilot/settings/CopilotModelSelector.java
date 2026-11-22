@@ -5,6 +5,7 @@ import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.JBUI;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.review.CopilotModelDiscovery;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.awt.Component;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -22,9 +23,13 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.text.StringEscapeUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Owns provider selection, model selection, and Copilot-only review options. */
 final class CopilotModelSelector {
+
+    private static final Logger log = LoggerFactory.getLogger(CopilotModelSelector.class);
 
     private record ModelOption(String label, String id) {}
 
@@ -203,12 +208,19 @@ final class CopilotModelSelector {
         }
         backgroundExecutor.accept(
                 () -> {
-                    CopilotModelDiscovery.Result result = catalog.refresh();
+                    CopilotModelDiscovery.Result result;
+                    try {
+                        result = catalog.refresh();
+                    } catch (RuntimeException e) {
+                        log.warn("Copilot model refresh failed", LogRedactor.sanitize(e));
+                        result = CopilotModelDiscovery.Result.none(LogRedactor.errorType(e));
+                    }
+                    CopilotModelDiscovery.Result finalResult = result;
                     uiExecutor.accept(
                             () -> {
                                 refreshModelsButton.setEnabled(true);
                                 refreshModelsButton.setText("Refresh");
-                                applyCopilotModelResult(result);
+                                applyCopilotModelResult(finalResult);
                             });
                 });
     }

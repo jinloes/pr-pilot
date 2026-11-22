@@ -5,6 +5,7 @@ import com.jinloes.prpilot.model.CiAnnotation;
 import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.PullRequest;
+import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.review.CancellationToken;
 import com.jinloes.prpilot.review.ClaudeService;
@@ -12,6 +13,7 @@ import com.jinloes.prpilot.review.CopilotModelDiscovery;
 import com.jinloes.prpilot.review.CopilotService;
 import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.review.HostCodeIntelligence;
+import com.jinloes.prpilot.review.ProviderSetupProbe;
 import com.jinloes.prpilot.review.RepoGuidelinesReader;
 import com.jinloes.prpilot.review.ReviewChatPrompts;
 import com.jinloes.prpilot.review.ReviewOutcomeLog;
@@ -20,6 +22,7 @@ import com.jinloes.prpilot.review.ReviewPrompts;
 import com.jinloes.prpilot.review.ReviewedBlobReader;
 import com.jinloes.prpilot.review.SemanticReviewService;
 import com.jinloes.prpilot.review.SemanticWorktreeStore;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -30,6 +33,8 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Default {@link ReviewEngineApi} implementation: dispatches to the Claude or Copilot provider
@@ -44,25 +49,35 @@ import org.apache.commons.lang3.StringUtils;
  */
 public class ReviewSessionService implements ReviewEngineApi {
 
+    private static final Logger log = LoggerFactory.getLogger(ReviewSessionService.class);
     private static final int MAX_OPERATION_ID_LENGTH = 128;
 
     private final OperationRegistry activeOperations = new OperationRegistry();
     private final ReviewOutcomeLog outcomeLog;
     private final GitWorktreeService worktreeService;
+    private final ProviderSetupProbe setupProbe;
     private final SemanticReviewService semanticReviews = new SemanticReviewService();
 
     public ReviewSessionService() {
-        this(new ReviewOutcomeLog(), new GitWorktreeService());
+        this(new ReviewOutcomeLog(), new GitWorktreeService(), new ProviderSetupProbe());
     }
 
     /** Test seam so outcome logging can be pointed at a temp file. */
     public ReviewSessionService(ReviewOutcomeLog outcomeLog) {
-        this(outcomeLog, new GitWorktreeService());
+        this(outcomeLog, new GitWorktreeService(), new ProviderSetupProbe());
     }
 
     ReviewSessionService(ReviewOutcomeLog outcomeLog, GitWorktreeService worktreeService) {
+        this(outcomeLog, worktreeService, new ProviderSetupProbe());
+    }
+
+    ReviewSessionService(
+            ReviewOutcomeLog outcomeLog,
+            GitWorktreeService worktreeService,
+            ProviderSetupProbe setupProbe) {
         this.outcomeLog = outcomeLog;
         this.worktreeService = worktreeService;
+        this.setupProbe = setupProbe;
     }
 
     private static PullRequest toPullRequest(PrParams p) {
@@ -450,13 +465,30 @@ public class ReviewSessionService implements ReviewEngineApi {
     }
 
     @Override
+    public ProviderSetupProbe.Result probeProviderSetup(ProbeProviderSetupParams params) {
+        if (params == null || StringUtils.isBlank(params.provider())) {
+            throw new IllegalArgumentException("Provider is required.");
+        }
+        ReviewProvider provider =
+                switch (params.provider().trim().toLowerCase(java.util.Locale.ROOT)) {
+                    case "claude" -> ReviewProvider.CLAUDE;
+                    case "copilot" -> ReviewProvider.COPILOT;
+                    default ->
+                            throw new IllegalArgumentException(
+                                    "Unsupported provider: " + params.provider());
+                };
+        return setupProbe.probe(provider, params.checkAuthentication());
+    }
+
+    @Override
     public RecordOutcomeResult recordOutcome(RecordOutcomeParams params) {
         if (params == null) return new RecordOutcomeResult(0);
         ReviewOutcomeLog.Metadata metadata =
                 new ReviewOutcomeLog.Metadata(
                         ReviewPrompts.reviewPipelineVersion(params.reviewSupervisorEnabled()),
                         params.provider(),
-                        params.model());
+                        params.model(),
+                        StringUtils.defaultString(params.secondReviewerModel()));
         int recorded =
                 outcomeLog.record(
                         toLineComments(params.generated()),
@@ -473,7 +505,11 @@ public class ReviewSessionService implements ReviewEngineApi {
             LineComment comment =
                     new LineComment(param.file(), param.line(), param.type(), param.body());
             comment.setSeverity(param.severity());
+            comment.setCategory(param.category());
             comment.setConfidence(param.confidence());
+            if (param.corroborated()) {
+                comment.setSources(List.of("primary", "second"));
+            }
             comments.add(comment);
         }
         return comments;
@@ -499,11 +535,25 @@ public class ReviewSessionService implements ReviewEngineApi {
                     null);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
+            log.warn(
+                    "Interrupted while reading reviewed blob {} at {}",
+                    params.file(),
+                    params.commit(),
+                    LogRedactor.sanitize(interrupted));
             return new ReviewedBlobResult(null, "Reviewed file lookup was interrupted.");
         } catch (java.io.IOException
                 | java.util.concurrent.TimeoutException
                 | java.nio.file.InvalidPathException failure) {
-            return new ReviewedBlobResult(null, failure.getMessage());
+            log.warn(
+                    "Failed to read reviewed blob {} at {}",
+                    params.file(),
+                    params.commit(),
+                    LogRedactor.sanitize(failure));
+            return new ReviewedBlobResult(
+                    null,
+                    StringUtils.defaultIfBlank(
+                            LogRedactor.redact(failure.getMessage()),
+                            LogRedactor.errorType(failure)));
         }
     }
 
@@ -572,9 +622,18 @@ public class ReviewSessionService implements ReviewEngineApi {
             }
             return new WorktreeResult("created", worktreeDir.getAbsolutePath(), "");
         } catch (IOException | IllegalStateException e) {
+            log.warn(
+                    "Failed to create worktree for PR #{} in {}",
+                    params.prNumber(),
+                    params.gitRoot(),
+                    LogRedactor.sanitize(e));
             // Domain result, not an exception: hosts present an actionable failure rather than
             // granting a provider access to an arbitrary open checkout.
-            return new WorktreeResult("failed", "", String.valueOf(e.getMessage()));
+            return new WorktreeResult(
+                    "failed",
+                    "",
+                    StringUtils.defaultIfBlank(
+                            LogRedactor.redact(e.getMessage()), LogRedactor.errorType(e)));
         }
     }
 

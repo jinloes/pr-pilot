@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.jinloes.prpilot.model.ReviewProvider;
 import com.jinloes.prpilot.sidecar.pr.PrDiffResult;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collections;
@@ -19,11 +20,13 @@ public final class UserFacingErrors {
 
     private static final String TEMPLATE_RESOURCE = "user-facing-errors.yaml";
     private static final String TEMPLATE_GITHUB_AUTH_FAILED = "github_auth_failed";
+    private static final String TEMPLATE_GITHUB_SSO_REQUIRED = "github_sso_required";
     private static final String TEMPLATE_GITHUB_NOT_FOUND_OR_INACCESSIBLE =
             "github_not_found_or_inaccessible";
     private static final String TEMPLATE_GITHUB_DIFF_TOO_LARGE = "github_diff_too_large";
     private static final String TEMPLATE_PROVIDER_BINARY_MISSING = "provider_binary_missing";
     private static final String TEMPLATE_PROVIDER_NOT_INSTALLED = "provider_not_installed";
+    private static final String TEMPLATE_PROVIDER_REPO_INACCESSIBLE = "provider_repo_inaccessible";
     private static final String TEMPLATE_REQUEST_TIMED_OUT = "request_timed_out";
     private static final String TEMPLATE_GIT_TIMED_OUT = "git_timed_out";
     private static final String TEMPLATE_PROVIDER_START_TIMED_OUT = "provider_start_timed_out";
@@ -34,6 +37,8 @@ public final class UserFacingErrors {
     private static final String TEMPLATE_NETWORK_ERROR = "network_error";
     private static final String TEMPLATE_TLS_CERTIFICATE_UNTRUSTED = "tls_certificate_untrusted";
     private static final String TEMPLATE_GENERIC_FAILURE = "generic_failure";
+    private static final String TEMPLATE_BLANK_MESSAGE_FAILURE = "blank_message_failure";
+    private static final String IDEA_LOG_HINT = "See idea.log.";
     private static final Map<String, String> TEMPLATES = loadTemplates();
 
     private UserFacingErrors() {}
@@ -71,6 +76,12 @@ public final class UserFacingErrors {
                 msg, "failed to parse review json", "unexpected token", "produced no output")) {
             return template(TEMPLATE_INVALID_REVIEW_FORMAT, Map.of());
         }
+        if (containsAny(msg, "saml enforcement", "saml sso", "organization saml")) {
+            return template(TEMPLATE_GITHUB_SSO_REQUIRED, Map.of());
+        }
+        if (containsAny(msg, "repository not found", "repo not found")) {
+            return template(TEMPLATE_PROVIDER_REPO_INACCESSIBLE, Map.of());
+        }
         if (containsAny(msg, "authentication", "unauthorized", "forbidden", "not signed in")) {
             return template(
                     TEMPLATE_GITHUB_AUTH_FAILED, Map.of("auth_command", "provider auth command"));
@@ -79,7 +90,7 @@ public final class UserFacingErrors {
             return template(TEMPLATE_NETWORK_ERROR, Map.of("operation", op));
         }
 
-        return template(TEMPLATE_GENERIC_FAILURE, Map.of("operation", op));
+        return genericFailure(e, msg, op);
     }
 
     public static String forGitHub(Exception e, String operation) {
@@ -95,6 +106,9 @@ public final class UserFacingErrors {
         if (e instanceof IntellijGitHubService.GitHubOperationException operationException
                 && PrDiffResult.STATUS_DIFF_TOO_LARGE.equals(operationException.status())) {
             return template(TEMPLATE_GITHUB_DIFF_TOO_LARGE, Map.of());
+        }
+        if (containsAny(msg, "saml enforcement", "saml sso", "organization saml")) {
+            return template(TEMPLATE_GITHUB_SSO_REQUIRED, Map.of());
         }
         if (containsAny(
                 msg,
@@ -120,7 +134,22 @@ public final class UserFacingErrors {
                 "unable to reach")) {
             return template(TEMPLATE_NETWORK_ERROR, Map.of("operation", op));
         }
-        return template(TEMPLATE_GENERIC_FAILURE, Map.of("operation", op));
+        return genericFailure(e, msg, op);
+    }
+
+    private static String genericFailure(Exception e, String normalizedMsg, String operation) {
+        if (e != null && normalizedMsg.isEmpty()) {
+            return template(
+                    TEMPLATE_BLANK_MESSAGE_FAILURE,
+                    Map.of(
+                            "operation",
+                            operation,
+                            "error_type",
+                            LogRedactor.errorType(e),
+                            "log_hint",
+                            IDEA_LOG_HINT));
+        }
+        return template(TEMPLATE_GENERIC_FAILURE, Map.of("operation", operation));
     }
 
     /**
@@ -142,7 +171,7 @@ public final class UserFacingErrors {
     }
 
     static String normalize(Exception e) {
-        return StringUtils.defaultString(e.getMessage()).trim().toLowerCase();
+        return e == null ? "" : StringUtils.defaultString(e.getMessage()).trim().toLowerCase();
     }
 
     private static boolean containsAny(String source, String... needles) {

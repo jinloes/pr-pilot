@@ -3,9 +3,9 @@ package com.jinloes.prpilot.review;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.copilot.rpc.McpHttpServerConfig;
-import com.github.copilot.rpc.McpServerConfig;
-import com.github.copilot.rpc.McpStdioServerConfig;
+import com.microsoft.copilot.rpc.McpHttpServerConfig;
+import com.microsoft.copilot.rpc.McpServerConfig;
+import com.microsoft.copilot.rpc.McpStdioServerConfig;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

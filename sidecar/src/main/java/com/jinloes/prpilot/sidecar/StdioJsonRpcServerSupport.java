@@ -141,14 +141,24 @@ final class StdioJsonRpcServerSupport {
             if (!comment.isObject()
                     || !hasOnlyFields(
                             comment,
-                            Set.of("file", "line", "type", "body", "severity", "confidence"))
+                            Set.of(
+                                    "file",
+                                    "line",
+                                    "type",
+                                    "body",
+                                    "severity",
+                                    "category",
+                                    "confidence",
+                                    "corroborated"))
                     || !comment.path("file").isTextual()
                     || !comment.path("line").isIntegralNumber()
                     || !comment.path("line").canConvertToInt()
                     || !comment.path("body").isTextual()
                     || (comment.has("type") && !comment.path("type").isTextual())
                     || (comment.has("severity") && !comment.path("severity").isTextual())
-                    || (comment.has("confidence") && !comment.path("confidence").isTextual())) {
+                    || (comment.has("category") && !comment.path("category").isTextual())
+                    || (comment.has("confidence") && !comment.path("confidence").isTextual())
+                    || (comment.has("corroborated") && !comment.path("corroborated").isBoolean())) {
                 return null;
             }
             comments.add(
@@ -158,7 +168,9 @@ final class StdioJsonRpcServerSupport {
                             optionalText(comment, "type"),
                             comment.path("body").textValue(),
                             optionalText(comment, "severity"),
-                            optionalText(comment, "confidence")));
+                            optionalText(comment, "category"),
+                            optionalText(comment, "confidence"),
+                            comment.path("corroborated").asBoolean(false)));
         }
         return comments;
     }

@@ -41,13 +41,6 @@ export const MIRRORS = [
     extra: 'Each host stores its own token-free index (~/.pr-pilot/pending-prs.json vs VS Code globalState).',
   },
   {
-    what: 'CLI binary-probing candidates',
-    sides: [
-      [`review-engine/${JAVA}/review/BinaryLocator.java`],
-      [`${VSCODE}/claude.ts`, `${VSCODE}/copilot.ts`],
-    ],
-  },
-  {
     what: 'Copilot model selector command',
     sides: [
       [`intellij-plugin/${JAVA}/settings/CopilotModelSelector.java`],
@@ -142,10 +135,10 @@ function matching(files, patterns) {
 }
 
 /** Returns one reminder per mirror entry that the changed paths touch. */
-export function mirrorNotes(changedPaths) {
+export function mirrorNotes(changedPaths, mirrors = MIRRORS) {
   const files = [...new Set(changedPaths.map(normalize).filter(Boolean))]
   const notes = []
-  for (const mirror of MIRRORS) {
+  for (const mirror of mirrors) {
     const [first, second] = mirror.sides
     const changedFirst = matching(files, first)
     const changedSecond = mirror.oneWay ? [] : matching(files, second)

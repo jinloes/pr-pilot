@@ -13,6 +13,7 @@ import com.jinloes.prpilot.model.LineComment;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.settings.PluginSettings;
 import com.jinloes.prpilot.settings.PluginSettingsConfigurable;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.commons.lang3.StringUtils;
@@ -116,23 +117,22 @@ final class WebviewBridgeHandler {
                 case "submitReview" -> {
                     String verdict = node.path("verdict").asText();
                     String comment = node.path("comment").asText("");
-                    getApplication()
-                            .executeOnPooledThread(
-                                    () -> {
-                                        synchronized (panel.draftMutationLock) {
-                                            panel.handleSubmitReview(
-                                                    number, owner, repo, verdict, comment);
-                                        }
-                                    });
+                    runBridgeTask(
+                            "submitReview",
+                            () -> {
+                                synchronized (panel.draftMutationLock) {
+                                    panel.handleSubmitReview(number, owner, repo, verdict, comment);
+                                }
+                            });
                 }
                 case "deleteDraft" ->
-                        getApplication()
-                                .executeOnPooledThread(
-                                        () -> {
-                                            synchronized (panel.draftMutationLock) {
-                                                panel.handleDeleteDraft(number, owner, repo);
-                                            }
-                                        });
+                        runBridgeTask(
+                                "deleteDraft",
+                                () -> {
+                                    synchronized (panel.draftMutationLock) {
+                                        panel.handleDeleteDraft(number, owner, repo);
+                                    }
+                                });
                 case "clearChat" -> panel.chats.clear(node.path("operationId").asText());
                 case "cancelChat" -> panel.chats.cancel(node.path("operationId").asText());
                 case "saveRepositoryInstructions" ->
@@ -147,15 +147,29 @@ final class WebviewBridgeHandler {
                     String question = node.path("question").asText();
                     ChatContext.Attachment attachment = chatAttachment(node);
                     String operationId = node.path("operationId").asText();
-                    getApplication()
-                            .executeOnPooledThread(
-                                    () -> panel.chats.ask(question, attachment, operationId));
+                    runBridgeTask(
+                            "askClaude", () -> panel.chats.ask(question, attachment, operationId));
                 }
                 default -> log.warn("Unknown bridge message type: {}", type);
             }
         } catch (Exception e) {
-            log.warn("Bridge message error: {}", e.getMessage());
+            log.warn("Bridge message error", LogRedactor.sanitize(e));
         }
+    }
+
+    private static void runBridgeTask(String messageType, Runnable task) {
+        getApplication()
+                .executeOnPooledThread(
+                        () -> {
+                            try {
+                                task.run();
+                            } catch (RuntimeException e) {
+                                log.warn(
+                                        "Unhandled failure in '{}' bridge task",
+                                        messageType,
+                                        LogRedactor.sanitize(e));
+                            }
+                        });
     }
 
     private void saveDraft(JsonNode node, int number, String owner, String repo) {
@@ -181,25 +195,25 @@ final class WebviewBridgeHandler {
                 bridgeOrphans = parsed;
             }
         } catch (Exception e) {
-            log.warn("saveDraft: failed to parse review data from bridge: {}", e.getMessage());
+            log.warn("saveDraft: failed to parse review data from bridge", LogRedactor.sanitize(e));
         }
         final ReviewResult finalResult = bridgeResult;
         final ReviewResult finalGeneratedResult = bridgeGeneratedResult;
         final List<LineComment> finalOrphans = bridgeOrphans;
-        getApplication()
-                .executeOnPooledThread(
-                        () -> {
-                            synchronized (panel.draftMutationLock) {
-                                panel.handleSaveDraft(
-                                        number,
-                                        owner,
-                                        repo,
-                                        saveId,
-                                        finalResult,
-                                        finalGeneratedResult,
-                                        finalOrphans);
-                            }
-                        });
+        runBridgeTask(
+                "saveDraft",
+                () -> {
+                    synchronized (panel.draftMutationLock) {
+                        panel.handleSaveDraft(
+                                number,
+                                owner,
+                                repo,
+                                saveId,
+                                finalResult,
+                                finalGeneratedResult,
+                                finalOrphans);
+                    }
+                });
     }
 
     /** Only a JSON {@code true} opts in; Jackson's lenient coercion would also accept "true". */

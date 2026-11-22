@@ -62,7 +62,12 @@ public final class ReviewOutcomeLog {
     }
 
     /** Identifies the pipeline that produced a review, so outcomes can be segmented by it. */
-    public record Metadata(String promptVersion, String provider, String model) {}
+    public record Metadata(
+            String promptVersion, String provider, String model, String secondReviewerModel) {
+        public Metadata(String promptVersion, String provider, String model) {
+            this(promptVersion, provider, model, "");
+        }
+    }
 
     /**
      * One JSONL line. Deliberately carries no file path or comment text — only an identity hash.
@@ -72,12 +77,14 @@ public final class ReviewOutcomeLog {
             String promptVersion,
             String provider,
             String model,
+            String secondReviewerModel,
             String commentFingerprint,
             String outcome,
             String type,
             String severity,
             String category,
-            String confidence) {}
+            String confidence,
+            boolean corroborated) {}
 
     private final Path logFile;
 
@@ -184,18 +191,21 @@ public final class ReviewOutcomeLog {
 
     private static OutcomeRecord toRecord(
             String recordedAt, Metadata metadata, LineComment comment, Outcome outcome) {
-        Metadata safe = metadata == null ? new Metadata("", "", "") : metadata;
+        Metadata safe = metadata == null ? new Metadata("", "", "", "") : metadata;
+        boolean corroborated = comment.getSources() != null && comment.getSources().size() >= 2;
         return new OutcomeRecord(
                 recordedAt,
                 StringUtils.defaultString(safe.promptVersion()),
                 StringUtils.defaultString(safe.provider()),
                 StringUtils.defaultString(safe.model()),
+                StringUtils.defaultString(safe.secondReviewerModel()),
                 fingerprint(comment),
                 outcome.name().toLowerCase(Locale.ROOT),
                 comment.getType(),
                 comment.getSeverity(),
                 comment.getCategory(),
-                comment.getConfidence());
+                comment.getConfidence(),
+                corroborated);
     }
 
     private static String locationKey(LineComment comment) {

@@ -227,5 +227,51 @@ class BaseCommitContextCallSitesTest extends BaseCommitContextTestSupport {
             assertThat(result.fileHistory()).contains("base");
             assertThat(result.callSites()).isEmpty();
         }
+
+        @Test
+        void listsSwitchAndWhenSitesForAddedEnumVariantsEvenWhenTypeHasManyReferences()
+                throws Exception {
+            write("src/OrderStatus.java", "public enum OrderStatus {\n  PENDING,\n  PAID\n}\n");
+            write(
+                    "src/OrderRouter.java",
+                    "class OrderRouter {\n"
+                            + "  String route(OrderStatus status) {\n"
+                            + "    return switch (status) {\n"
+                            + "      case PENDING -> \"hold\";\n"
+                            + "      default -> \"ship\";\n"
+                            + "    };\n"
+                            + "  }\n"
+                            + "}\n");
+            StringBuilder manyNonSwitchRefs = new StringBuilder();
+            for (int i = 0; i <= BaseCommitContext.MAX_LISTED_REFERENCES + 5; i++) {
+                manyNonSwitchRefs.append("OrderStatus s").append(i).append(" = null;\n");
+            }
+            write("src/AuditLog.java", manyNonSwitchRefs.toString());
+            String base = commit("base");
+
+            InspectionManifest manifest =
+                    InspectionManifest.fromDiff(
+                            """
+                            diff --git a/src/OrderStatus.java b/src/OrderStatus.java
+                            --- a/src/OrderStatus.java
+                            +++ b/src/OrderStatus.java
+                            @@ -1,4 +1,5 @@
+                             public enum OrderStatus {
+                               PENDING,
+                               PAID,
+                            +  REFUNDED
+                             }
+                            """);
+
+            String sites = context.resolve(repo, base, manifest, List.of(), () -> {}).callSites();
+
+            assertThat(sites)
+                    .contains(
+                            "## OrderStatus (added variant REFUNDED in src/OrderStatus.java;"
+                                    + " check switch/when/match dispatch sites for unhandled or"
+                                    + " default arms)")
+                    .contains("src/OrderRouter.java:3: return switch (status) {")
+                    .doesNotContain("src/AuditLog.java");
+        }
     }
 }

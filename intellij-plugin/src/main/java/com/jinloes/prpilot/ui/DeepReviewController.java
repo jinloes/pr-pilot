@@ -9,17 +9,23 @@ import com.jinloes.prpilot.review.SemanticReviewService;
 import com.jinloes.prpilot.review.SemanticWorktreeStore;
 import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ErrorMsg;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Owns IntelliJ-assisted (deep) review preparation and Continue correlation. State transitions
  * happen under the host panel's lock so they stay consistent with the panel's PR selection.
  */
 final class DeepReviewController {
+
+    private static final Logger log = LoggerFactory.getLogger(DeepReviewController.class);
 
     /** The panel members the deep-review flow reads; implemented by {@link WebviewPanel}. */
     interface Host {
@@ -188,6 +194,10 @@ final class DeepReviewController {
                                     "Open this exact worktree in IntelliJ, enable MCP and import Gradle. Continue may first arm tracking; then run one manual Gradle sync and Retry.");
                         }
                     } catch (Exception error) {
+                        log.warn(
+                                "Deep review preparation failed for {}",
+                                key,
+                                LogRedactor.sanitize(error));
                         synchronized (hostLock) {
                             if (!host.isDisposed()
                                     && revision == deepPreparationRevision
@@ -196,7 +206,9 @@ final class DeepReviewController {
                                         new ErrorMsg(
                                                 "reviewError",
                                                 key,
-                                                String.valueOf(error.getMessage())));
+                                                deepErrorMessage(
+                                                        "prepare IntelliJ-assisted review",
+                                                        error)));
                         }
                     }
                 });
@@ -249,6 +261,10 @@ final class DeepReviewController {
                         validateHead(pending, fresh);
                         io.generate(pending, operationId, server);
                     } catch (Exception error) {
+                        log.warn(
+                                "Deep review continuation failed for {}",
+                                key,
+                                LogRedactor.sanitize(error));
                         synchronized (hostLock) {
                             if (!host.isDisposed()
                                     && pending.revision() == deepPreparationRevision
@@ -262,7 +278,9 @@ final class DeepReviewController {
                                         new ErrorMsg(
                                                 "reviewError",
                                                 key,
-                                                String.valueOf(error.getMessage())));
+                                                deepErrorMessage(
+                                                        "continue IntelliJ-assisted review",
+                                                        error)));
                             }
                         }
                     }
@@ -310,6 +328,10 @@ final class DeepReviewController {
                                         "retained",
                                         io.list()));
                     } catch (Exception error) {
+                        log.warn(
+                                "Deep review maintenance '{}' failed",
+                                input.path("type").asText(),
+                                LogRedactor.sanitize(error));
                         host.pushMessage(
                                 java.util.Map.of(
                                         "type",
@@ -317,8 +339,20 @@ final class DeepReviewController {
                                         "operationId",
                                         input.path("operationId").asText(),
                                         "message",
-                                        String.valueOf(error.getMessage())));
+                                        deepErrorMessage(
+                                                "maintain IntelliJ-assisted worktrees", error)));
                     }
                 });
+    }
+
+    private static String deepErrorMessage(String operation, Exception error) {
+        if (StringUtils.isBlank(error.getMessage())) {
+            return "Couldn't "
+                    + operation
+                    + " ("
+                    + LogRedactor.errorType(error)
+                    + "). See idea.log.";
+        }
+        return error.getMessage();
     }
 }

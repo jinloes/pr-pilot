@@ -135,8 +135,14 @@ final class WebviewPanelSupport {
                 : ClaudeService.isBinaryAvailable();
     }
 
+    private static ReviewProvider configuredReviewProvider() {
+        return com.intellij.openapi.application.ApplicationManager.getApplication() != null
+                ? PluginSettings.getInstance().getReviewProvider()
+                : ReviewProvider.CLAUDE;
+    }
+
     static WebviewBridgeMessages.ProviderReadinessDto currentProviderReadiness() {
-        ReviewProvider provider = PluginSettings.getInstance().getReviewProvider();
+        ReviewProvider provider = configuredReviewProvider();
         boolean available = isProviderBinaryAvailable(provider);
         return new WebviewBridgeMessages.ProviderReadinessDto(
                 provider == ReviewProvider.COPILOT ? "copilot" : "claude",
@@ -151,7 +157,10 @@ final class WebviewPanelSupport {
 
     static WebviewBridgeMessages.ProviderReadinessDto providerReadiness(
             ProviderSetupProbe.Result setup) {
-        ReviewProvider provider = PluginSettings.getInstance().getReviewProvider();
+        if (setup == null) {
+            return currentProviderReadiness();
+        }
+        ReviewProvider provider = configuredReviewProvider();
         String detail;
         if (!setup.available()) {
             detail = UserFacingErrors.forProviderNotInstalled(provider);

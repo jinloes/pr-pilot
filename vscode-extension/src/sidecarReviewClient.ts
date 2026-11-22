@@ -1,10 +1,16 @@
 import * as path from 'path';
 import type { ReviewResult } from './models';
-import { parseChatResult, parseCopilotModelsResult, parseReviewResult } from './sidecarProtocol';
+import {
+    parseChatResult,
+    parseCopilotModelsResult,
+    parseProviderSetupResult,
+    parseReviewResult,
+} from './sidecarProtocol';
 import { SidecarGitHubClient } from './sidecarGitHubClient';
 import type {
     DeepReviewPreparation,
     RetainedDeepReview,
+    ReviewProvider,
     SidecarChatParams,
     SidecarChatResult,
     SidecarCopilotModelsResult,
@@ -12,6 +18,7 @@ import type {
     SidecarGitHubAuthResult,
     SidecarPrListResult,
     SidecarPrSearchResult,
+    SidecarProviderSetupResult,
     SidecarStarredReposResult,
     SidecarExistingReviewsResult,
     SidecarPrDetailResult,
@@ -81,11 +88,13 @@ export class SidecarReviewClient extends SidecarGitHubClient {
         reviewSupervisorEnabled: boolean,
         generated: OutcomeComment[],
         submitted: OutcomeComment[],
+        secondReviewerModel = '',
     ): Promise<void> {
         try {
             await this.request('reviews/recordOutcome', {
                 provider,
                 model,
+                secondReviewerModel,
                 reviewSupervisorEnabled,
                 generated,
                 submitted,
@@ -134,6 +143,22 @@ export class SidecarReviewClient extends SidecarGitHubClient {
             { timeoutMs: MODEL_DISCOVERY_TIMEOUT_MS },
         );
         return this.parseResult('Copilot model discovery', parseCopilotModelsResult, value);
+    }
+
+    /**
+     * Probes provider CLI availability and optional non-interactive authentication readiness via
+     * the shared `review-engine` `ProviderSetupProbe`, retiring host-local CLI binary/auth probing.
+     */
+    async probeProviderSetup(
+        provider: ReviewProvider,
+        checkAuthentication = false,
+    ): Promise<SidecarProviderSetupResult> {
+        await this.initialize();
+        const value = await this.requestRaw('reviews/probeProviderSetup', {
+            provider,
+            checkAuthentication,
+        });
+        return this.parseResult('provider setup probe', parseProviderSetupResult, value);
     }
 
     /*

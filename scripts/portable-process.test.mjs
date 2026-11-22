@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { gradleWrapperInvocation, npmCliInvocation } from './portable-process.mjs'
+import {
+  gradleWrapperInvocation,
+  npmCliInvocation,
+  resolveNpmInvocation,
+} from './portable-process.mjs'
 
 test('npm scripts invoke the npm JavaScript CLI instead of a Windows cmd shim', () => {
   const invocation = npmCliInvocation(
@@ -38,4 +42,27 @@ test('Gradle uses the wrapper main class instead of a Windows batch file', () =>
     '*BinaryLocatorTest',
   ])
   assert.doesNotMatch(invocation.command, /\.(?:cmd|bat)$/i)
+})
+
+test('resolveNpmInvocation locates bundled npm-cli.js or falls back without shell:true', () => {
+  const voltaCli =
+    'C:\\Users\\dev\\AppData\\Local\\Volta\\tools\\image\\node\\26.13.0\\node_modules\\npm\\bin\\npm-cli.js'
+  const direct = resolveNpmInvocation(['run', 'lint'], {
+    platform: 'win32',
+    nodeExecutable: 'C:\\Users\\dev\\AppData\\Local\\Volta\\tools\\image\\node\\26.13.0\\node.exe',
+    env: {},
+    existsSync: (target) => target === voltaCli,
+  })
+  assert.equal(direct.shell, false)
+  assert.deepEqual(direct.args, [voltaCli, 'run', 'lint'])
+
+  const fallback = resolveNpmInvocation(['exec', '--', 'tsc', '--noEmit'], {
+    platform: 'win32',
+    nodeExecutable: 'C:\\custom\\node.exe',
+    env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    existsSync: () => false,
+  })
+  assert.equal(fallback.shell, false)
+  assert.equal(fallback.windowsVerbatimArguments, true)
+  assert.equal(fallback.command, 'C:\\Windows\\System32\\cmd.exe')
 })

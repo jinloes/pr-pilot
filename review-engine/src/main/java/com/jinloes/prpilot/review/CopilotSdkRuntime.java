@@ -1,22 +1,34 @@
 package com.jinloes.prpilot.review;
 
-import com.github.copilot.CopilotClient;
-import com.github.copilot.CopilotSession;
-import com.github.copilot.SystemMessageMode;
-import com.github.copilot.generated.AssistantMessageDeltaEvent;
-import com.github.copilot.generated.AssistantMessageEvent;
-import com.github.copilot.generated.SessionErrorEvent;
-import com.github.copilot.generated.ToolExecutionStartEvent;
-import com.github.copilot.rpc.BuiltInTools;
-import com.github.copilot.rpc.CopilotClientMode;
-import com.github.copilot.rpc.CopilotClientOptions;
-import com.github.copilot.rpc.InfiniteSessionConfig;
-import com.github.copilot.rpc.McpServerConfig;
-import com.github.copilot.rpc.MessageOptions;
-import com.github.copilot.rpc.PermissionHandler;
-import com.github.copilot.rpc.PermissionRequestResult;
-import com.github.copilot.rpc.SessionConfig;
-import com.github.copilot.rpc.SystemMessageConfig;
+import com.microsoft.copilot.CopilotClient;
+import com.microsoft.copilot.CopilotSession;
+import com.microsoft.copilot.SystemMessageMode;
+import com.microsoft.copilot.generated.AssistantMessageDeltaEvent;
+import com.microsoft.copilot.generated.AssistantMessageEvent;
+import com.microsoft.copilot.generated.SessionErrorEvent;
+import com.microsoft.copilot.generated.ToolExecutionStartEvent;
+import com.microsoft.copilot.rpc.BuiltInTools;
+import com.microsoft.copilot.rpc.CopilotClientMode;
+import com.microsoft.copilot.rpc.CopilotClientOptions;
+import com.microsoft.copilot.rpc.CreateSessionInstructionOptions;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
+import com.microsoft.copilot.rpc.InfiniteSessionConfig;
+import com.microsoft.copilot.rpc.McpServerConfig;
+import com.microsoft.copilot.rpc.MessageOptions;
+import com.microsoft.copilot.rpc.PermissionHandler;
+import com.microsoft.copilot.rpc.PermissionRequestResult;
+import com.microsoft.copilot.rpc.RuntimeConnection;
+import com.microsoft.copilot.rpc.SessionAgentOptions;
+import com.microsoft.copilot.rpc.SessionEventOptions;
+import com.microsoft.copilot.rpc.SessionHookOptions;
+import com.microsoft.copilot.rpc.SessionInferenceOptions;
+import com.microsoft.copilot.rpc.SessionMcpOptions;
+import com.microsoft.copilot.rpc.SessionPermissionOptions;
+import com.microsoft.copilot.rpc.SessionPluginOptions;
+import com.microsoft.copilot.rpc.SessionSkillOptions;
+import com.microsoft.copilot.rpc.SessionStateOptions;
+import com.microsoft.copilot.rpc.SessionToolOptions;
+import com.microsoft.copilot.rpc.SystemMessageConfig;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -206,10 +218,14 @@ final class CopilotSdkRuntime {
             this.client =
                     new CopilotClient(
                             new CopilotClientOptions()
-                                    .setCliPath(request.cliPath())
-                                    .setCwd(request.workingDir().getAbsolutePath())
-                                    .setEnvironment(request.environment())
-                                    .setMode(CopilotClientMode.COPILOT_CLI)
+                                    // Keep the runtime in a spawned CLI subprocess so a native
+                                    // runtime fault can never crash the host IDE or sidecar JVM.
+                                    .setRuntime(
+                                            RuntimeConnection.forSpawnedStdio(request.cliPath())
+                                                    .setWorkingDirectory(
+                                                            request.workingDir().getAbsolutePath())
+                                                    .setEnvironment(request.environment()))
+                                    .setMode(CopilotClientMode.CODING_AGENT)
                                     .setAutoStart(false));
         }
 
@@ -222,7 +238,7 @@ final class CopilotSdkRuntime {
         public RuntimeSession createSession(SessionRequest sessionRequest) throws Exception {
             AtomicReference<CopilotSession> liveSession = new AtomicReference<>();
             ToolBudget toolBudget = new ToolBudget();
-            SessionConfig config =
+            CreateSessionOptions config =
                     buildSessionConfig(
                             sessionRequest,
                             toolBudget,
@@ -300,10 +316,9 @@ final class CopilotSdkRuntime {
 
         @Override
         public String sendAndWait(String prompt, long timeoutMs) throws Exception {
-            return session.sendAndWait(new MessageOptions().setPrompt(prompt), timeoutMs)
-                    .get()
-                    .getData()
-                    .content();
+            AssistantMessageEvent event =
+                    session.sendAndWait(new MessageOptions().setPrompt(prompt), timeoutMs).get();
+            return event != null && event.getData() != null ? event.getData().content() : null;
         }
 
         @Override
@@ -382,7 +397,7 @@ final class CopilotSdkRuntime {
         return servers;
     }
 
-    static SessionConfig buildSessionConfig(
+    static CreateSessionOptions buildSessionConfig(
             SessionRequest sessionRequest, ToolBudget toolBudget, Runnable onRunawayToolLoop) {
         PermissionHandler permissionHandler =
                 (permissionRequest, ctx) ->
@@ -393,12 +408,16 @@ final class CopilotSdkRuntime {
                                         sessionRequest.allowReadTools(),
                                         toolBudget,
                                         onRunawayToolLoop));
-        SessionConfig config =
-                new SessionConfig()
-                        .setOnPermissionRequest(permissionHandler)
-                        .setStreaming(true)
+        SessionToolOptions tools = new SessionToolOptions();
+        CreateSessionOptions config =
+                new CreateSessionOptions()
+                        .setPermissions(
+                                new SessionPermissionOptions().setOnRequest(permissionHandler))
+                        .setEvents(new SessionEventOptions().setStreaming(true))
                         .setWorkingDirectory(sessionRequest.workingDir().getAbsolutePath())
-                        .setReasoningEffort(sessionRequest.effort())
+                        .setInference(
+                                new SessionInferenceOptions()
+                                        .setReasoningEffort(sessionRequest.effort()))
                         .setSystemMessage(
                                 new SystemMessageConfig()
                                         .setMode(SystemMessageMode.REPLACE)
@@ -410,29 +429,39 @@ final class CopilotSdkRuntime {
                         // untrusted PR-branch worktree; trusted repo guidance comes from
                         // BaseCommitContext and trusted MCP servers are injected explicitly below.
                         .setEnableConfigDiscovery(false)
-                        .setSkipCustomInstructions(true)
-                        .setEnableSkills(false)
-                        .setEnableFileHooks(false)
-                        .setSkillDirectories(List.of())
-                        .setAgentDirectories(List.of())
-                        .setHookDirectories(List.of())
+                        .setInstructions(
+                                new CreateSessionInstructionOptions()
+                                        .setSkipCustomInstructions(true))
+                        .setSkills(
+                                new SessionSkillOptions()
+                                        .setEnabled(false)
+                                        .setDirectories(List.of()))
+                        .setAgents(new SessionAgentOptions().setDirectories(List.of()))
+                        .setHooks(
+                                new SessionHookOptions()
+                                        .setEnableRepositoryHooks(false)
+                                        .setDirectories(List.of()))
                         // Disable infinite context compaction so a single review pass cannot loop
                         // across multiple context windows of file reads.
-                        .setInfiniteSessions(new InfiniteSessionConfig().setEnabled(false))
+                        .setState(
+                                new SessionStateOptions()
+                                        .setInfiniteSessions(
+                                                new InfiniteSessionConfig().setEnabled(false)))
                         // Always pass an explicit map (including empty) — leaving mcpServers null
                         // lets the CLI inherit ~/.copilot/mcp-config.json even when inheritMcp is
                         // false, and read-only remote MCP tools can bypass onPermissionRequest.
-                        .setMcpServers(mcpServers(sessionRequest));
+                        .setMcp(new SessionMcpOptions().setServers(mcpServers(sessionRequest)))
+                        .setTools(tools);
         if (!sessionRequest.allowReadTools()) {
-            config.setAvailableTools(List.of());
-            config.setPluginDirectories(List.of());
+            tools.setAvailableTools(List.of());
+            config.setPlugins(new SessionPluginOptions().setDirectories(List.of()));
         } else if (!sessionRequest.allowsMcp()) {
-            config.setAvailableTools(READ_ONLY_TOOLS);
-            config.setPluginDirectories(List.of());
+            tools.setAvailableTools(READ_ONLY_TOOLS);
+            config.setPlugins(new SessionPluginOptions().setDirectories(List.of()));
         } else {
-            config.setExcludedTools(EXCLUDED_NON_REVIEW_TOOLS);
+            tools.setExcludedTools(EXCLUDED_NON_REVIEW_TOOLS);
             if (!sessionRequest.inheritMcp()) {
-                config.setPluginDirectories(List.of());
+                config.setPlugins(new SessionPluginOptions().setDirectories(List.of()));
             }
         }
         if (StringUtils.isNotBlank(sessionRequest.model())) {
@@ -495,7 +524,13 @@ final class CopilotSdkRuntime {
             Thread.currentThread().interrupt();
             throw new IOException("copilot " + operation + " failed", interrupted);
         } catch (ExecutionException execution) {
-            throw new IOException("copilot " + operation + " failed", execution);
+            Throwable cause = execution.getCause();
+            String detail = cause != null ? StringUtils.trimToNull(cause.getMessage()) : null;
+            throw new IOException(
+                    detail != null
+                            ? "copilot " + operation + " failed: " + detail
+                            : "copilot " + operation + " failed",
+                    execution);
         }
     }
 }

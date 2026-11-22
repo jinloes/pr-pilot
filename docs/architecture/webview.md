@@ -41,7 +41,7 @@ webview uses in-DOM dialogs with explicit focus entry, trapping, restoration, an
 cancellation.
 
 The IntelliJ host uses JCEF off-screen rendering (OSR) and attaches its layout-managed component
-directly to the tool-window content. Do not replace this with heavyweight native rendering or call
+directly to the editor-tab container. Do not replace this with heavyweight native rendering or call
 `CefBrowser.wasResized` during ordinary Swing layout: on macOS, the native child window can retain
 an intermediate height and clip the webview. JCEF OSR can also retain stale pixels after DOM
 elements move without changing the browser viewport; dynamic webview geometry changes must send
@@ -243,13 +243,16 @@ rewrites only packaged local asset URIs and nonces scripts; the fallback error p
 resources, and dynamic error text is HTML-escaped.
 
 ### IntelliJ webview surfaces
-The IntelliJ `PR Pilot` tool window is the sole primary interactive surface. It owns one full
-`WebviewPanel` directly, so selecting the tool-window stripe always shows the real review UI without
-an editor-tab handoff, launcher, or duplicate webview lifecycle. Hiding the tool window preserves
-the session; removing its content or closing the project disposes the panel and its
-JCEF/loopback/worktree resources. This intentionally differs from VS Code's editor-panel container
-because IntelliJ tool windows can directly and reliably host the persistent JCEF Swing component; it
-is a container difference, not a feature difference. The plugin declares the
-`com.intellij.modules.jcef` bundled dependency in both `plugin.xml` and the IntelliJ Platform Gradle
-configuration; keep both declarations because Toolbox-based IDE distributions provide JCEF as a
-separate bundled module.
+Like VS Code, the IntelliJ host runs the full shared webview (PR discovery, review, diff, and chat)
+inside a main-window editor tab rather than a docked side tool window. `PrReviewFileEditorProvider`
+opens a non-persistent `PrReviewVirtualFile` (`LightVirtualFile` implementing
+`VirtualFileWithoutContent`), and `PrReviewEditorTabTitleProvider` renders `"PR Pilot"` when idle
+or `"PR Pilot · #<number>"` when a PR is selected. The `PR Pilot` tool window
+(`PRToolWindowFactory`) is a lightweight Swing stripe launcher that hosts no JCEF browser; showing
+it (`PrPilotToolWindowListener.toolWindowShown` or `createToolWindowContent`) hides the side tool
+window first—so persisted side-dock width neither steals editor space nor reclaims focus—and then
+opens or focuses the main editor tab (`OpenPrPilotAction` adds **Tools > Open PR Pilot**).
+`PrPilotUiCoordinator` wires initial `loadPRs` on `onPageReady`, queues notification `activatePR`
+until `prListLoaded` succeeds, avoids re-activating an already-active PR, seeds split tabs, and
+resets tab title state when the last tab closes. Keep `com.intellij.modules.jcef` declared in both
+`plugin.xml` and Gradle for Toolbox IDE distributions.

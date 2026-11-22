@@ -24,11 +24,33 @@ final class StdioJsonRpcServerReviewHandlers {
     void register(Map<String, StdioJsonRpcServer.MethodHandler> handlers) {
         handlers.put("reviews/readGuidelines", this::readGuidelines);
         handlers.put("reviews/listCopilotModels", this::listCopilotModels);
+        handlers.put("reviews/probeProviderSetup", this::probeProviderSetup);
         handlers.put("reviews/findGitRoot", this::findGitRoot);
         handlers.put("reviews/recordOutcome", this::recordReviewOutcome);
         handlers.put("reviews/createWorktree", this::createWorktree);
         handlers.put("reviews/readReviewedBlob", this::readReviewedBlob);
         handlers.put("reviews/removeWorktree", this::removeWorktree);
+    }
+
+    private ObjectNode probeProviderSetup(JsonNode request) {
+        JsonNode params = request.get("params");
+        if (params == null
+                || !params.isObject()
+                || !support.hasOnlyFields(params, Set.of("provider", "checkAuthentication"))
+                || !params.path("provider").isTextual()
+                || (params.has("checkAuthentication")
+                        && !params.path("checkAuthentication").isBoolean())) {
+            return support.error(support.requestId(request), -32602, "Invalid params");
+        }
+        String provider = params.path("provider").textValue();
+        if (!"claude".equals(provider) && !"copilot".equals(provider)) {
+            return support.error(support.requestId(request), -32602, "Invalid params");
+        }
+        return support.result(
+                support.requestId(request),
+                review.probeProviderSetup(
+                        new ReviewEngineApi.ProbeProviderSetupParams(
+                                provider, params.path("checkAuthentication").asBoolean(false))));
     }
 
     private ObjectNode listCopilotModels(JsonNode request) {
@@ -107,11 +129,15 @@ final class StdioJsonRpcServerReviewHandlers {
                         Set.of(
                                 "provider",
                                 "model",
+                                "secondReviewerModel",
                                 "reviewSupervisorEnabled",
                                 "generated",
                                 "submitted"))
                 || !params.path("provider").isTextual()
                 || !params.path("model").isTextual()
+                || (params.has("secondReviewerModel")
+                        && !params.path("secondReviewerModel").isNull()
+                        && !params.path("secondReviewerModel").isTextual())
                 || (params.has("reviewSupervisorEnabled")
                         && !params.path("reviewSupervisorEnabled").isBoolean())) {
             return support.error(support.requestId(request), -32602, "Invalid params");
@@ -130,6 +156,7 @@ final class StdioJsonRpcServerReviewHandlers {
                             new ReviewEngineApi.RecordOutcomeParams(
                                     params.path("provider").textValue(),
                                     params.path("model").textValue(),
+                                    support.optionalText(params, "secondReviewerModel"),
                                     params.path("reviewSupervisorEnabled").asBoolean(false),
                                     generated,
                                     submitted));

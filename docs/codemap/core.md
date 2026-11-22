@@ -24,4 +24,6 @@ Plain Java 21 shared models with no host dependencies.
 - `model/ReviewProvider.java` - Claude/Copilot provider enum.
 - `model/SourceInventory.java` - Strict required/nullable wire shapes, canonical identities,
   source manifest digest and shared protocol limits; no READY state.
+- `util/LogRedactor.java` - Redacts tokens, bearer headers, API keys, and URL credentials from log
+  strings and `Throwable` graphs while preserving exception class names and stack traces.
 - Tests: `core/src/test/java/com/jinloes/prpilot/`.

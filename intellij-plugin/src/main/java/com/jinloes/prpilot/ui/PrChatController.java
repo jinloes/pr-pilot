@@ -11,6 +11,7 @@ import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ChatChunkMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ChatResponseMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ErrorMsg;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -118,7 +119,10 @@ final class PrChatController {
         try {
             chatService = host.resolvePrClaudeService(pr);
         } catch (Exception e) {
-            log.warn("Worktree resolution for PR #{} failed: {}", pr.getNumber(), e.getMessage());
+            log.warn(
+                    "Worktree resolution for PR #{} failed",
+                    pr.getNumber(),
+                    LogRedactor.sanitize(e));
             host.pushMessage(
                     new ErrorMsg(
                             "chatError",

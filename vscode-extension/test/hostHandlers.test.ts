@@ -16,6 +16,12 @@ function host(settings: Record<string, unknown> = {}) {
         listPullRequests: async () => ({
             status: 'ok', prs: [], resultLimit: 50, limited: false, reviewStatusAvailable: true,
         }),
+        probeProviderSetup: async () => ({
+            available: true,
+            binaryStatus: 'ready',
+            authenticationStatus: 'ready',
+            authCommand: 'claude auth login',
+        }),
         cancelReview: async (operationId: string) => { cancelled.push(operationId); },
     };
     const openedDocs: Array<{ uri: Record<string, unknown>; options: Record<string, unknown> }> = [];
@@ -69,7 +75,7 @@ function host(settings: Record<string, unknown> = {}) {
         };
         const expose = path.basename(file) === 'extension.js'
             ? '\nexports.testHost = {refresh: handleRefreshPRs, select: handleSelectPR, cancelChat: handleCancelChat, generate: handleGenerateReview, '
-                + 'openFile: handleOpenFile, saveRepositoryInstructions: handleSaveRepositoryInstructions, setClient: c => {sidecarClient=c}};'
+                + 'openFile: handleOpenFile, saveRepositoryInstructions: handleSaveRepositoryInstructions, setClient: c => {sidecarClient = Object.assign({}, sidecarClient, c)}};'
             : '';
         runInNewContext(readFileSync(file, 'utf8') + expose, { module, exports: module.exports,
             require: requireLocal, __dirname: path.dirname(file), __filename: file,

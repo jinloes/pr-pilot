@@ -13,6 +13,7 @@ import type {
     SidecarPrDiffResult,
     SidecarPrListResult,
     SidecarPrSearchResult,
+    SidecarProviderSetupResult,
     SidecarStarredReposResult,
     SidecarCommitContext,
     SidecarLineComment,
@@ -114,6 +115,29 @@ export function parseCopilotModelsResult(value: unknown): SidecarCopilotModelsRe
     };
 }
 
+const PROVIDER_BINARY_STATUSES = new Set<SidecarProviderSetupResult['binaryStatus']>(['ready', 'missing']);
+const PROVIDER_AUTH_STATUSES = new Set<SidecarProviderSetupResult['authenticationStatus']>(['ready', 'unavailable', 'unverified']);
+
+/** Validates the shape returned by `reviews/probeProviderSetup`. */
+export function parseProviderSetupResult(value: unknown): SidecarProviderSetupResult | null {
+    if (!value || typeof value !== 'object') return null;
+    const result = value as Record<string, unknown>;
+    if (typeof result.available !== 'boolean'
+        || typeof result.binaryStatus !== 'string'
+        || !PROVIDER_BINARY_STATUSES.has(result.binaryStatus as SidecarProviderSetupResult['binaryStatus'])
+        || typeof result.authenticationStatus !== 'string'
+        || !PROVIDER_AUTH_STATUSES.has(result.authenticationStatus as SidecarProviderSetupResult['authenticationStatus'])
+        || typeof result.authCommand !== 'string') {
+        return null;
+    }
+    return {
+        available: result.available,
+        binaryStatus: result.binaryStatus as SidecarProviderSetupResult['binaryStatus'],
+        authenticationStatus: result.authenticationStatus as SidecarProviderSetupResult['authenticationStatus'],
+        authCommand: result.authCommand,
+    };
+}
+
 const AUTH_STATUSES = new Set<SidecarGitHubAuthResult['status']>([
     'authenticated',
     'not_installed',
@@ -150,6 +174,7 @@ const PR_DETAIL_STATUSES = new Set<SidecarPrDetailResult['status']>([
     'invalid_request',
     'rate_limited',
     'network_error',
+    'not_found_or_inaccessible',
     'api_failed',
 ]);
 const PR_DIFF_STATUSES = new Set<SidecarPrDiffResult['status']>([

@@ -1,0 +1,494 @@
+[
+  {
+    "id": "sql-injection-kept",
+    "title": "Add user lookup by email",
+    "description": "Queries user row by email",
+    "diff": "diff --git a/src/UserRepo.java b/src/UserRepo.java\nindex 1111111..2222222 100644\n--- a/src/UserRepo.java\n+++ b/src/UserRepo.java\n@@ -10,2 +10,3 @@ class UserRepo {\n     ResultSet findByEmail(Connection conn, String email) throws SQLException {\n+        return conn.createStatement().executeQuery(\"SELECT * FROM users WHERE email = '\" + email + \"'\");\n     }\n",
+    "selfCritique": true,
+    "supervisorEnabled": true,
+    "builtInRules": false,
+    "ciAnnotations": [],
+    "primaryResponse": {
+      "summary": "Unparameterized SQL query enables injection.",
+      "verdict": "REQUEST_CHANGES",
+      "lineComments": [
+        {
+          "file": "src/UserRepo.java",
+          "line": 11,
+          "type": "issue",
+          "severity": "blocker",
+          "category": "security",
+          "confidence": "high",
+          "body": "Interpolating `email` directly into SQL allows SQL injection; use a `PreparedStatement` parameter.",
+          "rationale": "Untrusted string concatenated into SQL text"
+        }
+      ]
+    },
+    "critiqueResponse": {
+      "summary": "Unparameterized SQL query enables injection.",
+      "verdict": "REQUEST_CHANGES",
+      "lineComments": [
+        {
+          "file": "src/UserRepo.java",
+          "line": 11,
+          "type": "issue",
+          "severity": "blocker",
+          "category": "security",
+          "confidence": "high",
+          "body": "Interpolating `email` directly into SQL allows SQL injection; use a `PreparedStatement` parameter.",
+          "rationale": "Untrusted string concatenated into SQL text"
+        }
+      ]
+    },
+    "expectedVerdict": "REQUEST_CHANGES",
+    "expectedKeptAnchors": ["src/UserRepo.java:11"],
+    "expectedDroppedAnchors": []
+  },
+  {
+    "id": "contradicted-null-check-dropped",
+    "title": "Read account balance safely",
+    "description": "Returns zero when account is absent",
+    "diff": "diff --git a/src/Billing.java b/src/Billing.java\nindex 1111111..2222222 100644\n--- a/src/Billing.java\n+++ b/src/Billing.java\n@@ -20,2 +20,4 @@ class Billing {\n     long currentBalance(Account account) {\n+        if (account == null) return 0;\n+        return account.balanceCents();\n     }\n",
+    "selfCritique": true,
+    "supervisorEnabled": true,
+    "builtInRules": false,
+    "ciAnnotations": [],
+    "primaryResponse": {
+      "summary": "Potential null dereference on account.",
+      "verdict": "REQUEST_CHANGES",
+      "lineComments": [
+        {
+          "file": "src/Billing.java",
+          "line": 22,
+          "type": "issue",
+          "severity": "major",
+          "category": "correctness",
+          "confidence": "high",
+          "body": "`account` may be null before calling `balanceCents()`.",
+          "rationale": "Nullable parameter dereferenced"
+        }
+      ]
+    },
+    "critiqueResponse": {
+      "summary": "Null check on line 21 guards `account` before dereference.",
+      "verdict": "APPROVE",
+      "lineComments": []
+    },
+    "expectedVerdict": "APPROVE",
+    "expectedKeptAnchors": [],
+    "expectedDroppedAnchors": ["src/Billing.java:22"]
+  },
+  {
+    "id": "unanchored-comment-dropped",
+    "title": "Compute ratio in stats helper",
+    "description": "Adds integer ratio calculation",
+    "diff": "diff --git a/src/Stats.java b/src/Stats.java\nindex 1111111..2222222 100644\n--- a/src/Stats.java\n+++ b/src/Stats.java\n@@ -5,2 +5,3 @@ class Stats {\n     int computeRatio(int total, int divisor) {\n+        return total / divisor;\n     }\n",
+    "selfCritique": false,
+    "supervisorEnabled": true,
+    "builtInRules": false,
+    "ciAnnotations": [],
+    "primaryResponse": {
+      "summary": "Unchecked division by zero.",
+      "verdict": "REQUEST_CHANGES",
+      "lineComments": [
+        {
+          "file": "src/Stats.java",
+          "line": 6,
+          "type": "issue",
+          "severity": "major",
+          "category": "correctness",
+          "confidence": "high",
+          "body": "`divisor == 0` throws `ArithmeticException`.",
+          "rationale": "Zero denominator not guarded"
+        },
+        {
+          "file": "src/Stats.java",
+          "line": 80,
+          "type": "issue",
+          "severity": "major",
+          "category": "correctness",
+          "confidence": "high",
+          "body": "Off-diff hallucinated line anchor.",
+          "rationale": "Not in hunk"
+        }
+      ]
+    },
+    "expectedVerdict": "REQUEST_CHANGES",
+    "expectedKeptAnchors": ["src/Stats.java:6"],
+    "expectedDroppedAnchors": ["src/Stats.java:80"]
+  },
+  {
+    "id": "ci-duplicate-suppressed",
+    "title": "Increment shared worker counter",
+    "description": "Updates worker loop counters",
+    "diff": "diff --git a/src/Worker.java b/src/Worker.java\nindex 1111111..2222222 100644\n--- a/src/Worker.java\n+++ b/src/Worker.java\n@@ -14,2 +14,4 @@ class Worker {\n     void onTick() {\n+        String deadTemp = \"\";\n+        sharedCounter++;\n     }\n",
+    "selfCritique": true,
+    "supervisorEnabled": true,
+    "builtInRules": false,
+    "ciAnnotations": [
+      {
+        "file": "src/Worker.java",
+        "line": 15,
+        "level": "warning",
+        "message": "Unused local variable deadTemp declared inside worker tick method"
+      }
+    ],
+    "primaryResponse": {
+      "summary": "Unsynchronized shared counter mutation.",
+      "verdict": "REQUEST_CHANGES",
+      "lineComments": [
+        {
+          "file": "src/Worker.java",
+          "line": 15,
+          "type": "suggestion",
+          "severity": "minor",
+          "category": "maintainability",
+          "confidence": "high",
+          "body": "Unused local variable deadTemp declared inside worker tick method",
+          "rationale": "Dead local variable"
+        },
+        {
+          "file": "src/Worker.java",
+          "line": 16,
+          "type": "issue",
+          "severity": "major",
+          "category": "correctness",
+          "confidence": "high",
+          "body": "`sharedCounter++` is not atomic across worker threads; use `AtomicLong.incrementAndGet()`.",
+          "rationale": "Data race on non-atomic increment"
+        }
+      ]
+    },
+    "critiqueResponse": {
+      "summary": "Unsynchronized shared counter mutation.",
+      "verdict": "REQUEST_CHANGES",
+      "lineComments": [
+        {
+          "file": "src/Worker.java",
+          "line": 15,
+          "type": "suggestion",
+          "severity": "minor",
+          "category": "maintainability",
+          "confidence": "high",
+          "body": "Unused local variable deadTemp declared inside worker tick method",
+          "rationale": "Dead local variable"
+        },
+        {
+          "file": "src/Worker.java",
+          "line": 16,
+          "type": "issue",
+          "severity": "major",
+          "category": "correctness",
+          "confidence": "high",
+          "body": "`sharedCounter++` is not atomic across worker threads; use `AtomicLong.incrementAndGet()`.",
+          "rationale": "Data race on non-atomic increment"
+        }
+      ]
+    },
+    "expectedVerdict": "REQUEST_CHANGES",
+    "expectedKeptAnchors": ["src/Worker.java:16"],
+    "expectedDroppedAnchors": ["src/Worker.java:15"]
+  },
+  {
+    "id": "unsafe-suggestion-stripped",
+    "title": "Verify webhook signature token",
+    "description": "Compares webhook token strings",
+    "diff": "diff --git a/src/TokenVerifier.java b/src/TokenVerifier.java\nindex 1111111..2222222 100644\n--- a/src/TokenVerifier.java\n+++ b/src/TokenVerifier.java\n@@ -8,2 +8,3 @@ class TokenVerifier {\n     boolean matches(String token, String expected) {\n+        return token.equals(expected);\n     }\n",
+    "selfCritique": false,
+    "supervisorEnabled": true,
+    "builtInRules": false,
+    "ciAnnotations": [],
+    "primaryResponse": {
+      "summary": "Use constant-time comparison for secret tokens.",
+      "verdict": "REQUEST_CHANGES",
+      "lineComments": [
+        {
+          "file": "src/TokenVerifier.java",
+          "line": 9,
+          "type": "issue",
+          "severity": "major",
+          "category": "security",
+          "confidence": "high",
+          "body": "`String.equals` short-circuits on mismatch; use `MessageDigest.isEqual`.",
+          "rationale": "Timing side-channel on MAC comparison",
+          "suggestedChange": "9|         return MessageDigest.isEqual(token.getBytes(UTF_8), expected.getBytes(UTF_8));"
+        }
+      ]
+    },
+    "expectedVerdict": "REQUEST_CHANGES",
+    "expectedKeptAnchors": ["src/TokenVerifier.java:9"],
+    "expectedDroppedAnchors": [],
+    "expectedSuggestedChanges": {
+      "src/TokenVerifier.java:9": ""
+    }
+  },
+  {
+    "id": "safe-suggestion-preserved",
+    "title": "Add Bag emptiness check",
+    "description": "Returns whether items list is empty",
+    "diff": "diff --git a/src/Bag.java b/src/Bag.java\nindex 1111111..2222222 100644\n--- a/src/Bag.java\n+++ b/src/Bag.java\n@@ -8,2 +8,3 @@ class Bag {\n     boolean empty() {\n+        return items.size() == 0;\n     }\n",
+    "selfCritique": false,
+    "supervisorEnabled": true,
+    "builtInRules": false,
+    "ciAnnotations": [],
+    "primaryResponse": {
+      "summary": "Prefer Collection.isEmpty().",
+      "verdict": "COMMENT",
+      "lineComments": [
+        {
+          "file": "src/Bag.java",
+          "line": 9,
+          "type": "suggestion",
+          "severity": "minor",
+          "category": "maintainability",
+          "confidence": "high",
+          "body": "Prefer `items.isEmpty()` for clarity and O(1) emptiness checks.",
+          "rationale": "Collection idiom",
+          "suggestedChange": "        return items.isEmpty();"
+        }
+      ]
+    },
+    "expectedVerdict": "COMMENT",
+    "expectedKeptAnchors": ["src/Bag.java:9"],
+    "expectedDroppedAnchors": [],
+    "expectedSuggestedChanges": {
+      "src/Bag.java:9": "        return items.isEmpty();"
+    }
+  },
+  {
+    "id": "low-confidence-filtered",
+    "title": "Populate cache entry on miss",
+    "description": "Computes value and increments counter",
+    "diff": "diff --git a/src/Cache.java b/src/Cache.java\nindex 1111111..2222222 100644\n--- a/src/Cache.java\n+++ b/src/Cache.java\n@@ -30,2 +30,4 @@ class Cache {\n     void refresh(String key) {\n+        cache.put(key, null);\n+        metrics.increment();\n     }\n",
+    "selfCritique": true,
+    "supervisorEnabled": true,
+    "builtInRules": false,
+    "ciAnnotations": [],
+    "primaryResponse": {
+      "summary": "ConcurrentHashMap.put throws NPE on null value.",
+      "verdict": "REQUEST_CHANGES",
+      "lineComments": [
+        {
+          "file": "src/Cache.java",
+          "line": 31,
+          "type": "issue",
+          "severity": "blocker",
+          "category": "correctness",
+          "confidence": "high",
+          "body": "`ConcurrentHashMap.put` rejects `null` values with `NullPointerException`.",
+          "rationale": "Null value inserted into ConcurrentHashMap"
+        },
+        {
+          "file": "src/Cache.java",
+          "line": 32,
+          "type": "suggestion",
+          "severity": "nit",
+          "category": "performance",
+          "confidence": "low",
+          "body": "Speculative suggestion with low confidence.",
+          "rationale": "Unverified guess"
+        }
+      ]
+    },
+    "critiqueResponse": {
+      "summary": "ConcurrentHashMap.put throws NPE on null value.",
+      "verdict": "REQUEST_CHANGES",
+      "lineComments": [
+        {
+          "file": "src/Cache.java",
+          "line": 31,
+          "type": "issue",
+          "severity": "blocker",
+          "category": "correctness",
+          "confidence": "high",
+          "body": "`ConcurrentHashMap.put` rejects `null` values with `NullPointerException`.",
+          "rationale": "Null value inserted into ConcurrentHashMap"
+        },
+        {
+          "file": "src/Cache.java",
+          "line": 32,
+          "type": "suggestion",
+          "severity": "nit",
+          "category": "performance",
+          "confidence": "low",
+          "body": "Speculative suggestion with low confidence.",
+          "rationale": "Unverified guess"
+        }
+      ]
+    },
+    "expectedVerdict": "REQUEST_CHANGES",
+    "expectedKeptAnchors": ["src/Cache.java:31"],
+    "expectedDroppedAnchors": ["src/Cache.java:32"]
+  },
+  {
+    "id": "builtin-rule-triggered-and-restored",
+    "title": "Fan out async item fetches",
+    "description": "Launches async task per item ID",
+    "diff": "diff --git a/src/BatchLoader.java b/src/BatchLoader.java\nindex 1111111..2222222 100644\n--- a/src/BatchLoader.java\n+++ b/src/BatchLoader.java\n@@ -18,2 +18,3 @@ class BatchLoader {\n     void preloadAll(List<String> ids) {\n+        ids.forEach(id -> CompletableFuture.runAsync(() -> fetch(id)));\n     }\n",
+    "selfCritique": true,
+    "supervisorEnabled": true,
+    "builtInRules": true,
+    "ciAnnotations": [],
+    "primaryResponse": {
+      "summary": "No primary issues.",
+      "verdict": "APPROVE",
+      "lineComments": []
+    },
+    "critiqueResponse": {
+      "summary": "Validated.",
+      "verdict": "APPROVE",
+      "lineComments": []
+    },
+    "ruleSelectionResponse": {
+      "triggered": ["unbounded-fanout"]
+    },
+    "ruleAgentResponses": {
+      "unbounded-fanout": {
+        "summary": "",
+        "verdict": "COMMENT",
+        "lineComments": [
+          {
+            "file": "src/BatchLoader.java",
+            "line": 19,
+            "type": "issue",
+            "severity": "major",
+            "category": "performance",
+            "confidence": "high",
+            "body": "Unbounded `runAsync` fan-out over `ids` can saturate `ForkJoinPool.commonPool()`.",
+            "rationale": "Unbounded per-element async submission"
+          }
+        ]
+      }
+    },
+    "expectedVerdict": "REQUEST_CHANGES",
+    "expectedKeptAnchors": ["src/BatchLoader.java:19"],
+    "expectedDroppedAnchors": [],
+    "expectedRuleTags": ["rule: unbounded-fanout"]
+  },
+  {
+    "id": "hygiene-finding-restored",
+    "title": "Log background sync failures",
+    "description": "Adds error logging in sync job",
+    "diff": "diff --git a/src/SyncJob.java b/src/SyncJob.java\nindex 1111111..2222222 100644\n--- a/src/SyncJob.java\n+++ b/src/SyncJob.java\n@@ -40,2 +40,3 @@ class SyncJob {\n         } catch (IOException ex) {\n+            log.error(\"Sync failed: {}\", ex.getMessage());\n         }\n",
+    "selfCritique": true,
+    "supervisorEnabled": true,
+    "builtInRules": false,
+    "ciAnnotations": [],
+    "primaryResponse": {
+      "summary": "No functional bugs.",
+      "verdict": "APPROVE",
+      "lineComments": []
+    },
+    "critiqueResponse": {
+      "summary": "No functional bugs.",
+      "verdict": "APPROVE",
+      "lineComments": []
+    },
+    "hygieneResponse": {
+      "summary": "",
+      "verdict": "COMMENT",
+      "lineComments": [
+        {
+          "file": "src/SyncJob.java",
+          "line": 41,
+          "type": "suggestion",
+          "severity": "minor",
+          "category": "maintainability",
+          "confidence": "high",
+          "body": "Pass `ex` as the final logger argument so the stack trace and cause chain are logged.",
+          "rationale": "Exception message logged without throwable"
+        }
+      ]
+    },
+    "expectedVerdict": "COMMENT",
+    "expectedKeptAnchors": ["src/SyncJob.java:41"],
+    "expectedDroppedAnchors": []
+  },
+  {
+    "id": "fenced-json-and-clean-refactor",
+    "title": "Rename count field to itemCount",
+    "description": "Internal private field rename",
+    "diff": "diff --git a/src/Counter.java b/src/Counter.java\nindex 1111111..2222222 100644\n--- a/src/Counter.java\n+++ b/src/Counter.java\n@@ -3,3 +3,3 @@ class Counter {\n-    private int count;\n+    private int itemCount;\n }\n",
+    "selfCritique": true,
+    "supervisorEnabled": true,
+    "builtInRules": false,
+    "ciAnnotations": [],
+    "primaryResponse": "```json\n{\"summary\":\"Field renamed.\",\"verdict\":\"COMMENT\",\"lineComments\":[{\"file\":\"src/Counter.java\",\"line\":3,\"type\":\"suggestion\",\"severity\":\"nit\",\"category\":\"maintainability\",\"confidence\":\"medium\",\"body\":\"Subjective naming preference.\",\"rationale\":\"style nit\"}]}\n```",
+    "critiqueResponse": {
+      "summary": "Clean field rename with no defects.",
+      "verdict": "APPROVE",
+      "lineComments": []
+    },
+    "expectedVerdict": "APPROVE",
+    "expectedKeptAnchors": [],
+    "expectedDroppedAnchors": ["src/Counter.java:3"]
+  },
+  {
+    "id": "ci-duplicate-does-not-shadow-hygiene",
+    "title": "Add token error logging",
+    "description": "Logs failure details when request fails",
+    "diff": "diff --git a/src/Api.java b/src/Api.java\nindex 1111111..2222222 100644\n--- a/src/Api.java\n+++ b/src/Api.java\n@@ -10,2 +10,3 @@ class Api {\n+    public void call(String token) {\n+        logger.error(\"token=\" + token);\n     }\n",
+    "selfCritique": true,
+    "supervisorEnabled": true,
+    "builtInRules": false,
+    "ciAnnotations": [
+      {
+        "file": "src/Api.java",
+        "line": 10,
+        "level": "failure",
+        "message": "Unused parameter token triggers Checkstyle unused parameter rule."
+      }
+    ],
+    "primaryResponse": {
+      "summary": "Checkstyle warning.",
+      "verdict": "COMMENT",
+      "lineComments": [
+        {
+          "file": "src/Api.java",
+          "line": 10,
+          "type": "suggestion",
+          "severity": "minor",
+          "category": "maintainability",
+          "confidence": "high",
+          "body": "Unused parameter token triggers Checkstyle unused parameter rule.",
+          "rationale": "Repeats CI checkstyle failure"
+        }
+      ]
+    },
+    "critiqueResponse": {
+      "summary": "Checkstyle warning.",
+      "verdict": "COMMENT",
+      "lineComments": [
+        {
+          "file": "src/Api.java",
+          "line": 10,
+          "type": "suggestion",
+          "severity": "minor",
+          "category": "maintainability",
+          "confidence": "high",
+          "body": "Unused parameter token triggers Checkstyle unused parameter rule.",
+          "rationale": "Repeats CI checkstyle failure"
+        }
+      ]
+    },
+    "hygieneResponse": {
+      "summary": "Hygiene.",
+      "verdict": "COMMENT",
+      "lineComments": [
+        {
+          "file": "src/Api.java",
+          "line": 11,
+          "type": "suggestion",
+          "severity": "minor",
+          "category": "maintainability",
+          "confidence": "high",
+          "body": "Redact `token` before logging at error level.",
+          "rationale": "Sensitive credential logged"
+        }
+      ]
+    },
+    "expectedVerdict": "COMMENT",
+    "expectedKeptAnchors": ["src/Api.java:11"],
+    "expectedDroppedAnchors": ["src/Api.java:10"]
+  }
+]

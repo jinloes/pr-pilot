@@ -11,6 +11,7 @@ import com.intellij.util.concurrency.AppExecutorUtil;
 import com.jinloes.prpilot.model.PullRequest;
 import com.jinloes.prpilot.settings.PluginSettings;
 import com.jinloes.prpilot.ui.PRToolWindowFactory;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -296,7 +297,7 @@ public final class PRNotificationService implements Disposable {
             try {
                 reviewRequested.addAll(sourceClient.searchPRs(REVIEW_REQUESTED_QUERY));
             } catch (Exception e) {
-                log.warn("PR notification poll failed", e);
+                log.warn("PR notification poll failed", LogRedactor.sanitize(e));
                 pollError = sanitizeError(e);
             }
         }
@@ -312,7 +313,7 @@ public final class PRNotificationService implements Disposable {
                     starredPrs.addAll(sourceClient.searchPRs(buildStarredReposQuery(repoQ)));
                 }
             } catch (Exception e) {
-                log.warn("PR notification poll failed", e);
+                log.warn("PR notification poll failed", LogRedactor.sanitize(e));
                 if (pollError == null) pollError = sanitizeError(e);
             }
         }

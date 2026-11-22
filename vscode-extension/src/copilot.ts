@@ -1,9 +1,3 @@
-import {
-    candidateBinaryPaths,
-    existsOnPath,
-    resolveCandidateBinary,
-    resolveFromPath,
-} from './claude';
 import type { SidecarCopilotModelsResult } from './sidecarTypes';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -37,27 +31,6 @@ export function permissionDecision(kind: string, allowMcp: boolean): PermissionD
  */
 export function resolveReviewInheritMcp(inheritMcp: boolean, forceForReview: boolean): boolean {
     return inheritMcp || forceForReview;
-}
-
-// ── Binary resolution ──────────────────────────────────────────────────────────
-
-export function findCopilotBinary(): string {
-    for (const p of candidateBinaryPaths('copilot')) {
-        const resolved = resolveCandidateBinary(p);
-        if (resolved) return resolved;
-    }
-    return resolveFromPath('copilot') ?? 'copilot';
-}
-
-/**
- * Proactive preflight: true when the `copilot` CLI is resolvable without spawning it — either a
- * hard-coded candidate path exists, or `copilot` is found on PATH.
- */
-export function copilotBinaryAvailable(): boolean {
-    for (const p of candidateBinaryPaths('copilot')) {
-        if (resolveCandidateBinary(p)) return true;
-    }
-    return existsOnPath('copilot');
 }
 
 type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';

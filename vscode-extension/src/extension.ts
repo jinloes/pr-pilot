@@ -1,22 +1,19 @@
 import * as vscode from 'vscode';
-import { execFile } from 'node:child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { randomUUID } from 'crypto';
 import { DeepReviewFlow } from './deepReview';
-import * as claude from './claude';
 import * as copilot from './copilot';
 import * as settings from './settings';
 import * as workspace from './workspace';
 import { BRIDGE_PROTOCOL_VERSION, isValidBridgeRequest } from './bridgeValidation';
-import { providerNotInstalledMessage } from './userFacingError';
 import { resolveWebviewDistPath } from './webviewAssets';
 import { buildErrorHtml, buildMainWebviewHtml } from './webviewHtml';
 import { classifyHostTheme, type HostTheme } from './hostTheme';
 import { SidecarClient, resolveSidecarJarPath } from './sidecar';
 import { DraftRecoveryStore } from './draftRecovery';
 import { PendingDraftIndex } from './pendingDraftIndex';
-import { buildGhAuthLoginCommand, probeClaudeAuthentication } from './providerSetup';
+import { buildGhAuthLoginCommand, toProviderReadiness } from './providerSetup';
 import type { PR, ReviewResult } from './models';
 import { cancelThenCleanup, invalidateChatAndCancel, invalidateGenerationAndCancel } from './operationCorrelation';
 import { normalizeRepositoryInstructions, repositoryKey } from './repositoryInstructions';
@@ -393,46 +390,26 @@ function runAuthLoginInTerminal(): void {
     terminal.sendText(buildGhAuthLoginCommand(githubBaseUrl()), true);
 }
 
+const cachedProviderReadiness = new Map<Provider, ProviderReadiness>();
+
 function providerReadiness(): ProviderReadiness {
     const current = provider();
-    const available = current === 'copilot' ? copilot.copilotBinaryAvailable() : claude.claudeBinaryAvailable();
-    return {
-        provider: current,
-        available,
-        binaryStatus: available ? 'ready' : 'missing',
-        authenticationStatus: available ? 'unverified' : 'unavailable',
+    const cached = cachedProviderReadiness.get(current);
+    if (cached) return cached;
+    return toProviderReadiness(current, {
+        available: true,
+        binaryStatus: 'ready',
+        authenticationStatus: 'unverified',
         authCommand: current === 'copilot' ? 'copilot login' : 'claude auth login',
-        detail: available
-            ? 'Provider CLI found. Authentication cannot be verified without starting a provider session.'
-            : providerNotInstalledMessage(current),
-    };
+    });
 }
 
 async function providerSetupReadiness(): Promise<ProviderReadiness> {
-    const readiness = providerReadiness();
-    if (!readiness.available || readiness.provider === 'copilot') return readiness;
-    const authenticationStatus = await probeClaudeAuthentication((complete) => {
-        const invocation = claude.buildClaudeAuthProbeCommand(claude.findClaudeBinary());
-        if (!invocation) {
-            complete(new Error('Unsafe or missing Claude binary path'), '', '');
-            return;
-        }
-        execFile(
-            invocation.command,
-            invocation.args,
-            { timeout: 5_000, windowsHide: true },
-            (error, stdout, stderr) => complete(error, String(stdout), String(stderr)),
-        );
-    });
-    return {
-        ...readiness,
-        authenticationStatus,
-        detail: authenticationStatus === 'ready'
-            ? 'Provider CLI and authentication are ready.'
-            : authenticationStatus === 'unavailable'
-                ? `Claude authentication is unavailable. Run '${readiness.authCommand}' and check again.`
-                : `Claude authentication could not be verified non-interactively; run '${readiness.authCommand}' if sign-in is required.`,
-    };
+    const current = provider();
+    const probe = await sidecarClient.probeProviderSetup(current, true);
+    const readiness = toProviderReadiness(current, probe);
+    cachedProviderReadiness.set(current, readiness);
+    return readiness;
 }
 
 function prKey(pr: ActivePR | null): string | null {

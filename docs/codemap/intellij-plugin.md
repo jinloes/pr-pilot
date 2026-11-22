@@ -45,9 +45,18 @@ IntelliJ host integration. Depends directly on `core`, `github-engine`, and `rev
 - `settings/SettingsUi.java` - Shared Swing layout helpers.
 - `settings/PluginSettingsConfigurable.java` - Settings lifecycle integration.
 - `settings/GithubBaseUrlValidator.java` - HTTPS GitHub-origin normalization.
-- `ui/PRToolWindowFactory.java` - Tool-window entry point; title actions (Pop Out, Settings) and the
-  gear-menu "Reload PR Pilot View" action, built by package-private helpers covered by
-  `PRToolWindowFactoryTest`.
+- `ui/PRToolWindowFactory.java`, `ui/PrPilotToolWindowListener.java`, `ui/OpenPrPilotAction.java` -
+  Lightweight Swing tool-window stripe launcher (auto-hides on show and opens/focuses the main
+  editor tab), `Tools > Open PR Pilot` action, title actions (Open PR Pilot, Settings), gear-menu
+  "Reload PR Pilot View" action, initial `wireWebviewLoading`, and notification handoff via
+  `PrPilotUiCoordinator` (`PRToolWindowFactoryTest`).
+- `ui/PrPilotUiCoordinator.java` - Project service managing main-editor `PrReviewVirtualFile`
+  tab(s): `openOrFocusEditor`, queued notification `activatePR` after `loadPRs` readiness, split-tab
+  seeding, focus tracking, reload, and tab-close reset (`PrPilotUiCoordinatorTest`).
+- `ui/PrReviewVirtualFile.java`, `ui/PrReviewFileEditor.java`, `ui/PrReviewFileEditorProvider.java`,
+  `ui/PrReviewEditorTabTitleProvider.java` - Non-persistent `VirtualFileWithoutContent` main-editor
+  tab hosting `WebviewPanel` and `"PR Pilot"` / `"PR Pilot · #<number>"` tab title/tooltip
+  formatting (`PrReviewEditorTest`).
 - `ui/WebviewPanel.java` - JCEF host composition root wiring the collaborators below.
 - `ui/WebviewBridgeHandler.java` - Bridge message parsing and dispatch.
 - `ui/WebviewBrowserController.java` - Browser/resource-server startup and repaint scheduling.

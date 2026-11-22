@@ -5,12 +5,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.github.copilot.SystemMessageMode;
-import com.github.copilot.rpc.McpHttpServerConfig;
-import com.github.copilot.rpc.McpServerConfig;
-import com.github.copilot.rpc.PermissionRequestResult;
-import com.github.copilot.rpc.SessionConfig;
 import com.jinloes.prpilot.review.CopilotSdkRuntime.SessionRequest;
+import com.microsoft.copilot.SystemMessageMode;
+import com.microsoft.copilot.rpc.CreateSessionOptions;
+import com.microsoft.copilot.rpc.McpHttpServerConfig;
+import com.microsoft.copilot.rpc.McpServerConfig;
+import com.microsoft.copilot.rpc.PermissionRequestResult;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -200,31 +200,32 @@ class CopilotSdkRuntimeTest {
 
         @Test
         void buildSessionConfigLocksNonMcpSessionsToExplicitEmptyMcpAndReadOnlyAllowlist() {
-            SessionConfig config =
+            CreateSessionOptions config =
                     CopilotSdkRuntime.buildSessionConfig(
                             request(false, true, null),
                             new CopilotSdkRuntime.ToolBudget(),
                             () -> {});
 
             // Never null: leaving mcpServers null lets the CLI inherit ~/.copilot/mcp-config.json.
-            assertThat(config.getMcpServers()).isNotNull().isEmpty();
-            assertThat(config.getAvailableTools())
+            assertThat(config.getMcp()).isNotNull();
+            assertThat(config.getMcp().getServers()).isNotNull().isEmpty();
+            assertThat(config.getTools().getAvailableTools())
                     .containsExactlyElementsOf(CopilotSdkRuntime.READ_ONLY_TOOLS);
-            assertThat(config.getPluginDirectories()).isEmpty();
-            assertThat(config.getSkillDirectories()).isEmpty();
-            assertThat(config.getAgentDirectories()).isEmpty();
-            assertThat(config.getHookDirectories()).isEmpty();
+            assertThat(config.getPlugins().getDirectories()).isEmpty();
+            assertThat(config.getSkills().getDirectories()).isEmpty();
+            assertThat(config.getAgents().getDirectories()).isEmpty();
+            assertThat(config.getHooks().getDirectories()).isEmpty();
             assertThat(config.getEnableConfigDiscovery()).contains(false);
-            assertThat(config.getSkipCustomInstructions()).contains(true);
-            assertThat(config.getEnableSkills()).contains(false);
-            assertThat(config.getEnableFileHooks()).contains(false);
-            assertThat(config.getInfiniteSessions().getEnabled()).contains(false);
+            assertThat(config.getInstructions().getSkipCustomInstructions()).contains(true);
+            assertThat(config.getSkills().getEnabled()).contains(false);
+            assertThat(config.getHooks().getEnableRepositoryHooks()).contains(false);
+            assertThat(config.getState().getInfiniteSessions().getEnabled()).contains(false);
             assertThat(config.getSystemMessage()).isNotNull();
             assertThat(config.getSystemMessage().getMode()).isEqualTo(SystemMessageMode.REPLACE);
             assertThat(config.getSystemMessage().getContent())
                     .contains("output_mode: \"content\"", "view_range", "<repo_guidelines>");
 
-            SessionConfig toolFree =
+            CreateSessionOptions toolFree =
                     CopilotSdkRuntime.buildSessionConfig(
                             request(false, false, null),
                             new CopilotSdkRuntime.ToolBudget(),
@@ -240,27 +241,28 @@ class CopilotSdkRuntimeTest {
                         throws IOException {
             writeTrustedConfig("search");
 
-            SessionConfig hostOnly =
+            CreateSessionOptions hostOnly =
                     CopilotSdkRuntime.buildSessionConfig(
                             request(false, true, HOST),
                             new CopilotSdkRuntime.ToolBudget(),
                             () -> {});
-            assertThat(hostOnly.getAvailableTools()).isNull();
-            assertThat(hostOnly.getExcludedTools())
+            assertThat(hostOnly.getTools().getAvailableTools()).isNull();
+            assertThat(hostOnly.getTools().getExcludedTools())
                     .contains("bash", "edit", "create", "task", "skill", "ask_user");
-            assertThat(hostOnly.getPluginDirectories()).isEmpty();
-            assertThat(hostOnly.getMcpServers()).containsOnlyKeys(HostCodeIntelligence.SERVER_NAME);
+            assertThat(hostOnly.getPlugins().getDirectories()).isEmpty();
+            assertThat(hostOnly.getMcp().getServers())
+                    .containsOnlyKeys(HostCodeIntelligence.SERVER_NAME);
 
-            SessionConfig inherited =
+            CreateSessionOptions inherited =
                     CopilotSdkRuntime.buildSessionConfig(
                             request(true, true, null),
                             new CopilotSdkRuntime.ToolBudget(),
                             () -> {});
-            assertThat(inherited.getAvailableTools()).isNull();
-            assertThat(inherited.getExcludedTools())
+            assertThat(inherited.getTools().getAvailableTools()).isNull();
+            assertThat(inherited.getTools().getExcludedTools())
                     .contains("bash", "edit", "create", "task", "skill", "ask_user");
-            assertThat(inherited.getPluginDirectories()).isNull();
-            assertThat(inherited.getMcpServers()).containsOnlyKeys("search");
+            assertThat(inherited.getPlugins().getDirectories()).isNull();
+            assertThat(inherited.getMcp().getServers()).containsOnlyKeys("search");
         }
     }
 
@@ -318,6 +320,17 @@ class CopilotSdkRuntimeTest {
             } finally {
                 Thread.interrupted();
             }
+        }
+
+        @Test
+        void executionFailureIncludesUnderlyingCauseMessage() {
+            CompletableFuture<String> future =
+                    CompletableFuture.failedFuture(
+                            new IllegalStateException("SDK protocol version mismatch"));
+
+            assertThatThrownBy(() -> CopilotSdkRuntime.awaitWithTimeout(future, "runtime startup"))
+                    .isInstanceOf(IOException.class)
+                    .hasMessage("copilot runtime startup failed: SDK protocol version mismatch");
         }
     }
 }

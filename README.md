@@ -63,7 +63,8 @@ conclusive signed-out response blocks onboarding.
 2. In IntelliJ IDEA, open **Settings/Preferences > Plugins**.
 3. Select the gear menu, choose **Install Plugin from Disk**, and select the downloaded ZIP.
 4. Restart the IDE when prompted.
-5. Open **View > Tool Windows > PR Pilot**.
+5. Open **Tools > Open PR Pilot** (or click **PR Pilot** in the tool window stripe) to open PR
+   Pilot in a main editor tab.
 
 ### VS Code
 

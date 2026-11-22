@@ -24,6 +24,7 @@ public record GitHubResponse(int statusCode, String body, Map<String, String> ra
 
     private static final List<String> SAFE_RATE_LIMIT_HEADERS =
             List.of("x-ratelimit-remaining", "x-ratelimit-reset", "retry-after");
+    private static final String SSO_HEADER = "x-github-sso";
 
     public GitHubResponse {
         body = body == null ? "" : body;
@@ -34,19 +35,25 @@ public record GitHubResponse(int statusCode, String body, Map<String, String> ra
         this(statusCode, body, Map.of());
     }
 
-    /** Retains only normalized rate-limit headers; credentials and cookies are never copied. */
+    /** Retains only normalized rate-limit and sanitized SSO requirement markers. */
     public static GitHubResponse fromHeaders(
             int statusCode, String body, Map<String, List<String>> headers) {
         Map<String, String> safe = new LinkedHashMap<>();
         if (headers != null) {
             for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
                 String name = entry.getKey().toLowerCase(Locale.ROOT);
-                if (!SAFE_RATE_LIMIT_HEADERS.contains(name)
-                        || entry.getValue() == null
-                        || entry.getValue().isEmpty()) {
+                if (entry.getValue() == null || entry.getValue().isEmpty()) {
                     continue;
                 }
-                safe.put(name, entry.getValue().get(0));
+                String first = entry.getValue().get(0);
+                if (SAFE_RATE_LIMIT_HEADERS.contains(name)) {
+                    safe.put(name, first);
+                } else if (SSO_HEADER.equals(name)
+                        && first != null
+                        && first.toLowerCase(Locale.ROOT).contains("required")) {
+                    // Strip org URL and authorization_request nonce; keep only the boolean signal.
+                    safe.put(SSO_HEADER, "required");
+                }
             }
         }
         return new GitHubResponse(statusCode, body, safe);
@@ -75,6 +82,15 @@ public record GitHubResponse(int statusCode, String body, Map<String, String> ra
     /** True when the token is missing, invalid, or receives a non-rate-limit permission denial. */
     public boolean isUnauthenticated() {
         return statusCode == 401 || (statusCode == 403 && !isRateLimited());
+    }
+
+    /** True when GitHub rejected the request due to organization SAML SSO enforcement. */
+    public boolean isSsoRequired() {
+        if (statusCode != 403 || isRateLimited()) return false;
+        if ("required".equals(rateLimitHeaders.get(SSO_HEADER))) return true;
+        String normalizedBody = body.toLowerCase(Locale.ROOT);
+        return normalizedBody.contains("saml enforcement")
+                || normalizedBody.contains("organization saml");
     }
 
     public boolean isRateLimited() {

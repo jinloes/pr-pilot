@@ -35,3 +35,19 @@ judge's instructions as a `developer` message that Copilot's Claude endpoint ign
 matcher returns prose instead of JSON. Per-review diagnostics (critique-dropped findings and stage
 lines) go to `<run>/diagnostics/`, never `<run>/findings/`, because the judge reads every file in
 the findings directory and would score dropped findings as submitted ones.
+
+### Layered provider canary and stage-isolated golden evals
+Full corpus runs (`reviewBenchmark` and `reviewBench`) are too slow and expensive for routine SDK
+bumps or inner-loop prompt/rule edits, while unit tests mock the provider runtime. Two lightweight
+harnesses in `review-benchmark` fill that gap without adding host or sidecar surface:
+
+- **`providerCanary` (`:review-benchmark:providerCanary`):** Runs a single live end-to-end check
+  against `copilot` and/or `claude` on an isolated temporary checkout and 6-line diff (`effort=low`,
+  `builtInRules=false`), asserting CLI preflight, live `Source.ACCOUNT` Copilot model discovery
+  (which catches SDK/CLI protocol mismatches before falling back to static CLI help), and valid,
+  diff-anchored `ReviewResult` JSON output.
+- **`stageEval` (`:review-benchmark:stageEval` + `StageEvalRunnerTest`):** Replays frozen
+  primary-pass JSON from `stage-eval/cases.json` through the real `ReviewPipelineService` stages via
+  `ReviewStageReplay`. Deterministic mode runs on every `:review-benchmark:test` with zero model
+  calls; `--live` keeps the frozen primary draft (`0ms`) and sends only single-turn downstream
+  stages (critique, rule-trigger selection, rule agents, hygiene) to the live CLI.

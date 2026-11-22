@@ -27,6 +27,17 @@ public record GitHubFailure(String status, String message) {
             new GitHubFailure(
                     "not_authenticated", "Run 'gh auth login' in a terminal for this GitHub host.");
 
+    /**
+     * Kept under {@code not_authenticated} so existing wire status enums stay compatible while
+     * hosts match the {@code SAML SSO} phrase to surface SSO-specific token guidance.
+     */
+    public static final GitHubFailure SSO_REQUIRED =
+            new GitHubFailure(
+                    "not_authenticated",
+                    "Organization SAML SSO enforcement requires token authorization. Authorize"
+                            + " your token for SSO or run 'gh auth refresh -h github.com -s"
+                            + " repo,read:org'.");
+
     public static final GitHubFailure RATE_LIMITED =
             new GitHubFailure("rate_limited", "GitHub rate limit exceeded. Try again shortly.");
 
@@ -53,6 +64,7 @@ public record GitHubFailure(String status, String message) {
     public static GitHubFailure of(GitHubResponse response) {
         if (response.isSuccess()) return null;
         if (response.isRateLimited()) return RATE_LIMITED;
+        if (response.isSsoRequired()) return SSO_REQUIRED;
         if (response.isUnauthenticated()) return NOT_AUTHENTICATED;
         if (response.isNetworkError()) return networkFailure(response);
         return API_FAILED;

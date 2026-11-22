@@ -71,6 +71,9 @@ guidance.
 - `review/ReviewProviderExecutor.java` - Provider seam that the pipeline and `ReviewRulesPass`
   drive (first pass, later-stage prompt completions, cooperative cancellation), with Claude and
   Copilot adapters.
+- `review/ReviewStageReplay.java` - Replays frozen primary-pass JSON into `ReviewPipelineService`
+  either deterministically from recorded stage fixtures or with live downstream stages for
+  `review-benchmark`'s `stageEval` harness (`ReviewStageReplayTest`).
 - `review/ReviewPipelineFindings.java` - Post-validation bookkeeping: restores the hygiene and rule
   findings validation dropped, reports dropped findings and why when asked, and strips reviewer
   labels no candidate earned from rule findings. Tests: `ReviewPipelineFindingsTest`.
@@ -107,9 +110,16 @@ guidance.
 - `review/ChangedSymbols.java` - Extracts the existing declarations a diff changes (removed-line
   declarations, then hunk-header context) for the call-site search; a changed `.proto` element also
   carries the names generated code gives it. Tests: `ChangedSymbolsTest`.
+- `review/ChangedEnumVariants.java` - Extracts newly added enum, string-union, and sealed-hierarchy
+  variants so `BaseCommitContext` can surface `switch`/`when`/`match` dispatch sites in unchanged
+  files even when general type references exceed `MAX_LISTED_REFERENCES`. Tests:
+  `ChangedEnumVariantsTest`, `BaseCommitContextCallSitesTest`.
 - `review/ChangedLogStatements.java` - Mechanically extracts the production log statements a diff
   adds or edits (multi-line calls included) into the hygiene pass's `<changed_log_statements>`
   inventory. Tests: `ChangedLogStatementsTest`.
+- `review/WeakenedTests.java` - Mechanically extracts newly skipped tests and removed assertions
+  without replacement assertions on test files into `<weakened_tests>` for primary and critique
+  prompts. Tests: `WeakenedTestsTest`.
 - `review/InspectionManifest.java`, `ReviewPassParser.java`, `InspectionLedger.java`, and
   `EvidenceRef.java` - Stable changed targets plus validated inspection/evidence accounting.
 - `review/ReviewCoverageAnalyzer.java`, `CoverageGap.java`, `ReviewSupervisorPrompts.java`, and

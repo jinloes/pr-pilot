@@ -119,6 +119,31 @@ class UserFacingErrorsTest {
 
             assertThat(msg).isEqualTo("Couldn't load the PR diff. Please retry.");
         }
+
+        @Test
+        void blankMessageIncludesExceptionTypeAndIdeaLogHint() {
+            String msg =
+                    UserFacingErrors.forGitHub(
+                            new IllegalStateException("   "), "load the PR diff");
+
+            assertThat(msg)
+                    .isEqualTo("Couldn't load the PR diff (IllegalStateException). See idea.log.");
+        }
+
+        @Test
+        void samlSsoFailureMapsToSsoTokenGuidanceInsteadOfGenericGhAuthLogin() {
+            String msg =
+                    UserFacingErrors.forGitHub(
+                            new IntellijGitHubService.GitHubOperationException(
+                                    "not_authenticated",
+                                    "Organization SAML SSO enforcement requires token"
+                                            + " authorization."),
+                            "load PR details");
+
+            assertThat(msg)
+                    .contains("SAML SSO")
+                    .contains("gh auth refresh -h github.com -s repo,read:org");
+        }
     }
 
     @Nested
@@ -180,6 +205,41 @@ class UserFacingErrorsTest {
                             new IOException("Failed to parse review JSON: unexpected token"),
                             "generate a review");
             assertThat(msg).contains("invalid review format").contains("Retry");
+        }
+
+        @Test
+        void blankOrNullMessageIncludesExceptionTypeAndIdeaLogHint() {
+            assertThat(
+                            UserFacingErrors.forProvider(
+                                    ReviewProvider.COPILOT,
+                                    new NullPointerException(),
+                                    "generate review"))
+                    .isEqualTo("Couldn't generate review (NullPointerException). See idea.log.");
+            assertThat(
+                            UserFacingErrors.forProvider(
+                                    ReviewProvider.CLAUDE,
+                                    new IOException(""),
+                                    "answer chat question"))
+                    .isEqualTo("Couldn't answer chat question (IOException). See idea.log.");
+        }
+
+        @Test
+        void providerRepoNotFoundAndSamlEnforcementGiveOrgAccessGuidance() {
+            assertThat(
+                            UserFacingErrors.forProvider(
+                                    ReviewProvider.COPILOT,
+                                    new IOException("Error: repository not found"),
+                                    "generate review"))
+                    .contains("gh auth status")
+                    .contains("organization");
+            assertThat(
+                            UserFacingErrors.forProvider(
+                                    ReviewProvider.COPILOT,
+                                    new IOException(
+                                            "Resource protected by organization SAML enforcement"),
+                                    "generate review"))
+                    .contains("SAML SSO")
+                    .contains("gh auth refresh");
         }
     }
 

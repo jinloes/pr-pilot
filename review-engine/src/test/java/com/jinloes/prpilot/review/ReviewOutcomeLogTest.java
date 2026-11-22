@@ -136,17 +136,22 @@ class ReviewOutcomeLogTest {
             generated.setSeverity("major");
             generated.setCategory("compatibility");
             generated.setConfidence("high");
+            generated.setSources(List.of("claude-opus", "gpt-5"));
+            ReviewOutcomeLog.Metadata withSecond =
+                    new ReviewOutcomeLog.Metadata("v1", "claude", "sonnet", "gpt-5");
 
             ReviewOutcomeLog.OutcomeRecord record =
-                    log.classify(List.of(generated), List.of(), META).get(0);
+                    log.classify(List.of(generated), List.of(), withSecond).get(0);
 
             assertThat(record.promptVersion()).isEqualTo("v1");
             assertThat(record.provider()).isEqualTo("claude");
             assertThat(record.model()).isEqualTo("sonnet");
+            assertThat(record.secondReviewerModel()).isEqualTo("gpt-5");
             assertThat(record.type()).isEqualTo("issue");
             assertThat(record.severity()).isEqualTo("major");
             assertThat(record.category()).isEqualTo("compatibility");
             assertThat(record.confidence()).isEqualTo("high");
+            assertThat(record.corroborated()).isTrue();
             assertThat(record.recordedAt()).isNotBlank();
         }
     }

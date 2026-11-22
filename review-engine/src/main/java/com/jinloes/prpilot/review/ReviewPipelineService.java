@@ -348,7 +348,10 @@ public final class ReviewPipelineService {
                     String raw =
                             provider.complete(
                                     ReviewCritiquePrompts.buildCritiquePrompt(
-                                            critiqueRequest, candidate, reportDropped),
+                                            critiqueRequest,
+                                            candidate,
+                                            reportDropped,
+                                            WeakenedTests.extract(manifest)),
                                     CRITIQUE_TIMEOUT_MS,
                                     true,
                                     true,
@@ -365,6 +368,12 @@ public final class ReviewPipelineService {
                 }
                 // Unconfirmed recall candidates never reach the user, even if validation failed.
                 candidate = ReviewResultMerger.withoutLowConfidence(candidate);
+                // Drop CI-reported duplicates before hygiene/rule restoration so a doomed duplicate
+                // cannot cover and suppress a real finding within ±2 lines.
+                candidate = CiFindingSuppressor.suppress(candidate, request.getCiAnnotations());
+                hygiene = CiFindingSuppressor.suppress(hygiene, request.getCiAnnotations());
+                ruleFindings =
+                        CiFindingSuppressor.suppress(ruleFindings, request.getCiAnnotations());
                 int validatedCount = candidate.getLineComments().size();
                 candidate =
                         ReviewPipelineFindings.restoreHygieneFindings(candidate, hygiene, manifest);
@@ -403,10 +412,10 @@ public final class ReviewPipelineService {
             if (supervisorEnabled) {
                 candidate = ReviewAnchorValidator.validate(candidate, manifest);
             }
+            candidate = CiFindingSuppressor.suppress(candidate, request.getCiAnnotations());
             candidate = ReviewResultMerger.capFinal(candidate);
             validateAuthority();
-            return ReviewSuggestionGuard.apply(
-                    CiFindingSuppressor.suppress(candidate, request.getCiAnnotations()), manifest);
+            return ReviewSuggestionGuard.apply(candidate, manifest);
         } finally {
             if (!auxiliaryJoined) {
                 if (rulesFuture != null) rulesFuture.cancel(true);
@@ -757,7 +766,19 @@ public final class ReviewPipelineService {
             throws IOException, InterruptedException {
         long startedAt = System.nanoTime();
         onStatus.accept("Checking review coverage…");
-        List<CoverageGap> gaps = coverageAnalyzer.findGaps(manifest, primary.ledger());
+        Set<String> baselineFindingFiles = new HashSet<>();
+        if (primary.review() != null && primary.review().getLineComments() != null) {
+            primary.review()
+                    .getLineComments()
+                    .forEach(
+                            comment -> {
+                                if (comment != null && StringUtils.isNotBlank(comment.getFile())) {
+                                    baselineFindingFiles.add(comment.getFile());
+                                }
+                            });
+        }
+        List<CoverageGap> gaps =
+                coverageAnalyzer.findGaps(manifest, primary.ledger(), baselineFindingFiles);
         if (gaps.isEmpty()) {
             logCoverage(manifest, primary, 0, 0, 0, elapsedMillis(startedAt));
             onStatus.accept(STATUS_COVERAGE_COMPLETE);

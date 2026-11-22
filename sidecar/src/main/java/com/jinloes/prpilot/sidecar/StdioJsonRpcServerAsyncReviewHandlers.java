@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jinloes.prpilot.engine.ReviewEngineApi;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -91,14 +92,23 @@ final class StdioJsonRpcServerAsyncReviewHandlers {
                         operation.complete(support.result(id, result));
                     } catch (InterruptedException interrupted) {
                         Thread.currentThread().interrupt();
+                        if (!operation.isCancelled()) {
+                            log.warn(
+                                    "Async JSON-RPC method 'reviews/generate' interrupted (id={}, operationId={}, provider='{}')",
+                                    id,
+                                    params.operationId(),
+                                    params.provider(),
+                                    LogRedactor.sanitize(interrupted));
+                        }
                         operation.completeCancellation();
                     } catch (Throwable failure) {
                         if (!operation.isCancelled()) {
                             log.warn(
-                                    "Async JSON-RPC method 'reviews/generate' failed (id={}, operationId={})",
+                                    "Async JSON-RPC method 'reviews/generate' failed (id={}, operationId={}, provider='{}')",
                                     id,
                                     params.operationId(),
-                                    failure);
+                                    params.provider(),
+                                    LogRedactor.sanitize(failure));
                         }
                         operation.complete(
                                 operation.isCancelled()
@@ -150,14 +160,23 @@ final class StdioJsonRpcServerAsyncReviewHandlers {
                         operation.complete(support.result(id, result));
                     } catch (InterruptedException interrupted) {
                         Thread.currentThread().interrupt();
+                        if (!operation.isCancelled()) {
+                            log.warn(
+                                    "Async JSON-RPC method 'reviews/chat' interrupted (id={}, operationId={}, provider='{}')",
+                                    id,
+                                    params.operationId(),
+                                    params.provider(),
+                                    LogRedactor.sanitize(interrupted));
+                        }
                         operation.completeCancellation();
                     } catch (Throwable failure) {
                         if (!operation.isCancelled()) {
                             log.warn(
-                                    "Async JSON-RPC method 'reviews/chat' failed (id={}, operationId={})",
+                                    "Async JSON-RPC method 'reviews/chat' failed (id={}, operationId={}, provider='{}')",
                                     id,
                                     params.operationId(),
-                                    failure);
+                                    params.provider(),
+                                    LogRedactor.sanitize(failure));
                         }
                         operation.complete(
                                 operation.isCancelled()
@@ -200,9 +219,12 @@ final class StdioJsonRpcServerAsyncReviewHandlers {
                 && operationId.chars().noneMatch(Character::isISOControl);
     }
 
-    private String safeMessage(Throwable failure) {
-        String message = failure.getMessage();
-        return message == null ? failure.getClass().getSimpleName() : message;
+    static String safeMessage(Throwable failure) {
+        String message = failure == null ? null : failure.getMessage();
+        if (message == null || message.isBlank()) {
+            return LogRedactor.errorType(failure);
+        }
+        return LogRedactor.redact(message);
     }
 
     private ObjectNode statusParams(JsonNode id, String message) {
@@ -274,13 +296,20 @@ final class StdioJsonRpcServerAsyncReviewHandlers {
                         operation.complete(support.result(id, review.prepareDeepReview(params)));
                     } catch (InterruptedException failure) {
                         Thread.currentThread().interrupt();
+                        if (!operation.isCancelled()) {
+                            log.warn(
+                                    "Async JSON-RPC method 'reviews/prepareDeepReview' interrupted (id={}, operationId={})",
+                                    id,
+                                    params.operationId(),
+                                    LogRedactor.sanitize(failure));
+                        }
                         operation.completeCancellation();
                     } catch (Throwable failure) {
                         log.warn(
                                 "Async JSON-RPC method 'reviews/prepareDeepReview' failed (id={}, operationId={})",
                                 id,
                                 params.operationId(),
-                                failure);
+                                LogRedactor.sanitize(failure));
                         operation.complete(support.error(id, -32000, safeMessage(failure)));
                         if (failure instanceof VirtualMachineError vmError) {
                             throw vmError;
@@ -336,7 +365,7 @@ final class StdioJsonRpcServerAsyncReviewHandlers {
                                 request.path("method").asText(),
                                 id,
                                 operationId,
-                                failure);
+                                LogRedactor.sanitize(failure));
                         operation.complete(support.error(id, -32000, safeMessage(failure)));
                         if (failure instanceof VirtualMachineError vmError) {
                             throw vmError;

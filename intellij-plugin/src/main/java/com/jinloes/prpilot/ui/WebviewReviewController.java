@@ -31,6 +31,7 @@ import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewGenerationSettings;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewResultMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ReviewScopeDto;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.SimpleMsg;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -190,312 +191,29 @@ final class WebviewReviewController {
         getApplication()
                 .executeOnPooledThread(
                         () -> {
-                            if (!panel.isCurrentGeneration(key, reviewRevision, generationId)) {
-                                return;
-                            }
-                            // Atomically snapshot prefetched data to prevent check-then-act
-                            // races with a concurrent handleSelectPR on the JCEF bridge thread.
-                            String snapshotDiff;
-                            String snapshotValidationDiff;
-                            PrDiffService.LocalSource localSource;
-                            IntellijGitHubService.PRRevisions reviewedRevisions;
-                            IntellijGitHubService.PRRevisions beforeDiff = null;
-                            String snapshotReviews;
-                            long worktreeEpoch;
-                            WebviewPanel.PrefetchedPrContext snapshotContext;
-                            PullRequest promptPr;
-                            synchronized (panel) {
-                                if (!panel.isCurrentGenerationLocked(
-                                        key, reviewRevision, generationId)) {
-                                    return;
-                                }
-                                promptPr = panel.activePR;
-                                snapshotDiff = panel.prefetchedDiff;
-                                snapshotValidationDiff = panel.prefetchedValidationDiff;
-                                localSource = deep == null ? panel.prefetchedLocalDiffSource : null;
-                                reviewedRevisions = panel.prefetchedReviewedRevisions;
-                                snapshotReviews = panel.prefetchedExistingReviews;
-                                snapshotContext = panel.prefetchedPrContext;
-                                worktreeEpoch = panel.worktreeManager.epoch();
-                            }
-
-                            if (localSource != null) {
-                                IntellijGitHubService.PRRevisions fresh = null;
-                                try {
-                                    fresh = panel.ghSvc.getPRRevisions(owner, repo, number);
-                                } catch (Exception e) {
-                                    log.warn(
-                                            "Could not verify local diff revision for PR #{}",
-                                            number,
-                                            e);
-                                }
-                                if (!matchesLocalDiff(localSource, fresh)) {
-                                    panel.publishIfCurrentGeneration(
-                                            key,
-                                            reviewRevision,
-                                            generationId,
-                                            new ErrorMsg(
-                                                    "reviewError",
-                                                    key,
-                                                    "Could not confirm the local diff still matches this pull request. Reopen the pull request and try again."));
-                                    return;
-                                }
-                            }
-
-                            // Reuse prefetched diff; fall back to live fetch only if stale.
-                            String diff;
-                            if (StringUtils.isNotBlank(overrideDiff)) {
-                                diff = overrideDiff;
-                                if (!overrideDiff.equals(snapshotDiff)
-                                        && !overrideDiff.equals(snapshotValidationDiff)) {
-                                    reviewedRevisions = null;
-                                }
-                            } else if (StringUtils.isNotBlank(snapshotDiff)) {
-                                diff = snapshotDiff;
-                            } else {
-                                panel.publishIfCurrentGeneration(
-                                        key,
-                                        reviewRevision,
-                                        generationId,
-                                        new ReviewGeneratingMsg(
-                                                "reviewGenerating", key, "Fetching diff…"));
-                                try {
-                                    if (deep == null)
-                                        beforeDiff = panel.reviewMetadata(owner, repo, number);
-                                    var loaded =
-                                            panel.ghSvc.loadPRDiff(
-                                                    owner,
-                                                    repo,
-                                                    number,
-                                                    false,
-                                                    () ->
-                                                            deep == null
-                                                                            && panel
-                                                                                    .isCurrentSelection(
-                                                                                            key,
-                                                                                            reviewRevision)
-                                                                    ? panel.localDiffSource(
-                                                                            promptPr,
-                                                                            worktreeEpoch,
-                                                                            null)
-                                                                    : null);
-                                    diff = loaded.diff();
-                                    if (loaded.localSource() != null) {
-                                        localSource = loaded.localSource();
-                                        snapshotValidationDiff = null;
-                                    }
-                                } catch (Exception e) {
-                                    panel.publishIfCurrentGeneration(
-                                            key,
-                                            reviewRevision,
-                                            generationId,
-                                            new ErrorMsg(
-                                                    "reviewError",
-                                                    key,
-                                                    UserFacingErrors.forGitHub(
-                                                            e, "load the PR diff")));
-                                    return;
-                                }
-                            }
-
-                            String validationDiff;
-                            if (StringUtils.isNotBlank(snapshotValidationDiff)) {
-                                validationDiff = snapshotValidationDiff;
-                            } else {
-                                try {
-                                    validationDiff =
-                                            localSource == null
-                                                    ? reviewedRevisions != null
-                                                            ? diff
-                                                            : panel.ghSvc.getPRDiffFull(
-                                                                    owner, repo, number)
-                                                    : panel.ghSvc.loadLocalPRDiff(
-                                                            owner, repo, number, true, localSource);
-                                } catch (Exception e) {
-                                    log.warn(
-                                            "getPRDiffFull failed; falling back to truncated diff: {}",
-                                            e.getMessage());
-                                    validationDiff = diff;
-                                }
-                            }
-
-                            if (localSource != null
-                                    && (StringUtils.isBlank(overrideDiff)
-                                            || overrideDiff.equals(snapshotDiff)
-                                            || overrideDiff.equals(snapshotValidationDiff))) {
-                                reviewedRevisions =
-                                        new IntellijGitHubService.PRRevisions(
-                                                localSource.headSha(), localSource.baseSha());
-                            } else if (beforeDiff != null
-                                    && beforeDiff.equals(
-                                            panel.reviewMetadata(owner, repo, number))) {
-                                reviewedRevisions = beforeDiff;
-                            }
-
-                            // The incremental diff only feeds the model: the published diff and
-                            // validationDiff stay PR diffs so anchors validate against the whole
-                            // PR.
-                            ReviewInput reviewInput;
                             try {
-                                reviewInput =
-                                        resolveReviewInput(
-                                                incremental && deep == null,
-                                                diff,
-                                                () ->
-                                                        panel.ghSvc.getIncrementalDiff(
-                                                                owner, repo, number));
-                            } catch (Exception e) {
-                                panel.publishIfCurrentGeneration(
-                                        key,
-                                        reviewRevision,
-                                        generationId,
-                                        new ErrorMsg(
-                                                "reviewError",
-                                                key,
-                                                UserFacingErrors.forGitHub(
-                                                        e,
-                                                        "load the changes since your last review")));
-                                return;
-                            }
-
-                            // Run additive GitHub context and worktree resolution concurrently.
-                            // CI status is always fetched fresh for the current headSha so checks
-                            // that finished after selectPR are never missed, while immutable
-                            // commits/linked-issue text for the same headSha reuses the prefetch.
-                            panel.publishIfCurrentGeneration(
-                                    key,
-                                    reviewRevision,
-                                    generationId,
-                                    new ReviewGeneratingMsg(
-                                            "reviewGenerating", key, "Preparing PR branch…"));
-
-                            CompletableFuture<IntellijClaudeService> worktreeFuture =
-                                    CompletableFuture.supplyAsync(
-                                            () -> {
-                                                try {
-                                                    return deep == null
-                                                            ? panel.resolvePrClaudeService(promptPr)
-                                                            : new IntellijClaudeService(
-                                                                    deep.pending()
-                                                                            .preparation()
-                                                                            .worktree());
-                                                } catch (Exception e) {
-                                                    throw new CompletionException(e);
-                                                }
-                                            });
-
-                            CompletableFuture<String> existingReviewsFuture =
-                                    snapshotReviews != null
-                                            ? CompletableFuture.completedFuture(snapshotReviews)
-                                            : CompletableFuture.supplyAsync(
-                                                    () -> {
-                                                        try {
-                                                            return panel.ghSvc
-                                                                    .getExistingReviewsSummary(
-                                                                            owner, repo, number);
-                                                        } catch (Exception e) {
-                                                            log.warn(
-                                                                    "getExistingReviewsSummary"
-                                                                            + " failed: {}",
-                                                                    e.getMessage());
-                                                            return "";
-                                                        }
-                                                    });
-
-                            CompletableFuture<IntellijGitHubService.PRRevisions> revisionsFuture =
-                                    localSource != null
-                                            ? CompletableFuture.completedFuture(
-                                                    new IntellijGitHubService.PRRevisions(
-                                                            localSource.headSha(),
-                                                            localSource.baseSha()))
-                                            : CompletableFuture.supplyAsync(
-                                                    () -> {
-                                                        try {
-                                                            return panel.ghSvc.getPRRevisions(
-                                                                    owner, repo, number);
-                                                        } catch (Exception e) {
-                                                            log.warn(
-                                                                    "getPRRevisions failed: {}",
-                                                                    e.getMessage());
-                                                            return new IntellijGitHubService
-                                                                    .PRRevisions("", "");
-                                                        }
-                                                    });
-
-                            CompletableFuture<IntellijGitHubService.CheckContext> checksFuture =
-                                    revisionsFuture.thenApplyAsync(
-                                            revisions -> {
-                                                if (StringUtils.isBlank(revisions.headSha())) {
-                                                    return new IntellijGitHubService.CheckContext(
-                                                            "", List.of());
-                                                }
-                                                try {
-                                                    return panel.ghSvc.getCheckContext(
-                                                            owner, repo, revisions.headSha());
-                                                } catch (Exception e) {
-                                                    log.warn(
-                                                            "getCheckContext failed: {}",
-                                                            e.getMessage());
-                                                    return new IntellijGitHubService.CheckContext(
-                                                            "", List.of());
-                                                }
-                                            });
-
-                            record CommitsAndIssue(String commits, String linkedIssue) {}
-                            CompletableFuture<CommitsAndIssue> commitsAndIssueFuture =
-                                    revisionsFuture.thenApplyAsync(
-                                            revisions -> {
-                                                if (snapshotContext != null
-                                                        && StringUtils.isNotBlank(
-                                                                revisions.headSha())
-                                                        && revisions
-                                                                .headSha()
-                                                                .equals(
-                                                                        snapshotContext
-                                                                                .headSha())) {
-                                                    return new CommitsAndIssue(
-                                                            snapshotContext.commits(),
-                                                            snapshotContext.linkedIssue());
-                                                }
-                                                IntellijGitHubService.CommitContext commits =
-                                                        new IntellijGitHubService.CommitContext(
-                                                                "", List.of());
-                                                try {
-                                                    commits =
-                                                            panel.ghSvc.getCommitContext(
-                                                                    owner, repo, number);
-                                                } catch (Exception e) {
-                                                    log.warn(
-                                                            "getCommitContext failed: {}",
-                                                            e.getMessage());
-                                                }
-                                                String issue = "";
-                                                try {
-                                                    issue =
-                                                            panel.ghSvc.getLinkedIssueSummary(
-                                                                    owner,
-                                                                    repo,
-                                                                    promptPr.getBody(),
-                                                                    commits.closingIssueNumbers());
-                                                } catch (Exception e) {
-                                                    log.warn(
-                                                            "getLinkedIssueSummary failed: {}",
-                                                            e.getMessage());
-                                                }
-                                                return new CommitsAndIssue(
-                                                        commits.summary(), issue);
-                                            });
-
-                            IntellijClaudeService reviewService;
-                            try {
-                                reviewService = worktreeFuture.join();
-                            } catch (CompletionException wrapped) {
-                                Throwable e =
-                                        wrapped.getCause() != null ? wrapped.getCause() : wrapped;
-                                log.warn(
-                                        "Worktree resolution for PR #{} failed: {}",
+                                runGenerateReviewTask(
                                         number,
-                                        e.getMessage());
+                                        owner,
+                                        repo,
+                                        key,
+                                        reviewRevision,
+                                        generationId,
+                                        provider,
+                                        generationSettings,
+                                        overrideDiff,
+                                        chunkedReview,
+                                        overrideFocusAreas,
+                                        overrideCustomInstructions,
+                                        operationId,
+                                        deep,
+                                        incremental);
+                            } catch (Exception e) {
+                                log.warn(
+                                        "Unexpected failure while trying to generate review for {} with provider '{}'",
+                                        key,
+                                        provider.getId(),
+                                        LogRedactor.sanitize(e));
                                 synchronized (panel) {
                                     if (panel.isCurrentGenerationLocked(
                                             key, reviewRevision, generationId)) {
@@ -511,259 +229,547 @@ final class WebviewReviewController {
                                         new ErrorMsg(
                                                 "reviewError",
                                                 key,
-                                                "Unable to create an isolated pull request worktree."
-                                                        + " Open the PR repository and try again."));
-                                return;
+                                                UserFacingErrors.forProvider(
+                                                        provider, e, "generate review")));
                             }
-
-                            String existingReviews = existingReviewsFuture.join();
-                            String baseSha = revisionsFuture.join().baseSha();
-                            IntellijGitHubService.CheckContext checks = checksFuture.join();
-                            String ciStatus = checks.summary();
-                            List<CiAnnotation> ciAnnotations = checks.annotations();
-                            CommitsAndIssue commitsAndIssue = commitsAndIssueFuture.join();
-                            IntellijGitHubService.CommitContext commitContext =
-                                    new IntellijGitHubService.CommitContext(
-                                            commitsAndIssue.commits(), List.of());
-                            String linkedIssue = commitsAndIssue.linkedIssue();
-
-                            final IntellijClaudeService finalReviewService = reviewService;
-
-                            // Kick off the review — callbacks fired on EDT
-                            final String finalDiff = diff;
-                            final String finalModelDiff = reviewInput.modelDiff();
-                            final String finalIncrementalBaselineSha =
-                                    reviewInput.incrementalBaselineSha();
-                            final ReviewScopeDto finalReviewScope = reviewInput.reviewScope();
-                            final String finalValidationDiff = validationDiff;
-                            var worktree = panel.worktreeManager.activeValueForPr(promptPr);
-                            var reviewedFile =
-                                    WebviewPanel.ReviewedFile.forCommit(
-                                            deep != null
-                                                    ? java.util.Objects.equals(
-                                                                    finalValidationDiff, finalDiff)
-                                                            ? deep.pending().preparation().head()
-                                                            : null
-                                                    : reviewedRevisions != null
-                                                                    && worktree != null
-                                                                    && reviewedRevisions
-                                                                            .headSha()
-                                                                            .equals(
-                                                                                    worktree
-                                                                                            .headSha())
-                                                                    && (reviewInput.reviewScope()
-                                                                                    == null
-                                                                            || "full"
-                                                                                    .equals(
-                                                                                            reviewInput
-                                                                                                    .reviewScope()
-                                                                                                    .kind()))
-                                                            ? reviewedRevisions.headSha()
-                                                            : null);
-                            final String finalExisting = existingReviews;
-                            java.io.File guidelinesDir;
-                            ReviewResult priorResult;
-                            synchronized (panel) {
-                                if (!panel.isCurrentGenerationLocked(
-                                        key, reviewRevision, generationId)) {
-                                    return;
-                                }
-                                panel.activeReviewService = finalReviewService;
-                                panel.activeReviewProvider =
-                                        generationSettings.runtime().provider();
-                                WebviewBridgeMessages.PrWorktree activeWorktree =
-                                        panel.worktreeManager.activeValue();
-                                guidelinesDir =
-                                        deep != null
-                                                ? new java.io.File(
-                                                        deep.pending().preparation().worktree())
-                                                : activeWorktree != null
-                                                        ? activeWorktree.directory()
-                                                        : (panel.project.getBasePath() != null
-                                                                ? new java.io.File(
-                                                                        panel.project.getBasePath())
-                                                                : null);
-                                priorResult = panel.lastResult;
-                            }
-                            panel.publishIfCurrentGeneration(
-                                    key,
-                                    reviewRevision,
-                                    generationId,
-                                    new ReviewGeneratingMsg(
-                                            "reviewGenerating", key, "Sending review request…"));
-                            // Guidance in the PR worktree is authored by the change under review,
-                            // so the host never reads it. The engine resolves guidance and file
-                            // history from the trusted base commit identified by baseSha.
-                            final String finalGuidelines = "";
-                            final String finalBaseSha = baseSha;
-                            final String finalPriorReview =
-                                    WebviewPanel.formatPriorReview(priorResult);
-                            final String finalFocusAreas =
-                                    StringUtils.isNotBlank(overrideFocusAreas)
-                                            ? overrideFocusAreas
-                                            : generationSettings.focusAreas();
-                            final String finalCustomInstructions =
-                                    RepositoryReviewInstructions.compose(
-                                            owner + "/" + repo,
-                                            generationSettings.repositoryInstructions(),
-                                            StringUtils.isNotBlank(overrideCustomInstructions)
-                                                    ? overrideCustomInstructions
-                                                    : generationSettings.customInstructions());
-                            final String finalCiStatus = ciStatus;
-                            final List<CiAnnotation> finalCiAnnotations = ciAnnotations;
-                            final String finalCommits = commitContext.summary();
-                            final String finalLinkedIssue = linkedIssue;
-                            final String finalRepoProfile =
-                                    guidelinesDir == null
-                                            ? ""
-                                            : panel.ghSvc.getRepoProfileSummary(
-                                                    guidelinesDir.getAbsolutePath());
-                            finalReviewService.reviewPR(
-                                    PRReviewRequest.builder(promptPr, finalModelDiff)
-                                            .priorReview(finalPriorReview)
-                                            .existingReviews(finalExisting)
-                                            .repoGuidelines(finalGuidelines)
-                                            .focusAreas(finalFocusAreas)
-                                            .customInstructions(finalCustomInstructions)
-                                            .ciStatus(finalCiStatus)
-                                            .commits(finalCommits)
-                                            .linkedIssue(finalLinkedIssue)
-                                            .repoProfile(finalRepoProfile)
-                                            .ciAnnotations(finalCiAnnotations)
-                                            .baseSha(finalBaseSha)
-                                            .guidanceGlobs(generationSettings.guidanceGlobs())
-                                            .rulesDirectory(generationSettings.rulesDirectory())
-                                            .builtInRules(generationSettings.builtInRules())
-                                            .incrementalBaselineSha(finalIncrementalBaselineSha)
-                                            .build(),
-                                    generationSettings.runtime(),
-                                    chunkedReview && finalIncrementalBaselineSha == null,
-                                    statusMsg ->
-                                            panel.publishIfCurrentGeneration(
-                                                    key,
-                                                    reviewRevision,
-                                                    generationId,
-                                                    new ReviewGeneratingMsg(
-                                                            "reviewGenerating", key, statusMsg)),
-                                    (kind, chunk) ->
-                                            panel.publishIfCurrentGeneration(
-                                                    key,
-                                                    reviewRevision,
-                                                    generationId,
-                                                    new ReviewChunkMsg(
-                                                            "reviewChunk", key, kind, chunk)),
-                                    result -> {
-                                        if (result == null) {
-                                            synchronized (panel) {
-                                                if (panel.isCurrentGenerationLocked(
-                                                        key, reviewRevision, generationId)) {
-                                                    panel.activeReviewOperationId = null;
-                                                    panel.activeReviewProvider =
-                                                            ReviewProvider.CLAUDE;
-                                                    panel.activeReviewService = panel.claudeService;
-                                                }
-                                            }
-                                            panel.publishIfCurrentGeneration(
-                                                    key,
-                                                    reviewRevision,
-                                                    generationId,
-                                                    new ErrorMsg(
-                                                            "reviewError",
-                                                            key,
-                                                            UserFacingErrors.forProvider(
-                                                                    provider,
-                                                                    new Exception(
-                                                                            "Provider produced no output"),
-                                                                    "generate review")));
-                                            return;
-                                        }
-                                        synchronized (panel) {
-                                            if (!panel.isCurrentGenerationLocked(
-                                                    key, reviewRevision, generationId)) {
-                                                return;
-                                            }
-                                            panel.activeReviewService = panel.claudeService;
-                                            panel.activeReviewOperationId = null;
-                                            panel.activeReviewProvider = ReviewProvider.CLAUDE;
-                                            panel.lastResult = result;
-                                            panel.reviewedFile = reviewedFile;
-                                            panel.generatedReviews.put(
-                                                    key,
-                                                    new GeneratedReview(
-                                                            generationId,
-                                                            result,
-                                                            generationMetadata(
-                                                                    provider,
-                                                                    generationSettings
-                                                                            .runtime()
-                                                                            .model(),
-                                                                    generationSettings
-                                                                            .runtime()
-                                                                            .supervisorEnabled())));
-                                            panel.pendingReviewId = null;
-                                        }
-                                        panel.publishIfCurrentGeneration(
-                                                key,
-                                                reviewRevision,
-                                                generationId,
-                                                new ReviewResultMsg(
-                                                        "reviewResult",
-                                                        key,
-                                                        ReviewMapper.INSTANCE.toDto(result),
-                                                        finalDiff,
-                                                        finalValidationDiff,
-                                                        finalReviewScope,
-                                                        reviewedFile == null
-                                                                ? null
-                                                                : reviewedFile.token()));
-                                    },
-                                    err -> {
-                                        synchronized (panel) {
-                                            if (!panel.isCurrentGenerationLocked(
-                                                    key, reviewRevision, generationId)) {
-                                                return;
-                                            }
-                                            panel.activeReviewService = panel.claudeService;
-                                            panel.activeReviewOperationId = null;
-                                            panel.activeReviewProvider = ReviewProvider.CLAUDE;
-                                        }
-                                        // Cancellations are user-initiated — don't surface as
-                                        // errors.
-                                        String lower = err.toLowerCase(java.util.Locale.ROOT);
-                                        if (!lower.contains("cancel")
-                                                && !lower.contains("interrupt")) {
-                                            if (deep != null) {
-                                                synchronized (panel) {
-                                                    if (panel.isCurrentGenerationLocked(
-                                                            key, reviewRevision, generationId)) {
-                                                        panel.assistedReviews
-                                                                .restoreAfterGenerationFailureLocked(
-                                                                        deep.pending(),
-                                                                        operationId,
-                                                                        err);
-                                                    }
-                                                }
-                                                return;
-                                            }
-                                            panel.publishIfCurrentGeneration(
-                                                    key,
-                                                    reviewRevision,
-                                                    generationId,
-                                                    new ErrorMsg("reviewError", key, err));
-                                        }
-                                    },
-                                    deep == null
-                                            ? null
-                                            : new IntellijClaudeService.DeepReviewOperation(
-                                                    panel.semanticReviews,
-                                                    deep.pending().preparation().retainedId(),
-                                                    deep.server(),
-                                                    owner + "/" + repo + "#" + number,
-                                                    operationId,
-                                                    () ->
-                                                            panel.assistedReviews.validateHead(
-                                                                    deep.pending())));
                         });
+    }
+
+    private void runGenerateReviewTask(
+            int number,
+            String owner,
+            String repo,
+            String key,
+            long reviewRevision,
+            long generationId,
+            ReviewProvider provider,
+            ReviewGenerationSettings generationSettings,
+            String overrideDiff,
+            boolean chunkedReview,
+            String overrideFocusAreas,
+            String overrideCustomInstructions,
+            String operationId,
+            DeepReviewController.DeepInvocation deep,
+            boolean incremental) {
+        if (!panel.isCurrentGeneration(key, reviewRevision, generationId)) {
+            return;
+        }
+        // Atomically snapshot prefetched data to prevent check-then-act
+        // races with a concurrent handleSelectPR on the JCEF bridge thread.
+        String snapshotDiff;
+        String snapshotValidationDiff;
+        PrDiffService.LocalSource localSource;
+        IntellijGitHubService.PRRevisions reviewedRevisions;
+        IntellijGitHubService.PRRevisions beforeDiff = null;
+        String snapshotReviews;
+        long worktreeEpoch;
+        WebviewPanel.PrefetchedPrContext snapshotContext;
+        PullRequest promptPr;
+        synchronized (panel) {
+            if (!panel.isCurrentGenerationLocked(key, reviewRevision, generationId)) {
+                return;
+            }
+            promptPr = panel.activePR;
+            snapshotDiff = panel.prefetchedDiff;
+            snapshotValidationDiff = panel.prefetchedValidationDiff;
+            localSource = deep == null ? panel.prefetchedLocalDiffSource : null;
+            reviewedRevisions = panel.prefetchedReviewedRevisions;
+            snapshotReviews = panel.prefetchedExistingReviews;
+            snapshotContext = panel.prefetchedPrContext;
+            worktreeEpoch = panel.worktreeManager.epoch();
+        }
+
+        if (localSource != null) {
+            IntellijGitHubService.PRRevisions fresh = null;
+            try {
+                fresh = panel.ghSvc.getPRRevisions(owner, repo, number);
+            } catch (Exception e) {
+                log.warn(
+                        "Could not verify local diff revision for PR #{}",
+                        number,
+                        LogRedactor.sanitize(e));
+            }
+            if (!matchesLocalDiff(localSource, fresh)) {
+                panel.publishIfCurrentGeneration(
+                        key,
+                        reviewRevision,
+                        generationId,
+                        new ErrorMsg(
+                                "reviewError",
+                                key,
+                                "Could not confirm the local diff still matches this pull request. Reopen the pull request and try again."));
+                return;
+            }
+        }
+
+        // Reuse prefetched diff; fall back to live fetch only if stale.
+        String diff;
+        if (StringUtils.isNotBlank(overrideDiff)) {
+            diff = overrideDiff;
+            if (!overrideDiff.equals(snapshotDiff)
+                    && !overrideDiff.equals(snapshotValidationDiff)) {
+                reviewedRevisions = null;
+            }
+        } else if (StringUtils.isNotBlank(snapshotDiff)) {
+            diff = snapshotDiff;
+        } else {
+            panel.publishIfCurrentGeneration(
+                    key,
+                    reviewRevision,
+                    generationId,
+                    new ReviewGeneratingMsg("reviewGenerating", key, "Fetching diff…"));
+            try {
+                if (deep == null) beforeDiff = panel.reviewMetadata(owner, repo, number);
+                var loaded =
+                        panel.ghSvc.loadPRDiff(
+                                owner,
+                                repo,
+                                number,
+                                false,
+                                () ->
+                                        deep == null
+                                                        && panel.isCurrentSelection(
+                                                                key, reviewRevision)
+                                                ? panel.localDiffSource(
+                                                        promptPr, worktreeEpoch, null)
+                                                : null);
+                diff = loaded.diff();
+                if (loaded.localSource() != null) {
+                    localSource = loaded.localSource();
+                    snapshotValidationDiff = null;
+                }
+            } catch (Exception e) {
+                log.warn(
+                        "Failed to load PR diff for {} during review generation",
+                        key,
+                        LogRedactor.sanitize(e));
+                panel.publishIfCurrentGeneration(
+                        key,
+                        reviewRevision,
+                        generationId,
+                        new ErrorMsg(
+                                "reviewError",
+                                key,
+                                UserFacingErrors.forGitHub(e, "load the PR diff")));
+                return;
+            }
+        }
+
+        String validationDiff;
+        if (StringUtils.isNotBlank(snapshotValidationDiff)) {
+            validationDiff = snapshotValidationDiff;
+        } else {
+            try {
+                validationDiff =
+                        localSource == null
+                                ? reviewedRevisions != null
+                                        ? diff
+                                        : panel.ghSvc.getPRDiffFull(owner, repo, number)
+                                : panel.ghSvc.loadLocalPRDiff(
+                                        owner, repo, number, true, localSource);
+            } catch (Exception e) {
+                log.warn(
+                        "getPRDiffFull failed for {}; falling back to truncated diff",
+                        key,
+                        LogRedactor.sanitize(e));
+                validationDiff = diff;
+            }
+        }
+
+        if (localSource != null
+                && (StringUtils.isBlank(overrideDiff)
+                        || overrideDiff.equals(snapshotDiff)
+                        || overrideDiff.equals(snapshotValidationDiff))) {
+            reviewedRevisions =
+                    new IntellijGitHubService.PRRevisions(
+                            localSource.headSha(), localSource.baseSha());
+        } else if (beforeDiff != null
+                && beforeDiff.equals(panel.reviewMetadata(owner, repo, number))) {
+            reviewedRevisions = beforeDiff;
+        }
+
+        // The incremental diff only feeds the model: the published diff and
+        // validationDiff stay PR diffs so anchors validate against the whole
+        // PR.
+        ReviewInput reviewInput;
+        try {
+            reviewInput =
+                    resolveReviewInput(
+                            incremental && deep == null,
+                            diff,
+                            () -> panel.ghSvc.getIncrementalDiff(owner, repo, number));
+        } catch (Exception e) {
+            log.warn("Failed to load incremental diff for {}", key, LogRedactor.sanitize(e));
+            panel.publishIfCurrentGeneration(
+                    key,
+                    reviewRevision,
+                    generationId,
+                    new ErrorMsg(
+                            "reviewError",
+                            key,
+                            UserFacingErrors.forGitHub(
+                                    e, "load the changes since your last review")));
+            return;
+        }
+
+        // Run additive GitHub context and worktree resolution concurrently.
+        // CI status is always fetched fresh for the current headSha so checks
+        // that finished after selectPR are never missed, while immutable
+        // commits/linked-issue text for the same headSha reuses the prefetch.
+        panel.publishIfCurrentGeneration(
+                key,
+                reviewRevision,
+                generationId,
+                new ReviewGeneratingMsg("reviewGenerating", key, "Preparing PR branch…"));
+
+        CompletableFuture<IntellijClaudeService> worktreeFuture =
+                CompletableFuture.supplyAsync(
+                        () -> {
+                            try {
+                                return deep == null
+                                        ? panel.resolvePrClaudeService(promptPr)
+                                        : new IntellijClaudeService(
+                                                deep.pending().preparation().worktree());
+                            } catch (Exception e) {
+                                throw new CompletionException(e);
+                            }
+                        });
+
+        CompletableFuture<String> existingReviewsFuture =
+                snapshotReviews != null
+                        ? CompletableFuture.completedFuture(snapshotReviews)
+                        : CompletableFuture.supplyAsync(
+                                () -> {
+                                    try {
+                                        return panel.ghSvc.getExistingReviewsSummary(
+                                                owner, repo, number);
+                                    } catch (Exception e) {
+                                        log.warn(
+                                                "getExistingReviewsSummary failed for {}",
+                                                key,
+                                                LogRedactor.sanitize(e));
+                                        return "";
+                                    }
+                                });
+
+        CompletableFuture<IntellijGitHubService.PRRevisions> revisionsFuture =
+                localSource != null
+                        ? CompletableFuture.completedFuture(
+                                new IntellijGitHubService.PRRevisions(
+                                        localSource.headSha(), localSource.baseSha()))
+                        : CompletableFuture.supplyAsync(
+                                () -> {
+                                    try {
+                                        return panel.ghSvc.getPRRevisions(owner, repo, number);
+                                    } catch (Exception e) {
+                                        log.warn(
+                                                "getPRRevisions failed for {}",
+                                                key,
+                                                LogRedactor.sanitize(e));
+                                        return new IntellijGitHubService.PRRevisions("", "");
+                                    }
+                                });
+
+        CompletableFuture<IntellijGitHubService.CheckContext> checksFuture =
+                revisionsFuture.thenApplyAsync(
+                        revisions -> {
+                            if (StringUtils.isBlank(revisions.headSha())) {
+                                return new IntellijGitHubService.CheckContext("", List.of());
+                            }
+                            try {
+                                return panel.ghSvc.getCheckContext(
+                                        owner, repo, revisions.headSha());
+                            } catch (Exception e) {
+                                log.warn(
+                                        "getCheckContext failed for {}",
+                                        key,
+                                        LogRedactor.sanitize(e));
+                                return new IntellijGitHubService.CheckContext("", List.of());
+                            }
+                        });
+
+        record CommitsAndIssue(String commits, String linkedIssue) {}
+        CompletableFuture<CommitsAndIssue> commitsAndIssueFuture =
+                revisionsFuture.thenApplyAsync(
+                        revisions -> {
+                            if (snapshotContext != null
+                                    && StringUtils.isNotBlank(revisions.headSha())
+                                    && revisions.headSha().equals(snapshotContext.headSha())) {
+                                return new CommitsAndIssue(
+                                        snapshotContext.commits(), snapshotContext.linkedIssue());
+                            }
+                            IntellijGitHubService.CommitContext commits =
+                                    new IntellijGitHubService.CommitContext("", List.of());
+                            try {
+                                commits = panel.ghSvc.getCommitContext(owner, repo, number);
+                            } catch (Exception e) {
+                                log.warn(
+                                        "getCommitContext failed for {}",
+                                        key,
+                                        LogRedactor.sanitize(e));
+                            }
+                            String issue = "";
+                            try {
+                                issue =
+                                        panel.ghSvc.getLinkedIssueSummary(
+                                                owner,
+                                                repo,
+                                                promptPr.getBody(),
+                                                commits.closingIssueNumbers());
+                            } catch (Exception e) {
+                                log.warn(
+                                        "getLinkedIssueSummary failed for {}",
+                                        key,
+                                        LogRedactor.sanitize(e));
+                            }
+                            return new CommitsAndIssue(commits.summary(), issue);
+                        });
+
+        IntellijClaudeService reviewService;
+        try {
+            reviewService = worktreeFuture.join();
+        } catch (CompletionException wrapped) {
+            Throwable e = wrapped.getCause() != null ? wrapped.getCause() : wrapped;
+            log.warn("Worktree resolution for PR #{} failed", number, LogRedactor.sanitize(e));
+            synchronized (panel) {
+                if (panel.isCurrentGenerationLocked(key, reviewRevision, generationId)) {
+                    panel.activeReviewService = panel.claudeService;
+                    panel.activeReviewProvider = ReviewProvider.CLAUDE;
+                    panel.activeReviewOperationId = null;
+                }
+            }
+            panel.publishIfCurrentGeneration(
+                    key,
+                    reviewRevision,
+                    generationId,
+                    new ErrorMsg(
+                            "reviewError",
+                            key,
+                            "Unable to create an isolated pull request worktree."
+                                    + " Open the PR repository and try again."));
+            return;
+        }
+
+        String existingReviews = existingReviewsFuture.join();
+        String baseSha = revisionsFuture.join().baseSha();
+        IntellijGitHubService.CheckContext checks = checksFuture.join();
+        String ciStatus = checks.summary();
+        List<CiAnnotation> ciAnnotations = checks.annotations();
+        CommitsAndIssue commitsAndIssue = commitsAndIssueFuture.join();
+        IntellijGitHubService.CommitContext commitContext =
+                new IntellijGitHubService.CommitContext(commitsAndIssue.commits(), List.of());
+        String linkedIssue = commitsAndIssue.linkedIssue();
+
+        final IntellijClaudeService finalReviewService = reviewService;
+
+        // Kick off the review — callbacks fired on EDT
+        final String finalDiff = diff;
+        final String finalModelDiff = reviewInput.modelDiff();
+        final String finalIncrementalBaselineSha = reviewInput.incrementalBaselineSha();
+        final ReviewScopeDto finalReviewScope = reviewInput.reviewScope();
+        final String finalValidationDiff = validationDiff;
+        var worktree = panel.worktreeManager.activeValueForPr(promptPr);
+        var reviewedFile =
+                WebviewPanel.ReviewedFile.forCommit(
+                        deep != null
+                                ? java.util.Objects.equals(finalValidationDiff, finalDiff)
+                                        ? deep.pending().preparation().head()
+                                        : null
+                                : reviewedRevisions != null
+                                                && worktree != null
+                                                && reviewedRevisions
+                                                        .headSha()
+                                                        .equals(worktree.headSha())
+                                                && (reviewInput.reviewScope() == null
+                                                        || "full"
+                                                                .equals(
+                                                                        reviewInput
+                                                                                .reviewScope()
+                                                                                .kind()))
+                                        ? reviewedRevisions.headSha()
+                                        : null);
+        final String finalExisting = existingReviews;
+        java.io.File guidelinesDir;
+        ReviewResult priorResult;
+        synchronized (panel) {
+            if (!panel.isCurrentGenerationLocked(key, reviewRevision, generationId)) {
+                return;
+            }
+            panel.activeReviewService = finalReviewService;
+            panel.activeReviewProvider = generationSettings.runtime().provider();
+            WebviewBridgeMessages.PrWorktree activeWorktree = panel.worktreeManager.activeValue();
+            guidelinesDir =
+                    deep != null
+                            ? new java.io.File(deep.pending().preparation().worktree())
+                            : activeWorktree != null
+                                    ? activeWorktree.directory()
+                                    : (panel.project.getBasePath() != null
+                                            ? new java.io.File(panel.project.getBasePath())
+                                            : null);
+            priorResult = panel.lastResult;
+        }
+        panel.publishIfCurrentGeneration(
+                key,
+                reviewRevision,
+                generationId,
+                new ReviewGeneratingMsg("reviewGenerating", key, "Sending review request…"));
+        // Guidance in the PR worktree is authored by the change under review,
+        // so the host never reads it. The engine resolves guidance and file
+        // history from the trusted base commit identified by baseSha.
+        final String finalGuidelines = "";
+        final String finalBaseSha = baseSha;
+        final String finalPriorReview = WebviewPanel.formatPriorReview(priorResult);
+        final String finalFocusAreas =
+                StringUtils.isNotBlank(overrideFocusAreas)
+                        ? overrideFocusAreas
+                        : generationSettings.focusAreas();
+        final String finalCustomInstructions =
+                RepositoryReviewInstructions.compose(
+                        owner + "/" + repo,
+                        generationSettings.repositoryInstructions(),
+                        StringUtils.isNotBlank(overrideCustomInstructions)
+                                ? overrideCustomInstructions
+                                : generationSettings.customInstructions());
+        final String finalCiStatus = ciStatus;
+        final List<CiAnnotation> finalCiAnnotations = ciAnnotations;
+        final String finalCommits = commitContext.summary();
+        final String finalLinkedIssue = linkedIssue;
+        final String finalRepoProfile =
+                guidelinesDir == null
+                        ? ""
+                        : panel.ghSvc.getRepoProfileSummary(guidelinesDir.getAbsolutePath());
+        finalReviewService.reviewPR(
+                PRReviewRequest.builder(promptPr, finalModelDiff)
+                        .priorReview(finalPriorReview)
+                        .existingReviews(finalExisting)
+                        .repoGuidelines(finalGuidelines)
+                        .focusAreas(finalFocusAreas)
+                        .customInstructions(finalCustomInstructions)
+                        .ciStatus(finalCiStatus)
+                        .commits(finalCommits)
+                        .linkedIssue(finalLinkedIssue)
+                        .repoProfile(finalRepoProfile)
+                        .ciAnnotations(finalCiAnnotations)
+                        .baseSha(finalBaseSha)
+                        .guidanceGlobs(generationSettings.guidanceGlobs())
+                        .rulesDirectory(generationSettings.rulesDirectory())
+                        .builtInRules(generationSettings.builtInRules())
+                        .incrementalBaselineSha(finalIncrementalBaselineSha)
+                        .build(),
+                generationSettings.runtime(),
+                chunkedReview && finalIncrementalBaselineSha == null,
+                statusMsg ->
+                        panel.publishIfCurrentGeneration(
+                                key,
+                                reviewRevision,
+                                generationId,
+                                new ReviewGeneratingMsg("reviewGenerating", key, statusMsg)),
+                (kind, chunk) ->
+                        panel.publishIfCurrentGeneration(
+                                key,
+                                reviewRevision,
+                                generationId,
+                                new ReviewChunkMsg("reviewChunk", key, kind, chunk)),
+                result -> {
+                    if (result == null) {
+                        synchronized (panel) {
+                            if (panel.isCurrentGenerationLocked(
+                                    key, reviewRevision, generationId)) {
+                                panel.activeReviewOperationId = null;
+                                panel.activeReviewProvider = ReviewProvider.CLAUDE;
+                                panel.activeReviewService = panel.claudeService;
+                            }
+                        }
+                        panel.publishIfCurrentGeneration(
+                                key,
+                                reviewRevision,
+                                generationId,
+                                new ErrorMsg(
+                                        "reviewError",
+                                        key,
+                                        UserFacingErrors.forProvider(
+                                                provider,
+                                                new Exception("Provider produced no output"),
+                                                "generate review")));
+                        return;
+                    }
+                    synchronized (panel) {
+                        if (!panel.isCurrentGenerationLocked(key, reviewRevision, generationId)) {
+                            return;
+                        }
+                        panel.activeReviewService = panel.claudeService;
+                        panel.activeReviewOperationId = null;
+                        panel.activeReviewProvider = ReviewProvider.CLAUDE;
+                        panel.lastResult = result;
+                        panel.reviewedFile = reviewedFile;
+                        panel.generatedReviews.put(
+                                key,
+                                new GeneratedReview(
+                                        generationId,
+                                        result,
+                                        generationMetadata(
+                                                provider,
+                                                generationSettings.runtime().model(),
+                                                deep != null
+                                                        ? ""
+                                                        : generationSettings
+                                                                .runtime()
+                                                                .secondReviewerModel(),
+                                                generationSettings.runtime().supervisorEnabled())));
+                        panel.pendingReviewId = null;
+                    }
+                    panel.publishIfCurrentGeneration(
+                            key,
+                            reviewRevision,
+                            generationId,
+                            new ReviewResultMsg(
+                                    "reviewResult",
+                                    key,
+                                    ReviewMapper.INSTANCE.toDto(result),
+                                    finalDiff,
+                                    finalValidationDiff,
+                                    finalReviewScope,
+                                    reviewedFile == null ? null : reviewedFile.token()));
+                },
+                err -> {
+                    synchronized (panel) {
+                        if (!panel.isCurrentGenerationLocked(key, reviewRevision, generationId)) {
+                            return;
+                        }
+                        panel.activeReviewService = panel.claudeService;
+                        panel.activeReviewOperationId = null;
+                        panel.activeReviewProvider = ReviewProvider.CLAUDE;
+                    }
+                    // Cancellations are user-initiated — don't surface as
+                    // errors.
+                    String lower = err.toLowerCase(java.util.Locale.ROOT);
+                    if (!lower.contains("cancel") && !lower.contains("interrupt")) {
+                        if (deep != null) {
+                            synchronized (panel) {
+                                if (panel.isCurrentGenerationLocked(
+                                        key, reviewRevision, generationId)) {
+                                    panel.assistedReviews.restoreAfterGenerationFailureLocked(
+                                            deep.pending(), operationId, err);
+                                }
+                            }
+                            return;
+                        }
+                        panel.publishIfCurrentGeneration(
+                                key,
+                                reviewRevision,
+                                generationId,
+                                new ErrorMsg("reviewError", key, err));
+                    }
+                },
+                deep == null
+                        ? null
+                        : new IntellijClaudeService.DeepReviewOperation(
+                                panel.semanticReviews,
+                                deep.pending().preparation().retainedId(),
+                                deep.server(),
+                                owner + "/" + repo + "#" + number,
+                                operationId,
+                                () -> panel.assistedReviews.validateHead(deep.pending())));
     }
 
     void handleSaveDraft(
@@ -800,6 +806,7 @@ final class WebviewReviewController {
             saved = panel.ghSvc.saveDraftReview(owner, repo, number, result, orphans);
             panel.draftRecoveryStore.clear(key);
         } catch (Exception e) {
+            log.warn("Failed to save draft review for {}", key, LogRedactor.sanitize(e));
             panel.pushMessage(
                     new DraftSaveErrorMsg(
                             "draftSaveError",
@@ -813,7 +820,7 @@ final class WebviewReviewController {
         try {
             headSha = panel.ghSvc.getPRHeadSha(owner, repo, number);
         } catch (Exception e) {
-            log.warn("getPRHeadSha failed during saveDraft: {}", e.getMessage());
+            log.warn("getPRHeadSha failed during saveDraft for {}", key, LogRedactor.sanitize(e));
         }
 
         PullRequest pr =
@@ -873,6 +880,7 @@ final class WebviewReviewController {
             panel.ghSvc.submitDraftReview(owner, repo, number, reviewId, verdict, comment);
             panel.draftRecoveryStore.clear(key);
         } catch (Exception e) {
+            log.warn("Failed to submit draft review for {}", key, LogRedactor.sanitize(e));
             panel.pushMessage(
                     new ErrorMsg(
                             "reviewSubmitError",
@@ -901,10 +909,19 @@ final class WebviewReviewController {
 
     static ReviewOutcomeLog.Metadata generationMetadata(
             ReviewProvider provider, String model, boolean supervisorEnabled) {
+        return generationMetadata(provider, model, "", supervisorEnabled);
+    }
+
+    static ReviewOutcomeLog.Metadata generationMetadata(
+            ReviewProvider provider,
+            String model,
+            String secondReviewerModel,
+            boolean supervisorEnabled) {
         return new ReviewOutcomeLog.Metadata(
                 ReviewPrompts.reviewPipelineVersion(supervisorEnabled),
                 provider.name().toLowerCase(java.util.Locale.ROOT),
-                model);
+                model,
+                StringUtils.defaultString(secondReviewerModel));
     }
 
     /**
@@ -926,7 +943,7 @@ final class WebviewReviewController {
                                 panel.outcomeLog.record(
                                         generatedComments, submittedComments, metadata);
                             } catch (Exception e) {
-                                log.warn("Review outcome logging failed: {}", e.getMessage());
+                                log.warn("Review outcome logging failed", LogRedactor.sanitize(e));
                             }
                         });
     }
@@ -951,6 +968,7 @@ final class WebviewReviewController {
             panel.ghSvc.deleteDraftReview(owner, repo, number, reviewId);
             panel.draftRecoveryStore.clear(key);
         } catch (Exception e) {
+            log.warn("Failed to delete draft review for {}", key, LogRedactor.sanitize(e));
             panel.pushMessage(
                     new ErrorMsg(
                             "draftDeleteError",

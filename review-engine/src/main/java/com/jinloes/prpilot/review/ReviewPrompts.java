@@ -56,6 +56,14 @@ public final class ReviewPrompts {
                     + " added line saying that the next regeneration will overwrite the edit,"
                     + " unless <pr_description> or <commits> explains it:";
 
+    private static final String WEAKENED_TESTS_PREFACE =
+            "Test cases or assertions mechanically detected as newly skipped or removed without"
+                    + " replacement assertions in the same hunk, as `- path:line [kind] detail`."
+                    + " Report a finding ONLY when the exercised production behavior remains"
+                    + " active and neither <pr_description>, <commits>, nor surrounding code"
+                    + " justifies the change (such as removing a deprecated feature). Never ask"
+                    + " for additional test cases on untested code:";
+
     private ReviewPrompts() {}
 
     /**
@@ -81,6 +89,7 @@ public final class ReviewPrompts {
         parts.add(ReviewCritiquePrompts.CORROBORATION_DIRECTIVE);
         parts.add(PROTO_SCHEMA_CHANGES_PREFACE);
         parts.add(GENERATED_CODE_PREFACE);
+        parts.add(WEAKENED_TESTS_PREFACE);
         parts.add(ReviewRulePrompts.RULE_SELECTION_PREAMBLE);
         parts.add(ReviewRulePrompts.RULE_REVIEW_PREAMBLE);
         parts.add(ReviewSupervisorPrompts.HUNK_OBJECTIVE);
@@ -239,6 +248,16 @@ public final class ReviewPrompts {
     }
 
     static void appendContextSections(StringBuilder prompt, PRReviewRequest request) {
+        appendContextSections(
+                prompt,
+                request,
+                WeakenedTests.extract(InspectionManifest.fromDiff(request.getDiff())));
+    }
+
+    static void appendContextSections(
+            StringBuilder prompt,
+            PRReviewRequest request,
+            List<WeakenedTests.Entry> weakenedTests) {
         appendSemanticSections(prompt, request);
         appendOptionalSection(
                 prompt,
@@ -322,6 +341,11 @@ public final class ReviewPrompts {
                 PROTO_SCHEMA_CHANGES_PREFACE);
         appendOptionalSection(
                 prompt, "generated_code", request.getGeneratedCode(), GENERATED_CODE_PREFACE);
+        appendOptionalSection(
+                prompt,
+                "weakened_tests",
+                WeakenedTests.formatInventory(weakenedTests),
+                WEAKENED_TESTS_PREFACE);
         appendOptionalSection(
                 prompt,
                 "repo_profile",

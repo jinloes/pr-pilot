@@ -196,7 +196,9 @@ async function handleSelectPR(state: ViewState, msg: Record<string, unknown>): P
         if (diffResult.status !== 'ok' || diffResult.diff === null) {
             throw new GitHubOperationError(diffResult.status, diffResult.message);
         }
-        if (detailResult.status !== 'ok' || !detailResult.detail) throw new Error(detailResult.message);
+        if (detailResult.status !== 'ok' || !detailResult.detail) {
+            throw new GitHubOperationError(detailResult.status, detailResult.message);
+        }
         if (draftResult.status !== 'ok' && draftResult.status !== 'none') throw new Error(draftResult.message);
         const diff = diffResult.diff;
         const detail = detailResult.detail;

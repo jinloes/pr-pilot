@@ -12,7 +12,9 @@ import static com.jinloes.prpilot.review.ReviewPipelineTestSupport.withSecondary
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jinloes.prpilot.model.CiAnnotation;
 import com.jinloes.prpilot.model.LineComment;
+import com.jinloes.prpilot.model.PRReviewRequest;
 import com.jinloes.prpilot.model.ReviewResult;
 import com.jinloes.prpilot.review.ReviewPipelineTestSupport.FakeProvider;
 import com.jinloes.prpilot.review.ReviewPipelineTestSupport.FakeSecondary;
@@ -216,6 +218,162 @@ class ReviewPipelineRecallTest {
             assertThat(provider.completeCalls).isEmpty();
             assertThat(result.getLineComments()).hasSize(20);
             assertThat(result.getLineComments().get(0).getBody()).isEqualTo("primary finding #24;");
+        }
+
+        @Test
+        void suppressesCiDuplicateBeforeRestoringNearbyHygieneFinding() throws Exception {
+            String diff =
+                    """
+                    diff --git a/src/Api.java b/src/Api.java
+                    --- a/src/Api.java
+                    +++ b/src/Api.java
+                    @@ -1,2 +1,2 @@
+                    -public void call() {}
+                    +public void call(String token) {
+                    +    logger.error("token=" + token);
+                    """;
+            LineComment ciDuplicate =
+                    new LineComment(
+                            "src/Api.java",
+                            1,
+                            "suggestion",
+                            "Unused parameter token triggers Checkstyle unused parameter rule.");
+            ciDuplicate.setRationale("Repeats CI failure");
+            ciDuplicate.setSeverity("minor");
+            ciDuplicate.setCategory("maintainability");
+            ciDuplicate.setConfidence("high");
+            LineComment realHygiene =
+                    new LineComment(
+                            "src/Api.java",
+                            2,
+                            "suggestion",
+                            "Avoid logging secret token values at error level without redaction.");
+            realHygiene.setRationale("Sensitive credential logged");
+            realHygiene.setSeverity("minor");
+            realHygiene.setCategory("maintainability");
+            realHygiene.setConfidence("high");
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult = pass(result(ciDuplicate));
+            provider.hygieneCompletions.add(
+                    JSON.writeValueAsString(
+                            Map.of(
+                                    "summary",
+                                    "hygiene",
+                                    "verdict",
+                                    "COMMENT",
+                                    "lineComments",
+                                    List.of(realHygiene))));
+            provider.completions.add(
+                    JSON.writeValueAsString(
+                            Map.of(
+                                    "summary",
+                                    "validated",
+                                    "verdict",
+                                    "COMMENT",
+                                    "lineComments",
+                                    List.of(ciDuplicate))));
+            PRReviewRequest req =
+                    request(diff).toBuilder()
+                            .ciAnnotations(
+                                    List.of(
+                                            new CiAnnotation(
+                                                    "src/Api.java",
+                                                    1,
+                                                    "failure",
+                                                    "Unused parameter token triggers Checkstyle"
+                                                            + " unused parameter rule.")))
+                            .build();
+
+            ReviewResult result = pipeline(provider).review(req, false, true, false, s -> {}, null);
+
+            assertThat(result.getLineComments())
+                    .singleElement()
+                    .extracting(LineComment::getBody)
+                    .isEqualTo(
+                            "Avoid logging secret token values at error level without redaction.");
+        }
+
+        @Test
+        void suppressesCiDuplicatesBeforeCappingAtTwentyFindings() throws Exception {
+            StringBuilder diff =
+                    new StringBuilder(
+                            "diff --git a/src/A.java b/src/A.java\n--- a/src/A.java\n"
+                                    + "+++ b/src/A.java\n@@ -0,0 +1,22 @@\n");
+            for (int line = 1; line <= 22; line++) diff.append("+int v").append(line).append(";\n");
+            ReviewResult many = numberedComments("primary", "src/A.java", 21);
+            LineComment ciDuplicate =
+                    new LineComment(
+                            "src/A.java",
+                            1,
+                            "issue",
+                            "Checkstyle reports missing final modifier on parameter value.");
+            ciDuplicate.setRationale("Repeats CI failure");
+            ciDuplicate.setSeverity("blocker");
+            ciDuplicate.setCategory("correctness");
+            ciDuplicate.setConfidence("high");
+            List<LineComment> all = new ArrayList<>();
+            all.add(ciDuplicate);
+            for (int i = 0; i < 20; i++) {
+                LineComment item = many.getLineComments().get(i);
+                item.setLine(i + 2);
+                all.add(item);
+            }
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult = pass(new ReviewResult("many", "REQUEST_CHANGES", all));
+            PRReviewRequest req =
+                    request(diff.toString()).toBuilder()
+                            .ciAnnotations(
+                                    List.of(
+                                            new CiAnnotation(
+                                                    "src/A.java",
+                                                    1,
+                                                    "failure",
+                                                    "Checkstyle reports missing final modifier on"
+                                                            + " parameter value.")))
+                            .build();
+
+            ReviewResult result =
+                    pipeline(provider).review(req, false, false, false, s -> {}, null);
+
+            assertThat(result.getLineComments())
+                    .hasSize(20)
+                    .noneMatch(c -> c.getBody().contains("Checkstyle reports missing final"));
+        }
+
+        @Test
+        void followsUpHighRiskUncommentedHunkWhenMultiFileLedgerIsOmitted() throws Exception {
+            String diff =
+                    """
+                    diff --git a/src/Commented.java b/src/Commented.java
+                    --- a/src/Commented.java
+                    +++ b/src/Commented.java
+                    @@ -1 +1 @@
+                    -private void oldOne() {}
+                    +public void newOne() {}
+                    diff --git a/src/Missed.java b/src/Missed.java
+                    --- a/src/Missed.java
+                    +++ b/src/Missed.java
+                    @@ -1 +1 @@
+                    -private void oldTwo() {}
+                    +public void newTwo() {}
+                    """;
+            FakeProvider provider = new FakeProvider();
+            provider.primaryResult =
+                    ReviewPassResult.withoutLedger(
+                            result(comment("src/Commented.java", 1, "high", "Already reviewed.")));
+            provider.completions.add(
+                    ReviewPipelineTestSupport.reviewJsonWithFinding("src/Missed.java", 1));
+
+            ReviewResult result =
+                    pipeline(provider).review(request(diff), false, false, true, s -> {}, null);
+
+            assertThat(provider.completeCalls).hasSize(1);
+            assertThat(provider.completeCalls.get(0).prompt())
+                    .contains("src/Missed.java")
+                    .doesNotContain("diff --git a/src/Commented.java");
+            assertThat(result.getLineComments())
+                    .extracting(LineComment::getFile)
+                    .containsExactlyInAnyOrder("src/Commented.java", "src/Missed.java");
         }
     }
 }

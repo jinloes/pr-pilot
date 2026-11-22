@@ -50,6 +50,7 @@ import com.jinloes.prpilot.model.SourceInventory;
 import com.jinloes.prpilot.review.SemanticRuntime;
 import com.jinloes.prpilot.review.SourceInventoryClient;
 import com.jinloes.prpilot.review.SourceInventoryFiles;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Field;
@@ -69,9 +70,12 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Native readiness only. All physical settings reads are delegated to the packaged fork. */
 public final class SemanticSnapshotService implements Disposable {
+    private static final Logger log = LoggerFactory.getLogger(SemanticSnapshotService.class);
     private static final ObjectMapper JSON = new ObjectMapper();
     private final Project project;
     private final NativeAccess nativeAccess;
@@ -309,6 +313,9 @@ public final class SemanticSnapshotService implements Disposable {
                                     action.run();
                                     if (disposed || project.isDisposed()) baseline.invalidate();
                                 } catch (Exception | LinkageError e) {
+                                    log.warn(
+                                            "Semantic snapshot background operation failed",
+                                            LogRedactor.sanitize(e));
                                     failure =
                                             e instanceof IOException
                                                     ? e.getMessage()

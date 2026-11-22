@@ -8,6 +8,7 @@ import com.jinloes.prpilot.review.GitWorktreeService;
 import com.jinloes.prpilot.services.IntellijClaudeService;
 import com.jinloes.prpilot.services.IntellijGitHubService;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrWorktree;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.io.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -102,7 +103,8 @@ final class WebviewWorktreeManager {
             if (wt.exists() && !worktreeService.removeWorktree(detectedRoot, wt)) {
                 log.warn("Failed to remove incomplete worktree at {}", wt);
             }
-            log.warn("Worktree creation for PR #{} failed: {}", pr.getNumber(), e.getMessage());
+            log.warn(
+                    "Worktree creation for PR #{} failed", pr.getNumber(), LogRedactor.sanitize(e));
             throw new IllegalStateException(
                     "Unable to create an isolated pull request worktree.", e);
         }
@@ -150,11 +152,18 @@ final class WebviewWorktreeManager {
             getApplication()
                     .executeOnPooledThread(
                             () -> {
-                                if (!worktreeService.removeWorktree(
-                                        worktree.gitRoot(), worktree.directory())) {
+                                try {
+                                    if (!worktreeService.removeWorktree(
+                                            worktree.gitRoot(), worktree.directory())) {
+                                        log.warn(
+                                                "Failed to remove worktree at {}",
+                                                worktree.directory());
+                                    }
+                                } catch (Exception e) {
                                     log.warn(
                                             "Failed to remove worktree at {}",
-                                            worktree.directory());
+                                            worktree.directory(),
+                                            LogRedactor.sanitize(e));
                                 }
                             });
         }

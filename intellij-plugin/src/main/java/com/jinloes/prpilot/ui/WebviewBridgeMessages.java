@@ -187,6 +187,7 @@ final class WebviewBridgeMessages {
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record ActivatePrMsg(String type, @JsonProperty("pr") WebviewPr pr, String source) {}
 
     @JsonInclude(JsonInclude.Include.NON_NULL)

@@ -98,6 +98,29 @@ class GitHubFailureTest {
         }
 
         @Test
+        void mapsSsoHeaderAndSamlBodyToSsoRequiredWithoutLeakingAuthorizationNonce() {
+            GitHubResponse fromHeader =
+                    GitHubResponse.fromHeaders(
+                            403,
+                            "{\"message\":\"Forbidden\"}",
+                            Map.of(
+                                    "X-GitHub-SSO",
+                                    List.of(
+                                            "required;"
+                                                    + " url=https://github.com/orgs/acme/sso?authorization_request=secret123")));
+
+            assertThat(fromHeader.rateLimitHeaders())
+                    .containsOnly(Map.entry("x-github-sso", "required"));
+            assertThat(GitHubFailure.of(fromHeader)).isEqualTo(GitHubFailure.SSO_REQUIRED);
+
+            GitHubResponse fromBody =
+                    new GitHubResponse(
+                            403,
+                            "{\"message\":\"Resource protected by organization SAML enforcement.\"}");
+            assertThat(GitHubFailure.of(fromBody)).isEqualTo(GitHubFailure.SSO_REQUIRED);
+        }
+
+        @Test
         void mapsTheSyntheticTransportStatusToANetworkError() {
             assertThat(GitHubFailure.of(GitHubResponse.networkError()))
                     .isEqualTo(GitHubFailure.NETWORK_ERROR);

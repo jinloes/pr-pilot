@@ -68,7 +68,8 @@ final class SidecarBootstrapService {
                                     "reviews/generate",
                                     "reviews/chat",
                                     "reviews/cancel",
-                                    "reviews/recordOutcome")));
+                                    "reviews/recordOutcome",
+                                    "reviews/probeProviderSetup")));
 
     InitializeResult initialize() {
         // TreeMap so the advertised order is stable across runs; the handshake payload is read by

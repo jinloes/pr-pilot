@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jinloes.prpilot.engine.GitHubEngineApi;
 import com.jinloes.prpilot.engine.ReviewEngineApi;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -125,7 +126,10 @@ final class StdioJsonRpcServer {
                 try {
                     request = objectMapper.readTree(frame);
                 } catch (IOException exception) {
-                    log.warn("Malformed JSON-RPC frame ({} bytes)", frame.length, exception);
+                    log.warn(
+                            "Malformed JSON-RPC frame ({} bytes)",
+                            frame.length,
+                            LogRedactor.sanitize(exception));
                     send(support.error(null, -32700, "Parse error"));
                     continue;
                 }
@@ -147,6 +151,11 @@ final class StdioJsonRpcServer {
                                 if (response != null) send(response);
                             });
                 } catch (RejectedExecutionException exception) {
+                    log.warn(
+                            "Rejected JSON-RPC method '{}' (id={}): request queue full",
+                            method,
+                            support.requestId(request),
+                            LogRedactor.sanitize(exception));
                     if (request.has("id")) {
                         send(
                                 support.error(
@@ -177,7 +186,10 @@ final class StdioJsonRpcServer {
         try {
             request = objectMapper.readTree(frame);
         } catch (IOException exception) {
-            log.warn("Malformed JSON-RPC frame ({} bytes)", frame.length, exception);
+            log.warn(
+                    "Malformed JSON-RPC frame ({} bytes)",
+                    frame.length,
+                    LogRedactor.sanitize(exception));
             return support.error(null, -32700, "Parse error");
         }
 
@@ -198,12 +210,15 @@ final class StdioJsonRpcServer {
                     handler == null
                             ? support.error(support.requestId(request), -32601, "Method not found")
                             : handler.handle(request);
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | Error exception) {
             log.error(
                     "Unhandled exception in JSON-RPC method '{}' (id={})",
                     method,
                     support.requestId(request),
-                    exception);
+                    LogRedactor.sanitize(exception));
+            if (exception instanceof VirtualMachineError vmError) {
+                throw vmError;
+            }
             response = support.error(support.requestId(request), -32603, "Internal error");
         }
 

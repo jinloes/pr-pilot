@@ -14,6 +14,10 @@ export function classifySetupAuthError(err: unknown): SetupReason {
         || errMsg.includes('command not found');
     if (notInstalled) return 'gh_not_installed';
 
+    if (errMsg.includes('saml sso') || errMsg.includes('saml enforcement') || errMsg.includes('organization saml')) {
+        return 'load_failed';
+    }
+
     const authRelated =
         errMsg.includes('gh auth')
         || errMsg.includes('auth token')

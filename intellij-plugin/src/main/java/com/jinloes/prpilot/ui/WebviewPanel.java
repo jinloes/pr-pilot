@@ -54,6 +54,7 @@ import com.jinloes.prpilot.ui.WebviewBridgeMessages.PrWorktree;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.ProviderReadinessDto;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.SetupRequiredMsg;
 import com.jinloes.prpilot.ui.WebviewBridgeMessages.WebviewPr;
+import com.jinloes.prpilot.util.LogRedactor;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -154,7 +155,7 @@ public class WebviewPanel implements Disposable {
     final Alarm layoutRepaintAlarm;
     private final ObjectMapper mapper =
             new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-    final PendingReviewIndex pendingIndex = new PendingReviewIndex();
+    final PendingReviewIndex pendingIndex;
     final Runnable pendingIndexRecoveryAction = this::reload;
     PendingReviewIndexNotifications.Registration pendingIndexRecoveryRegistration = () -> {};
     final IntellijClaudeService claudeService;
@@ -235,6 +236,7 @@ public class WebviewPanel implements Disposable {
 
     public WebviewPanel(Project project) {
         this.project = project;
+        this.pendingIndex = new PendingReviewIndex();
         this.layoutRepaintAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD, this);
         this.ghSvc = IntellijGitHubService.getInstance();
         this.draftRecoveryStore = DraftRecoveryStore.getInstance();
@@ -406,7 +408,26 @@ public class WebviewPanel implements Disposable {
             Supplier<Object> settings,
             Consumer<Object> messages,
             BooleanSupplier intellijAssistedEnabled) {
+        this(
+                selected,
+                new PendingReviewIndex(),
+                io,
+                background,
+                settings,
+                messages,
+                intellijAssistedEnabled);
+    }
+
+    WebviewPanel(
+            PullRequest selected,
+            PendingReviewIndex pendingIndex,
+            DeepReviewIo io,
+            Consumer<Runnable> background,
+            Supplier<Object> settings,
+            Consumer<Object> messages,
+            BooleanSupplier intellijAssistedEnabled) {
         project = null;
+        this.pendingIndex = pendingIndex;
         browser = null;
         browserPanel = null;
         bridgeQuery = null;
@@ -736,9 +757,9 @@ public class WebviewPanel implements Disposable {
                                                 1);
                             } catch (IOException failure) {
                                 log.warn(
-                                        "Failed to resolve editor target for {}: {}",
+                                        "Failed to resolve editor target for {}",
                                         file,
-                                        failure.getMessage());
+                                        LogRedactor.sanitize(failure));
                                 if (!isCurrentSelection(expectedKey, expectedRevision)) {
                                     return;
                                 }
@@ -832,11 +853,24 @@ public class WebviewPanel implements Disposable {
                             });
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
+            log.warn(
+                    "Interrupted while opening reviewed file {} for {}",
+                    file,
+                    expectedKey,
+                    LogRedactor.sanitize(interrupted));
         } catch (IOException | java.util.concurrent.TimeoutException failure) {
+            log.warn(
+                    "Failed to open reviewed file {} for {}",
+                    file,
+                    expectedKey,
+                    LogRedactor.sanitize(failure));
             if (reviewedFile == reviewed && isCurrentSelection(expectedKey, expectedRevision)) {
+                String detail =
+                        StringUtils.defaultIfBlank(
+                                failure.getMessage(), LogRedactor.errorType(failure));
                 notifyEditorOpenInfo(
                         "Could not open the reviewed file: "
-                                + StringEscapeUtils.escapeHtml4(failure.getMessage()));
+                                + StringEscapeUtils.escapeHtml4(detail));
             }
         }
     }
@@ -988,7 +1022,7 @@ public class WebviewPanel implements Disposable {
         themeController.pushCurrentTheme();
     }
 
-    public void loadPRs(
+    public boolean loadPRs(
             List<PullRequest> prs,
             String defaultRepo,
             String searchScope,
@@ -996,7 +1030,7 @@ public class WebviewPanel implements Disposable {
             boolean limited,
             boolean reviewStatusAvailable,
             ProviderSetupProbe.Result providerSetup) {
-        prListController.loadPRs(
+        return prListController.loadPRs(
                 prs,
                 defaultRepo,
                 searchScope,
@@ -1100,6 +1134,10 @@ public class WebviewPanel implements Disposable {
 
     public JComponent getComponent() {
         return browserPanel;
+    }
+
+    JComponent preferredFocusedComponent() {
+        return browser != null ? browser.getComponent() : browserPanel;
     }
 
     boolean isDisposedForHost() {

@@ -102,8 +102,12 @@ tasks.named('compileTestJava') {
 check.dependsOn unitTest
 
 // The platform `test` task requires the IntelliJ sandbox and cannot run in this project.
-// Unit tests run via `unitTest` instead.
+// Unit tests run via `unitTest` instead; disable the unused test-sandbox prep tasks too so
+// `:intellij-plugin:check` does not assemble and copy a test sandbox for a skipped task.
 test {
+    enabled = false
+}
+tasks.matching { it.name in ['prepareTest', 'prepareTestSandbox'] }.configureEach {
     enabled = false
 }
 
@@ -147,11 +151,24 @@ def resolvedNpm = {
     return System.getProperty('os.name').startsWith('Windows') ? 'npm.cmd' : 'npm'
 }()
 
+def webviewInstallStamp = layout.buildDirectory.file('webview-npm-install.stamp')
+
 tasks.register('installWebviewDeps', Exec) {
     workingDir webviewSrcDir
     commandLine resolvedNpm, 'install', '--no-audit', '--no-fund'
-    inputs.file("$webviewSrcDir/package.json")
-    outputs.dir("$webviewSrcDir/node_modules")
+    inputs.files("$webviewSrcDir/package.json", "$webviewSrcDir/package-lock.json")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    // Track a lightweight stamp instead of snapshotting 30k+ files under node_modules (which Vite
+    // and Vitest mutate via node_modules/.vite, otherwise re-triggering npm install every build).
+    outputs.file(webviewInstallStamp)
+    outputs.upToDateWhen {
+        new File(webviewSrcDir, 'node_modules/.package-lock.json').isFile()
+    }
+    doLast {
+        File stamp = webviewInstallStamp.get().asFile
+        stamp.parentFile.mkdirs()
+        stamp.setText('ok\n', 'UTF-8')
+    }
 }
 
 tasks.register('buildWebview', Exec) {
@@ -159,10 +176,11 @@ tasks.register('buildWebview', Exec) {
     workingDir webviewSrcDir
     commandLine resolvedNpm, 'run', 'build'
     inputs.files(fileTree(webviewSrcDir) {
-        include 'src/**', 'index.html', 'package.json', 'vite.config.ts', 'tsconfig*.json'
-        exclude 'node_modules/**', 'dist/**'
-    })
+        include 'src/**', 'index.html', 'package.json', 'package-lock.json', 'vite.config.ts', 'tsconfig*.json', 'tailwind.config.*'
+        exclude 'node_modules/**', 'dist/**', 'src/**/*.test.ts', 'src/**/*.test.tsx'
+    }).withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.dir("$webviewSrcDir/dist")
+    outputs.cacheIf { true }
 }
 
 // Copies the Vite dist output under webview/ in the classpath.
